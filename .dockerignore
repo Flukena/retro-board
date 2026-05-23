@@ -1,0 +1,11 @@
+node_modules
+dist
+yjs-db
+.git
+.gitignore
+.DS_Store
+*.log
+npm-debug.log*
+Dockerfile*
+docker-compose*.yml
+.dockerignore

@@ -1,0 +1,48 @@
+# Host ports are shifted from the defaults so this stack can coexist with a
+# locally-running `npm run dev` / `npm run yjs`:
+#   - yjs : host 11234 -> container 1234
+#   - web : host 15173 -> container 5173
+# The browser learns the yjs port via VITE_YJS_PORT (see storage-bridge.js).
+services:
+  yjs:
+    build:
+      context: .
+      dockerfile: Dockerfile.yjs
+    container_name: retro-yjs
+    ports:
+      - "11234:1234"
+    volumes:
+      # Persists LevelDB across container restarts. The yjs-server writes to
+      # /data inside the container (YJS_DB_DIR is set in Dockerfile.yjs).
+      - yjs_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:1234/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    container_name: retro-web
+    ports:
+      - "15173:5173"
+    volumes:
+      # Mount source for HMR. The anonymous volume on /app/node_modules
+      # shadows the host node_modules so the container keeps the deps
+      # installed during `docker build` (mac/linux compatibility).
+      - .:/app
+      - /app/node_modules
+    environment:
+      # File-watching over bind-mounts on macOS needs polling.
+      - CHOKIDAR_USEPOLLING=true
+      # Tells the in-browser bundle which host port the yjs relay is on.
+      - VITE_YJS_PORT=11234
+    depends_on:
+      - yjs
+    restart: unless-stopped
+
+volumes:
+  yjs_data:

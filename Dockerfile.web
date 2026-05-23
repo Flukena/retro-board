@@ -1,0 +1,17 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Cache npm install on a separate layer. The full source tree is bind-mounted
+# at runtime via docker compose, but baking in node_modules at build time
+# avoids reinstalling on every container start.
+COPY package.json package-lock.json* ./
+RUN npm ci
+
+COPY . .
+
+EXPOSE 5173
+
+# Vite dev server with HMR. --host 0.0.0.0 makes it reachable from outside
+# the container (the package.json `dev` script already does this).
+CMD ["npm", "run", "dev"]

@@ -1,0 +1,20 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install only the runtime deps the yjs server needs (yjs, y-websocket,
+# y-leveldb, ws). package-lock.json is included so installs are deterministic.
+COPY package.json package-lock.json* ./
+RUN npm ci --omit=dev
+
+# Server entrypoint — kept separate from the rest of the source so this
+# layer rebuilds only when the file actually changes.
+COPY yjs-server.mjs ./
+
+ENV YJS_PORT=1234
+ENV YJS_DB_DIR=/data
+
+EXPOSE 1234
+
+# LevelDB lives on a named volume mounted at /data so docs survive restarts.
+CMD ["node", "yjs-server.mjs"]

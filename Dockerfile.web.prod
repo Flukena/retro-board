@@ -1,0 +1,27 @@
+# ---- build stage --------------------------------------------------------
+# Compiles the React app to static assets with Vite. .env.local is included
+# via the build context (no .dockerignore entry) so VITE_* values are baked
+# into the bundle at build time. VITE_YJS_PORT is exposed as a build arg so
+# the bundle knows the host port the yjs relay will be reachable on.
+FROM node:20-alpine AS build
+
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+RUN npm ci
+
+ARG VITE_YJS_PORT=1234
+ENV VITE_YJS_PORT=${VITE_YJS_PORT}
+
+COPY . .
+RUN npm run build
+
+# ---- runtime stage ------------------------------------------------------
+# Plain nginx serving the built bundle. Smaller and faster than `vite preview`.
+FROM nginx:1.27-alpine AS runtime
+
+COPY --from=build /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]

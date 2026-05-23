@@ -1,0 +1,60 @@
+# Production stack — standalone, run with:
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Same yjs service as docker-compose.yml (shared `yjs_data` volume so docs
+# survive switching between dev and prod), but the web container builds the
+# Vite bundle and serves it through nginx on port 4173 (vite preview default —
+# rarely conflicts with anything else on a dev machine).
+# Host ports:
+#   - yjs : host 11234 -> container 1234
+#   - web : host 4174  -> container 80   (4173 was taken by another local app)
+# VITE_YJS_PORT is passed as a build arg so the bundle knows where to find
+# the relay when accessed over http (https path-routes via /yjs instead).
+services:
+  yjs:
+    build:
+      context: .
+      dockerfile: Dockerfile.yjs
+    container_name: retro-yjs
+    ports:
+      - "11234:1234"
+    volumes:
+      - yjs_data:/data
+    environment:
+      # Lock the WS upgrade to the prod web origin(s). Override with your
+      # public host(s) when deploying behind cloudflared / a CDN.
+      - YJS_ALLOWED_ORIGINS=http://localhost:4174,https://retro.sagonzis.space
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:1234/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web.prod
+      args:
+        VITE_YJS_PORT: "11234"
+    container_name: retro-web
+    ports:
+      - "4174:80"
+    depends_on:
+      - yjs
+    restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: retro-cloudflared
+    command: tunnel --config /etc/cloudflared/config.yml run
+    volumes:
+      - ./cloudflared.prod.yml:/etc/cloudflared/config.yml:ro
+      - ${HOME}/.cloudflared/7dbe6863-0fc6-44af-a264-d1a619e9bb80.json:/etc/cloudflared/creds.json:ro
+    depends_on:
+      - web
+      - yjs
+    restart: unless-stopped
+
+volumes:
+  yjs_data:
