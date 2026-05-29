@@ -10,7 +10,7 @@ import {
   ChevronDown, X, Sparkles, AlertCircle, Type, Copy,
   Image as ImageIcon, MousePointer2, RotateCcw,
   Languages, Sun, Moon, Monitor, Download, Upload, Undo2, Redo2,
-  MoreHorizontal,
+  MoreHorizontal, Ban,
 } from 'lucide-react';
 import { t, useLang } from './src/i18n.js';
 import { useTheme, nextThemePref } from './src/theme.js';
@@ -67,6 +67,15 @@ const ADMIN_DEAD_MS = 15000;
 const POLL_SAFETY = 15000; // safety net only — Realtime push is primary
 const SAVE_DEBOUNCE = 200;
 const TEXT_SAVE_DEBOUNCE = 350;
+// Drag/resize push cadence: send granular geometry at most every DRAG_FLUSH_MS
+// while moving, plus a trailing flush DRAG_TRAILING_MS after the last move so
+// the final position always lands even if the throttle swallowed it.
+const DRAG_FLUSH_MS = 60;
+const DRAG_TRAILING_MS = 80;
+// Above this many paintable cards (sticky+image) on the board, drop the blurred
+// per-card shadows/filters — overlapping blur kernels are the dominant paint
+// cost when cards cluster. Cards stay separated by their borders.
+const DENSE_CARD_THRESHOLD = 60;
 
 // Built-in templates are evaluated lazily so titles re-localize on lang change.
 const getTemplates = () => ({
@@ -124,11 +133,14 @@ const DEFAULT_BOARD = {
   items: [],
   adminUserId: null,
   editingLocked: false,
+  // In-session pause for voting. Voting requires an active timer session AND
+  // votingLocked === false. Default unlocked so starting a timer enables voting
+  // right away; an admin can flip this to pause voting mid-session.
+  votingLocked: false,
   allRevealed: false,
-  // voteSession: { startedAt, endsAt: number|null, voteLimit: number|null }
+  // timer: { startedAt, endsAt: number|null, voteLimit: number|null }
   // - endsAt=null   → no time limit, admin must stop manually
   // - voteLimit=null → unlimited votes per user
-  // Voting is only possible when a session is active.
   timer: null,
   lastResultsAt: null,
   // SHA-256(boardCode + ':' + pin) — required before destructive admin
@@ -205,6 +217,54 @@ const storage = {
       window.storage.off(handler);
     }
   },
+  // --- Granular board writes ---
+  // Pass through to the Yjs bridge when present; otherwise mutate the in-memory
+  // board so dev/preview (no relay) stays consistent. Each maps to one Yjs
+  // transaction in the bridge; `opts.silent` keeps derived writes off undo.
+  addItem(item, opts) {
+    if (window.storage?.addItem) { window.storage.addItem(item, opts); return; }
+    const b = memBoard(); memSetBoard({ ...b, items: [...b.items, item] });
+  },
+  updateItem(id, patch, opts) {
+    if (window.storage?.updateItem) { window.storage.updateItem(id, patch, opts); return; }
+    const b = memBoard();
+    memSetBoard({ ...b, items: b.items.map((it) => (it.id === id ? memMerge(it, patch) : it)) });
+  },
+  updateItems(entries, opts) {
+    if (window.storage?.updateItems) { window.storage.updateItems(entries, opts); return; }
+    const byId = new Map(entries.map((e) => [e.id, e.patch]));
+    const b = memBoard();
+    memSetBoard({ ...b, items: b.items.map((it) => (byId.has(it.id) ? memMerge(it, byId.get(it.id)) : it)) });
+  },
+  removeItem(id, opts) {
+    if (window.storage?.removeItem) { window.storage.removeItem(id, opts); return; }
+    const b = memBoard(); memSetBoard({ ...b, items: b.items.filter((it) => it.id !== id) });
+  },
+  setMeta(patch, opts) {
+    if (window.storage?.setMeta) { window.storage.setMeta(patch, opts); return; }
+    memSetBoard(memMerge(memBoard(), patch));
+  },
+  replaceBoard(board, opts) {
+    if (window.storage?.replaceBoard) { window.storage.replaceBoard(board, opts); return; }
+    memSetBoard(board);
+  },
+};
+
+// In-memory board helpers for the dev/preview fallback (no Yjs relay).
+const memBoard = () => {
+  const k = 's::boardState';
+  if (!memoryStore.has(k)) memoryStore.set(k, { ...DEFAULT_BOARD, items: [] });
+  return memoryStore.get(k);
+};
+const memSetBoard = (next) => memoryStore.set('s::boardState', next);
+// Merge a patch, treating an undefined value as "delete this key".
+const memMerge = (obj, patch) => {
+  const out = { ...obj };
+  Object.entries(patch).forEach(([k, v]) => {
+    if (v === undefined) delete out[k];
+    else out[k] = v;
+  });
+  return out;
 };
 
 const centerOf = (it) => {
@@ -231,7 +291,7 @@ const insideZone = (p, z) =>
    ============================================================ */
 
 const StickyCard = React.memo(function StickyCard({
-  item, selected, isEditing, isOwner, allRevealed,
+  item, selected, isEditing, isOwner, allRevealed, dense,
   voted, voteCount, voteFlash, top3, votingAllowedNow,
   // `lang` is unused inside the body, but its presence as a prop
   // forces a re-render when language changes so t() picks up new strings.
@@ -265,13 +325,19 @@ const StickyCard = React.memo(function StickyCard({
         ['--rb-rot']: `${rot}deg`,
         transition: 'transform 0.18s ease, box-shadow 0.18s ease',
         animation: top3 ? 'rb-glow 1.6s ease-in-out infinite, rb-appear-rot 0.28s ease-out' : 'rb-appear-rot 0.28s ease-out',
+        // Drop the blurred shadow in dense mode — the 1.5px border still
+        // separates cards, and overlapping blur is the main cluster paint cost.
+        // The top3 result glow is kept (only ≤3 cards, meaningful highlight).
         boxShadow: top3
           ? `0 0 0 3px #fbbf24, 0 8px 24px rgba(251,191,36,0.6), 0 6px 14px rgba(0,0,0,0.12)`
-          : '0 6px 14px rgba(0,0,0,0.12)',
+          : (dense ? 'none' : '0 6px 14px rgba(0,0,0,0.12)'),
         cursor: 'grab',
-        fontFamily: '"Plus Jakarta Sans", "Sarabun", sans-serif',
+        // Sarabun (Thai) leads so a Thai cluster's consonant + สระ + วรรณยุกต์
+        // are shaped by one font — otherwise marks split to a fallback font and
+        // detach. Sarabun also covers Latin, so mixed text stays consistent.
+        fontFamily: '"Sarabun", "Plus Jakarta Sans", sans-serif',
         fontSize: it.fontSize || 15,
-        lineHeight: 1.35,
+        lineHeight: 1.5,
         color: 'var(--text)',
         userSelect: 'none',
         outline: selected ? '2px solid #2563eb' : 'none',
@@ -296,28 +362,40 @@ const StickyCard = React.memo(function StickyCard({
           overflow: 'hidden',
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
-          filter: hideContent ? 'blur(8px)' : 'none',
+          // Dense mode skips the GPU blur AND the text (the overlay obscures the
+          // card); blur is only the obfuscation when text is actually rendered.
+          filter: hideContent && !dense ? 'blur(8px)' : 'none',
           userSelect: hideContent ? 'none' : 'auto',
           color: it.fontColor || 'var(--text)',
         }}
       >
-        {isEditing ? (
-          <textarea
-            ref={editAreaRef}
-            value={it.text || ''}
-            onChange={(e) => onTextChange(it.id, { text: e.target.value })}
-            onKeyDown={(e) => onTextKeyDown(e)}
-            onBlur={() => onTextBlur(it.id)}
-            onMouseDown={(e) => e.stopPropagation()}
-            placeholder={t('sticky.placeholder')}
-            style={{
-              width: '100%', height: '100%',
-              background: 'transparent', border: 'none', outline: 'none',
-              resize: 'none', fontFamily: 'inherit', fontSize: it.fontSize || 15,
-              lineHeight: 1.35, color: it.fontColor || 'var(--text)',
-            }}
-          />
-        ) : (it.text || (isOwner ? <span style={{ color: 'var(--text-faint)', fontStyle: 'italic' }}>{t('sticky.placeholder')}</span> : ''))}
+        {(() => {
+          if (isEditing) {
+            return (
+              <textarea
+                ref={editAreaRef}
+                value={it.text || ''}
+                onChange={(e) => onTextChange(it.id, { text: e.target.value })}
+                onKeyDown={(e) => onTextKeyDown(e)}
+                onBlur={() => onTextBlur(it.id)}
+                onMouseDown={(e) => e.stopPropagation()}
+                placeholder={t('sticky.placeholder')}
+                style={{
+                  width: '100%', height: '100%',
+                  background: 'transparent', border: 'none', outline: 'none',
+                  resize: 'none', fontFamily: 'inherit', fontSize: it.fontSize || 15,
+                  lineHeight: 1.5, color: it.fontColor || 'var(--text)',
+                }}
+              />
+            );
+          }
+          // Don't render hidden text at all in dense mode (cheaper + no leak).
+          if (hideContent && dense) return null;
+          if (it.text) return it.text;
+          return isOwner
+            ? <span style={{ color: 'var(--text-faint)', fontStyle: 'italic' }}>{t('sticky.placeholder')}</span>
+            : '';
+        })()}
       </div>
 
       {hideContent && (
@@ -552,7 +630,7 @@ const TextCard = React.memo(function TextCard({
   );
 });
 
-const ImageCard = React.memo(function ImageCard({ item, selected, onStartDrag }) {
+const ImageCard = React.memo(function ImageCard({ item, selected, dense, onStartDrag }) {
   const it = item;
   const w = it.w || 200;
   const h = it.h || 200;
@@ -566,10 +644,10 @@ const ImageCard = React.memo(function ImageCard({ item, selected, onStartDrag })
         width: w,
         height: h,
         // drop-shadow respects PNG alpha but is GPU-expensive; a tight blur
-        // radius keeps it cheap when many images are on screen. CSS
-        // containment scopes layout/paint invalidation to this card so a
-        // change in one image doesn't repaint neighbours.
-        filter: 'drop-shadow(0 3px 6px rgba(0,0,0,0.18))',
+        // radius keeps it cheap when many images are on screen, and dense mode
+        // drops it entirely. CSS containment scopes layout/paint invalidation
+        // to this card so a change in one image doesn't repaint neighbours.
+        filter: dense ? 'none' : 'drop-shadow(0 3px 6px rgba(0,0,0,0.18))',
         outline: selected ? '2px solid #2563eb' : 'none',
         outlineOffset: 6,
         cursor: 'grab',
@@ -726,6 +804,17 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     return [...zones, ...images, ...others];
   }, [board.items]);
 
+  // Switch cards to cheap paint (no blurred shadow/filter) once the board holds
+  // many cards. Keyed on total count — not visible count or zoom — so it never
+  // flaps during pan/zoom and doesn't pull viewport into the render memo.
+  const denseRender = useMemo(
+    () => board.items.reduce(
+      (n, it) => (it.type === 'sticky' || it.type === 'image' ? n + 1 : n),
+      0,
+    ) >= DENSE_CARD_THRESHOLD,
+    [board.items],
+  );
+
   // Viewport size — tracked so we can cull off-screen items at render time.
   // Initialised lazily to handle SSR-style first paint with no window.
   const [viewportSize, setViewportSize] = useState(() => ({
@@ -852,58 +941,78 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   }, []);
 
   /* ============================================================
-     Save board to shared storage.
-     - While dragging/resizing: throttle to ~60ms so peers see motion live.
-     - Otherwise: debounce ~200ms to coalesce edits.
+     Granular board writes.
+     Each helper does an optimistic setBoard (instant UI) and writes only the
+     delta to Yjs — so a keystroke or a drag frame no longer re-diffs the whole
+     board. `opts.silent` maps to a 'system'-origin Yjs write that peers receive
+     but the local undo stack ignores (for derived/automatic changes).
      ============================================================ */
   const lastFlushRef = useRef(0);
-  // flushBoard accepts an optional explicit payload but defaults to
-  // boardRef.current. The default is the safe choice for trailing/deferred
-  // calls so we always write the LATEST state, not a stale snapshot a
-  // remote update may have already invalidated.
-  const flushBoard = useCallback((payload) => {
-    lastFlushRef.current = Date.now();
-    storage.set('boardState', payload || boardRef.current, true);
+  // Latest geometry entries pending a throttled flush during a drag/resize.
+  const pendingGeomRef = useRef(null);
+
+  // ---- One-item field patch ----
+  const updateItem = useCallback((id, patch, opts) => {
+    setBoard((prev) => ({
+      ...prev,
+      items: prev.items.map((it) => (it.id === id ? { ...it, ...patch } : it)),
+    }));
+    storage.updateItem(id, patch, opts);
   }, []);
 
-  const saveBoard = useCallback((next) => {
-    const dragging = interactionRef.current?.kind === 'drag';
-    if (dragging) {
-      // Drag fires at ~60fps — throttle to a 60ms cadence to keep WS chatter
-      // sane, with a trailing 80ms flush so the final position always lands.
-      // The trailing call passes no payload so it reads boardRef.current at
-      // fire time and picks up every mid-drag setBoard.
-      const now = Date.now();
-      if (now - lastFlushRef.current >= 60) flushBoard(next);
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = setTimeout(() => flushBoard(), 80);
-      return;
-    }
-    // Non-drag mutations flush immediately. The old 200ms debounce was a
-    // relic of the JSON-blob storage where every save retransmitted the
-    // whole board; with per-field Yjs diff each write only sends the
-    // changed fields, so debouncing buys nothing. The race it caused —
-    // remote updates arriving in the debounce window getting clobbered
-    // by our stale snapshot, or applyRemoteBoard wiping locally-added
-    // items that hadn't been flushed yet — is real and severe.
-    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
-    flushBoard(next);
-  }, [flushBoard]);
+  // ---- Add one / many new items ----
+  const addItemLocal = useCallback((item) => {
+    setBoard((prev) => ({ ...prev, items: [...prev.items, item] }));
+    storage.addItem(item);
+  }, []);
 
-  const mutateBoard = useCallback((updater, opts) => {
-    setBoard((prev) => {
-      const next = typeof updater === 'function' ? updater(prev) : updater;
-      if (opts && opts.silent) {
-        // Automatic/derived change — bypass throttle/debounce AND skip the
-        // local undo stack. The user didn't choose this, so undo shouldn't
-        // reverse it (and yet it should still propagate to peers).
-        storage.set('boardState', next, true, { silent: true });
-      } else {
-        saveBoard(next);
-      }
-      return next;
-    });
-  }, [saveBoard]);
+  const addItemsLocal = useCallback((items) => {
+    if (!items.length) return;
+    setBoard((prev) => ({ ...prev, items: [...prev.items, ...items] }));
+    storage.updateItems(items.map((it) => ({ id: it.id, patch: it })));
+  }, []);
+
+  // ---- Board-level meta patch ----
+  const patchMeta = useCallback((patch, opts) => {
+    setBoard((prev) => ({ ...prev, ...patch }));
+    storage.setMeta(patch, opts);
+  }, []);
+
+  // ---- Full board replace (import / clear) ----
+  const replaceBoardLocal = useCallback((nextBoard, opts) => {
+    setBoard(nextBoard);
+    storage.replaceBoard(nextBoard, opts);
+  }, []);
+
+  /* ----- Throttled geometry writer for drag / resize -----
+     Optimistic setBoard runs every frame for a live local feel; the granular
+     Yjs write is throttled to DRAG_FLUSH_MS with a DRAG_TRAILING_MS trailing
+     flush. `pendingGeomRef` always holds the freshest entries, so timing
+     against React's commit cycle is irrelevant. */
+  const flushPendingGeom = useCallback(() => {
+    const entries = pendingGeomRef.current;
+    if (entries && entries.length) storage.updateItems(entries);
+    lastFlushRef.current = Date.now();
+  }, []);
+
+  const commitGeometry = useCallback((entries) => {
+    if (!entries.length) return;
+    const byId = new Map(entries.map((e) => [e.id, e.patch]));
+    setBoard((prev) => ({
+      ...prev,
+      items: prev.items.map((it) => (byId.has(it.id) ? { ...it, ...byId.get(it.id) } : it)),
+    }));
+    pendingGeomRef.current = entries;
+    if (Date.now() - lastFlushRef.current >= DRAG_FLUSH_MS) flushPendingGeom();
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(flushPendingGeom, DRAG_TRAILING_MS);
+  }, [flushPendingGeom]);
+
+  const endGeometry = useCallback(() => {
+    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
+    flushPendingGeom();
+    pendingGeomRef.current = null;
+  }, [flushPendingGeom]);
 
   /* ============================================================
      Realtime push: subscribe to storage change events.
@@ -919,8 +1028,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       const focusedField = fid ? fid.split(':')[1] : null;
       const remoteIds = new Set(next.items.map((i) => i.id));
       if (focusedItemId || (dragIds && dragIds.size > 0)) {
+        // Index prev items by id once (O(N)) so the merge below is O(N), not the
+        // O(N²) a per-item find() would cost during live collaboration.
+        const prevById = new Map(prev.items.map((p) => [p.id, p]));
         next.items = next.items.map((i) => {
-          const localItem = prev.items.find((p) => p.id === i.id);
+          const localItem = prevById.get(i.id);
           if (!localItem) return i;
           let patched = i;
           if (focusedItemId === i.id && focusedField) {
@@ -1065,11 +1177,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           // Immediate flush — bypass the 200ms debounce so the claim lands
           // in yMeta on the first tick. Otherwise a second client racing
           // the same election can miss our write and double-claim.
-          setBoard((prev) => {
-            const next = { ...prev, adminUserId: userId, adminName: effectiveName };
-            storage.set('boardState', next, true);
-            return next;
-          });
+          setBoard((prev) => ({ ...prev, adminUserId: userId, adminName: effectiveName }));
+          storage.setMeta({ adminUserId: userId, adminName: effectiveName });
           setToast({ msg: t('transfer.becomeAdmin'), type: 'info' });
         }
       }
@@ -1101,84 +1210,93 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     if (!isAdmin || !timer) return;
     // Only auto-end if a deadline was set and has passed.
     if (!timer.endsAt || timer.endsAt > now) return;
-    // Timer just expired — admin finalizes results
-    mutateBoard((b) => {
-      if (!b.timer || !b.timer.endsAt || b.timer.endsAt > Date.now()) return b;
-      // Sort sticky notes within their innermost containing zone by vote count
-      // (desc) and reposition. If zones overlap (e.g. Retro Loop's wrapper
-      // around Good/Bad/Try columns), the smallest enclosing zone wins —
-      // otherwise the wrapper would scoop up every sticky and pile them at
-      // its corner.
-      const zones = b.items.filter((i) => i.type === 'zone');
-      const stickies = b.items.filter((i) => i.type === 'sticky');
-      const ownerByStickyId = new Map();
-      stickies.forEach((s) => {
-        const c = centerOf(s);
-        const owner = zones
-          .filter((z) => insideZone(c, z))
-          .sort((za, zc) => (za.w * za.h) - (zc.w * zc.h))[0];
-        if (owner) ownerByStickyId.set(s.id, owner.id);
+    // Timer just expired — admin finalizes results.
+    const b = boardRef.current;
+    if (!b.timer || !b.timer.endsAt || b.timer.endsAt > Date.now()) return;
+    // Sort sticky notes within their innermost containing zone by vote count
+    // (desc) and reposition. If zones overlap (e.g. Retro Loop's wrapper
+    // around Good/Bad/Try columns), the smallest enclosing zone wins —
+    // otherwise the wrapper would scoop up every sticky and pile them at
+    // its corner.
+    const zones = b.items.filter((i) => i.type === 'zone');
+    const stickies = b.items.filter((i) => i.type === 'sticky');
+    const ownerByStickyId = new Map();
+    stickies.forEach((s) => {
+      const c = centerOf(s);
+      const owner = zones
+        .filter((z) => insideZone(c, z))
+        .sort((za, zc) => (za.w * za.h) - (zc.w * zc.h))[0];
+      if (owner) ownerByStickyId.set(s.id, owner.id);
+    });
+    const newItems = [...b.items];
+    // Geometry deltas to persist (the array reorder below is local z-order only
+    // and intentionally not written — yItems keeps insertion order on peers).
+    const geomEntries = [];
+    const GAP = 24;       // gap between cards
+    const PAD = 16;       // inner padding from zone edges
+    zones.forEach((z) => {
+      const children = stickies
+        .filter((s) => ownerByStickyId.get(s.id) === z.id)
+        .sort((a, c) => voteCountOf(c.id) - voteCountOf(a.id));
+      if (children.length === 0) return;
+      // Use the WIDEST sticky in this zone for column sizing so the grid
+      // never overlaps when zones host different-sized stickies. Same for
+      // row height. (Previously this used the global STICKY_W/H constants
+      // which became too small after we scaled stickies to ~2.5% of zone
+      // area, producing overlapping rows.)
+      const colW = Math.max(...children.map((c) => c.w || STICKY_W));
+      const rowH = Math.max(...children.map((c) => c.h || STICKY_H));
+      const cols = Math.max(1, Math.floor((z.w - PAD * 2 + GAP) / (colW + GAP)));
+      const rowsNeeded = Math.ceil(children.length / cols);
+      const availH = Math.max(0, z.h - ZONE_TITLE_H - PAD * 2);
+      // When the natural grid would spill below the zone, compress the
+      // vertical step so rows overlap like a stacked deck of cards instead
+      // of escaping the zone. Top-voted card stays at row 0; later rows
+      // shingle downward.
+      let rowStep = rowH + GAP;
+      if (rowsNeeded > 1) {
+        const fitStep = (availH - rowH) / (rowsNeeded - 1);
+        if (fitStep < rowStep) rowStep = Math.max(1, fitStep);
+      }
+      children.forEach((s, idx) => {
+        const col = idx % cols;
+        const row = Math.floor(idx / cols);
+        const targetX = z.x + PAD + col * (colW + GAP);
+        const targetY = z.y + ZONE_TITLE_H + PAD + row * rowStep;
+        const k = newItems.findIndex((i) => i.id === s.id);
+        if (k >= 0) newItems[k] = { ...newItems[k], x: targetX, y: targetY };
+        geomEntries.push({ id: s.id, patch: { x: targetX, y: targetY } });
       });
-      const newItems = [...b.items];
-      const GAP = 24;       // gap between cards
-      const PAD = 16;       // inner padding from zone edges
-      zones.forEach((z) => {
-        const children = stickies
-          .filter((s) => ownerByStickyId.get(s.id) === z.id)
-          .sort((a, c) => voteCountOf(c.id) - voteCountOf(a.id));
-        if (children.length === 0) return;
-        // Use the WIDEST sticky in this zone for column sizing so the grid
-        // never overlaps when zones host different-sized stickies. Same for
-        // row height. (Previously this used the global STICKY_W/H constants
-        // which became too small after we scaled stickies to ~2.5% of zone
-        // area, producing overlapping rows.)
-        const colW = Math.max(...children.map((c) => c.w || STICKY_W));
-        const rowH = Math.max(...children.map((c) => c.h || STICKY_H));
-        const cols = Math.max(1, Math.floor((z.w - PAD * 2 + GAP) / (colW + GAP)));
-        const rowsNeeded = Math.ceil(children.length / cols);
-        const availH = Math.max(0, z.h - ZONE_TITLE_H - PAD * 2);
-        // When the natural grid would spill below the zone, compress the
-        // vertical step so rows overlap like a stacked deck of cards instead
-        // of escaping the zone. Top-voted card stays at row 0; later rows
-        // shingle downward.
-        let rowStep = rowH + GAP;
-        if (rowsNeeded > 1) {
-          const fitStep = (availH - rowH) / (rowsNeeded - 1);
-          if (fitStep < rowStep) rowStep = Math.max(1, fitStep);
+      // Re-order so the highest-voted sticky renders on top of the stack
+      // (last in the array = drawn last). children is sorted vote-desc, so
+      // walking from the end and pushing each puts the top vote-getter at
+      // the very end.
+      for (let i = children.length - 1; i >= 0; i -= 1) {
+        const id = children[i].id;
+        const k = newItems.findIndex((it) => it.id === id);
+        if (k >= 0) {
+          const [item] = newItems.splice(k, 1);
+          newItems.push(item);
         }
-        children.forEach((s, idx) => {
-          const col = idx % cols;
-          const row = Math.floor(idx / cols);
-          const targetX = z.x + PAD + col * (colW + GAP);
-          const targetY = z.y + ZONE_TITLE_H + PAD + row * rowStep;
-          const k = newItems.findIndex((i) => i.id === s.id);
-          if (k >= 0) newItems[k] = { ...newItems[k], x: targetX, y: targetY };
-        });
-        // Re-order so the highest-voted sticky renders on top of the stack
-        // (last in the array = drawn last). children is sorted vote-desc, so
-        // walking from the end and pushing each puts the top vote-getter at
-        // the very end.
-        for (let i = children.length - 1; i >= 0; i -= 1) {
-          const id = children[i].id;
-          const k = newItems.findIndex((it) => it.id === id);
-          if (k >= 0) {
-            const [item] = newItems.splice(k, 1);
-            newItems.push(item);
-          }
-        }
-      });
-      return {
-        ...b,
-        items: newItems,
-        timer: null,
-        lastResultsAt: Date.now(),
-      };
-    }, { silent: true });
+      }
+    });
+    const finalizedAt = Date.now();
+    // Optimistic local update (incl. z-order); persist geometry + meta silently
+    // (derived change — propagates to peers but stays off the undo stack).
+    setBoard((prev) => ({
+      ...prev,
+      items: newItems,
+      timer: null,
+      lastResultsAt: finalizedAt,
+    }));
+    if (geomEntries.length) storage.updateItems(geomEntries, { silent: true });
+    // Clearing the timer ends the session, so voting stops (timerActive=false).
+    storage.setMeta({ timer: null, lastResultsAt: finalizedAt }, { silent: true });
     let totalVotes = 0;
     const voters = new Set();
     votesByItem.forEach((set) => { totalVotes += set.size; set.forEach((v) => voters.add(v)); });
     setToast({ msg: t('vote.results', { n: totalVotes, users: voters.size }), type: 'info' });
-  }, [now, timer, isAdmin, board.items, mutateBoard, votesByItem]);
+  }, [now, timer, isAdmin, board.items, votesByItem]);
 
   /* ============================================================
      Persist viewport (per-user) — debounced lightly
@@ -1300,13 +1418,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
      Item operations
      ============================================================ */
 
-  const updateItem = useCallback((id, patch) => {
-    mutateBoard((b) => ({
-      ...b,
-      items: b.items.map((it) => (it.id === id ? { ...it, ...patch } : it)),
-    }));
-  }, [mutateBoard]);
-
   const deleteItem = useCallback((id) => {
     // One Yjs transaction so Cmd+Z restores the item AND its votes together.
     // Falls back to the two-call path if the bridge is an older build that
@@ -1319,7 +1430,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       setBoard((prev) => ({ ...prev, items: prev.items.filter((it) => it.id !== id) }));
     } else {
       window.storage?.clearVotesFor?.(id);
-      mutateBoard((b) => ({ ...b, items: b.items.filter((it) => it.id !== id) }));
+      setBoard((prev) => ({ ...prev, items: prev.items.filter((it) => it.id !== id) }));
+      storage.removeItem(id);
     }
     setSelectedIds((prev) => {
       if (!prev.has(id)) return prev;
@@ -1328,7 +1440,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       return n;
     });
     setFocusedTextId((cur) => (cur && cur.startsWith(`${id}:`) ? null : cur));
-  }, [mutateBoard]);
+  }, []);
 
   const addSticky = useCallback((wx, wy) => {
     // Inherit the color of the deepest enclosing zone — when zones overlap
@@ -1369,15 +1481,14 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       text: '',
       color,
       rotation: (Math.random() * 3 - 1.5),
-      votes: [],
       private: true,
       ...(fontSize ? { fontSize } : {}),
     };
-    mutateBoard((b) => ({ ...b, items: [...b.items, it] }));
+    addItemLocal(it);
     setSelectedId(it.id);
     setFocusedTextId(`${it.id}:text`);
     setTimeout(() => editAreaRef.current?.focus(), 20);
-  }, [userId, userName, mutateBoard, setSelectedId]);
+  }, [userId, userName, addItemLocal, setSelectedId]);
 
   const addText = useCallback((wx, wy) => {
     const it = {
@@ -1390,14 +1501,14 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       createdAt: Date.now(),
       text: t('tool.text'),
     };
-    mutateBoard((b) => ({ ...b, items: [...b.items, it] }));
+    addItemLocal(it);
     setSelectedId(it.id);
     setFocusedTextId(`${it.id}:text`);
     setTimeout(() => {
       const el = editAreaRef.current;
       if (el) { el.focus(); el.select(); }
     }, 20);
-  }, [userId, userName, mutateBoard, setSelectedId]);
+  }, [userId, userName, addItemLocal, setSelectedId]);
 
   const addZone = useCallback((x, y, w, h, title = 'Untitled', color = 0) => {
     const it = {
@@ -1410,10 +1521,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       authorName: userName,
       createdAt: Date.now(),
     };
-    mutateBoard((b) => ({ ...b, items: [...b.items, it] }));
+    addItemLocal(it);
     setSelectedId(it.id);
     return it.id;
-  }, [userId, userName, mutateBoard, setSelectedId]);
+  }, [userId, userName, addItemLocal, setSelectedId]);
 
   const addImage = useCallback((wx, wy, src, natW, natH) => {
     // Scale display size down if huge
@@ -1438,10 +1549,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       authorName: userName,
       createdAt: Date.now(),
     };
-    mutateBoard((b) => ({ ...b, items: [...b.items, it] }));
+    addItemLocal(it);
     setSelectedId(it.id);
     return it.id;
-  }, [userId, userName, mutateBoard, setSelectedId]);
+  }, [userId, userName, addItemLocal, setSelectedId]);
 
   const importImageFromBlob = useCallback(async (blob, worldX, worldY) => {
     if (!blob || !blob.type || !blob.type.startsWith('image/')) return;
@@ -1542,9 +1653,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       authorName: userName,
       createdAt: Date.now(),
     }));
-    mutateBoard((b) => ({ ...b, items: [...b.items, ...zones] }));
+    addItemsLocal(zones);
     setTemplatesOpen(false);
-  }, [userId, userName, mutateBoard, screenToWorld, customTemplates]);
+  }, [userId, userName, addItemsLocal, screenToWorld, customTemplates]);
 
   const saveCurrentAsTemplate = useCallback((rawName) => {
     const name = (rawName || '').trim();
@@ -1577,7 +1688,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
      Admin gates
      ============================================================ */
   const editingAllowed = isAdmin || !board.editingLocked;
-  const votingAllowedNow = timerActive;
+  // Voting is only possible while a vote session (timer) is running. The lock
+  // is an in-session pause an admin can toggle; default unlocked so starting a
+  // timer enables voting immediately.
+  const votingAllowedNow = timerActive && !board.votingLocked;
 
   const requireEdit = useCallback(() => {
     if (!editingAllowed) {
@@ -1864,14 +1978,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       const z = viewportRef.current.zoom;
       const wx = dx / z;
       const wy = dy / z;
-      mutateBoard((b) => ({
-        ...b,
-        items: b.items.map((it) => {
-          const seed = seeds.get(it.id);
-          if (!seed) return it;
-          return { ...it, x: seed.x + wx, y: seed.y + wy };
-        }),
-      }));
+      const entries = [];
+      seeds.forEach((seed, id) => entries.push({ id, patch: { x: seed.x + wx, y: seed.y + wy } }));
+      commitGeometry(entries);
     };
     const onMove = (ev) => {
       pending = { x: ev.clientX, y: ev.clientY };
@@ -1891,10 +2000,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       dragItemsRef.current = null;
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
-      if (wasDragging) {
-        // Force immediate final save (bypass throttle/debounce).
-        flushBoard(boardRef.current);
-      }
+      // Force immediate final geometry flush (bypass throttle).
+      if (wasDragging) endGeometry();
       if (!moved) {
         if (shiftToggle) setSelectedIds(dragIds);
         else setSelectedId(item.id);
@@ -1904,7 +2011,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-  }, [requireEdit, mutateBoard, setSelectedId, flushBoard]);
+  }, [requireEdit, commitGeometry, endGeometry, setSelectedId]);
 
   /* ----- Zone title drag (with children) ----- */
   const startZoneDrag = useCallback((e, zone) => {
@@ -1953,14 +2060,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       const z = viewportRef.current.zoom;
       const wx = dx / z;
       const wy = dy / z;
-      mutateBoard((b) => ({
-        ...b,
-        items: b.items.map((it) => {
-          const seed = initial.get(it.id);
-          if (!seed) return it;
-          return { ...it, x: seed.x + wx, y: seed.y + wy };
-        }),
-      }));
+      const entries = [];
+      initial.forEach((seed, id) => entries.push({ id, patch: { x: seed.x + wx, y: seed.y + wy } }));
+      commitGeometry(entries);
     };
     const onMove = (ev) => {
       pending = { x: ev.clientX, y: ev.clientY };
@@ -1980,12 +2082,12 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       dragItemsRef.current = null;
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
-      if (wasDragging) flushBoard(boardRef.current);
+      if (wasDragging) endGeometry();
       if (!moved) setSelectedId(zone.id);
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-  }, [mutateBoard, requireEdit, setSelectedId, flushBoard]);
+  }, [requireEdit, commitGeometry, endGeometry, setSelectedId]);
 
   /* ----- Generic item resize (zone / sticky / image) ----- */
   const startItemResize = useCallback((e, item, corner) => {
@@ -2036,18 +2138,18 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         if (corner === 'nw' || corner === 'ne') y = initial.y + (initial.h - minH);
         h = minH;
       }
-      updateItem(item.id, { x, y, w, h });
+      commitGeometry([{ id: item.id, patch: { x, y, w, h } }]);
     };
     const onUp = () => {
       interactionRef.current = null;
       dragItemsRef.current = null;
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
-      flushBoard(boardRef.current);
+      endGeometry();
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-  }, [requireEdit, updateItem, flushBoard]);
+  }, [requireEdit, commitGeometry, endGeometry]);
 
   /* ----- Group resize (scales all selected items around opposite corner) ----- */
   const startGroupResize = useCallback((e, corner) => {
@@ -2119,32 +2221,28 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       const floor = aspectLock ? Math.max(minScaleX, minScaleY) : null;
       sx = aspectLock ? Math.max(sx, floor) : Math.max(sx, minScaleX);
       sy = aspectLock ? Math.max(sy, floor) : Math.max(sy, minScaleY);
-      mutateBoard((b) => ({
-        ...b,
-        items: b.items.map((it) => {
-          const seed = seeds.get(it.id);
-          if (!seed) return it;
-          const next = {
-            ...it,
-            x: ax + (seed.x - ax) * sx,
-            y: ay + (seed.y - ay) * sy,
-          };
-          if (seed.w > 0) next.w = seed.w * sx;
-          if (seed.h > 0) next.h = seed.h * sy;
-          return next;
-        }),
-      }));
+      const entries = [];
+      seeds.forEach((seed, id) => {
+        const patch = {
+          x: ax + (seed.x - ax) * sx,
+          y: ay + (seed.y - ay) * sy,
+        };
+        if (seed.w > 0) patch.w = seed.w * sx;
+        if (seed.h > 0) patch.h = seed.h * sy;
+        entries.push({ id, patch });
+      });
+      commitGeometry(entries);
     };
     const onUp = () => {
       interactionRef.current = null;
       dragItemsRef.current = null;
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
-      flushBoard(boardRef.current);
+      endGeometry();
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-  }, [requireEdit, selectedIds, mutateBoard, flushBoard]);
+  }, [requireEdit, selectedIds, commitGeometry, endGeometry]);
 
   /* ----- Duplicate selected items (offset clones into board) ----- */
   const duplicateItems = useCallback((sourceItems, offset = 24) => {
@@ -2163,19 +2261,18 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         id: uid(),
         x: (it.x ?? 0) + offset,
         y: (it.y ?? 0) + offset,
-        votes: it.type === 'sticky' ? [] : it.votes,
         text: isHidden ? '' : it.text,
         authorId: userId,
         authorName: userName,
         createdAt: Date.now(),
       };
     });
-    mutateBoard((b) => ({ ...b, items: [...b.items, ...clones] }));
+    addItemsLocal(clones);
     setSelectedIds(new Set(clones.map((c) => c.id)));
     if (stripped > 0) {
       setToast({ msg: t('copy.hiddenStripped', { n: stripped }), type: 'warn' });
     }
-  }, [requireEdit, mutateBoard, userId, userName]);
+  }, [requireEdit, addItemsLocal, userId, userName]);
 
   /* ============================================================
      Keyboard
@@ -2336,15 +2433,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
      ============================================================ */
   const adminToggle = useCallback((key) => {
     if (!isAdmin) { setToast({ msg: t('common.adminOnly'), type: 'warn' }); return; }
-    // Flush immediately — skipping the 200ms debounce closes the race where
-    // applyRemoteBoard could re-spread DEFAULT_BOARD over the local toggle
-    // before the Yjs write lands.
-    setBoard((prev) => {
-      const next = { ...prev, [key]: !prev[key] };
-      storage.set('boardState', next, true);
-      return next;
-    });
-  }, [isAdmin]);
+    // patchMeta writes the single flipped flag immediately — no debounce window
+    // for applyRemoteBoard to re-spread DEFAULT_BOARD over the local toggle.
+    patchMeta({ [key]: !boardRef.current[key] });
+  }, [isAdmin, patchMeta]);
 
   const adminStartTimer = useCallback((minutes, voteLimit) => {
     if (!isAdmin) return;
@@ -2353,12 +2445,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     const limit = voteLimit && voteLimit > 0 ? voteLimit : null;
     // Wipe vote keys so each user starts with a clean quota under the new limit.
     window.storage?.clearAllVotes?.();
-    mutateBoard((b) => ({
-      ...b,
-      items: b.items.map((it) => (it.type === 'sticky' ? { ...it, votes: [] } : it)),
-      timer: { startedAt, endsAt, voteLimit: limit },
-      lastResultsAt: null,
-    }));
+    // Each new session starts unlocked so voting works right away.
+    patchMeta({ timer: { startedAt, endsAt, voteLimit: limit }, lastResultsAt: null, votingLocked: false });
     setTimerSetupOpen(false);
     setToast({
       msg: t('vote.session.started', {
@@ -2367,21 +2455,21 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       }),
       type: 'session',
     });
-  }, [isAdmin, mutateBoard]);
+  }, [isAdmin, patchMeta]);
 
   const adminExtendTimer = useCallback((minutes) => {
     if (!isAdmin || !timer) return;
-    mutateBoard((b) => {
-      if (!b.timer) return b;
-      const base = b.timer.endsAt && b.timer.endsAt > Date.now() ? b.timer.endsAt : Date.now();
-      return { ...b, timer: { ...b.timer, endsAt: base + minutes * 60000 } };
-    });
-  }, [isAdmin, timer, mutateBoard]);
+    const cur = boardRef.current.timer;
+    if (!cur) return;
+    const base = cur.endsAt && cur.endsAt > Date.now() ? cur.endsAt : Date.now();
+    patchMeta({ timer: { ...cur, endsAt: base + minutes * 60000 } });
+  }, [isAdmin, timer, patchMeta]);
 
   const adminStopTimer = useCallback(() => {
     if (!isAdmin || !timer) return;
-    mutateBoard((b) => ({ ...b, timer: null }));
-  }, [isAdmin, timer, mutateBoard]);
+    // Ending the session stops voting on its own (timerActive becomes false).
+    patchMeta({ timer: null });
+  }, [isAdmin, timer, patchMeta]);
 
   // Gate every destructive action behind a PIN. First call ever (no PIN on
   // the board yet) opens the modal in "set" mode and stores the hash; later
@@ -2402,7 +2490,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         const cur = boardRef.current.adminPinHash;
         if (!cur) {
           // Set mode — persist the new PIN's hash into the shared board.
-          mutateBoard((b) => ({ ...b, adminPinHash: hash }));
+          patchMeta({ adminPinHash: hash });
         } else if (cur !== hash) {
           // Verify mode — wrong PIN, keep modal open with error.
           setPinPromptCfg((cfg) => (cfg ? { ...cfg, error: 'wrong' } : cfg));
@@ -2414,7 +2502,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       },
       onCancel: () => setPinPromptCfg(null),
     });
-  }, [isAdmin, boardCode, mutateBoard, setToast]);
+  }, [isAdmin, boardCode, patchMeta, setToast]);
 
   // Claim admin when there is none active. Anyone holding the PIN can take
   // over a vacant role. Without this flow a board where the creator lost
@@ -2449,63 +2537,56 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           setToast({ msg: t('common.adminOnly'), type: 'warn' });
           return;
         }
-        mutateBoard((b) => ({
-          ...b,
+        patchMeta({
           adminUserId: userId,
           adminName: userName || 'Guest',
           // First-ever claim doubles as set-PIN.
           adminPinHash: curHash || hash,
-        }));
+        });
         pinSessionOkRef.current = true;
         setPinPromptCfg(null);
         setToast({ msg: t('transfer.becomeAdmin'), type: 'info' });
       },
       onCancel: () => setPinPromptCfg(null),
     });
-  }, [isAdmin, userId, userName, boardCode, onlineUsers, mutateBoard, setToast]);
+  }, [isAdmin, userId, userName, boardCode, onlineUsers, patchMeta, setToast]);
 
   const adminClearBoard = useCallback(() => {
     if (!isAdmin) return;
     window.storage?.clearAllVotes?.();
-    mutateBoard((b) => ({
-      ...b,
+    // Full replace: drop every item, reset session meta, preserve admin identity.
+    replaceBoardLocal({
+      ...boardRef.current,
       items: [],
       timer: null,
       lastResultsAt: null,
       allRevealed: false,
       votingLocked: false,
       editingLocked: false,
-    }));
+    });
     setConfirmClear(false);
     setTemplatesOpen(true);
-  }, [isAdmin, mutateBoard]);
+  }, [isAdmin, replaceBoardLocal]);
 
   const adminResetVotes = useCallback(() => {
     if (!isAdmin) return;
+    // Votes live in CRDT keys; clearing them re-renders via the vote subscription.
     window.storage?.clearAllVotes?.();
-    mutateBoard((b) => ({
-      ...b,
-      items: b.items.map((it) => (it.type === 'sticky' ? { ...it, votes: [] } : it)),
-      lastResultsAt: null,
-    }));
+    patchMeta({ lastResultsAt: null });
     setConfirmResetVotes(false);
     setToast({ msg: t('reset.done'), type: 'info' });
-  }, [isAdmin, mutateBoard]);
+  }, [isAdmin, patchMeta]);
 
   const adminTransfer = useCallback((toId) => {
     if (!isAdmin) return;
     const toName = presence[toId]?.name || '';
-    // Immediate flush — admin transfer is a hand-off; if our own heartbeat
-    // fires before the debounce we'd still see ourselves as admin and could
-    // accidentally rewrite the role back to us in the same tick.
-    setBoard((prev) => {
-      const next = { ...prev, adminUserId: toId, adminName: toName };
-      storage.set('boardState', next, true);
-      return next;
-    });
+    // Immediate write — admin transfer is a hand-off; if our own heartbeat
+    // fires first we'd still see ourselves as admin and could accidentally
+    // rewrite the role back to us in the same tick.
+    patchMeta({ adminUserId: toId, adminName: toName });
     setTransferOpen(false);
     setToast({ msg: t('transfer.done'), type: 'info' });
-  }, [isAdmin, presence]);
+  }, [isAdmin, presence, patchMeta]);
 
   /* ----- Export / Import ----- */
   const exportBoard = useCallback(() => {
@@ -2524,6 +2605,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         items: b.items,
         timer: b.timer,
         editingLocked: b.editingLocked,
+        votingLocked: b.votingLocked,
         allRevealed: b.allRevealed,
         lastResultsAt: b.lastResultsAt,
       },
@@ -2623,11 +2705,14 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     // Wipe vote keys first — incoming userIds reference the source room.
     window.storage?.clearAllVotes?.();
     // Restore board fields (drop unrelated keys to avoid sneaking in bad shape).
-    mutateBoard(() => ({
+    // Full replace so removed items are deleted from Yjs, not just hidden.
+    replaceBoardLocal({
       ...DEFAULT_BOARD,
       items: parsed.board.items,
       timer: parsed.board.timer || null,
       editingLocked: !!parsed.board.editingLocked,
+      // Older exports predate votingLocked; default to unlocked when absent.
+      votingLocked: parsed.board.votingLocked ?? false,
       allRevealed: !!parsed.board.allRevealed,
       lastResultsAt: parsed.board.lastResultsAt || null,
       // Preserve identity-of-the-room across import: who's admin, what their
@@ -2637,7 +2722,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       adminUserId: boardRef.current.adminUserId,
       adminName: boardRef.current.adminName,
       adminPinHash: boardRef.current.adminPinHash,
-    }));
+    });
     // Replay votes — each (itemId, userId) pair becomes its own CRDT key so
     // they survive concurrent edits in the destination room.
     if (parsed.votes && typeof parsed.votes === 'object') {
@@ -2653,7 +2738,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     const n = parsed.board.items.length;
     setPendingImport(null);
     setToast({ msg: t('import.done', { n }), type: 'info' });
-  }, [pendingImport, isAdmin, mutateBoard]);
+  }, [pendingImport, isAdmin, replaceBoardLocal]);
 
   /* ============================================================
      Save name
@@ -2765,6 +2850,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       isEditing={focusedTextId === `${it.id}:text`}
       isOwner={it.authorId === userId}
       allRevealed={board.allRevealed}
+      dense={denseRender}
       voted={didUserVoteOn(it.id)}
       voteCount={voteCountOf(it.id)}
       voteFlash={voteFlashes[it.id] || null}
@@ -2812,6 +2898,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       key={it.id}
       item={it}
       selected={selectedIds.has(it.id)}
+      dense={denseRender}
       onStartDrag={startItemDrag}
     />
   );
@@ -2838,6 +2925,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       votingAllowedNow,
       userId,
       board.allRevealed,
+      denseRender,
       lang,
       zoneChildCount,
       startItemDrag,
@@ -3194,6 +3282,14 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           enabled={isAdmin}
           icon={board.editingLocked ? <Lock size={16} /> : <Unlock size={16} />}
           label={board.editingLocked ? t('topbar.unlockEdit') : t('topbar.lockEdit')}
+        />
+        <TopBtn
+          title={board.votingLocked ? t('topbar.unlockVote') : t('topbar.lockVote')}
+          onClick={() => adminToggle('votingLocked')}
+          active={board.votingLocked}
+          enabled={isAdmin}
+          icon={board.votingLocked ? <Ban size={16} /> : <ThumbsUp size={16} />}
+          label={board.votingLocked ? t('topbar.unlockVote') : t('topbar.lockVote')}
         />
         <TopBtn
           title={board.allRevealed ? t('topbar.hide') : t('topbar.reveal')}
@@ -3562,7 +3658,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           display: 'flex', alignItems: 'center', gap: 12,
           zIndex: 41,
           boxShadow: '0 12px 30px rgba(0,0,0,0.18)',
-          animation: 'rb-banner-in 0.35s cubic-bezier(.2,1,.3,1) both',
+          // Under 30s left, layer a looping red pulse over the entrance animation
+          // (rb-pulse keeps the translateX(-50%) the dock needs to stay centred).
+          animation: isUrgent
+            ? 'rb-banner-in 0.35s cubic-bezier(.2,1,.3,1) both, rb-pulse 1s ease-in-out infinite'
+            : 'rb-banner-in 0.35s cubic-bezier(.2,1,.3,1) both',
           backdropFilter: 'blur(8px)',
         }}
       >

@@ -201,6 +201,39 @@ const writeBoardSnapshot = (newBoard, origin = 'local') => {
 };
 
 // ---------------------------------------------------------------------------
+// Granular board writes. The UI sends only the delta it changed instead of the
+// whole board, so a single text edit or a per-frame drag no longer pays the
+// O(items × fields) cost of reading + diffing the entire board. Each runs in
+// one transaction; `origin` decides undo-stack membership, exactly as
+// writeBoardSnapshot did — 'local' = user action (undoable), 'system' = derived
+// / automatic change (skipped by the UndoManager).
+// ---------------------------------------------------------------------------
+const originOf = (opts) => (opts && opts.silent ? 'system' : 'local');
+
+// Seed a brand-new item as its own Y.Map (mirrors writeBoardSnapshot's
+// create branch). Populated before attaching so peers see it complete.
+const seedItem = (id, fields) => {
+  const yItem = new Y.Map();
+  Object.entries(fields).forEach(([k, v]) => {
+    if (k === 'id' || v === undefined) return;
+    yItem.set(k, v);
+  });
+  yItems.set(id, yItem);
+};
+
+// Upsert one item: create it if absent, else apply a per-field patch where
+// `undefined` deletes the field and any other value sets it.
+const upsertItem = (id, patch) => {
+  const yItem = yItems.get(id);
+  if (!(yItem instanceof Y.Map)) { seedItem(id, patch); return; }
+  Object.entries(patch).forEach(([k, v]) => {
+    if (k === 'id') return;
+    if (v === undefined) yItem.delete(k);
+    else yItem.set(k, v);
+  });
+};
+
+// ---------------------------------------------------------------------------
 // One-time migration of the legacy `s||boardState` JSON blob into yItems/yMeta.
 // Idempotent — guarded by a `__migrated` flag in yMeta. Runs as origin 'system'
 // so the migration itself never appears on the undo stack.
@@ -406,10 +439,6 @@ if (provider) {
       // Use it for automatic/derived changes the user didn't explicitly trigger
       // (e.g. timer-end auto-sort of cards by vote count).
       const silent = !!(opts && opts.silent);
-      if (key === 'boardState' && shared) {
-        writeBoardSnapshot(value, silent ? 'system' : 'local');
-        return;
-      }
       if (key === 'presence' && shared && value && typeof value === 'object') {
         // Backward-compat shim: callers still pass the FULL pmap. The only
         // entry we actually own is the one with the freshest lastSeen — that's
@@ -449,6 +478,43 @@ if (provider) {
     },
     on(handler) { emitter.addEventListener('change', handler); },
     off(handler) { emitter.removeEventListener('change', handler); },
+
+    // --- Granular board writes (delta-only; see helpers above) ---
+    addItem(item, opts) {
+      if (!item || !item.id) return;
+      ydoc.transact(() => { seedItem(item.id, item); }, originOf(opts));
+    },
+    updateItem(id, patch, opts) {
+      if (!id || !patch || typeof patch !== 'object') return;
+      ydoc.transact(() => { upsertItem(id, patch); }, originOf(opts));
+    },
+    updateItems(entries, opts) {
+      if (!Array.isArray(entries) || !entries.length) return;
+      ydoc.transact(() => {
+        entries.forEach((e) => {
+          if (e && e.id && e.patch) upsertItem(e.id, e.patch);
+        });
+      }, originOf(opts));
+    },
+    removeItem(id, opts) {
+      if (!id) return;
+      ydoc.transact(() => { if (yItems.has(id)) yItems.delete(id); }, originOf(opts));
+    },
+    setMeta(patch, opts) {
+      if (!patch || typeof patch !== 'object') return;
+      ydoc.transact(() => {
+        Object.entries(patch).forEach(([k, v]) => {
+          if (k.startsWith(META_INTERNAL_PREFIX)) return;
+          if (v === undefined || v === null) yMeta.delete(k);
+          else yMeta.set(k, v);
+        });
+      }, originOf(opts));
+    },
+    // Full board replace — for import / clear only. Reuses the proven
+    // delete-missing + per-field upsert diff.
+    replaceBoard(board, opts) {
+      writeBoardSnapshot(board, originOf(opts));
+    },
 
     setVote(itemId, voterId, on) {
       // Strict id format so a `:` in the key never confuses parseVoteKey on
