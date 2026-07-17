@@ -30,9 +30,7 @@ const COLORS = [
   { bg: '#fed7aa', border: '#f97316', zoneBg: 'rgba(249,115,22,0.10)' }, // orange
 ];
 
-// Font-color presets shown in the toolbar swatch popover. `null` = auto/default
-// so the sticky's text follows the theme (var(--text)) instead of being pinned
-// to a specific shade that might look bad in dark mode.
+// Font-color presets shown in the toolbar swatch popover. `null` = auto/default.
 const FONT_COLORS = [
   { value: null,      label: 'auto',  swatch: 'linear-gradient(135deg,#111 50%,#fff 50%)' },
   { value: '#111827', label: 'black', swatch: '#111827' },
@@ -45,6 +43,13 @@ const FONT_COLORS = [
   { value: '#9333ea', label: 'purple',swatch: '#9333ea' },
 ];
 
+// Sticky note backgrounds (COLORS above) are fixed pastels that never follow
+// the app theme, unlike var(--text) — pin "auto" sticky text to the
+// light-theme text colors instead, since the card's own background is
+// always light regardless of dark mode.
+const STICKY_AUTO_TEXT = '#111827';
+const STICKY_AUTO_TEXT_FAINT = '#9ca3af';
+
 const STICKY_W = 200;
 const STICKY_H = 180;
 const STICKY_MIN_W = 120;
@@ -54,10 +59,12 @@ const ZONE_MIN_H = 200;
 const IMAGE_MIN_W = 60;
 const IMAGE_MIN_H = 40;
 const IMAGE_MAX_DIM = 1200; // resize larger imports down to this max edge
-// Hard cap on accepted image blob size before any resize. Larger files are
-// rejected up front so we don't OOM the page decoding them, or flood yjs /
-// LevelDB with multi-MB base64 strings.
+// Hard cap on accepted image blob size before any resize/upload. Larger
+// files are rejected up front so we don't OOM the page decoding them.
 const IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+// Must match the server's MIME_EXT allowlist (yjs-server.mjs) — anything
+// outside this set is rejected by /upload regardless of the resize path.
+const UPLOADABLE_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 const ZONE_TITLE_H = 32;
 const DRAG_THRESHOLD = 4;
 const ZOOM_MIN = 0.15;
@@ -70,6 +77,13 @@ const TEXT_SAVE_DEBOUNCE = 350;
 // the final position always lands even if the throttle swallowed it.
 const DRAG_FLUSH_MS = 60;
 const DRAG_TRAILING_MS = 80;
+// A just-finished drag stays protected against remote-snapshot overwrite for
+// this long after mouseup — covers the window where a concurrent peer write
+// (e.g. the vote-finalize auto-sort) can land on the same item with a Yjs
+// clock that outranks this client's, even though it happened earlier in
+// real time. Mirrors RECENT_AUTHOR_WINDOW_MS below (same class of problem:
+// a remote snapshot that doesn't yet reflect what this client just did).
+const RECENT_MOVE_WINDOW_MS = 8000;
 // Above this many paintable cards (sticky+image) on the board, drop the blurred
 // per-card shadows/filters — overlapping blur kernels are the dominant paint
 // cost when cards cluster. Cards stay separated by their borders.
@@ -269,6 +283,13 @@ const centerOf = (it) => {
 const insideZone = (p, z) =>
   p.x >= z.x && p.x <= z.x + z.w && p.y >= z.y && p.y <= z.y + z.h;
 
+// Shared by exportZoneCsv / exportBoardCsv.
+const csvColorName = (i) => ['yellow', 'red', 'green', 'blue', 'purple', 'orange'][i] || String(i);
+const csvEsc = (v) => {
+  const s = v == null ? '' : String(v);
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
+
 /* ============================================================
    Memoized item cards
    ------------------------------------------------------------
@@ -354,7 +375,7 @@ const StickyCard = React.memo(function StickyCard({
           // card); blur is only the obfuscation when text is actually rendered.
           filter: hideContent && !dense ? 'blur(8px)' : 'none',
           userSelect: hideContent ? 'none' : 'auto',
-          color: it.fontColor || 'var(--text)',
+          color: it.fontColor || STICKY_AUTO_TEXT,
         }}
       >
         {(() => {
@@ -372,7 +393,7 @@ const StickyCard = React.memo(function StickyCard({
                   width: '100%', height: '100%',
                   background: 'transparent', border: 'none', outline: 'none',
                   resize: 'none', fontFamily: 'inherit', fontSize: it.fontSize || 15,
-                  lineHeight: 1.5, color: it.fontColor || 'var(--text)',
+                  lineHeight: 1.5, color: it.fontColor || STICKY_AUTO_TEXT,
                 }}
               />
             );
@@ -381,7 +402,7 @@ const StickyCard = React.memo(function StickyCard({
           if (hideContent && dense) return null;
           if (it.text) return it.text;
           return isOwner
-            ? <span style={{ color: 'var(--text-faint)', fontStyle: 'italic' }}>{t('sticky.placeholder')}</span>
+            ? <span style={{ color: STICKY_AUTO_TEXT_FAINT, fontStyle: 'italic' }}>{t('sticky.placeholder')}</span>
             : '';
         })()}
       </div>
@@ -525,7 +546,7 @@ const ZoneCard = React.memo(function ZoneCard({
           alignItems: 'center',
           padding: '0 14px',
           gap: 8,
-          cursor: isEditingTitle ? 'text' : 'grab',
+          cursor: isEditingTitle ? 'text' : (it.locked ? 'not-allowed' : 'grab'),
           fontWeight: 600,
           fontSize: titleFs,
           userSelect: 'none',
@@ -549,6 +570,7 @@ const ZoneCard = React.memo(function ZoneCard({
           />
         ) : (
           <>
+            {it.locked && <Lock size={13} />}
             <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {it.title}
             </span>
@@ -742,6 +764,45 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const focusedTextIdRef = useRef(null);
   useEffect(() => { focusedTextIdRef.current = focusedTextId; }, [focusedTextId]);
 
+  // Hold Space + drag = pan the canvas regardless of what's under the cursor
+  // (Figma/Miro-style), overriding the normal "drag a card moves it" or
+  // "drag empty canvas pans" behavior. Ignored while typing in a text field
+  // so a literal space keystroke isn't swallowed. Consumed in
+  // onCanvasMouseDown/startItemDrag/startZoneDrag below.
+  const spaceHeldRef = useRef(false);
+  useEffect(() => {
+    const isTypingTarget = () => {
+      const tag = document.activeElement?.tagName;
+      return tag === 'TEXTAREA' || tag === 'INPUT';
+    };
+    const onSpaceKeyDown = (e) => {
+      if (e.code !== 'Space' || isTypingTarget()) return;
+      e.preventDefault();
+      if (spaceHeldRef.current) return;
+      spaceHeldRef.current = true;
+      if (canvasRef.current) canvasRef.current.style.cursor = 'grab';
+    };
+    const onSpaceKeyUp = (e) => {
+      if (e.code !== 'Space') return;
+      spaceHeldRef.current = false;
+      if (canvasRef.current) canvasRef.current.style.cursor = '';
+    };
+    // If the window loses focus while Space is held (e.g. alt-tab), the
+    // keyup never arrives — reset here so pan mode doesn't get stuck on.
+    const onBlur = () => {
+      spaceHeldRef.current = false;
+      if (canvasRef.current) canvasRef.current.style.cursor = '';
+    };
+    window.addEventListener('keydown', onSpaceKeyDown);
+    window.addEventListener('keyup', onSpaceKeyUp);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onSpaceKeyDown);
+      window.removeEventListener('keyup', onSpaceKeyUp);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, []);
+
   // single-select helpers
   const selectedId = selectedIds.size === 1 ? [...selectedIds][0] : null;
   const setSelectedId = useCallback((id) => {
@@ -922,6 +983,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const lastFlushRef = useRef(0);
   // Latest geometry entries pending a throttled flush during a drag/resize.
   const pendingGeomRef = useRef(null);
+  // itemId -> { x, y, w, h, until } for drags that just ended. Lets
+  // applyRemoteBoard keep preserving local geometry for a grace period past
+  // mouseup, not just while dragItemsRef marks an active drag.
+  const recentlyMovedRef = useRef(new Map());
 
   // ---- One-item field patch ----
   const updateItem = useCallback((id, patch, opts) => {
@@ -975,13 +1040,21 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   }, []);
 
   const commitGeometry = useCallback((entries) => {
-    if (!entries.length) return;
-    const byId = new Map(entries.map((e) => [e.id, e.patch]));
+    // Single enforcement point for "locked zones don't move" — every drag/
+    // resize path (solo, group, zone-carries-children) funnels through here,
+    // so filtering here also covers a locked zone caught in someone else's
+    // multi-select drag, not just its own title bar / resize handles.
+    const filtered = entries.filter((e) => {
+      const it = boardRef.current.items.find((i) => i.id === e.id);
+      return !(it?.type === 'zone' && it.locked);
+    });
+    if (!filtered.length) return;
+    const byId = new Map(filtered.map((e) => [e.id, e.patch]));
     setBoard((prev) => ({
       ...prev,
       items: prev.items.map((it) => (byId.has(it.id) ? { ...it, ...byId.get(it.id) } : it)),
     }));
-    pendingGeomRef.current = entries;
+    pendingGeomRef.current = filtered;
     if (Date.now() - lastFlushRef.current >= DRAG_FLUSH_MS) flushPendingGeom();
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(flushPendingGeom, DRAG_TRAILING_MS);
@@ -989,6 +1062,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
 
   const endGeometry = useCallback(() => {
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
+    const entries = pendingGeomRef.current;
+    if (entries && entries.length) {
+      const until = Date.now() + RECENT_MOVE_WINDOW_MS;
+      entries.forEach((e) => recentlyMovedRef.current.set(e.id, { ...e.patch, until }));
+    }
     flushPendingGeom();
     pendingGeomRef.current = null;
   }, [flushPendingGeom]);
@@ -1006,7 +1084,12 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       const focusedItemId = fid ? fid.split(':')[0] : null;
       const focusedField = fid ? fid.split(':')[1] : null;
       const remoteIds = new Set(next.items.map((i) => i.id));
-      if (focusedItemId || (dragIds && dragIds.size > 0)) {
+      // Prune expired entries so a stale grace-period record can't outlive
+      // its window and mask a genuine later remote change to the same item.
+      const recentlyMoved = recentlyMovedRef.current;
+      const nowMs = Date.now();
+      recentlyMoved.forEach((v, id) => { if (v.until <= nowMs) recentlyMoved.delete(id); });
+      if (focusedItemId || (dragIds && dragIds.size > 0) || recentlyMoved.size > 0) {
         // Index prev items by id once (O(N)) so the merge below is O(N), not the
         // O(N²) a per-item find() would cost during live collaboration.
         const prevById = new Map(prev.items.map((p) => [p.id, p]));
@@ -1022,6 +1105,16 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
             patched = { ...patched, x: localItem.x, y: localItem.y };
             if (localItem.w != null) patched.w = localItem.w;
             if (localItem.h != null) patched.h = localItem.h;
+          } else if (recentlyMoved.has(i.id)) {
+            // preserve local geometry for a short grace period after a drag
+            // just ended — a concurrent peer write (e.g. the vote-finalize
+            // auto-sort) can otherwise land on the same item and win the
+            // Yjs conflict resolution despite happening earlier in real
+            // time (see RECENT_MOVE_WINDOW_MS).
+            const rm = recentlyMoved.get(i.id);
+            patched = { ...patched, x: rm.x, y: rm.y };
+            if (rm.w != null) patched.w = rm.w;
+            if (rm.h != null) patched.h = rm.h;
           }
           return patched;
         });
@@ -1119,18 +1212,17 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     return () => clearInterval(id);
   }, [tickInterval]);
 
-  useEffect(() => {
-    if (!isAdmin || !timer) return;
-    // Only auto-end if a deadline was set and has passed.
-    if (!timer.endsAt || timer.endsAt > now) return;
-    // Timer just expired — admin finalizes results.
+  // Sort sticky notes within their innermost containing zone by vote count
+  // (desc), reposition, and end the session. Shared by both ways a voting
+  // session can end: the deadline auto-expiring (below) and an admin
+  // stopping it early (adminStopTimer) — both must produce the same result.
+  const finalizeVotingSession = useCallback(() => {
+    if (!isAdmin) return;
     const b = boardRef.current;
-    if (!b.timer || !b.timer.endsAt || b.timer.endsAt > Date.now()) return;
-    // Sort sticky notes within their innermost containing zone by vote count
-    // (desc) and reposition. If zones overlap (e.g. Retro Loop's wrapper
-    // around Good/Bad/Try columns), the smallest enclosing zone wins —
-    // otherwise the wrapper would scoop up every sticky and pile them at
-    // its corner.
+    if (!b.timer) return;
+    // If zones overlap (e.g. Retro Loop's wrapper around Good/Bad/Try
+    // columns), the smallest enclosing zone wins — otherwise the wrapper
+    // would scoop up every sticky and pile them at its corner.
     const zones = b.items.filter((i) => i.type === 'zone');
     const stickies = b.items.filter((i) => i.type === 'sticky');
     const ownerByStickyId = new Map();
@@ -1202,14 +1294,31 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       timer: null,
       lastResultsAt: finalizedAt,
     }));
-    if (geomEntries.length) storage.updateItems(geomEntries, { silent: true });
+    if (geomEntries.length) {
+      // The sort is an authoritative reposition — it must win over any
+      // grace-period protection a prior drag left on these same ids,
+      // otherwise the self-echoed 'system' write below gets reverted back
+      // to the pre-sort dragged position by the recentlyMoved guard.
+      geomEntries.forEach((e) => recentlyMovedRef.current.delete(e.id));
+      storage.updateItems(geomEntries, { silent: true });
+    }
     // Clearing the timer ends the session, so voting stops (timerActive=false).
     storage.setMeta({ timer: null, lastResultsAt: finalizedAt }, { silent: true });
     let totalVotes = 0;
     const voters = new Set();
     votesByItem.forEach((set) => { totalVotes += set.size; set.forEach((v) => voters.add(v)); });
     setToast({ msg: t('vote.results', { n: totalVotes, users: voters.size }), type: 'info' });
-  }, [now, timer, isAdmin, board.items, votesByItem]);
+  }, [isAdmin, votesByItem, voteCountOf, t]);
+
+  useEffect(() => {
+    if (!isAdmin || !timer) return;
+    // Only auto-end if a deadline was set and has passed.
+    if (!timer.endsAt || timer.endsAt > now) return;
+    // Timer just expired — admin finalizes results.
+    const b = boardRef.current;
+    if (!b.timer || !b.timer.endsAt || b.timer.endsAt > Date.now()) return;
+    finalizeVotingSession();
+  }, [now, timer, isAdmin, board.items, votesByItem, finalizeVotingSession]);
 
   /* ============================================================
      Persist viewport (per-user) — debounced lightly
@@ -1235,11 +1344,12 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   // Per-user vote tallies for the player list: userId → number of votes cast.
   const votesUsedByUser = useMemo(() => {
     const m = new Map();
+    if (!timer) return m;
     votesByItem.forEach((set) => {
       set.forEach((uid) => { m.set(uid, (m.get(uid) || 0) + 1); });
     });
     return m;
-  }, [votesByItem]);
+  }, [votesByItem, timer]);
 
   /* ============================================================
      Auto-dismiss toast
@@ -1332,6 +1442,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
      ============================================================ */
 
   const deleteItem = useCallback((id) => {
+    // Locked zones can't be deleted — checked here (not just at each call
+    // site) so the keyboard shortcut and bulk-select delete are covered too.
+    const it = boardRef.current.items.find((i) => i.id === id);
+    if (it?.type === 'zone' && it.locked) return;
     // One Yjs transaction so Cmd+Z restores the item AND its votes together.
     // Falls back to the two-call path if the bridge is an older build that
     // doesn't expose the combined helper yet.
@@ -1469,6 +1583,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
 
   const importImageFromBlob = useCallback(async (blob, worldX, worldY) => {
     if (!blob || !blob.type || !blob.type.startsWith('image/')) return;
+    if (!UPLOADABLE_IMAGE_TYPES.has(blob.type)) {
+      setToast({ msg: t('image.unsupportedFormat') || 'Unsupported image format (PNG, JPEG, WEBP, or GIF only)', type: 'warn' });
+      return;
+    }
     if (blob.size > IMAGE_MAX_BYTES) {
       setToast({
         msg: t('image.tooLarge', { mb: (IMAGE_MAX_BYTES / 1024 / 1024).toFixed(0) })
@@ -1477,20 +1595,21 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       });
       return;
     }
-    const dataUrl = await new Promise((res, rej) => {
-      const reader = new FileReader();
-      reader.onload = () => res(reader.result);
-      reader.onerror = rej;
-      reader.readAsDataURL(blob);
-    });
-    // Decode to get natural dims, optionally resize huge images via canvas.
+    // Decode via an object URL (not a base64 data URL) — images are uploaded
+    // to the server as raw bytes now, so there's no reason to pay for base64
+    // encoding just to read dimensions / draw into a resize canvas.
+    const objectUrl = URL.createObjectURL(blob);
     const img = new Image();
-    await new Promise((res, rej) => {
-      img.onload = res;
-      img.onerror = rej;
-      img.src = dataUrl;
-    });
-    let finalSrc = dataUrl;
+    try {
+      await new Promise((res, rej) => {
+        img.onload = res;
+        img.onerror = rej;
+        img.src = objectUrl;
+      });
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
+    let finalBlob = blob;
     let nw = img.naturalWidth;
     let nh = img.naturalHeight;
     const maxEdge = Math.max(nw, nh);
@@ -1505,38 +1624,39 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       ctx.drawImage(img, 0, 0, cw, ch);
       // JPEG keeps size down; PNG keeps transparency.
       const isTransparent = blob.type.includes('png') || blob.type.includes('gif') || blob.type.includes('webp');
-      finalSrc = canvas.toDataURL(isTransparent ? 'image/png' : 'image/jpeg', 0.85);
+      finalBlob = await new Promise((res) => canvas.toBlob(res, isTransparent ? 'image/png' : 'image/jpeg', 0.85));
       nw = cw;
       nh = ch;
     }
     // Belt-and-suspenders payload cap. The original blob.size check rejects
-    // huge originals, but base64 + lossless PNG re-encode of a transparent
-    // image can balloon — we don't want a 5MB PNG ending up as 9MB of dataURL
-    // pumped through the WebSocket and stored on every peer.
-    if (finalSrc.length > IMAGE_MAX_BYTES) {
+    // huge originals, but a lossless PNG re-encode of a transparent image can
+    // balloon past it — cap what actually gets uploaded and stored server-side.
+    if (!finalBlob || finalBlob.size > IMAGE_MAX_BYTES) {
       // Try re-encoding as JPEG first (drops transparency but saves ~60%).
-      try {
-        const canvas = document.createElement('canvas');
-        canvas.width = nw;
-        canvas.height = nh;
-        canvas.getContext('2d').drawImage(img, 0, 0, nw, nh);
-        const jpeg = canvas.toDataURL('image/jpeg', 0.8);
-        if (jpeg.length <= IMAGE_MAX_BYTES) {
-          finalSrc = jpeg;
-        } else {
-          setToast({
-            msg: t('image.tooLarge', { mb: (IMAGE_MAX_BYTES / 1024 / 1024).toFixed(0) })
-              || `Image too large (max ${(IMAGE_MAX_BYTES / 1024 / 1024).toFixed(0)} MB)`,
-            type: 'warn',
-          });
-          return;
-        }
-      } catch {
-        setToast({ msg: t('image.tooLarge', { mb: (IMAGE_MAX_BYTES / 1024 / 1024).toFixed(0) }), type: 'warn' });
+      const canvas = document.createElement('canvas');
+      canvas.width = nw;
+      canvas.height = nh;
+      canvas.getContext('2d').drawImage(img, 0, 0, nw, nh);
+      const jpeg = await new Promise((res) => canvas.toBlob(res, 'image/jpeg', 0.8));
+      if (jpeg && jpeg.size <= IMAGE_MAX_BYTES) {
+        finalBlob = jpeg;
+      } else {
+        setToast({
+          msg: t('image.tooLarge', { mb: (IMAGE_MAX_BYTES / 1024 / 1024).toFixed(0) })
+            || `Image too large (max ${(IMAGE_MAX_BYTES / 1024 / 1024).toFixed(0)} MB)`,
+          type: 'warn',
+        });
         return;
       }
     }
-    addImage(worldX, worldY, finalSrc, nw, nh);
+    let url;
+    try {
+      url = await window.storage.uploadImage(finalBlob);
+    } catch {
+      setToast({ msg: t('image.uploadFailed') || 'Image upload failed', type: 'warn' });
+      return;
+    }
+    addImage(worldX, worldY, url, nw, nh);
   }, [addImage, setToast]);
 
   const applyTemplate = useCallback((key) => {
@@ -1717,15 +1837,17 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   }, [applyViewportToDom]);
 
   const onCanvasMouseDown = useCallback((e) => {
-    // Only start pan/marquee if mousedown is on the canvas (not on an item).
-    if (e.target !== canvasRef.current && e.target.dataset?.surface !== '1') return;
+    // Only start pan/marquee if mousedown is on the canvas (not on an item) —
+    // unless Space is held, in which case any mousedown always pans (the
+    // card's own handler lets the event through; see startItemDrag/startZoneDrag).
+    if (!spaceHeldRef.current && e.target !== canvasRef.current && e.target.dataset?.surface !== '1') return;
     if (focusedTextIdRef.current) {
       if (document.activeElement && typeof document.activeElement.blur === 'function') {
         document.activeElement.blur();
       }
     }
     // Zone-creation tool: drag rectangle on canvas to place a new zone.
-    if (creationModeRef.current === 'zone' && requireEdit()) {
+    if (!spaceHeldRef.current && creationModeRef.current === 'zone' && requireEdit()) {
       e.preventDefault();
       const rect = canvasRef.current.getBoundingClientRect();
       const start = screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
@@ -1762,7 +1884,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       return;
     }
     const selectTool = creationModeRef.current === 'select';
-    const useMarquee = e.shiftKey || e.button === 2 || selectTool;
+    const useMarquee = !spaceHeldRef.current && (e.shiftKey || e.button === 2 || selectTool);
     if (!e.shiftKey) setSelectedIds(new Set());
     if (useMarquee) {
       // Box select
@@ -1851,6 +1973,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const startItemDrag = useCallback((e, item) => {
     if (!requireEdit()) return;
     if (focusedTextIdRef.current === item.id) return;
+    // Space held → let the mousedown bubble to onCanvasMouseDown and pan
+    // instead of dragging the card underneath the cursor.
+    if (spaceHeldRef.current) return;
     e.stopPropagation();
     const shiftToggle = e.shiftKey;
     // Read selection from a ref so this callback's identity is stable across
@@ -1929,7 +2054,14 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   /* ----- Zone title drag (with children) ----- */
   const startZoneDrag = useCallback((e, zone) => {
     if (!requireEdit()) return;
+    // Space held → let the mousedown bubble to onCanvasMouseDown and pan
+    // instead of dragging the zone underneath the cursor.
+    if (spaceHeldRef.current) return;
     e.stopPropagation();
+    // Locked zone's own title bar: select it (so the toolbar with the unlock
+    // button appears) but don't enter a drag gesture. commitGeometry also
+    // filters locked-zone patches, but bailing here avoids a dead drag state.
+    if (zone.locked) { setSelectedId(zone.id); return; }
     // If this zone is part of a multi-selection, drag every selected item as a
     // group — matches the marquee/shift-select expectation. Otherwise fall back
     // to the "zone carries its contents" behavior, including nested zones that
@@ -2005,6 +2137,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   /* ----- Generic item resize (zone / sticky / image) ----- */
   const startItemResize = useCallback((e, item, corner) => {
     if (!requireEdit()) return;
+    if (item.type === 'zone' && item.locked) return;
     e.stopPropagation();
     let minW = ZONE_MIN_W;
     let minH = ZONE_MIN_H;
@@ -2380,9 +2513,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
 
   const adminStopTimer = useCallback(() => {
     if (!isAdmin || !timer) return;
-    // Ending the session stops voting on its own (timerActive becomes false).
-    patchMeta({ timer: null });
-  }, [isAdmin, timer, patchMeta]);
+    // Route through the same sort/reposition/finalize path as a natural
+    // deadline expiry, so stopping early doesn't skip the vote-count sort.
+    finalizeVotingSession();
+  }, [isAdmin, timer, finalizeVotingSession]);
 
   const adminClearBoard = useCallback(() => {
     if (!isAdmin) return;
@@ -2413,8 +2547,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   /* ----- Export / Import ----- */
   const exportBoard = useCallback(() => {
     // Bundle the live board snapshot plus the CRDT-backed vote/template state
-    // into a single JSON file. Images live inline as base64 inside items.src so
-    // the file is fully self-contained (no external blobs needed on restore).
+    // into a single JSON file. Images are server-hosted (items.src is a URL,
+    // not embedded base64) — the file is no longer fully self-contained, and
+    // restoring it elsewhere requires the image files to still be reachable
+    // at that URL.
     const b = boardRef.current;
     const voteSnap = window.storage?.snapshotVotes?.() || new Map();
     const votes = {};
@@ -2457,11 +2593,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     if (!zone || zone.type !== 'zone') return;
     const b = boardRef.current;
     const voteSnap = window.storage?.snapshotVotes?.() || new Map();
-    const colorName = (i) => ['yellow', 'red', 'green', 'blue', 'purple', 'orange'][i] || String(i);
-    const esc = (v) => {
-      const s = v == null ? '' : String(v);
-      return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-    };
     const children = b.items
       .filter((i) => i.type === 'sticky' && insideZone(centerOf(i), zone))
       .sort((a, c) => (voteSnap.get(c.id)?.size ?? 0) - (voteSnap.get(a.id)?.size ?? 0));
@@ -2472,16 +2603,16 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       t('export.csv.votes'),
       t('export.csv.color'),
       t('export.csv.createdAt'),
-    ].map(esc).join(','));
+    ].map(csvEsc).join(','));
     children.forEach((sticky) => {
       const hide = sticky.private && sticky.authorId !== userId && !b.allRevealed;
       lines.push([
         hide ? t('export.csv.hidden') : (sticky.text || ''),
         sticky.authorName || '',
         voteSnap.get(sticky.id)?.size ?? 0,
-        colorName(sticky.color ?? 0),
+        csvColorName(sticky.color ?? 0),
         sticky.createdAt ? new Date(sticky.createdAt).toISOString() : '',
-      ].map(esc).join(','));
+      ].map(csvEsc).join(','));
     });
     const csv = '﻿' + lines.join('\r\n'); // UTF-8 BOM for Excel
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
@@ -2496,6 +2627,72 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     setTimeout(() => URL.revokeObjectURL(url), 0);
     setToast({ msg: t('export.done', { file }), type: 'info' });
   }, [userId]);
+
+  // Whole-room CSV: every sticky, grouped by zone. Overlapping zones (e.g.
+  // Retro Loop's wrapper around Good/Bad/Try) resolve to the smallest
+  // enclosing zone, same convention as the timer's auto-sort-by-vote feature.
+  // Stickies outside every zone land in a "(no zone)" group.
+  const exportBoardCsv = useCallback(() => {
+    const b = boardRef.current;
+    const voteSnap = window.storage?.snapshotVotes?.() || new Map();
+    const zones = b.items.filter((i) => i.type === 'zone');
+    const stickies = b.items.filter((i) => i.type === 'sticky');
+    const ownerByStickyId = new Map();
+    stickies.forEach((s) => {
+      const c = centerOf(s);
+      const owner = zones
+        .filter((z) => insideZone(c, z))
+        .sort((za, zc) => (za.w * za.h) - (zc.w * zc.h))[0];
+      if (owner) ownerByStickyId.set(s.id, owner.id);
+    });
+    const noZoneLabel = t('export.csv.unassigned');
+    const untitledZoneLabel = t('export.csv.untitledZone');
+    const byVotesDesc = (a, c) => (voteSnap.get(c.id)?.size ?? 0) - (voteSnap.get(a.id)?.size ?? 0);
+    const lines = [];
+    lines.push([
+      t('export.csv.zone'),
+      t('export.csv.text'),
+      t('export.csv.author'),
+      t('export.csv.votes'),
+      t('export.csv.color'),
+      t('export.csv.createdAt'),
+    ].map(csvEsc).join(','));
+    const pushRow = (zoneLabel, sticky) => {
+      const hide = sticky.private && sticky.authorId !== userId && !b.allRevealed;
+      lines.push([
+        zoneLabel,
+        hide ? t('export.csv.hidden') : (sticky.text || ''),
+        sticky.authorName || '',
+        voteSnap.get(sticky.id)?.size ?? 0,
+        csvColorName(sticky.color ?? 0),
+        sticky.createdAt ? new Date(sticky.createdAt).toISOString() : '',
+      ].map(csvEsc).join(','));
+    };
+    // Contiguous blocks, one per zone (in board order), then a final
+    // "(no zone)" block — not a global vote sort, so the CSV reads like the
+    // board's own columns instead of interleaving zones by vote count.
+    zones.forEach((zone) => {
+      stickies
+        .filter((s) => ownerByStickyId.get(s.id) === zone.id)
+        .sort(byVotesDesc)
+        .forEach((sticky) => pushRow(zone.title || untitledZoneLabel, sticky));
+    });
+    stickies
+      .filter((s) => !ownerByStickyId.has(s.id))
+      .sort(byVotesDesc)
+      .forEach((sticky) => pushRow(noZoneLabel, sticky));
+    const csv = '﻿' + lines.join('\r\n'); // UTF-8 BOM for Excel
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const ts = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+    const file = `retro-${boardCode || 'board'}-${ts}.csv`;
+    a.href = url;
+    a.download = file;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+    setToast({ msg: t('export.done', { file }), type: 'info' });
+  }, [boardCode, userId]);
 
   const fileInputRef = useRef(null);
   const [pendingImport, setPendingImport] = useState(null); // { file, parsed }
@@ -2912,8 +3109,19 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         {selectedItem.type === 'zone' && (
           <button
             type="button"
+            onClick={() => can && updateItem(selectedItem.id, { locked: !selectedItem.locked })}
+            disabled={!can}
+            title={selectedItem.locked ? t('zone.lockToggle.off') : t('zone.lockToggle.on')}
+            style={iconBtn(can)}
+          >
+            {selectedItem.locked ? <Lock size={15} /> : <Unlock size={15} />}
+          </button>
+        )}
+        {selectedItem.type === 'zone' && (
+          <button
+            type="button"
             onClick={() => exportZoneCsv(selectedItem)}
-            title={t('topbar.exportCsvTitle')}
+            title={t('zone.exportCsvTitle')}
             style={iconBtn(true)}
           >
             <Download size={15} />
@@ -2921,10 +3129,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         )}
         <button
           type="button"
-          onClick={() => can && deleteItem(selectedItem.id)}
-          disabled={!can}
-          title={t('common.delete')}
-          style={{ ...iconBtn(can), color: can ? '#ef4444' : 'var(--border)' }}
+          onClick={() => can && !selectedItem.locked && deleteItem(selectedItem.id)}
+          disabled={!can || selectedItem.locked}
+          title={selectedItem.locked ? t('zone.lockedDeleteTitle') : t('common.delete')}
+          style={{ ...iconBtn(can && !selectedItem.locked), color: can && !selectedItem.locked ? '#ef4444' : 'var(--border)' }}
         >
           <Trash2 size={15} />
         </button>
@@ -2983,6 +3191,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     }
 
     if (!selectedItem) return null;
+    if (selectedItem.type === 'zone' && selectedItem.locked) return null;
     const resizable = selectedItem.type === 'zone' || selectedItem.type === 'sticky' || selectedItem.type === 'image';
     if (!resizable) return null;
     const w = selectedItem.w || (selectedItem.type === 'sticky' ? STICKY_W : 200);
@@ -3167,6 +3376,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                   icon={<Download size={15} />}
                   label={t('topbar.export')}
                   onClick={() => { setMoreMenuOpen(false); exportBoard(); }}
+                />
+                <MoreMenuItem
+                  icon={<Download size={15} />}
+                  label={t('topbar.exportCsv')}
+                  onClick={() => { setMoreMenuOpen(false); exportBoardCsv(); }}
                 />
                 <MoreMenuItem
                   icon={<Upload size={15} />}
@@ -3553,76 +3767,83 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
             <LayoutTemplate size={16} /> Templates <ChevronDown size={14} />
           </button>
           {templatesOpen && (
-            <div
-              style={{
-                position: 'absolute', bottom: '120%', left: 0,
-                background: 'var(--bg-panel)', borderRadius: 12, padding: 8,
-                boxShadow: '0 10px 30px rgba(0,0,0,0.15)',
-                minWidth: 300, maxHeight: '70vh', overflow: 'auto',
-              }}
-            >
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '6px 8px', textTransform: 'uppercase', letterSpacing: 0.4, fontWeight: 700 }}>built-in</div>
-              {Object.entries(getTemplates()).map(([k, v]) => (
+            <>
+              {/* click-outside backdrop */}
+              <div
+                onClick={() => setTemplatesOpen(false)}
+                style={{ position: 'fixed', inset: 0, zIndex: 59 }}
+              />
+              <div
+                style={{
+                  position: 'absolute', bottom: '120%', left: 0,
+                  background: 'var(--bg-panel)', borderRadius: 12, padding: 8,
+                  boxShadow: '0 10px 30px rgba(0,0,0,0.15)',
+                  minWidth: 300, maxHeight: '70vh', overflow: 'auto', zIndex: 60,
+                }}
+              >
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '6px 8px', textTransform: 'uppercase', letterSpacing: 0.4, fontWeight: 700 }}>built-in</div>
+                {Object.entries(getTemplates()).map(([k, v]) => (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => applyTemplate(k)}
+                    style={tplRow}
+                    onMouseOver={(e) => { e.currentTarget.style.background = 'var(--bg-panel-2)'; }}
+                    onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    {v.name}
+                  </button>
+                ))}
+                {customTemplates.length > 0 && (
+                  <>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '10px 8px 6px', textTransform: 'uppercase', letterSpacing: 0.4, fontWeight: 700 }}>custom</div>
+                    {customTemplates.map((ct) => (
+                      <div
+                        key={ct.id}
+                        style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+                        onMouseOver={(e) => { e.currentTarget.style.background = 'var(--bg-panel-2)'; }}
+                        onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => applyTemplate(ct.id)}
+                          style={{ ...tplRow, flex: 1 }}
+                        >
+                          {ct.name}
+                          <span style={{ fontSize: 11, color: 'var(--text-faint)', marginLeft: 6 }}>· {ct.zones.length} zones</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteCustomTemplate(ct.id)}
+                          title={t('common.delete')}
+                          style={{
+                            background: 'transparent', border: 'none', color: 'var(--text-faint)',
+                            padding: 6, marginRight: 4, borderRadius: 6, cursor: 'pointer',
+                          }}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </>
+                )}
+                <div style={{ height: 1, background: 'var(--border)', margin: '8px 4px' }} />
                 <button
-                  key={k}
                   type="button"
-                  onClick={() => applyTemplate(k)}
-                  style={tplRow}
-                  onMouseOver={(e) => { e.currentTarget.style.background = 'var(--bg-panel-2)'; }}
+                  onClick={() => { setSaveTemplateOpen(true); setTemplatesOpen(false); }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    width: '100%', background: 'transparent', border: 'none',
+                    padding: '8px 10px', borderRadius: 8, cursor: 'pointer',
+                    fontSize: 13, color: 'var(--accent)', fontWeight: 600,
+                  }}
+                  onMouseOver={(e) => { e.currentTarget.style.background = 'var(--accent-bg)'; }}
                   onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; }}
                 >
-                  {v.name}
+                  {t('tmpl.save')}
                 </button>
-              ))}
-              {customTemplates.length > 0 && (
-                <>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '10px 8px 6px', textTransform: 'uppercase', letterSpacing: 0.4, fontWeight: 700 }}>custom</div>
-                  {customTemplates.map((ct) => (
-                    <div
-                      key={ct.id}
-                      style={{ display: 'flex', alignItems: 'center', gap: 4 }}
-                      onMouseOver={(e) => { e.currentTarget.style.background = 'var(--bg-panel-2)'; }}
-                      onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; }}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => applyTemplate(ct.id)}
-                        style={{ ...tplRow, flex: 1 }}
-                      >
-                        {ct.name}
-                        <span style={{ fontSize: 11, color: 'var(--text-faint)', marginLeft: 6 }}>· {ct.zones.length} zones</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => deleteCustomTemplate(ct.id)}
-                        title={t('common.delete')}
-                        style={{
-                          background: 'transparent', border: 'none', color: 'var(--text-faint)',
-                          padding: 6, marginRight: 4, borderRadius: 6, cursor: 'pointer',
-                        }}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  ))}
-                </>
-              )}
-              <div style={{ height: 1, background: 'var(--border)', margin: '8px 4px' }} />
-              <button
-                type="button"
-                onClick={() => { setSaveTemplateOpen(true); setTemplatesOpen(false); }}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  width: '100%', background: 'transparent', border: 'none',
-                  padding: '8px 10px', borderRadius: 8, cursor: 'pointer',
-                  fontSize: 13, color: 'var(--accent)', fontWeight: 600,
-                }}
-                onMouseOver={(e) => { e.currentTarget.style.background = 'var(--accent-bg)'; }}
-                onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; }}
-              >
-                {t('tmpl.save')}
-              </button>
-            </div>
+              </div>
+            </>
           )}
         </div>
       </div>
