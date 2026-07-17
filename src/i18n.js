@@ -181,6 +181,19 @@ const dict = {
     'admin.claim.confirm': 'รับสิทธิ์',
     'admin.claim.wrongPin': 'PIN ไม่ถูกต้อง',
 
+    // admin PIN modal
+    'pin.setHead': 'ตั้ง PIN สำหรับ admin',
+    'pin.verifyHead': 'กรอก PIN admin',
+    'pin.setBody': '4–8 หลัก จำเป็นสำหรับ Clear / Reset / Transfer',
+    'pin.verifyBody': 'ยืนยันก่อนทำรายการนี้',
+    'pin.confirm': 'ยืนยัน PIN',
+    'pin.wrong': 'PIN ไม่ถูกต้อง',
+    'pin.mismatch': 'PIN ไม่ตรงกัน',
+    'pin.set': 'ตั้ง PIN',
+    'pin.unlock': 'ปลดล็อก',
+    'pin.needsHttps': 'PIN admin ต้องใช้ HTTPS',
+    'pin.genericError': 'เกิดข้อผิดพลาด ลองใหม่อีกครั้ง',
+
     // player list
     'players.head': 'ผู้เล่นในห้อง ({n})',
     'players.votesTooltip': 'จำนวน vote ที่ใช้ไป / โควต้า',
@@ -368,6 +381,18 @@ const dict = {
     'admin.claim.desc.noPin': 'No admin yet in this room — press Claim to become the first admin.',
     'admin.claim.confirm': 'Claim',
     'admin.claim.wrongPin': 'Wrong PIN',
+
+    'pin.setHead': 'Set admin PIN',
+    'pin.verifyHead': 'Enter admin PIN',
+    'pin.setBody': '4–8 digits. Required for Clear / Reset / Transfer.',
+    'pin.verifyBody': 'Confirm this destructive action.',
+    'pin.confirm': 'confirm',
+    'pin.wrong': 'Wrong PIN',
+    'pin.mismatch': "PINs don't match",
+    'pin.set': 'Set PIN',
+    'pin.unlock': 'Unlock',
+    'pin.needsHttps': 'Admin PIN requires HTTPS',
+    'pin.genericError': 'Something went wrong. Try again.',
 
     'players.head': 'Players in room ({n})',
     'players.votesTooltip': 'Votes used / quota',

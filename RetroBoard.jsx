@@ -14,7 +14,8 @@ import {
 } from 'lucide-react';
 import { t, useLang } from './src/i18n.js';
 import { useTheme, nextThemePref } from './src/theme.js';
-import { isBoardCreatedByMe } from './src/router.js';
+import { useUserIdentity } from './src/useUserIdentity.js';
+import { useAdminRole, ONLINE_WINDOW } from './src/useAdminRole.js';
 
 /* ============================================================
    Constants
@@ -61,9 +62,6 @@ const ZONE_TITLE_H = 32;
 const DRAG_THRESHOLD = 4;
 const ZOOM_MIN = 0.15;
 const ZOOM_MAX = 3.0;
-const HEARTBEAT_MS = 5000;
-const ONLINE_WINDOW = 12000;
-const ADMIN_DEAD_MS = 15000;
 const POLL_SAFETY = 15000; // safety net only — Realtime push is primary
 const SAVE_DEBOUNCE = 200;
 const TEXT_SAVE_DEBOUNCE = 350;
@@ -149,16 +147,6 @@ const DEFAULT_BOARD = {
   // a PIN inline rather than blocking access.
   adminPinHash: null,
 };
-
-// Salted hash so the same PIN on different boards has different hashes,
-// blunting rainbow-table reuse. Web Crypto returns lowercase hex.
-async function hashAdminPin(boardCode, pin) {
-  const data = new TextEncoder().encode(`${boardCode || ''}:${pin}`);
-  const buf = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(buf))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-}
 
 /* ============================================================
    Helpers
@@ -680,12 +668,12 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   void lang;
 
   /* ---------- Identity ---------- */
-  const [userId, setUserId] = useState(null);
-  const userIdRef = useRef(null);
-  useEffect(() => { userIdRef.current = userId; }, [userId]);
-  const [userName, setUserName] = useState('');
-  const [nameDraft, setNameDraft] = useState('');
-  const [nameModalOpen, setNameModalOpen] = useState(false);
+  const {
+    userId, userIdRef, userName,
+    nameDraft, setNameDraft,
+    nameModalOpen, setNameModalOpen,
+    hydrate: hydrateIdentity, saveName,
+  } = useUserIdentity(storage);
 
   /* ---------- Board (shared) ---------- */
   const [board, setBoard] = useState(DEFAULT_BOARD);
@@ -749,15 +737,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const [now, setNow] = useState(Date.now());
   const [loaded, setLoaded] = useState(false);
   const [confirmResetVotes, setConfirmResetVotes] = useState(false);
-  // Admin PIN gate. `pinPromptCfg.onSuccess` is the callback to invoke after
-  // a successful set-or-verify. `pinSessionOkRef` short-circuits subsequent
-  // prompts for the same tab session so admins aren't pestered each click.
-  const [pinPromptCfg, setPinPromptCfg] = useState(null);
-  const pinSessionOkRef = useRef(false);
-  // Drop the PIN cached for this session the moment we stop being admin. The
-  // intent of the PIN is "prove you're currently authorized" — if admin is
-  // transferred away and later transferred back, the second tenure should
-  // re-prompt rather than reuse a stale OK flag from the first tenure.
   const [undoState, setUndoState] = useState({ canUndo: false, canRedo: false });
 
   const focusedTextIdRef = useRef(null);
@@ -783,10 +762,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const dragItemsRef = useRef(null);
 
   /* ---------- Derived ---------- */
-  const isAdmin = userId && board.adminUserId === userId;
-  useEffect(() => {
-    if (!isAdmin) pinSessionOkRef.current = false;
-  }, [isAdmin]);
   const timer = board.timer;
   const timerActive = !!timer && (!timer.endsAt || timer.endsAt > now);
   const timerHasDeadline = !!timer && !!timer.endsAt;
@@ -915,14 +890,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       const tpls = tRec?.value || [];
 
       if (cancelled) return;
-      setUserId(id);
-      setUserName(name);
-      setNameDraft(name || `Guest-${Math.floor(1000 + Math.random() * 9000)}`);
+      hydrateIdentity(id, name);
       setViewport(vp);
       setBoard({ ...DEFAULT_BOARD, ...bs });
       setPresence(pmap);
       setCustomTemplates(tpls);
-      if (!name) setNameModalOpen(true);
       setLoaded(true);
 
       // No initial-load admin claim here. The race was: storage.get returns
@@ -977,6 +949,13 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     setBoard((prev) => ({ ...prev, ...patch }));
     storage.setMeta(patch, opts);
   }, []);
+
+  const {
+    isAdmin, canClaim, pinPromptCfg, requireAdminPin, adminClaim, adminTransfer,
+  } = useAdminRole({
+    userId, userName, board, boardRef, onlineUsers, presence,
+    boardCode, boardToken, patchMeta, setToast, storage,
+  });
 
   // ---- Full board replace (import / clear) ----
   const replaceBoardLocal = useCallback((nextBoard, opts) => {
@@ -1125,72 +1104,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       offSyncRefresh();
     };
   }, [loaded, applyRemoteBoard]);
-
-  /* ============================================================
-     Heartbeat + admin election
-     ============================================================ */
-  useEffect(() => {
-    // Don't wait for the user to dismiss the name modal before heartbeating.
-    // A creator who opens their freshly-made board and walks away would
-    // otherwise never claim admin and leave the room orphaned. Fall back to a
-    // generic label until they pick a real name.
-    if (!userId) return undefined;
-    const effectiveName = userName || 'Guest';
-    const beat = async () => {
-      // Only refresh OUR own awareness slot. Peers' state arrives via the
-      // awareness 'change' event (wired in storage-bridge) which dispatches
-      // a synthetic presence update — letting heartbeat also call
-      // setPresence() would overwrite React state with a possibly-stale
-      // local snapshot and cause peers to flicker in/out.
-      const entry = { userId, name: effectiveName, lastSeen: Date.now() };
-      await storage.set('presence', { [userId]: entry }, true);
-
-      // Admin election — gated on sync to avoid claiming during cold start.
-      // We read adminUserId straight from yMeta (not boardRef) so a heartbeat
-      // firing in the gap between applyRemoteBoard and React commit doesn't
-      // see a stale `null` and re-claim the role from the true current admin.
-      if (!window.storage?.synced?.()) return;
-      const adminUserId = window.storage?.getAdminUserId?.();
-      const pmap = (await storage.get('presence', true))?.value || {};
-      const adminSeen = adminUserId ? pmap[adminUserId]?.lastSeen || 0 : 0;
-      const adminGone = !adminUserId || Date.now() - adminSeen > ADMIN_DEAD_MS;
-      if (adminGone) {
-        // Only auto-claim admin in boards THIS browser created. Otherwise a
-        // guest who happens to be alone in someone else's board (e.g. admin
-        // closed their tab) would silently inherit the role — confusing when
-        // the same identity is then "admin of two boards at once". Non-creators
-        // must use the PIN-gated Transfer Admin flow to take over.
-        if (!isBoardCreatedByMe(boardCode, boardToken)) return;
-        const online = Object.values(pmap)
-          .filter((p) => Date.now() - (p.lastSeen || 0) < ONLINE_WINDOW)
-          .map((p) => p.userId)
-          .sort();
-        const winner = online[0];
-        if (winner === userId) {
-          // Re-read adminUserId from yMeta right before claiming. The await
-          // calls above let other clients (or our own remote update) write
-          // adminUserId in between; without this CAS-style guard we'd
-          // overwrite a fresh claim with our own and produce two admins
-          // diverging until the next sync round.
-          const latestAdmin = window.storage?.getAdminUserId?.();
-          if (latestAdmin && latestAdmin !== userId) return;
-          // Immediate flush — bypass the 200ms debounce so the claim lands
-          // in yMeta on the first tick. Otherwise a second client racing
-          // the same election can miss our write and double-claim.
-          setBoard((prev) => ({ ...prev, adminUserId: userId, adminName: effectiveName }));
-          storage.setMeta({ adminUserId: userId, adminName: effectiveName });
-          setToast({ msg: t('transfer.becomeAdmin'), type: 'info' });
-        }
-      }
-    };
-    beat();
-    const id = setInterval(beat, HEARTBEAT_MS);
-    // Run election once more right after the initial WebSocket sync. Without
-    // this we'd wait up to a full HEARTBEAT_MS for the first eligible
-    // election attempt — long enough for users to think admin is broken.
-    const offSynced = window.storage?.onSynced?.(beat) || (() => {});
-    return () => { clearInterval(id); offSynced(); };
-  }, [userId, userName, boardCode, boardToken]);
 
   /* ============================================================
      Timer tick + auto-end actions (admin only)
@@ -2471,86 +2384,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     patchMeta({ timer: null });
   }, [isAdmin, timer, patchMeta]);
 
-  // Gate every destructive action behind a PIN. First call ever (no PIN on
-  // the board yet) opens the modal in "set" mode and stores the hash; later
-  // calls open it in "verify" mode. Once verified, we remember it for the
-  // rest of this tab session via pinSessionOkRef so the admin isn't pestered.
-  const requireAdminPin = useCallback((onSuccess) => {
-    if (!isAdmin) {
-      setToast({ msg: t('common.adminOnly'), type: 'warn' });
-      return;
-    }
-    if (pinSessionOkRef.current) { onSuccess(); return; }
-    const hasPin = !!boardRef.current.adminPinHash;
-    setPinPromptCfg({
-      isSetting: !hasPin,
-      error: null,
-      onSuccess: async (pin) => {
-        const hash = await hashAdminPin(boardCode, pin);
-        const cur = boardRef.current.adminPinHash;
-        if (!cur) {
-          // Set mode — persist the new PIN's hash into the shared board.
-          patchMeta({ adminPinHash: hash });
-        } else if (cur !== hash) {
-          // Verify mode — wrong PIN, keep modal open with error.
-          setPinPromptCfg((cfg) => (cfg ? { ...cfg, error: 'wrong' } : cfg));
-          return;
-        }
-        pinSessionOkRef.current = true;
-        setPinPromptCfg(null);
-        onSuccess();
-      },
-      onCancel: () => setPinPromptCfg(null),
-    });
-  }, [isAdmin, boardCode, patchMeta, setToast]);
-
-  // Claim admin when there is none active. Anyone holding the PIN can take
-  // over a vacant role. Without this flow a board where the creator lost
-  // localStorage (or the only admin closed the tab and never came back) would
-  // be permanently stuck — no Clear / Reset / Timer / Import / Transfer.
-  const adminClaim = useCallback(() => {
-    if (isAdmin || !userId) return;
-    const liveAdmin = window.storage?.getAdminUserId?.() || null;
-    // Bail if there's a currently-online admin — the existing Transfer flow
-    // is the right route, not a silent take-over.
-    if (liveAdmin && onlineUsers.some((u) => u.userId === liveAdmin)) {
-      setToast({ msg: t('common.adminOnly'), type: 'warn' });
-      return;
-    }
-    const hasPin = !!boardRef.current.adminPinHash;
-    setPinPromptCfg({
-      isSetting: !hasPin,
-      error: null,
-      claim: true,
-      onSuccess: async (pin) => {
-        const hash = await hashAdminPin(boardCode, pin);
-        const curHash = boardRef.current.adminPinHash;
-        if (curHash && curHash !== hash) {
-          setPinPromptCfg((cfg) => (cfg ? { ...cfg, error: 'wrong' } : cfg));
-          return;
-        }
-        // CAS-style re-check post-await — if a peer just claimed admin in
-        // the meantime, abort rather than overwrite their fresh claim.
-        const latestAdmin = window.storage?.getAdminUserId?.();
-        if (latestAdmin && onlineUsers.some((u) => u.userId === latestAdmin)) {
-          setPinPromptCfg(null);
-          setToast({ msg: t('common.adminOnly'), type: 'warn' });
-          return;
-        }
-        patchMeta({
-          adminUserId: userId,
-          adminName: userName || 'Guest',
-          // First-ever claim doubles as set-PIN.
-          adminPinHash: curHash || hash,
-        });
-        pinSessionOkRef.current = true;
-        setPinPromptCfg(null);
-        setToast({ msg: t('transfer.becomeAdmin'), type: 'info' });
-      },
-      onCancel: () => setPinPromptCfg(null),
-    });
-  }, [isAdmin, userId, userName, boardCode, onlineUsers, patchMeta, setToast]);
-
   const adminClearBoard = useCallback(() => {
     if (!isAdmin) return;
     window.storage?.clearAllVotes?.();
@@ -2576,17 +2409,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     setConfirmResetVotes(false);
     setToast({ msg: t('reset.done'), type: 'info' });
   }, [isAdmin, patchMeta]);
-
-  const adminTransfer = useCallback((toId) => {
-    if (!isAdmin) return;
-    const toName = presence[toId]?.name || '';
-    // Immediate write — admin transfer is a hand-off; if our own heartbeat
-    // fires first we'd still see ourselves as admin and could accidentally
-    // rewrite the role back to us in the same tick.
-    patchMeta({ adminUserId: toId, adminName: toName });
-    setTransferOpen(false);
-    setToast({ msg: t('transfer.done'), type: 'info' });
-  }, [isAdmin, presence, patchMeta]);
 
   /* ----- Export / Import ----- */
   const exportBoard = useCallback(() => {
@@ -2739,16 +2561,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     setPendingImport(null);
     setToast({ msg: t('import.done', { n }), type: 'info' });
   }, [pendingImport, isAdmin, replaceBoardLocal]);
-
-  /* ============================================================
-     Save name
-     ============================================================ */
-  const saveName = useCallback(async () => {
-    const n = nameDraft.trim() || `Guest-${Math.floor(1000 + Math.random() * 9000)}`;
-    setUserName(n);
-    setNameModalOpen(false);
-    await storage.set('userName', n, false);
-  }, [nameDraft]);
 
   /* ============================================================
      Zoom controls
@@ -3480,29 +3292,24 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           current user isn't already admin. Anyone holding the PIN can take
           over a vacant role, which is the one recovery path for a board
           whose creator lost their localStorage. */}
-      {!isAdmin && userId && (() => {
-        const adminOnline = board.adminUserId
-          && onlineUsers.some((u) => u.userId === board.adminUserId);
-        if (adminOnline) return null;
-        return (
-          <button
-            type="button"
-            onClick={adminClaim}
-            title={t('admin.claim.title')}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 6,
-              padding: '4px 10px', borderRadius: 999,
-              background: 'var(--accent)', color: '#fff',
-              fontSize: 12, fontWeight: 700,
-              border: 'none', cursor: 'pointer',
-              marginLeft: 4,
-            }}
-          >
-            <Crown size={12} />
-            <span>{t('admin.claim')}</span>
-          </button>
-        );
-      })()}
+      {canClaim && (
+        <button
+          type="button"
+          onClick={adminClaim}
+          title={t('admin.claim.title')}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            padding: '4px 10px', borderRadius: 999,
+            background: 'var(--accent)', color: '#fff',
+            fontSize: 12, fontWeight: 700,
+            border: 'none', cursor: 'pointer',
+            marginLeft: 4,
+          }}
+        >
+          <Crown size={12} />
+          <span>{t('admin.claim')}</span>
+        </button>
+      )}
 
       {/* Presence avatars — click to open player list */}
       <div style={{ position: 'relative', paddingLeft: 6, borderLeft: '1px solid var(--border-soft)', marginLeft: 4 }}>
@@ -4371,13 +4178,21 @@ function AdminPinModal({ cfg, onCancel, onSubmit }) {
   const [pin, setPin] = useState('');
   const [pin2, setPin2] = useState('');
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
   const isSetting = cfg.isSetting;
   const valid = /^[0-9]{4,8}$/.test(pin);
   const matches = !isSetting || pin === pin2;
   const submit = async () => {
     if (!valid || !matches || busy) return;
     setBusy(true);
-    try { await onSubmit(pin); } finally { setBusy(false); }
+    setErr(null);
+    try {
+      await onSubmit(pin);
+    } catch (e) {
+      setErr(e?.message || t('pin.genericError') || 'Something went wrong. Try again.');
+    } finally {
+      setBusy(false);
+    }
   };
   return (
     <div
@@ -4442,6 +4257,11 @@ function AdminPinModal({ cfg, onCancel, onSubmit }) {
         {cfg.error === 'wrong' && (
           <div style={{ color: '#dc2626', fontSize: 12, marginTop: 8 }}>
             {t('pin.wrong') || 'Wrong PIN'}
+          </div>
+        )}
+        {err && (
+          <div style={{ color: '#dc2626', fontSize: 12, marginTop: 8 }}>
+            {err}
           </div>
         )}
         {isSetting && pin && pin2 && !matches && (
