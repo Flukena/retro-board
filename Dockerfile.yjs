@@ -13,8 +13,10 @@ COPY yjs-server.mjs ./
 
 ENV YJS_PORT=1234
 ENV YJS_DB_DIR=/data
+ENV YJS_UPLOADS_DIR=/uploads
 
 EXPOSE 1234
 
-# LevelDB lives on a named volume mounted at /data so docs survive restarts.
+# LevelDB lives on a named volume mounted at /data, uploaded images on a
+# separate one at /uploads, so both survive restarts.
 CMD ["node", "yjs-server.mjs"]

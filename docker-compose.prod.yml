@@ -20,6 +20,7 @@ services:
       - "11234:1234"
     volumes:
       - yjs_data:/data
+      - yjs_uploads:/uploads
     environment:
       # Lock the WS upgrade to the prod web origin(s). Override with your
       # public host(s) when deploying behind cloudflared / a CDN.
@@ -58,3 +59,4 @@ services:
 
 volumes:
   yjs_data:
+  yjs_uploads:

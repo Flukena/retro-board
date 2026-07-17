@@ -74,6 +74,14 @@ const WS_URL = window.location.protocol === 'https:'
   ? `wss://${window.location.host}/yjs`
   : `ws://${window.location.hostname}:${YJS_LOCAL_PORT}`;
 
+// Same origin-resolution rule as WS_URL above, for the image upload/serve
+// HTTP routes that live on the same yjs-server process (reachable at /yjs/*
+// in prod via the cloudflared tunnel rule, at the bare path in dev).
+const resolveServerUrl = (path) => (window.location.protocol === 'https:'
+  ? `${window.location.origin}/yjs${path}`
+  : `http://${window.location.hostname}:${YJS_LOCAL_PORT}${path}`);
+const UPLOAD_URL = resolveServerUrl('/upload');
+
 const ydoc = new Y.Doc();
 const ymap = ydoc.getMap('kv');
 const yItems = ydoc.getMap('items');
@@ -402,6 +410,37 @@ if (provider) {
   });
 }
 
+// Bounded wait for the initial WebSocket sync, used by get()'s recovery path
+// when a per-device value is missing from localStorage. One shared, lazily
+// created promise so the three sequential cold-start reads (userId, userName,
+// viewport) pay the timeout at most once between them, not once each. Resolves
+// on the first 'sync' event or after the timeout, and always removes its own
+// listener on settle — deliberately NOT built on the public onSynced() below,
+// which never self-unregisters and would leak a listener per cold-start read.
+const RECOVERY_SYNC_TIMEOUT_MS = 3000;
+let syncWaitPromise = null;
+const waitForSyncBounded = () => {
+  if (!provider || provider.synced) return Promise.resolve();
+  if (!syncWaitPromise) {
+    syncWaitPromise = new Promise((resolve) => {
+      let settled = false;
+      let onSync = null;
+      let timer = null;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        if (onSync) provider.off('sync', onSync);
+        if (timer) clearTimeout(timer);
+        resolve();
+      };
+      timer = setTimeout(finish, RECOVERY_SYNC_TIMEOUT_MS);
+      onSync = (isSynced) => { if (isSynced) finish(); };
+      provider.on('sync', onSync);
+    });
+  }
+  return syncWaitPromise;
+};
+
 if (provider) {
   window.storage = {
     async get(key, shared) {
@@ -412,17 +451,37 @@ if (provider) {
         return { value: readPresenceMap() };
       }
       // User-scope keys (userName, viewport, userId) are per-device preferences.
-      // We back them with localStorage so they survive page refresh even before
-      // the Yjs WebSocket has resynced — and they're not lost if the y-websocket
-      // server's in-memory state gets recycled. Yjs is consulted only as a
-      // legacy fallback to migrate data written before this change.
+      // localStorage is a fast local cache in front of a durable per-client copy
+      // in Yjs (key `u|<clientId>|<key>`), which is synced + persisted server-
+      // side. localStorage stays the hot path; Yjs is the recovery path when the
+      // cache is missing/cleared (as long as clientId itself survives).
       if (!shared) {
         const lk = localStorageKeyFor(key);
+        const uKey = keyOf('u', key, clientId);
         try {
           const raw = localStorage.getItem(lk);
-          if (raw !== null) return { value: JSON.parse(raw) };
+          if (raw !== null) {
+            const cached = JSON.parse(raw);
+            // Write-through: seed this board's durable copy if it has none yet.
+            // Needed because userId's localStorage key is global (shared across
+            // boards), so entering a second board hits the cache and never calls
+            // set() — its Yjs copy would otherwise never exist on that board.
+            // Also retro-seeds users whose value predates durable storage.
+            // origin 'system' keeps it off the undo stack; it's a local echo, so
+            // ymap.observe's own-write guard suppresses any change event.
+            if (ymap.get(uKey) == null) {
+              try { ydoc.transact(() => { ymap.set(uKey, cached); }, 'system'); }
+              catch { /* transact refused — cache is still returned below */ }
+            }
+            return { value: cached };
+          }
         } catch { /* corrupted entry — ignore */ }
-        const v = ymap.get(keyOf('u', key, clientId));
+        // Cache miss — the durable copy may still be in flight over the socket.
+        // Wait (bounded) for the initial sync before reading Yjs so a returning
+        // client with a cleared cache can recover. Bounded so a dead relay can't
+        // hang the init effect's first await (which gates the loading screen).
+        await waitForSyncBounded();
+        const v = ymap.get(uKey);
         if (v != null) {
           try { localStorage.setItem(lk, JSON.stringify(v)); }
           catch { /* quota / private mode — non-fatal */ }
@@ -454,19 +513,19 @@ if (provider) {
         }
         return;
       }
-      // User-scope: persist to localStorage only. No Yjs traffic, no sync, no
-      // undo-stack pollution. See the matching comment in `get` above.
+      // User-scope: dual-write. localStorage is the fast local cache; the Yjs
+      // per-client key is the durable, server-persisted copy. See get() above.
       if (!shared) {
+        // Best-effort cache — instant reads next load.
         try {
           localStorage.setItem(localStorageKeyFor(key), JSON.stringify(value));
-        } catch {
-          // Quota / private-mode / disabled — fall back to a per-client slot in
-          // ymap so the value still survives reload via Yjs persistence. Marked
-          // 'system' so it never enters the undo stack.
-          try {
-            ydoc.transact(() => { ymap.set(keyOf('u', key, clientId), value); }, 'system');
-          } catch { /* both layers refused — give up */ }
-        }
+        } catch { /* quota / private-mode / disabled — durable copy below covers it */ }
+        // Durable copy — written on every set, not only on cache failure, so
+        // per-device prefs survive a cleared/broken localStorage. 'system' keeps
+        // it off the undo stack; transact is synchronous, nothing to await.
+        try {
+          ydoc.transact(() => { ymap.set(keyOf('u', key, clientId), value); }, 'system');
+        } catch { /* Yjs refused — cache above is the fallback */ }
         return;
       }
       const ck = keyOf('s', key, '');
@@ -478,6 +537,25 @@ if (provider) {
     },
     on(handler) { emitter.addEventListener('change', handler); },
     off(handler) { emitter.removeEventListener('change', handler); },
+
+    // Uploads an image blob to the server and resolves to its served URL.
+    // `doc` associates the upload with this room for future orphan cleanup
+    // (not enforced as authz — the endpoint's trust model matches the WS
+    // relay's, an Origin-header allowlist, nothing per-room). Note: in prod
+    // the WS relay's actual persisted docName carries a `yjs/` prefix added
+    // by the tunnel (see yjs-server.mjs), which ROOM here doesn't include —
+    // harmless today since nothing consumes this param yet, but a future
+    // cleanup job matching against LevelDB docNames needs to account for it.
+    async uploadImage(blob) {
+      const res = await fetch(`${UPLOAD_URL}?doc=${encodeURIComponent(ROOM)}`, {
+        method: 'POST',
+        body: blob,
+        headers: { 'Content-Type': blob.type },
+      });
+      if (!res.ok) throw new Error(`image upload failed: ${res.status}`);
+      const { url } = await res.json();
+      return resolveServerUrl(url);
+    },
 
     // --- Granular board writes (delta-only; see helpers above) ---
     addItem(item, opts) {
@@ -670,6 +748,7 @@ if (import.meta.env && import.meta.env.DEV) {
     yMetaAdminUserId: yMeta.get('adminUserId') || null,
     yMetaAdminName: yMeta.get('adminName') || null,
     yMetaAll: Array.from(yMeta.entries()).filter(([k]) => !k.startsWith('__')),
+    uScopeKeys: Array.from(ymap.entries()).filter(([k]) => k.startsWith(`u|${clientId}|`)),
     awareness: Array.from((provider?.awareness?.getStates?.() || new Map()).entries()),
     yItemsCount: yItems.size,
   });
