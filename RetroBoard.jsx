@@ -2113,7 +2113,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       if (activeGeometryFinalizerRef.current === onBlur) activeGeometryFinalizerRef.current = null;
     };
     const onBusyChange = () => {
-      if (!storage.findRemoteBusyItem(seeds.keys())) return;
+      if (!storage.findRemoteBusyItem(Array.from(seeds.keys()))) return;
       setToast({ msg: t('common.warnItemBusy'), type: 'warn' });
       abortGesture();
     };
@@ -2235,7 +2235,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       if (activeGeometryFinalizerRef.current === onBlur) activeGeometryFinalizerRef.current = null;
     };
     const onBusyChange = () => {
-      if (!storage.findRemoteBusyItem(initial.keys())) return;
+      if (!storage.findRemoteBusyItem(Array.from(initial.keys()))) return;
       setToast({ msg: t('common.warnItemBusy'), type: 'warn' });
       abortGesture();
     };
@@ -2473,7 +2473,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       if (activeGeometryFinalizerRef.current === onBlur) activeGeometryFinalizerRef.current = null;
     };
     const onBusyChange = () => {
-      if (!storage.findRemoteBusyItem(seeds.keys())) return;
+      if (!storage.findRemoteBusyItem(Array.from(seeds.keys()))) return;
       setToast({ msg: t('common.warnItemBusy'), type: 'warn' });
       finalize();
     };
