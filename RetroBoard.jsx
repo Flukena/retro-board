@@ -10,7 +10,7 @@ import {
   ChevronDown, X, Sparkles, AlertCircle, Type, Copy,
   Image as ImageIcon, MousePointer2, RotateCcw,
   Languages, Sun, Moon, Monitor, Download, Upload, Undo2, Redo2,
-  MoreHorizontal, Ban, Check,
+  MoreHorizontal, Ban, Check, BringToFront, SendToBack,
 } from 'lucide-react';
 import { t, useLang } from './src/i18n.js';
 import { useTheme, nextThemePref } from './src/theme.js';
@@ -171,6 +171,82 @@ const uid = () =>
   Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+const effectiveZIndex = (item) => item.zIndex ?? item.createdAt;
+const compareZOrder = (a, b) => {
+  const delta = effectiveZIndex(a) - effectiveZIndex(b);
+  if (delta) return delta;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+};
+
+const swapZOrderEntries = (items, index, neighborIndex) => {
+  const itemZ = effectiveZIndex(items[index]);
+  const neighborZ = effectiveZIndex(items[neighborIndex]);
+  const lowerIndex = Math.min(index, neighborIndex);
+  const upperIndex = Math.max(index, neighborIndex);
+  const lowerGroupZ = effectiveZIndex(items[lowerIndex]);
+  const upperGroupZ = effectiveZIndex(items[upperIndex]);
+  const touchesTie = lowerGroupZ === upperGroupZ
+    || (lowerIndex > 0 && effectiveZIndex(items[lowerIndex - 1]) === lowerGroupZ)
+    || (upperIndex < items.length - 1
+      && effectiveZIndex(items[upperIndex + 1]) === upperGroupZ);
+  if (!touchesTie) {
+    return [
+      { id: items[index].id, patch: { zIndex: neighborZ } },
+      { id: items[neighborIndex].id, patch: { zIndex: itemZ } },
+    ];
+  }
+
+  // Items created in one batch can share a millisecond timestamp. A raw swap
+  // can then be a no-op or cross extra peers in that tie, so give the smallest
+  // affected tied range distinct values while preserving all other positions.
+  let first = lowerIndex;
+  let last = upperIndex;
+  while (first > 0 && effectiveZIndex(items[first - 1]) === lowerGroupZ) first -= 1;
+  while (last < items.length - 1
+    && effectiveZIndex(items[last + 1]) === upperGroupZ) last += 1;
+
+  const reordered = items.slice(first, last + 1);
+  const localIndex = index - first;
+  const localNeighborIndex = neighborIndex - first;
+  [reordered[localIndex], reordered[localNeighborIndex]] = [
+    reordered[localNeighborIndex],
+    reordered[localIndex],
+  ];
+
+  const lowerZ = first > 0 ? effectiveZIndex(items[first - 1]) : null;
+  const upperZ = last < items.length - 1 ? effectiveZIndex(items[last + 1]) : null;
+  let values;
+  if (lowerZ != null && upperZ != null) {
+    const step = (upperZ - lowerZ) / (reordered.length + 1);
+    values = reordered.map((_, i) => lowerZ + step * (i + 1));
+  } else if (lowerZ != null) {
+    values = reordered.map((_, i) => lowerGroupZ + i);
+  } else if (upperZ != null) {
+    values = reordered.map((_, i) => upperGroupZ - (reordered.length - i - 1));
+  } else {
+    values = reordered.map((_, i) => i);
+  }
+
+  const valuesAreOrdered = values.every((value, i) => (
+    Number.isFinite(value)
+    && (i === 0 || value > values[i - 1])
+    && (lowerZ == null || value > lowerZ)
+    && (upperZ == null || value < upperZ)
+  ));
+  if (valuesAreOrdered) {
+    return reordered.map((item, i) => ({ id: item.id, patch: { zIndex: values[i] } }));
+  }
+
+  // Floating-point values can theoretically leave no representable gap.
+  // Reindexing the whole already-sorted stack is the deterministic fallback.
+  const fullyReordered = [...items];
+  [fullyReordered[index], fullyReordered[neighborIndex]] = [
+    fullyReordered[neighborIndex],
+    fullyReordered[index],
+  ];
+  return fullyReordered.map((item, i) => ({ id: item.id, patch: { zIndex: i } }));
+};
 
 const readScrollWheelZoomEnabled = () => {
   try {
@@ -942,11 +1018,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   }, [presence, now]);
 
   const sortedItems = useMemo(() => {
-    // Layer order: zones (back) → images → sticky/text (front)
-    const zones = board.items.filter((i) => i.type === 'zone');
-    const images = board.items.filter((i) => i.type === 'image');
-    const others = board.items.filter((i) => i.type !== 'zone' && i.type !== 'image');
-    return [...zones, ...images, ...others];
+    return [...board.items].sort(compareZOrder);
   }, [board.items]);
 
   // Switch cards to cheap paint (no blurred shadow/filter) once the board holds
@@ -1358,9 +1430,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       if (owner) ownerByStickyId.set(s.id, owner.id);
     });
     const newItems = [...b.items];
-    // Geometry deltas to persist (the array reorder below is local z-order only
-    // and intentionally not written — yItems keeps insertion order on peers).
+    // Derived geometry and z-order deltas to persist silently below.
     const geomEntries = [];
+    let nextZIndex = Math.max(...b.items.map(effectiveZIndex)) + 1;
     const GAP = 24;       // gap between cards
     const PAD = 16;       // inner padding from zone edges
     zones.forEach((z) => {
@@ -1392,22 +1464,22 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         const row = Math.floor(idx / cols);
         const targetX = z.x + PAD + col * (colW + GAP);
         const targetY = z.y + ZONE_TITLE_H + PAD + row * rowStep;
+        const targetZIndex = nextZIndex + children.length - idx - 1;
         const k = newItems.findIndex((i) => i.id === s.id);
-        if (k >= 0) newItems[k] = { ...newItems[k], x: targetX, y: targetY };
-        geomEntries.push({ id: s.id, patch: { x: targetX, y: targetY } });
-      });
-      // Re-order so the highest-voted sticky renders on top of the stack
-      // (last in the array = drawn last). children is sorted vote-desc, so
-      // walking from the end and pushing each puts the top vote-getter at
-      // the very end.
-      for (let i = children.length - 1; i >= 0; i -= 1) {
-        const id = children[i].id;
-        const k = newItems.findIndex((it) => it.id === id);
         if (k >= 0) {
-          const [item] = newItems.splice(k, 1);
-          newItems.push(item);
+          newItems[k] = {
+            ...newItems[k],
+            x: targetX,
+            y: targetY,
+            zIndex: targetZIndex,
+          };
         }
-      }
+        geomEntries.push({
+          id: s.id,
+          patch: { x: targetX, y: targetY, zIndex: targetZIndex },
+        });
+      });
+      nextZIndex += children.length;
     });
     const finalizedAt = Date.now();
     // Optimistic local update (incl. z-order); persist geometry + meta silently
@@ -2262,6 +2334,79 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     }));
   }, [commitViewportImmediately]);
 
+  const updateZIndexes = useCallback((entries) => {
+    const byId = new Map(entries.map((entry) => [entry.id, entry.patch.zIndex]));
+    setBoard((prev) => ({
+      ...prev,
+      items: prev.items.map((it) => (
+        byId.has(it.id) ? { ...it, zIndex: byId.get(it.id) } : it
+      )),
+    }));
+    storage.updateItems(entries);
+  }, []);
+
+  const bringToFront = useCallback((ids) => {
+    if (!ids?.size || interactionRef.current !== null) return;
+    const items = boardRef.current.items;
+    const selected = items
+      .filter((it) => ids.has(it.id))
+      .sort(compareZOrder);
+    if (selected.length === 0 || !requireEdit()) return;
+    if (!selected.every(canModifyOwnedItem)) return;
+    const maxZ = Math.max(...items.map(effectiveZIndex));
+    updateZIndexes(selected.map((it, index) => ({
+      id: it.id,
+      patch: { zIndex: maxZ + index + 1 },
+    })));
+  }, [canModifyOwnedItem, requireEdit, updateZIndexes]);
+
+  const sendToBack = useCallback((ids) => {
+    if (!ids?.size || interactionRef.current !== null) return;
+    const items = boardRef.current.items;
+    const selected = items
+      .filter((it) => ids.has(it.id))
+      .sort((a, b) => compareZOrder(b, a));
+    if (selected.length === 0 || !requireEdit()) return;
+    if (!selected.every(canModifyOwnedItem)) return;
+    const minZ = Math.min(...items.map(effectiveZIndex));
+    updateZIndexes(selected.map((it, index) => ({
+      id: it.id,
+      patch: { zIndex: minZ - index - 1 },
+    })));
+  }, [canModifyOwnedItem, requireEdit, updateZIndexes]);
+
+  const bringForward = useCallback((id) => {
+    if (!id || interactionRef.current !== null) return;
+    if (selectedIdsRef.current.size !== 1 || !selectedIdsRef.current.has(id)) return;
+    const items = [...boardRef.current.items].sort(compareZOrder);
+    const index = items.findIndex((it) => it.id === id);
+    if (index < 0 || index === items.length - 1) return;
+    if (!requireEdit()) return;
+    const entries = swapZOrderEntries(items, index, index + 1);
+    const currentById = new Map(boardRef.current.items.map((it) => [it.id, it]));
+    if (!entries.every((entry) => {
+      const current = currentById.get(entry.id);
+      return current && canModifyOwnedItem(current);
+    })) return;
+    updateZIndexes(entries);
+  }, [canModifyOwnedItem, requireEdit, updateZIndexes]);
+
+  const sendBackward = useCallback((id) => {
+    if (!id || interactionRef.current !== null) return;
+    if (selectedIdsRef.current.size !== 1 || !selectedIdsRef.current.has(id)) return;
+    const items = [...boardRef.current.items].sort(compareZOrder);
+    const index = items.findIndex((it) => it.id === id);
+    if (index <= 0) return;
+    if (!requireEdit()) return;
+    const entries = swapZOrderEntries(items, index, index - 1);
+    const currentById = new Map(boardRef.current.items.map((it) => [it.id, it]));
+    if (!entries.every((entry) => {
+      const current = currentById.get(entry.id);
+      return current && canModifyOwnedItem(current);
+    })) return;
+    updateZIndexes(entries);
+  }, [canModifyOwnedItem, requireEdit, updateZIndexes]);
+
   const onCanvasDoubleClick = useCallback((e) => {
     if (e.target !== canvasRef.current && e.target.dataset?.surface !== '1') return;
     if (!requireEdit()) return;
@@ -2724,7 +2869,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         && it.authorId !== userId
         && !allRevealed;
       if (isHidden) stripped += 1;
-      return {
+      const clone = {
         ...it,
         id: uid(),
         x: (it.x ?? 0) + offset,
@@ -2734,6 +2879,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         authorName: userName,
         createdAt: Date.now(),
       };
+      delete clone.zIndex;
+      return clone;
     });
     addItemsLocal(clones);
     setSelectedIds(new Set(clones.map((c) => c.id)));
@@ -2780,6 +2927,19 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         else resetZoom();
         return;
       }
+      if (!meta && !e.shiftKey && !e.altKey && (e.key === ']' || e.key === '[')) {
+        e.preventDefault();
+        if (e.key === ']') bringToFront(selectedIds);
+        else sendToBack(selectedIds);
+        return;
+      }
+      if (meta && !e.altKey && (e.key === ']' || e.key === '[')) {
+        e.preventDefault();
+        const id = selectedIds.size === 1 ? [...selectedIds][0] : null;
+        if (e.key === ']') bringForward(id);
+        else sendBackward(id);
+        return;
+      }
       if (e.key === 'Escape') {
         if (creationModeRef.current) { setCreationMode(null); setZonePreview(null); return; }
         setSelectedIds(new Set());
@@ -2819,6 +2979,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   }, [
     nameModalOpen, selectedIds, deleteItemsIfAllowed, duplicateItems, doUndo, doRedo,
     fitToContent, fitToSelection, zoomBy, resetZoom,
+    bringToFront, sendToBack, bringForward, sendBackward,
   ]);
 
   /* ============================================================
@@ -3164,6 +3325,19 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       if (!parsed?.board?.items || !Array.isArray(parsed.board.items)) {
         throw new Error('missing board.items');
       }
+      const importedAt = Date.now();
+      const zLimit = Number.MAX_SAFE_INTEGER - parsed.board.items.length - 1;
+      parsed.board.items = parsed.board.items.map((item, index) => {
+        const normalized = { ...item };
+        normalized.createdAt = Number.isFinite(item?.createdAt)
+          && Math.abs(item.createdAt) <= zLimit
+          ? item.createdAt
+          : importedAt + index;
+        if (!Number.isFinite(item?.zIndex) || Math.abs(item.zIndex) > zLimit) {
+          delete normalized.zIndex;
+        }
+        return normalized;
+      });
       setPendingImport({ name: file.name, parsed });
     } catch (err) {
       setToast({ msg: t('import.fail', { err: err.message }), type: 'warn' });
@@ -3525,6 +3699,24 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
             <Download size={15} />
           </button>
         )}
+        <button
+          type="button"
+          onClick={() => can && bringToFront(new Set([selectedItem.id]))}
+          disabled={!can}
+          title="Bring to front"
+          style={iconBtn(can)}
+        >
+          <BringToFront size={15} />
+        </button>
+        <button
+          type="button"
+          onClick={() => can && sendToBack(new Set([selectedItem.id]))}
+          disabled={!can}
+          title="Send to back"
+          style={iconBtn(can)}
+        >
+          <SendToBack size={15} />
+        </button>
         <button
           type="button"
           onClick={() => deleteItemsIfAllowed([selectedItem.id])}
