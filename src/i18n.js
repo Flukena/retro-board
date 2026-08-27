@@ -217,9 +217,11 @@ const dict = {
     // settings
     'settings.lang': 'Language',
     'settings.theme': 'Theme',
+    'settings.scrollWheelZoom': 'ใช้ล้อเมาส์เพื่อซูม',
     'settings.theme.light': 'Light',
     'settings.theme.dark': 'Dark',
     'settings.theme.auto': 'Auto',
+    'zoom.reset': 'รีเซ็ตการซูมเป็น 100%',
     'empty.hint': 'ดับเบิลคลิกเพื่อเริ่ม · เลือก template ด้านล่าง',
     'loading': 'กำลังโหลด…',
   },
@@ -420,9 +422,11 @@ const dict = {
 
     'settings.lang': 'Language',
     'settings.theme': 'Theme',
+    'settings.scrollWheelZoom': 'Use scroll wheel zoom',
     'settings.theme.light': 'Light',
     'settings.theme.dark': 'Dark',
     'settings.theme.auto': 'Auto',
+    'zoom.reset': 'Reset zoom to 100%',
     'empty.hint': 'Double-click to start · or pick a template below',
     'loading': 'Loading…',
   },

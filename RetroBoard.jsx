@@ -10,7 +10,7 @@ import {
   ChevronDown, X, Sparkles, AlertCircle, Type, Copy,
   Image as ImageIcon, MousePointer2, RotateCcw,
   Languages, Sun, Moon, Monitor, Download, Upload, Undo2, Redo2,
-  MoreHorizontal, Ban,
+  MoreHorizontal, Ban, Check,
 } from 'lucide-react';
 import { t, useLang } from './src/i18n.js';
 import { useTheme, nextThemePref } from './src/theme.js';
@@ -69,6 +69,7 @@ const ZONE_TITLE_H = 32;
 const DRAG_THRESHOLD = 4;
 const ZOOM_MIN = 0.15;
 const ZOOM_MAX = 3.0;
+const SCROLL_WHEEL_ZOOM_KEY = 'rb_scroll_wheel_zoom';
 const POLL_SAFETY = 15000; // safety net only — Realtime push is primary
 const SAVE_DEBOUNCE = 200;
 const TEXT_SAVE_DEBOUNCE = 350;
@@ -170,6 +171,54 @@ const uid = () =>
   Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+const readScrollWheelZoomEnabled = () => {
+  try {
+    return typeof window !== 'undefined'
+      && window.localStorage?.getItem(SCROLL_WHEEL_ZOOM_KEY) === 'true';
+  } catch { return false; }
+};
+
+const zoomViewportAt = (viewport, targetZoom, screenAnchor) => {
+  const zoom = clamp(targetZoom, ZOOM_MIN, ZOOM_MAX);
+  const worldX = (screenAnchor.x - viewport.x) / viewport.zoom;
+  const worldY = (screenAnchor.y - viewport.y) / viewport.zoom;
+  return {
+    zoom,
+    x: screenAnchor.x - worldX * zoom,
+    y: screenAnchor.y - worldY * zoom,
+  };
+};
+
+const fitViewportToItems = (items, width, height) => {
+  if (items.length === 0) return { x: width / 2, y: height / 2, zoom: 1 };
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  items.forEach((it) => {
+    if (it.type === 'zone') {
+      minX = Math.min(minX, it.x); minY = Math.min(minY, it.y);
+      maxX = Math.max(maxX, it.x + it.w); maxY = Math.max(maxY, it.y + it.h);
+    } else if (it.type === 'sticky' || it.type === 'image') {
+      const iw = it.w || (it.type === 'sticky' ? STICKY_W : 200);
+      const ih = it.h || (it.type === 'sticky' ? STICKY_H : 200);
+      minX = Math.min(minX, it.x); minY = Math.min(minY, it.y);
+      maxX = Math.max(maxX, it.x + iw); maxY = Math.max(maxY, it.y + ih);
+    } else {
+      minX = Math.min(minX, it.x); minY = Math.min(minY, it.y);
+      maxX = Math.max(maxX, it.x + 200); maxY = Math.max(maxY, it.y + 60);
+    }
+  });
+  const pad = 80;
+  const contentWidth = (maxX - minX) + pad * 2;
+  const contentHeight = (maxY - minY) + pad * 2;
+  const zoom = clamp(Math.min(width / contentWidth, height / contentHeight), ZOOM_MIN, ZOOM_MAX);
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  return {
+    zoom,
+    x: width / 2 - cx * zoom,
+    y: height / 2 - cy * zoom,
+  };
+};
 
 const hueFromId = (id) => {
   let h = 0;
@@ -735,7 +784,18 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   /* ---------- Viewport (per-user) ---------- */
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 });
   const viewportRef = useRef(viewport);
-  useEffect(() => { viewportRef.current = viewport; }, [viewport]);
+  useEffect(() => {
+    if (interactionRef.current === null) viewportRef.current = viewport;
+  }, [viewport]);
+  const [scrollWheelZoomEnabled, setScrollWheelZoomEnabled] = useState(readScrollWheelZoomEnabled);
+  const scrollWheelZoomEnabledRef = useRef(scrollWheelZoomEnabled);
+  useEffect(() => { scrollWheelZoomEnabledRef.current = scrollWheelZoomEnabled; }, [scrollWheelZoomEnabled]);
+  const toggleScrollWheelZoom = useCallback(() => {
+    const next = !scrollWheelZoomEnabledRef.current;
+    scrollWheelZoomEnabledRef.current = next;
+    setScrollWheelZoomEnabled(next);
+    try { window.localStorage.setItem(SCROLL_WHEEL_ZOOM_KEY, String(next)); } catch { /* noop */ }
+  }, []);
 
   /* ---------- Presence (shared map) ---------- */
   const [presence, setPresence] = useState({});
@@ -815,18 +875,24 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       e.preventDefault();
       if (spaceHeldRef.current) return;
       spaceHeldRef.current = true;
-      if (canvasRef.current) canvasRef.current.style.cursor = 'grab';
+      if (canvasRef.current) {
+        canvasRef.current.style.cursor = interactionRef.current?.kind === 'pan' ? 'grabbing' : 'grab';
+      }
     };
     const onSpaceKeyUp = (e) => {
       if (e.code !== 'Space') return;
       spaceHeldRef.current = false;
-      if (canvasRef.current) canvasRef.current.style.cursor = '';
+      if (canvasRef.current) {
+        canvasRef.current.style.cursor = interactionRef.current?.kind === 'pan' ? 'grabbing' : '';
+      }
     };
     // If the window loses focus while Space is held (e.g. alt-tab), the
     // keyup never arrives — reset here so pan mode doesn't get stuck on.
     const onBlur = () => {
       spaceHeldRef.current = false;
-      if (canvasRef.current) canvasRef.current.style.cursor = '';
+      if (canvasRef.current) {
+        canvasRef.current.style.cursor = interactionRef.current?.kind === 'pan' ? 'grabbing' : '';
+      }
     };
     window.addEventListener('keydown', onSpaceKeyDown);
     window.addEventListener('keyup', onSpaceKeyUp);
@@ -857,8 +923,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   // Ids of items currently being dragged/resized locally — protected from remote overwrite of geometry.
   const dragItemsRef = useRef(null);
   const activeGeometryFinalizerRef = useRef(null);
+  const activeViewportFinalizerRef = useRef(null);
   useEffect(() => () => {
     activeGeometryFinalizerRef.current?.();
+    activeViewportFinalizerRef.current?.();
     storage.setLocalBusyItems('geometry', []);
     storage.setLocalBusyItems('text', []);
   }, []);
@@ -1867,15 +1935,19 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     }
   }, []);
 
-  // Keep the DOM in sync with React state for non-pan changes (wheel zoom,
-  // fit-to-content, reset, initial load). Pan calls applyViewportToDom
-  // directly without touching state, and this effect picks up the final
-  // commit on mouseup.
+  // Keep the DOM in sync with React state for non-live changes (fit, reset,
+  // initial load). Continuous wheel/pan input applies directly to the DOM,
+  // and its final commit brings React state back into sync.
   useEffect(() => {
-    applyViewportToDom(viewport);
+    if (interactionRef.current === null) applyViewportToDom(viewport);
   }, [viewport, applyViewportToDom]);
 
-  // Wheel zoom is the noisiest input on the page — trackpads / Magic Mice
+  const liveApplyViewport = useCallback((next) => {
+    viewportRef.current = next;
+    applyViewportToDom(next);
+  }, [applyViewportToDom]);
+
+  // Wheel input is the noisiest input on the page — trackpads / Magic Mice
   // can fire 120+ events/sec. Each event used to force a layout via
   // getBoundingClientRect and write to the DOM, which manifested as zoom
   // jitter. Coalesce events into one rAF tick: cache rect once, fold every
@@ -1884,47 +1956,159 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const wheelCommitRef = useRef(null);
   const wheelRafRef = useRef(null);
   const wheelQueueRef = useRef([]);
+  const cancelPendingWheel = useCallback(() => {
+    if (wheelRafRef.current != null) {
+      cancelAnimationFrame(wheelRafRef.current);
+      wheelRafRef.current = null;
+    }
+    wheelQueueRef.current = [];
+    if (wheelCommitRef.current != null) {
+      clearTimeout(wheelCommitRef.current);
+      wheelCommitRef.current = null;
+    }
+  }, []);
+
+  const commitViewportImmediately = useCallback((next) => {
+    cancelPendingWheel();
+    viewportRef.current = next;
+    applyViewportToDom(next);
+    setViewport(next);
+  }, [applyViewportToDom, cancelPendingWheel]);
+
+  // A gesture starting after a live wheel frame must preserve that frame while
+  // discarding any not-yet-applied wheel events. This prevents a later React
+  // render from restoring the viewport that preceded the gesture.
+  const settleWheelBeforeInteraction = useCallback(() => {
+    if (wheelCommitRef.current != null) {
+      commitViewportImmediately(viewportRef.current);
+    } else {
+      cancelPendingWheel();
+    }
+  }, [cancelPendingWheel, commitViewportImmediately]);
+
   // Cancel any in-flight rAF / trailing commit on unmount so the deferred
   // setViewport callback can't fire after React tore the tree down (would log
   // a "setState on unmounted" warning and leak the closure's refs).
-  useEffect(() => () => {
-    if (wheelRafRef.current != null) cancelAnimationFrame(wheelRafRef.current);
-    if (wheelCommitRef.current != null) clearTimeout(wheelCommitRef.current);
-  }, []);
+  useEffect(() => () => cancelPendingWheel(), [cancelPendingWheel]);
+
   const onCanvasWheel = useCallback((e) => {
     e.preventDefault();
-    wheelQueueRef.current.push({ deltaY: e.deltaY, clientX: e.clientX, clientY: e.clientY });
+    if (interactionRef.current !== null) {
+      cancelPendingWheel();
+      return;
+    }
+    let deltaX = e.deltaX;
+    let deltaY = e.deltaY;
+    if (e.deltaMode === 1) {
+      deltaX *= 16;
+      deltaY *= 16;
+    } else if (e.deltaMode === 2) {
+      deltaX *= canvasRef.current?.clientWidth || window.innerWidth;
+      deltaY *= canvasRef.current?.clientHeight || window.innerHeight;
+    }
+    const shouldZoom = (e.ctrlKey || e.metaKey) !== scrollWheelZoomEnabledRef.current;
+    if (shouldZoom && deltaY === 0) return;
+    wheelQueueRef.current.push({
+      kind: shouldZoom ? 'zoom' : 'pan',
+      deltaX,
+      deltaY,
+      clientX: e.clientX,
+      clientY: e.clientY,
+    });
     if (wheelRafRef.current != null) return;
     wheelRafRef.current = requestAnimationFrame(() => {
       wheelRafRef.current = null;
       const events = wheelQueueRef.current;
       wheelQueueRef.current = [];
-      if (!events.length || !canvasRef.current) return;
+      if (interactionRef.current !== null || !events.length || !canvasRef.current) return;
       const rect = canvasRef.current.getBoundingClientRect();
       let v = viewportRef.current;
       for (let i = 0; i < events.length; i += 1) {
         const ev = events[i];
-        const cx = ev.clientX - rect.left;
-        const cy = ev.clientY - rect.top;
-        const factor = ev.deltaY < 0 ? 1.05 : 1 / 1.05;
-        const newZoom = clamp(v.zoom * factor, ZOOM_MIN, ZOOM_MAX);
-        const worldX = (cx - v.x) / v.zoom;
-        const worldY = (cy - v.y) / v.zoom;
-        v = {
-          zoom: newZoom,
-          x: cx - worldX * newZoom,
-          y: cy - worldY * newZoom,
-        };
+        if (ev.kind === 'pan') {
+          v = { ...v, x: v.x - ev.deltaX, y: v.y - ev.deltaY };
+        } else {
+          const factor = ev.deltaY < 0 ? 1.05 : 1 / 1.05;
+          v = zoomViewportAt(v, v.zoom * factor, {
+            x: ev.clientX - rect.left,
+            y: ev.clientY - rect.top,
+          });
+        }
       }
-      viewportRef.current = v;
-      applyViewportToDom(v);
+      liveApplyViewport(v);
       if (wheelCommitRef.current) clearTimeout(wheelCommitRef.current);
       wheelCommitRef.current = setTimeout(() => {
         wheelCommitRef.current = null;
         setViewport(viewportRef.current);
       }, 120);
     });
-  }, [applyViewportToDom]);
+  }, [cancelPendingWheel, liveApplyViewport]);
+
+  const startPan = useCallback((e) => {
+    if (interactionRef.current !== null) return false;
+    e.preventDefault();
+    e.stopPropagation();
+    settleWheelBeforeInteraction();
+    const start = {
+      x: e.clientX,
+      y: e.clientY,
+      vx: viewportRef.current.x,
+      vy: viewportRef.current.y,
+      zoom: viewportRef.current.zoom,
+    };
+    interactionRef.current = { kind: 'pan' };
+    if (canvasRef.current) canvasRef.current.style.cursor = 'grabbing';
+    let finished = false;
+    let panRaf = null;
+    let panPending = null;
+    const apply = (clientX, clientY) => {
+      liveApplyViewport({
+        zoom: start.zoom,
+        x: start.vx + (clientX - start.x),
+        y: start.vy + (clientY - start.y),
+      });
+    };
+    const onMove = (ev) => {
+      panPending = { x: ev.clientX, y: ev.clientY };
+      if (panRaf != null) return;
+      panRaf = requestAnimationFrame(() => {
+        panRaf = null;
+        const p = panPending;
+        panPending = null;
+        if (p) apply(p.x, p.y);
+      });
+    };
+    const removeListeners = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('blur', onBlur);
+    };
+    const finalize = () => {
+      if (finished) return;
+      finished = true;
+      if (panRaf != null) { cancelAnimationFrame(panRaf); panRaf = null; }
+      if (panPending) { const p = panPending; panPending = null; apply(p.x, p.y); }
+      interactionRef.current = null;
+      removeListeners();
+      if (activeViewportFinalizerRef.current === onBlur) activeViewportFinalizerRef.current = null;
+      if (canvasRef.current) canvasRef.current.style.cursor = spaceHeldRef.current ? 'grab' : '';
+      setViewport(viewportRef.current);
+    };
+    const onUp = () => finalize();
+    const onBlur = () => finalize();
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('blur', onBlur);
+    activeViewportFinalizerRef.current = onBlur;
+    return true;
+  }, [liveApplyViewport, settleWheelBeforeInteraction]);
+
+  const onCanvasMouseDownCapture = useCallback((e) => {
+    if (!spaceHeldRef.current && e.button !== 1) return;
+    e.preventDefault();
+    e.stopPropagation();
+    startPan(e);
+  }, [startPan]);
 
   const onCanvasMouseDown = useCallback((e) => {
     // Only start pan/marquee if mousedown is on the canvas (not on an item) —
@@ -1939,9 +2123,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     // Zone-creation tool: drag rectangle on canvas to place a new zone.
     if (!spaceHeldRef.current && creationModeRef.current === 'zone' && requireEdit()) {
       e.preventDefault();
+      settleWheelBeforeInteraction();
       const rect = canvasRef.current.getBoundingClientRect();
       const start = screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
       let lastWorld = start;
+      let finished = false;
       interactionRef.current = { kind: 'creating-zone' };
       const onMove = (ev) => {
         lastWorld = screenToWorld(ev.clientX - rect.left, ev.clientY - rect.top);
@@ -1951,11 +2137,19 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         const h = Math.abs(lastWorld.y - start.y);
         setZonePreview({ x, y, w, h });
       };
-      const onUp = () => {
-        interactionRef.current = null;
+      const removeListeners = () => {
         window.removeEventListener('mousemove', onMove);
         window.removeEventListener('mouseup', onUp);
+        window.removeEventListener('blur', onBlur);
+      };
+      const finalize = (complete) => {
+        if (finished) return;
+        finished = true;
+        interactionRef.current = null;
+        removeListeners();
+        if (activeViewportFinalizerRef.current === onBlur) activeViewportFinalizerRef.current = null;
         setZonePreview(null);
+        if (!complete) return;
         setCreationMode(null);
         const x = Math.min(start.x, lastWorld.x);
         const y = Math.min(start.y, lastWorld.y);
@@ -1969,8 +2163,12 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           editAreaRef.current?.select?.();
         }, 30);
       };
+      const onUp = () => finalize(true);
+      const onBlur = () => finalize(false);
       window.addEventListener('mousemove', onMove);
       window.addEventListener('mouseup', onUp);
+      window.addEventListener('blur', onBlur);
+      activeViewportFinalizerRef.current = onBlur;
       return;
     }
     const selectTool = creationModeRef.current === 'select';
@@ -1980,12 +2178,26 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       // Box select
       const start = { x: e.clientX, y: e.clientY };
       const baseSelection = e.shiftKey ? new Set(selectedIds) : new Set();
+      let finished = false;
+      settleWheelBeforeInteraction();
       interactionRef.current = { kind: 'marquee' };
       setMarquee({ x1: start.x, y1: start.y, x2: start.x, y2: start.y });
       const onMove = (ev) => {
         setMarquee({ x1: start.x, y1: start.y, x2: ev.clientX, y2: ev.clientY });
       };
-      const onUp = () => {
+      const removeListeners = () => {
+        window.removeEventListener('mousemove', onMoveTracked);
+        window.removeEventListener('mouseup', onUp);
+        window.removeEventListener('blur', onBlur);
+      };
+      const finalize = (complete) => {
+        if (finished) return;
+        finished = true;
+        interactionRef.current = null;
+        removeListeners();
+        if (activeViewportFinalizerRef.current === onBlur) activeViewportFinalizerRef.current = null;
+        setMarquee(null);
+        if (!complete) return;
         const m = { x1: Math.min(start.x, lastX), y1: Math.min(start.y, lastY), x2: Math.max(start.x, lastX), y2: Math.max(start.y, lastY) };
         const v = viewportRef.current;
         const wx1 = (m.x1 - v.x) / v.zoom;
@@ -1999,57 +2211,56 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         const next = new Set(baseSelection);
         hits.forEach((id) => next.add(id));
         setSelectedIds(next);
-        setMarquee(null);
-        interactionRef.current = null;
-        window.removeEventListener('mousemove', onMoveTracked);
-        window.removeEventListener('mouseup', onUp);
       };
       let lastX = start.x;
       let lastY = start.y;
       const onMoveTracked = (ev) => { lastX = ev.clientX; lastY = ev.clientY; onMove(ev); };
+      const onUp = () => finalize(true);
+      const onBlur = () => finalize(false);
       window.addEventListener('mousemove', onMoveTracked);
       window.addEventListener('mouseup', onUp);
+      window.addEventListener('blur', onBlur);
+      activeViewportFinalizerRef.current = onBlur;
       return;
     }
-    // Pan — apply directly to the DOM during drag, sync React state once on
-    // mouseup. With this path, pan cost is constant regardless of card count.
-    const start = { x: e.clientX, y: e.clientY, vx: viewportRef.current.x, vy: viewportRef.current.y };
-    const zoom0 = viewportRef.current.zoom;
-    interactionRef.current = { kind: 'pan' };
-    let panRaf = null;
-    let panPending = null;
-    const apply = (clientX, clientY) => {
-      const nv = {
-        zoom: zoom0,
-        x: start.vx + (clientX - start.x),
-        y: start.vy + (clientY - start.y),
-      };
-      viewportRef.current = nv;
-      applyViewportToDom(nv);
-    };
-    const onMove = (ev) => {
-      panPending = { x: ev.clientX, y: ev.clientY };
-      if (panRaf != null) return;
-      panRaf = requestAnimationFrame(() => {
-        panRaf = null;
-        const p = panPending;
-        panPending = null;
-        if (p) apply(p.x, p.y);
-      });
-    };
-    const onUp = () => {
-      if (panRaf != null) { cancelAnimationFrame(panRaf); panRaf = null; }
-      if (panPending) { const p = panPending; panPending = null; apply(p.x, p.y); }
-      interactionRef.current = null;
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-      // Commit the final viewport to React state so visibleItems re-culls and
-      // the per-user save effect picks it up.
-      setViewport(viewportRef.current);
-    };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-  }, [selectedIds, requireEdit, screenToWorld, addZone, applyViewportToDom, updateFocusedText]);
+    if (e.button === 0) startPan(e);
+  }, [
+    selectedIds, requireEdit, screenToWorld, addZone,
+    settleWheelBeforeInteraction, startPan, updateFocusedText,
+  ]);
+
+  const fitToContent = useCallback(() => {
+    if (interactionRef.current !== null || !canvasRef.current) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    commitViewportImmediately(fitViewportToItems(boardRef.current.items, rect.width, rect.height));
+  }, [commitViewportImmediately]);
+
+  const fitToSelection = useCallback(() => {
+    if (interactionRef.current !== null || !canvasRef.current) return;
+    const ids = selectedIdsRef.current;
+    if (ids.size === 0) return;
+    const items = boardRef.current.items.filter((it) => ids.has(it.id));
+    if (items.length === 0) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    commitViewportImmediately(fitViewportToItems(items, rect.width, rect.height));
+  }, [commitViewportImmediately]);
+
+  const zoomBy = useCallback((factor) => {
+    if (interactionRef.current !== null || !canvasRef.current) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    const center = { x: rect.width / 2, y: rect.height / 2 };
+    const current = viewportRef.current;
+    commitViewportImmediately(zoomViewportAt(current, current.zoom * factor, center));
+  }, [commitViewportImmediately]);
+
+  const resetZoom = useCallback(() => {
+    if (interactionRef.current !== null || !canvasRef.current) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    commitViewportImmediately(zoomViewportAt(viewportRef.current, 1, {
+      x: rect.width / 2,
+      y: rect.height / 2,
+    }));
+  }, [commitViewportImmediately]);
 
   const onCanvasDoubleClick = useCallback((e) => {
     if (e.target !== canvasRef.current && e.target.dataset?.surface !== '1') return;
@@ -2088,6 +2299,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     let moved = false;
     let claimed = false;
     let finished = false;
+    settleWheelBeforeInteraction();
     interactionRef.current = { kind: 'maybe-drag' };
     // Coalesce mousemove updates to one per animation frame so trackpads /
     // high-refresh displays don't fire React updates faster than the screen
@@ -2171,7 +2383,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     window.addEventListener('mouseup', onUp);
     window.addEventListener('blur', onBlur);
     activeGeometryFinalizerRef.current = onBlur;
-  }, [requireMove, commitGeometry, endGeometry, discardPendingGeometry, setSelectedId]);
+  }, [
+    requireMove, commitGeometry, endGeometry, discardPendingGeometry,
+    setSelectedId, settleWheelBeforeInteraction,
+  ]);
 
   /* ----- Zone title drag (with children) ----- */
   const startZoneDrag = useCallback((e, zone) => {
@@ -2212,6 +2427,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     let moved = false;
     let claimed = false;
     let finished = false;
+    settleWheelBeforeInteraction();
     interactionRef.current = { kind: 'maybe-drag' };
     // See startItemDrag for why we coalesce mousemove via rAF.
     let rafId = null;
@@ -2288,10 +2504,14 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     window.addEventListener('mouseup', onUp);
     window.addEventListener('blur', onBlur);
     activeGeometryFinalizerRef.current = onBlur;
-  }, [requireMove, commitGeometry, endGeometry, discardPendingGeometry, setSelectedId]);
+  }, [
+    requireMove, commitGeometry, endGeometry, discardPendingGeometry,
+    setSelectedId, settleWheelBeforeInteraction,
+  ]);
 
   /* ----- Generic item resize (zone / sticky / image) ----- */
   const startItemResize = useCallback((e, item, corner) => {
+    if (spaceHeldRef.current || e.button === 1) { startPan(e); return; }
     if (item.type === 'zone' && item.locked) return;
     e.stopPropagation();
     let minW = ZONE_MIN_W;
@@ -2304,6 +2524,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     const start = { x: e.clientX, y: e.clientY };
     const initial = { x: item.x, y: item.y, w: w0, h: h0 };
     if (!requireMove([item.id])) return;
+    settleWheelBeforeInteraction();
     interactionRef.current = { kind: 'drag' };
     dragItemsRef.current = new Set([item.id]);
     let finished = false;
@@ -2371,10 +2592,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     window.addEventListener('mouseup', onUp);
     window.addEventListener('blur', onBlur);
     activeGeometryFinalizerRef.current = onBlur;
-  }, [requireMove, commitGeometry, endGeometry]);
+  }, [requireMove, commitGeometry, endGeometry, settleWheelBeforeInteraction, startPan]);
 
   /* ----- Group resize (scales all selected items around opposite corner) ----- */
   const startGroupResize = useCallback((e, corner) => {
+    if (spaceHeldRef.current || e.button === 1) { startPan(e); return; }
     e.stopPropagation();
     const items = boardRef.current.items.filter((it) => selectedIds.has(it.id));
     if (items.length < 2) return;
@@ -2412,6 +2634,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       }
     });
     if (!requireMove(seeds.keys())) return;
+    settleWheelBeforeInteraction();
     interactionRef.current = { kind: 'drag' };
     dragItemsRef.current = new Set(seeds.keys());
     let finished = false;
@@ -2484,7 +2707,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     window.addEventListener('mouseup', onUp);
     window.addEventListener('blur', onBlur);
     activeGeometryFinalizerRef.current = onBlur;
-  }, [requireMove, selectedIds, commitGeometry, endGeometry]);
+  }, [
+    requireMove, selectedIds, commitGeometry, endGeometry,
+    settleWheelBeforeInteraction, startPan,
+  ]);
 
   /* ----- Duplicate selected items (offset clones into board) ----- */
   const duplicateItems = useCallback((sourceItems, offset = 24) => {
@@ -2528,6 +2754,32 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         'input, textarea, select, [contenteditable="true"], '
         + '[role="dialog"], [data-board-shortcuts="off"]',
       )) return;
+      const meta = e.ctrlKey || e.metaKey;
+      if (!meta && e.shiftKey && !e.altKey && e.code === 'Digit1') {
+        if (interactionRef.current === null) {
+          e.preventDefault();
+          fitToContent();
+        }
+        return;
+      }
+      if (!meta && e.shiftKey && !e.altKey && e.code === 'Digit2') {
+        if (interactionRef.current === null) {
+          e.preventDefault();
+          fitToSelection();
+        }
+        return;
+      }
+      const zoomInKey = e.key === '=' || e.key === '+' || e.code === 'NumpadAdd';
+      const zoomOutKey = e.key === '-' || e.code === 'NumpadSubtract';
+      const resetZoomKey = e.key === '0' || e.code === 'Numpad0';
+      if (meta && (zoomInKey || zoomOutKey || resetZoomKey)) {
+        e.preventDefault();
+        if (interactionRef.current !== null) return;
+        if (zoomInKey) zoomBy(1.2);
+        else if (zoomOutKey) zoomBy(1 / 1.2);
+        else resetZoom();
+        return;
+      }
       if (e.key === 'Escape') {
         if (creationModeRef.current) { setCreationMode(null); setZonePreview(null); return; }
         setSelectedIds(new Set());
@@ -2536,7 +2788,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         deleteItemsIfAllowed(selectedIds);
       }
       // Copy / cut / paste / duplicate / undo / redo selected items.
-      const meta = e.ctrlKey || e.metaKey;
       if (!meta) return;
       const k = e.key.toLowerCase();
       // Undo: Cmd/Ctrl+Z. Redo: Cmd/Ctrl+Shift+Z or Ctrl+Y.
@@ -2565,7 +2816,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [nameModalOpen, selectedIds, deleteItemsIfAllowed, duplicateItems, doUndo, doRedo]);
+  }, [
+    nameModalOpen, selectedIds, deleteItemsIfAllowed, duplicateItems, doUndo, doRedo,
+    fitToContent, fitToSelection, zoomBy, resetZoom,
+  ]);
 
   /* ============================================================
      Image import (paste + drop)
@@ -2956,61 +3210,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     setPendingImport(null);
     setToast({ msg: t('import.done', { n }), type: 'info' });
   }, [pendingImport, isAdmin, replaceBoardLocal]);
-
-  /* ============================================================
-     Zoom controls
-     ============================================================ */
-  const fitToContent = useCallback(() => {
-    const items = boardRef.current.items;
-    if (!canvasRef.current) return;
-    const rect = canvasRef.current.getBoundingClientRect();
-    if (items.length === 0) {
-      setViewport({ x: rect.width / 2, y: rect.height / 2, zoom: 1 });
-      return;
-    }
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    items.forEach((it) => {
-      if (it.type === 'zone') {
-        minX = Math.min(minX, it.x); minY = Math.min(minY, it.y);
-        maxX = Math.max(maxX, it.x + it.w); maxY = Math.max(maxY, it.y + it.h);
-      } else if (it.type === 'sticky' || it.type === 'image') {
-        const iw = it.w || (it.type === 'sticky' ? STICKY_W : 200);
-        const ih = it.h || (it.type === 'sticky' ? STICKY_H : 200);
-        minX = Math.min(minX, it.x); minY = Math.min(minY, it.y);
-        maxX = Math.max(maxX, it.x + iw); maxY = Math.max(maxY, it.y + ih);
-      } else {
-        minX = Math.min(minX, it.x); minY = Math.min(minY, it.y);
-        maxX = Math.max(maxX, it.x + 200); maxY = Math.max(maxY, it.y + 60);
-      }
-    });
-    const pad = 80;
-    const w = (maxX - minX) + pad * 2;
-    const h = (maxY - minY) + pad * 2;
-    const zoom = clamp(Math.min(rect.width / w, rect.height / h), ZOOM_MIN, ZOOM_MAX);
-    const cx = (minX + maxX) / 2;
-    const cy = (minY + maxY) / 2;
-    setViewport({
-      zoom,
-      x: rect.width / 2 - cx * zoom,
-      y: rect.height / 2 - cy * zoom,
-    });
-  }, []);
-
-  const zoomBy = useCallback((factor) => {
-    if (!canvasRef.current) return;
-    const rect = canvasRef.current.getBoundingClientRect();
-    const cx = rect.width / 2;
-    const cy = rect.height / 2;
-    const v = viewportRef.current;
-    const newZoom = clamp(v.zoom * factor, ZOOM_MIN, ZOOM_MAX);
-    const worldX = (cx - v.x) / v.zoom;
-    const worldY = (cy - v.y) / v.zoom;
-    setViewport({
-      zoom: newZoom,
-      x: cx - worldX * newZoom,
-      y: cy - worldY * newZoom,
-    });
-  }, []);
 
   /* ============================================================
      Rendering helpers
@@ -3572,6 +3771,13 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                 }}
               >
                 <MoreMenuItem
+                  icon={<ZoomIn size={15} />}
+                  label={t('settings.scrollWheelZoom')}
+                  checked={scrollWheelZoomEnabled}
+                  onClick={toggleScrollWheelZoom}
+                />
+                <MoreMenuDivider />
+                <MoreMenuItem
                   icon={<Download size={15} />}
                   label={t('topbar.export')}
                   onClick={() => { setMoreMenuOpen(false); exportBoard(); }}
@@ -4123,11 +4329,12 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         <button type="button" onClick={() => zoomBy(1 / 1.2)} style={zoomBtn} title="Zoom out">
           <ZoomOut size={16} />
         </button>
-        <div style={{
-          padding: '0 10px', fontSize: 13, color: 'var(--text-mid)', minWidth: 50, textAlign: 'center',
+        <button type="button" onClick={resetZoom} style={{
+          ...zoomBtn, fontSize: 13, minWidth: 70, justifyContent: 'center',
         }}
+        title={t('zoom.reset')}
         >{Math.round(viewport.zoom * 100)}%
-        </div>
+        </button>
         <button type="button" onClick={() => zoomBy(1.2)} style={zoomBtn} title="Zoom in">
           <ZoomIn size={16} />
         </button>
@@ -4227,6 +4434,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       {/* Canvas surface */}
       <div
         ref={canvasRef}
+        onMouseDownCapture={onCanvasMouseDownCapture}
         onMouseDown={onCanvasMouseDown}
         onDoubleClick={onCanvasDoubleClick}
         onWheel={onCanvasWheel}
@@ -4235,9 +4443,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         className="rb-no-select"
         style={{
           position: 'absolute', inset: 0, zIndex: 1,
-          cursor: creationMode === 'zone' ? 'crosshair'
+          cursor: interactionRef.current?.kind === 'pan' ? 'grabbing'
+            : spaceHeldRef.current ? 'grab'
+            : creationMode === 'zone' ? 'crosshair'
             : creationMode === 'select' ? 'crosshair'
-            : interactionRef.current?.kind === 'pan' ? 'grabbing'
             : 'default',
         }}
       >
@@ -4763,12 +4972,13 @@ function TopBtn({ title, onClick, active, enabled, icon, label, danger }) {
   );
 }
 
-function MoreMenuItem({ icon, label, onClick, disabled, danger }) {
+function MoreMenuItem({ icon, label, onClick, disabled, danger, checked }) {
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
+      aria-pressed={checked == null ? undefined : checked}
       style={{
         display: 'flex', alignItems: 'center', gap: 10,
         width: '100%', textAlign: 'left',
@@ -4783,6 +4993,7 @@ function MoreMenuItem({ icon, label, onClick, disabled, danger }) {
     >
       <span style={{ display: 'inline-flex', width: 18, justifyContent: 'center' }}>{icon}</span>
       <span style={{ flex: 1 }}>{label}</span>
+      {checked && <Check size={15} />}
     </button>
   );
 }
