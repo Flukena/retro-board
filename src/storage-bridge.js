@@ -38,6 +38,11 @@ if (route.kind !== 'board') {
     async set() { /* noop */ },
     on() { /* noop */ },
     off() { /* noop */ },
+    setLocalBusyItems() { /* noop */ },
+    findRemoteBusyItem() { return null; },
+    getRemoteBusyItems() { return new Map(); },
+    onBusyChange() { return () => {}; },
+    offBusyChange() { /* noop */ },
   };
 }
 
@@ -229,16 +234,21 @@ const seedItem = (id, fields) => {
   yItems.set(id, yItem);
 };
 
-// Upsert one item: create it if absent, else apply a per-field patch where
-// `undefined` deletes the field and any other value sets it.
-const upsertItem = (id, patch) => {
+const createItem = (id, fields) => {
+  if (yItems.has(id)) return false;
+  seedItem(id, fields);
+  return true;
+};
+
+const patchExistingItem = (id, patch) => {
   const yItem = yItems.get(id);
-  if (!(yItem instanceof Y.Map)) { seedItem(id, patch); return; }
+  if (!(yItem instanceof Y.Map)) return false;
   Object.entries(patch).forEach(([k, v]) => {
     if (k === 'id') return;
     if (v === undefined) yItem.delete(k);
     else yItem.set(k, v);
   });
+  return true;
 };
 
 // ---------------------------------------------------------------------------
@@ -384,6 +394,45 @@ const NEVER_UNDO_KEYS = new Set(['presence']);
 // conflict-free, and slots auto-clear when the WebSocket drops.
 // ---------------------------------------------------------------------------
 const presenceEmitter = new EventTarget();
+const busyEmitter = new EventTarget();
+const localBusySources = {
+  text: new Set(),
+  geometry: new Set(),
+};
+const normalizeBusyIds = (ids) => Array.from(new Set(
+  (Array.isArray(ids) || ids instanceof Set ? Array.from(ids) : [])
+    .filter((id) => typeof id === 'string' && id.length > 0),
+)).sort();
+const setLocalBusyItems = (source, ids) => {
+  if (!provider || (source !== 'text' && source !== 'geometry')) return;
+  const normalized = normalizeBusyIds(ids);
+  localBusySources[source] = new Set(source === 'text' ? normalized.slice(0, 1) : normalized);
+  const busyItems = normalizeBusyIds([
+    ...localBusySources.text,
+    ...localBusySources.geometry,
+  ]);
+  const current = normalizeBusyIds(provider.awareness.getLocalState()?.busyItems);
+  if (current.length === busyItems.length && current.every((id, i) => id === busyItems[i])) return;
+  provider.awareness.setLocalStateField('busyItems', busyItems.length ? busyItems : null);
+};
+const readRemoteBusyOwners = () => {
+  const out = new Map();
+  if (!provider) return out;
+  provider.awareness.getStates().forEach((state, awarenessClientId) => {
+    if (awarenessClientId === provider.awareness.clientID) return;
+    normalizeBusyIds(state?.busyItems).forEach((itemId) => {
+      let owners = out.get(itemId);
+      if (!owners) { owners = new Map(); out.set(itemId, owners); }
+      owners.set(awarenessClientId, state?.user || null);
+    });
+  });
+  return out;
+};
+const remoteBusySignature = (busy) => Array.from(busy.entries())
+  .sort(([a], [b]) => a.localeCompare(b))
+  .map(([itemId, owners]) => `${itemId}:${Array.from(owners.keys()).sort((a, b) => a - b).join(',')}`)
+  .join('|');
+let lastRemoteBusySignature = '';
 const readPresenceMap = () => {
   if (!provider) return {};
   const out = {};
@@ -400,6 +449,12 @@ const readPresenceMap = () => {
 };
 if (provider) {
   provider.awareness.on('change', () => {
+    const busy = readRemoteBusyOwners();
+    const signature = remoteBusySignature(busy);
+    if (signature !== lastRemoteBusySignature) {
+      lastRemoteBusySignature = signature;
+      busyEmitter.dispatchEvent(new CustomEvent('change', { detail: busy }));
+    }
     presenceEmitter.dispatchEvent(new Event('change'));
     // Fan into the main change emitter so existing storage.on('change')
     // handlers (RetroBoard's applyRemoteBoard router) keep receiving
@@ -537,17 +592,27 @@ if (provider) {
     },
     on(handler) { emitter.addEventListener('change', handler); },
     off(handler) { emitter.removeEventListener('change', handler); },
+    setLocalBusyItems,
+    findRemoteBusyItem(ids) {
+      const busy = readRemoteBusyOwners();
+      for (const itemId of normalizeBusyIds(ids)) {
+        const owners = busy.get(itemId);
+        if (!owners) continue;
+        const [clientID, user] = owners.entries().next().value;
+        return { itemId, clientID, user };
+      }
+      return null;
+    },
+    getRemoteBusyItems() { return readRemoteBusyOwners(); },
+    onBusyChange(handler) {
+      busyEmitter.addEventListener('change', handler);
+      return () => busyEmitter.removeEventListener('change', handler);
+    },
+    offBusyChange(handler) { busyEmitter.removeEventListener('change', handler); },
 
     // Uploads an image blob to the server and resolves to its served URL.
-    // `doc` associates the upload with this room for future orphan cleanup
-    // (not enforced as authz — the endpoint's trust model matches the WS
-    // relay's, an Origin-header allowlist, nothing per-room). Note: in prod
-    // the WS relay's actual persisted docName carries a `yjs/` prefix added
-    // by the tunnel (see yjs-server.mjs), which ROOM here doesn't include —
-    // harmless today since nothing consumes this param yet, but a future
-    // cleanup job matching against LevelDB docNames needs to account for it.
     async uploadImage(blob) {
-      const res = await fetch(`${UPLOAD_URL}?doc=${encodeURIComponent(ROOM)}`, {
+      const res = await fetch(UPLOAD_URL, {
         method: 'POST',
         body: blob,
         headers: { 'Content-Type': blob.type },
@@ -562,15 +627,23 @@ if (provider) {
       if (!item || !item.id) return;
       ydoc.transact(() => { seedItem(item.id, item); }, originOf(opts));
     },
+    addItems(items, opts) {
+      if (!Array.isArray(items) || !items.length) return;
+      ydoc.transact(() => {
+        items.forEach((item) => {
+          if (item && item.id) createItem(item.id, item);
+        });
+      }, originOf(opts));
+    },
     updateItem(id, patch, opts) {
       if (!id || !patch || typeof patch !== 'object') return;
-      ydoc.transact(() => { upsertItem(id, patch); }, originOf(opts));
+      ydoc.transact(() => { patchExistingItem(id, patch); }, originOf(opts));
     },
     updateItems(entries, opts) {
       if (!Array.isArray(entries) || !entries.length) return;
       ydoc.transact(() => {
         entries.forEach((e) => {
-          if (e && e.id && e.patch) upsertItem(e.id, e.patch);
+          if (e && e.id && e.patch) patchExistingItem(e.id, e.patch);
         });
       }, originOf(opts));
     },

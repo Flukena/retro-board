@@ -219,6 +219,21 @@ const storage = {
       window.storage.off(handler);
     }
   },
+  setLocalBusyItems(source, ids) {
+    try { window.storage?.setLocalBusyItems?.(source, ids); } catch { /* noop fallback */ }
+  },
+  findRemoteBusyItem(ids) {
+    try { return window.storage?.findRemoteBusyItem?.(ids) || null; } catch { return null; }
+  },
+  getRemoteBusyItems() {
+    try { return window.storage?.getRemoteBusyItems?.() || new Map(); } catch { return new Map(); }
+  },
+  onBusyChange(handler) {
+    try { return window.storage?.onBusyChange?.(handler) || (() => {}); } catch { return () => {}; }
+  },
+  offBusyChange(handler) {
+    try { window.storage?.offBusyChange?.(handler); } catch { /* noop fallback */ }
+  },
   // --- Granular board writes ---
   // Pass through to the Yjs bridge when present; otherwise mutate the in-memory
   // board so dev/preview (no relay) stays consistent. Each maps to one Yjs
@@ -226,6 +241,18 @@ const storage = {
   addItem(item, opts) {
     if (window.storage?.addItem) { window.storage.addItem(item, opts); return; }
     const b = memBoard(); memSetBoard({ ...b, items: [...b.items, item] });
+  },
+  addItems(items, opts) {
+    if (window.storage?.addItems) { window.storage.addItems(items, opts); return; }
+    const b = memBoard();
+    const ids = new Set(b.items.map((it) => it.id));
+    const additions = [];
+    items.forEach((it) => {
+      if (!it || !it.id || ids.has(it.id)) return;
+      ids.add(it.id);
+      additions.push(it);
+    });
+    memSetBoard({ ...b, items: [...b.items, ...additions] });
   },
   updateItem(id, patch, opts) {
     if (window.storage?.updateItem) { window.storage.updateItem(id, patch, opts); return; }
@@ -286,8 +313,11 @@ const insideZone = (p, z) =>
 // Shared by exportZoneCsv / exportBoardCsv.
 const csvColorName = (i) => ['yellow', 'red', 'green', 'blue', 'purple', 'orange'][i] || String(i);
 const csvEsc = (v) => {
-  const s = v == null ? '' : String(v);
-  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  let s = v == null ? '' : String(v);
+  if (/^[\s]*[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return /[",\n\r]/.test(s)
+    ? `"${s.replace(/"/g, '""')}"`
+    : s;
 };
 
 /* ============================================================
@@ -762,7 +792,12 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const [undoState, setUndoState] = useState({ canUndo: false, canRedo: false });
 
   const focusedTextIdRef = useRef(null);
-  useEffect(() => { focusedTextIdRef.current = focusedTextId; }, [focusedTextId]);
+  const updateFocusedText = useCallback((next) => {
+    focusedTextIdRef.current = next;
+    setFocusedTextId(next);
+    const itemId = typeof next === 'string' ? next.split(':')[0] : null;
+    storage.setLocalBusyItems('text', itemId ? [itemId] : []);
+  }, []);
 
   // Hold Space + drag = pan the canvas regardless of what's under the cursor
   // (Figma/Miro-style), overriding the normal "drag a card moves it" or
@@ -821,6 +856,12 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const editAreaRef = useRef(null);
   // Ids of items currently being dragged/resized locally — protected from remote overwrite of geometry.
   const dragItemsRef = useRef(null);
+  const activeGeometryFinalizerRef = useRef(null);
+  useEffect(() => () => {
+    activeGeometryFinalizerRef.current?.();
+    storage.setLocalBusyItems('geometry', []);
+    storage.setLocalBusyItems('text', []);
+  }, []);
 
   /* ---------- Derived ---------- */
   const timer = board.timer;
@@ -1006,7 +1047,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const addItemsLocal = useCallback((items) => {
     if (!items.length) return;
     setBoard((prev) => ({ ...prev, items: [...prev.items, ...items] }));
-    storage.updateItems(items.map((it) => ({ id: it.id, patch: it })));
+    storage.addItems(items);
   }, []);
 
   // ---- Board-level meta patch ----
@@ -1071,12 +1112,25 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     pendingGeomRef.current = null;
   }, [flushPendingGeom]);
 
+  const discardPendingGeometry = useCallback(() => {
+    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
+    pendingGeomRef.current = null;
+  }, []);
+
   /* ============================================================
      Realtime push: subscribe to storage change events.
      Polling kept as a long-interval safety net only.
      ============================================================ */
   const applyRemoteBoard = useCallback((remote) => {
     if (!remote) return;
+    const focusedItemId = focusedTextIdRef.current?.split(':')[0] || null;
+    if (focusedItemId && !remote.items?.some((it) => it.id === focusedItemId)) {
+      const localFocused = boardRef.current.items.find((it) => it.id === focusedItemId);
+      const isRecentLocalCreate = localFocused
+        && localFocused.authorId === userIdRef.current
+        && (localFocused.createdAt || 0) > Date.now() - 8000;
+      if (!isRecentLocalCreate) updateFocusedText(null);
+    }
     setBoard((prev) => {
       const next = { ...DEFAULT_BOARD, ...remote };
       const fid = focusedTextIdRef.current;
@@ -1134,7 +1188,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       if (localOnly.length) next.items = [...next.items, ...localOnly];
       return next;
     });
-  }, []);
+  }, [updateFocusedText]);
 
   useEffect(() => {
     if (!loaded) return undefined;
@@ -1154,6 +1208,12 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     // Re-read once now to catch up — and additionally re-read every time the
     // WebSocket re-syncs (reconnect, etc.) so React state never drifts from
     // the canonical yMeta/yItems.
+    // Subscribe to vote-key changes (local + remote) and rebuild the snapshot.
+    const voteHandler = () => {
+      if (typeof window !== 'undefined' && window.storage?.snapshotVotes) {
+        setVotesByItem(window.storage.snapshotVotes());
+      }
+    };
     const resync = () => {
       storage.get('boardState', true).then((r) => {
         if (r?.value) applyRemoteBoard(r.value);
@@ -1166,6 +1226,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       storage.get('customTemplates', true).then((r) => {
         if (Array.isArray(r?.value)) setCustomTemplates(r.value);
       });
+      voteHandler();
     };
     resync();
     const offSyncRefresh = window.storage?.onSynced?.(resync) || (() => {});
@@ -1176,14 +1237,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       if (bRec?.value) applyRemoteBoard(bRec.value);
       const pRec = await storage.get('presence', true);
       if (pRec?.value) setPresence(pRec.value);
+      voteHandler();
     };
     const interval = setInterval(safetyTick, POLL_SAFETY);
-    // Subscribe to vote-key changes (local + remote) and rebuild the snapshot.
-    const voteHandler = () => {
-      if (typeof window !== 'undefined' && window.storage?.snapshotVotes) {
-        setVotesByItem(window.storage.snapshotVotes());
-      }
-    };
     if (typeof window !== 'undefined' && window.storage?.onVotesChange) {
       window.storage.onVotesChange(voteHandler);
     }
@@ -1441,11 +1497,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
      Item operations
      ============================================================ */
 
-  const deleteItem = useCallback((id) => {
-    // Locked zones can't be deleted — checked here (not just at each call
-    // site) so the keyboard shortcut and bulk-select delete are covered too.
-    const it = boardRef.current.items.find((i) => i.id === id);
-    if (it?.type === 'zone' && it.locked) return;
+  const removeItemUnchecked = useCallback((id) => {
     // One Yjs transaction so Cmd+Z restores the item AND its votes together.
     // Falls back to the two-call path if the bridge is an older build that
     // doesn't expose the combined helper yet.
@@ -1466,8 +1518,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       n.delete(id);
       return n;
     });
-    setFocusedTextId((cur) => (cur && cur.startsWith(`${id}:`) ? null : cur));
-  }, []);
+    if (focusedTextIdRef.current?.startsWith(`${id}:`)) updateFocusedText(null);
+  }, [updateFocusedText]);
 
   const addSticky = useCallback((wx, wy) => {
     // Inherit the color of the deepest enclosing zone — when zones overlap
@@ -1513,9 +1565,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     };
     addItemLocal(it);
     setSelectedId(it.id);
-    setFocusedTextId(`${it.id}:text`);
+    updateFocusedText(`${it.id}:text`);
     setTimeout(() => editAreaRef.current?.focus(), 20);
-  }, [userId, userName, addItemLocal, setSelectedId]);
+  }, [userId, userName, addItemLocal, setSelectedId, updateFocusedText]);
 
   const addText = useCallback((wx, wy) => {
     const it = {
@@ -1530,12 +1582,12 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     };
     addItemLocal(it);
     setSelectedId(it.id);
-    setFocusedTextId(`${it.id}:text`);
+    updateFocusedText(`${it.id}:text`);
     setTimeout(() => {
       const el = editAreaRef.current;
       if (el) { el.focus(); el.select(); }
     }, 20);
-  }, [userId, userName, addItemLocal, setSelectedId]);
+  }, [userId, userName, addItemLocal, setSelectedId, updateFocusedText]);
 
   const addZone = useCallback((x, y, w, h, title = 'Untitled', color = 0) => {
     const it = {
@@ -1721,6 +1773,30 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
      Admin gates
      ============================================================ */
   const editingAllowed = isAdmin || !board.editingLocked;
+  const canModifyOwnedItem = useCallback((item) => (
+    editingAllowed && (item.authorId === userId || isAdmin || item.type === 'zone')
+  ), [editingAllowed, isAdmin, userId]);
+
+  const canDeleteItem = useCallback((item) => (
+    canModifyOwnedItem(item) && !(item.type === 'zone' && item.locked)
+  ), [canModifyOwnedItem]);
+
+  const deleteItemsIfAllowed = useCallback((candidateIds) => {
+    const ids = new Set(candidateIds);
+    const items = boardRef.current.items.filter((item) => ids.has(item.id));
+    if (!items.length) return false;
+    if (!editingAllowed) {
+      setToast({ msg: t('common.warnLockEdit'), type: 'warn' });
+      return false;
+    }
+    if (!items.every(canDeleteItem)) {
+      setToast({ msg: t('common.warnDeleteDenied'), type: 'warn' });
+      return false;
+    }
+    items.forEach((item) => removeItemUnchecked(item.id));
+    return true;
+  }, [canDeleteItem, editingAllowed, removeItemUnchecked]);
+
   // Voting is only possible while a vote session (timer) is running. The lock
   // is an in-session pause an admin can toggle; default unlocked so starting a
   // timer enables voting immediately.
@@ -1733,6 +1809,20 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     }
     return true;
   }, [editingAllowed]);
+
+  const requireMove = useCallback((candidateIds) => {
+    const ids = Array.from(new Set(
+      Array.from(candidateIds || []).filter((id) => typeof id === 'string' && id.length > 0),
+    )).sort();
+    const focusedItemId = focusedTextIdRef.current?.split(':')[0] || null;
+    if (focusedItemId && ids.includes(focusedItemId)) return false;
+    if (storage.findRemoteBusyItem(ids)) {
+      setToast({ msg: t('common.warnItemBusy'), type: 'warn' });
+      return false;
+    }
+    storage.setLocalBusyItems('geometry', ids);
+    return true;
+  }, []);
 
   /* ============================================================
      Voting
@@ -1873,8 +1963,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         const h = Math.max(ZONE_MIN_H, Math.abs(lastWorld.y - start.y));
         const id = addZone(x, y, w, h);
         // Focus the new zone's title so the user can name it.
+        updateFocusedText(`${id}:title`);
         setTimeout(() => {
-          setFocusedTextId(`${id}:title`);
           editAreaRef.current?.focus();
           editAreaRef.current?.select?.();
         }, 30);
@@ -1959,7 +2049,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-  }, [selectedIds, requireEdit, screenToWorld, addZone, applyViewportToDom]);
+  }, [selectedIds, requireEdit, screenToWorld, addZone, applyViewportToDom, updateFocusedText]);
 
   const onCanvasDoubleClick = useCallback((e) => {
     if (e.target !== canvasRef.current && e.target.dataset?.surface !== '1') return;
@@ -1971,8 +2061,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
 
   /* ----- Item drag (supports group when multi-selected) ----- */
   const startItemDrag = useCallback((e, item) => {
-    if (!requireEdit()) return;
-    if (focusedTextIdRef.current === item.id) return;
     // Space held → let the mousedown bubble to onCanvasMouseDown and pan
     // instead of dragging the card underneath the cursor.
     if (spaceHeldRef.current) return;
@@ -1998,20 +2086,48 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       if (dragIds.has(it.id)) seeds.set(it.id, { x: it.x, y: it.y });
     });
     let moved = false;
+    let claimed = false;
+    let finished = false;
     interactionRef.current = { kind: 'maybe-drag' };
     // Coalesce mousemove updates to one per animation frame so trackpads /
     // high-refresh displays don't fire React updates faster than the screen
     // can paint them.
     let rafId = null;
     let pending = null;
+    const removeListeners = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('blur', onBlur);
+      storage.offBusyChange(onBusyChange);
+    };
+    const abortGesture = () => {
+      if (finished) return;
+      finished = true;
+      if (rafId != null) { cancelAnimationFrame(rafId); rafId = null; }
+      pending = null;
+      if (moved) discardPendingGeometry();
+      dragItemsRef.current = null;
+      if (claimed) storage.setLocalBusyItems('geometry', []);
+      interactionRef.current = null;
+      removeListeners();
+      if (activeGeometryFinalizerRef.current === onBlur) activeGeometryFinalizerRef.current = null;
+    };
+    const onBusyChange = () => {
+      if (!storage.findRemoteBusyItem(seeds.keys())) return;
+      setToast({ msg: t('common.warnItemBusy'), type: 'warn' });
+      abortGesture();
+    };
     const applyMove = (clientX, clientY) => {
       const dx = clientX - start.x;
       const dy = clientY - start.y;
       if (!moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
       if (!moved) {
+        if (!requireMove(seeds.keys())) { abortGesture(); return; }
+        claimed = true;
         moved = true;
         interactionRef.current = { kind: 'drag' };
-        dragItemsRef.current = new Set(dragIds);
+        dragItemsRef.current = new Set(seeds.keys());
+        storage.onBusyChange(onBusyChange);
       }
       const z = viewportRef.current.zoom;
       const wx = dx / z;
@@ -2030,30 +2146,35 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         if (p) applyMove(p.x, p.y);
       });
     };
-    const onUp = () => {
+    const finalize = (allowClick) => {
+      if (finished) return;
       if (rafId != null) { cancelAnimationFrame(rafId); rafId = null; }
       if (pending) { const p = pending; pending = null; applyMove(p.x, p.y); }
-      const wasDragging = moved;
-      interactionRef.current = null;
+      if (finished) return;
+      finished = true;
+      if (moved) endGeometry();
       dragItemsRef.current = null;
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-      // Force immediate final geometry flush (bypass throttle).
-      if (wasDragging) endGeometry();
-      if (!moved) {
+      if (claimed) storage.setLocalBusyItems('geometry', []);
+      interactionRef.current = null;
+      removeListeners();
+      if (activeGeometryFinalizerRef.current === onBlur) activeGeometryFinalizerRef.current = null;
+      if (allowClick && !moved) {
         if (shiftToggle) setSelectedIds(dragIds);
         else setSelectedId(item.id);
       } else {
-        setSelectedIds(dragIds);
+        if (moved) setSelectedIds(dragIds);
       }
     };
+    const onUp = () => finalize(true);
+    const onBlur = () => finalize(false);
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-  }, [requireEdit, commitGeometry, endGeometry, setSelectedId]);
+    window.addEventListener('blur', onBlur);
+    activeGeometryFinalizerRef.current = onBlur;
+  }, [requireMove, commitGeometry, endGeometry, discardPendingGeometry, setSelectedId]);
 
   /* ----- Zone title drag (with children) ----- */
   const startZoneDrag = useCallback((e, zone) => {
-    if (!requireEdit()) return;
     // Space held → let the mousedown bubble to onCanvasMouseDown and pan
     // instead of dragging the zone underneath the cursor.
     if (spaceHeldRef.current) return;
@@ -2089,18 +2210,46 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       if (draggedIds.has(it.id)) initial.set(it.id, { x: it.x, y: it.y });
     });
     let moved = false;
+    let claimed = false;
+    let finished = false;
     interactionRef.current = { kind: 'maybe-drag' };
     // See startItemDrag for why we coalesce mousemove via rAF.
     let rafId = null;
     let pending = null;
+    const removeListeners = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('blur', onBlur);
+      storage.offBusyChange(onBusyChange);
+    };
+    const abortGesture = () => {
+      if (finished) return;
+      finished = true;
+      if (rafId != null) { cancelAnimationFrame(rafId); rafId = null; }
+      pending = null;
+      if (moved) discardPendingGeometry();
+      dragItemsRef.current = null;
+      if (claimed) storage.setLocalBusyItems('geometry', []);
+      interactionRef.current = null;
+      removeListeners();
+      if (activeGeometryFinalizerRef.current === onBlur) activeGeometryFinalizerRef.current = null;
+    };
+    const onBusyChange = () => {
+      if (!storage.findRemoteBusyItem(initial.keys())) return;
+      setToast({ msg: t('common.warnItemBusy'), type: 'warn' });
+      abortGesture();
+    };
     const applyMove = (clientX, clientY) => {
       const dx = clientX - start.x;
       const dy = clientY - start.y;
       if (!moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
       if (!moved) {
+        if (!requireMove(initial.keys())) { abortGesture(); return; }
+        claimed = true;
         moved = true;
         interactionRef.current = { kind: 'drag' };
         dragItemsRef.current = new Set(initial.keys());
+        storage.onBusyChange(onBusyChange);
       }
       const z = viewportRef.current.zoom;
       const wx = dx / z;
@@ -2119,24 +2268,30 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         if (p) applyMove(p.x, p.y);
       });
     };
-    const onUp = () => {
+    const finalize = (allowClick) => {
+      if (finished) return;
       if (rafId != null) { cancelAnimationFrame(rafId); rafId = null; }
       if (pending) { const p = pending; pending = null; applyMove(p.x, p.y); }
-      const wasDragging = moved;
-      interactionRef.current = null;
+      if (finished) return;
+      finished = true;
+      if (moved) endGeometry();
       dragItemsRef.current = null;
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-      if (wasDragging) endGeometry();
-      if (!moved) setSelectedId(zone.id);
+      if (claimed) storage.setLocalBusyItems('geometry', []);
+      interactionRef.current = null;
+      removeListeners();
+      if (activeGeometryFinalizerRef.current === onBlur) activeGeometryFinalizerRef.current = null;
+      if (allowClick && !moved) setSelectedId(zone.id);
     };
+    const onUp = () => finalize(true);
+    const onBlur = () => finalize(false);
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-  }, [requireEdit, commitGeometry, endGeometry, setSelectedId]);
+    window.addEventListener('blur', onBlur);
+    activeGeometryFinalizerRef.current = onBlur;
+  }, [requireMove, commitGeometry, endGeometry, discardPendingGeometry, setSelectedId]);
 
   /* ----- Generic item resize (zone / sticky / image) ----- */
   const startItemResize = useCallback((e, item, corner) => {
-    if (!requireEdit()) return;
     if (item.type === 'zone' && item.locked) return;
     e.stopPropagation();
     let minW = ZONE_MIN_W;
@@ -2148,8 +2303,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     const h0 = item.h || (item.type === 'sticky' ? STICKY_H : 200);
     const start = { x: e.clientX, y: e.clientY };
     const initial = { x: item.x, y: item.y, w: w0, h: h0 };
+    if (!requireMove([item.id])) return;
     interactionRef.current = { kind: 'drag' };
     dragItemsRef.current = new Set([item.id]);
+    let finished = false;
     const onMove = (ev) => {
       const z = viewportRef.current.zoom;
       let dx = (ev.clientX - start.x) / z;
@@ -2186,20 +2343,38 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       }
       commitGeometry([{ id: item.id, patch: { x, y, w, h } }]);
     };
-    const onUp = () => {
-      interactionRef.current = null;
-      dragItemsRef.current = null;
+    const removeListeners = () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
-      endGeometry();
+      window.removeEventListener('blur', onBlur);
+      storage.offBusyChange(onBusyChange);
     };
+    const finalize = () => {
+      if (finished) return;
+      finished = true;
+      endGeometry();
+      dragItemsRef.current = null;
+      storage.setLocalBusyItems('geometry', []);
+      interactionRef.current = null;
+      removeListeners();
+      if (activeGeometryFinalizerRef.current === onBlur) activeGeometryFinalizerRef.current = null;
+    };
+    const onBusyChange = () => {
+      if (!storage.findRemoteBusyItem([item.id])) return;
+      setToast({ msg: t('common.warnItemBusy'), type: 'warn' });
+      finalize();
+    };
+    const onUp = () => finalize();
+    const onBlur = () => finalize();
+    storage.onBusyChange(onBusyChange);
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-  }, [requireEdit, commitGeometry, endGeometry]);
+    window.addEventListener('blur', onBlur);
+    activeGeometryFinalizerRef.current = onBlur;
+  }, [requireMove, commitGeometry, endGeometry]);
 
   /* ----- Group resize (scales all selected items around opposite corner) ----- */
   const startGroupResize = useCallback((e, corner) => {
-    if (!requireEdit()) return;
     e.stopPropagation();
     const items = boardRef.current.items.filter((it) => selectedIds.has(it.id));
     if (items.length < 2) return;
@@ -2236,8 +2411,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         minScaleY = Math.max(minScaleY, mh / s.h);
       }
     });
+    if (!requireMove(seeds.keys())) return;
     interactionRef.current = { kind: 'drag' };
-    dragItemsRef.current = new Set(selectedIds);
+    dragItemsRef.current = new Set(seeds.keys());
+    let finished = false;
     // Signs that map a corner's outward direction onto positive growth — using
     // these on raw deltas (not abs) keeps shrink and grow symmetric so the
     // aspect lock holds in both directions.
@@ -2279,16 +2456,35 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       });
       commitGeometry(entries);
     };
-    const onUp = () => {
-      interactionRef.current = null;
-      dragItemsRef.current = null;
+    const removeListeners = () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
-      endGeometry();
+      window.removeEventListener('blur', onBlur);
+      storage.offBusyChange(onBusyChange);
     };
+    const finalize = () => {
+      if (finished) return;
+      finished = true;
+      endGeometry();
+      dragItemsRef.current = null;
+      storage.setLocalBusyItems('geometry', []);
+      interactionRef.current = null;
+      removeListeners();
+      if (activeGeometryFinalizerRef.current === onBlur) activeGeometryFinalizerRef.current = null;
+    };
+    const onBusyChange = () => {
+      if (!storage.findRemoteBusyItem(seeds.keys())) return;
+      setToast({ msg: t('common.warnItemBusy'), type: 'warn' });
+      finalize();
+    };
+    const onUp = () => finalize();
+    const onBlur = () => finalize();
+    storage.onBusyChange(onBusyChange);
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-  }, [requireEdit, selectedIds, commitGeometry, endGeometry]);
+    window.addEventListener('blur', onBlur);
+    activeGeometryFinalizerRef.current = onBlur;
+  }, [requireMove, selectedIds, commitGeometry, endGeometry]);
 
   /* ----- Duplicate selected items (offset clones into board) ----- */
   const duplicateItems = useCallback((sourceItems, offset = 24) => {
@@ -2327,13 +2523,17 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     const onKey = (e) => {
       if (focusedTextIdRef.current) return;
       if (nameModalOpen) return;
+      const el = e.target instanceof Element ? e.target : null;
+      if (el?.closest(
+        'input, textarea, select, [contenteditable="true"], '
+        + '[role="dialog"], [data-board-shortcuts="off"]',
+      )) return;
       if (e.key === 'Escape') {
         if (creationModeRef.current) { setCreationMode(null); setZonePreview(null); return; }
         setSelectedIds(new Set());
       }
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedIds.size > 0) {
-        if (!editingAllowed) return;
-        [...selectedIds].forEach((id) => deleteItem(id));
+        deleteItemsIfAllowed(selectedIds);
       }
       // Copy / cut / paste / duplicate / undo / redo selected items.
       const meta = e.ctrlKey || e.metaKey;
@@ -2345,11 +2545,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       if ((k === 'c' || k === 'x') && selectedIds.size > 0) {
         e.preventDefault();
         const picked = boardRef.current.items.filter((it) => selectedIds.has(it.id));
+        if (k === 'x' && !deleteItemsIfAllowed(picked.map((it) => it.id))) return;
         clipboardRef.current = picked.map((it) => ({ ...it }));
         setToast({ msg: t('copy.done', { n: picked.length }), type: 'info' });
-        if (k === 'x' && editingAllowed) {
-          [...selectedIds].forEach((id) => deleteItem(id));
-        }
       }
       if (k === 'v' && clipboardRef.current?.length) {
         e.preventDefault();
@@ -2367,7 +2565,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [nameModalOpen, selectedIds, editingAllowed, deleteItem, duplicateItems, doUndo, doRedo]);
+  }, [nameModalOpen, selectedIds, deleteItemsIfAllowed, duplicateItems, doUndo, doRedo]);
 
   /* ============================================================
      Image import (paste + drop)
@@ -2441,7 +2639,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       return;
     }
     setSelectedId(it.id);
-    setFocusedTextId(`${it.id}:${fieldKey}`);
+    updateFocusedText(`${it.id}:${fieldKey}`);
     setTimeout(() => {
       const el = editAreaRef.current;
       if (el) {
@@ -2450,19 +2648,19 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         if (typeof el.value === 'string') el.setSelectionRange(el.value.length, el.value.length);
       }
     }, 10);
-  }, [canEditItem, setSelectedId]);
+  }, [canEditItem, setSelectedId, updateFocusedText]);
 
   const onTextChange = useCallback((id, patch) => {
     updateItem(id, patch);
   }, [updateItem]);
 
   const onTextBlur = useCallback((id) => {
-    setFocusedTextId((cur) => (cur && cur.startsWith(`${id}:`) ? null : cur));
+    if (focusedTextIdRef.current?.startsWith(`${id}:`)) updateFocusedText(null);
     const it = boardRef.current.items.find((i) => i.id === id);
     if (it && (it.type === 'sticky' || it.type === 'text') && !(it.text || '').trim()) {
-      deleteItem(id);
+      deleteItemsIfAllowed([id]);
     }
-  }, [deleteItem]);
+  }, [deleteItemsIfAllowed, updateFocusedText]);
 
   const onTextKeyDown = useCallback((e, opts = {}) => {
     if (e.key === 'Escape') {
@@ -2964,7 +3162,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       sx = selectedItem.x * v.zoom + v.x + 60;
       sy = selectedItem.y * v.zoom + v.y - 14;
     }
-    const can = editingAllowed && (selectedItem.authorId === userId || isAdmin || selectedItem.type === 'zone');
+    const can = canModifyOwnedItem(selectedItem);
+    const canDelete = canDeleteItem(selectedItem);
     return (
       <div
         style={{
@@ -3129,10 +3328,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         )}
         <button
           type="button"
-          onClick={() => can && !selectedItem.locked && deleteItem(selectedItem.id)}
-          disabled={!can || selectedItem.locked}
+          onClick={() => deleteItemsIfAllowed([selectedItem.id])}
+          disabled={!canDelete}
           title={selectedItem.locked ? t('zone.lockedDeleteTitle') : t('common.delete')}
-          style={{ ...iconBtn(can && !selectedItem.locked), color: can && !selectedItem.locked ? '#ef4444' : 'var(--border)' }}
+          style={{ ...iconBtn(canDelete), color: canDelete ? '#ef4444' : 'var(--border)' }}
         >
           <Trash2 size={15} />
         </button>
@@ -3436,6 +3635,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                 style={{ position: 'fixed', inset: 0, zIndex: 59 }}
               />
               <div
+                data-board-shortcuts="off"
                 style={{
                   position: 'absolute', top: '110%', right: 0,
                   background: 'var(--bg-panel)', borderRadius: 10,
@@ -3774,6 +3974,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                 style={{ position: 'fixed', inset: 0, zIndex: 59 }}
               />
               <div
+                data-board-shortcuts="off"
                 style={{
                   position: 'absolute', bottom: '120%', left: 0,
                   background: 'var(--bg-panel)', borderRadius: 12, padding: 8,
@@ -4169,6 +4370,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       {/* Reset votes confirm */}
       {confirmResetVotes && (
         <div
+          role="dialog"
+          aria-modal="true"
           style={{
             position: 'fixed', inset: 0, zIndex: 100,
             background: 'rgba(0,0,0,0.4)',
@@ -4194,6 +4397,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <button
                 type="button"
+                autoFocus
                 onClick={() => setConfirmResetVotes(false)}
                 style={{
                   background: 'var(--bg-panel-2)', color: 'var(--text-mid)', border: 'none',
@@ -4220,6 +4424,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       {/* Import confirm */}
       {pendingImport && (
         <div
+          role="dialog"
+          aria-modal="true"
           style={{
             position: 'fixed', inset: 0, zIndex: 100,
             background: 'var(--bg-modal-veil)',
@@ -4246,6 +4452,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <button
                 type="button"
+                autoFocus
                 onClick={() => setPendingImport(null)}
                 style={{
                   background: 'var(--bg-panel-2)', color: 'var(--text-mid)', border: 'none',
@@ -4283,6 +4490,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
 
       {confirmClear && (
         <div
+          role="dialog"
+          aria-modal="true"
           style={{
             position: 'fixed', inset: 0, zIndex: 100,
             background: 'var(--bg-modal-veil)',
@@ -4306,6 +4515,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <button
                 type="button"
+                autoFocus
                 onClick={() => setConfirmClear(false)}
                 style={{
                   background: 'var(--bg-panel-2)', color: 'var(--text-mid)', border: 'none',
@@ -4417,6 +4627,8 @@ function AdminPinModal({ cfg, onCancel, onSubmit }) {
   };
   return (
     <div
+      role="dialog"
+      aria-modal="true"
       style={{
         position: 'fixed', inset: 0, zIndex: 110,
         background: 'rgba(0,0,0,0.45)',
@@ -4635,6 +4847,7 @@ function TimerSetup({ onClose, onStart }) {
   const submit = () => onStart(noTimeLimit ? 0 : minutes, unlimitedVotes ? null : votes);
   return (
     <div
+      data-board-shortcuts="off"
       onMouseDown={(e) => e.stopPropagation()}
       style={{
         position: 'absolute', top: '110%', right: 0, marginTop: 6,
@@ -4753,6 +4966,8 @@ function SaveTemplateModal({ onClose, onSave, zoneCount }) {
   const [name, setName] = useState('');
   return (
     <div
+      role="dialog"
+      aria-modal="true"
       style={{
         position: 'fixed', inset: 0, zIndex: 100,
         background: 'var(--bg-modal-veil)',

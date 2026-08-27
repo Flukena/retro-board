@@ -1,8 +1,7 @@
 # ---- build stage --------------------------------------------------------
-# Compiles the React app to static assets with Vite. .env.local is included
-# via the build context (no .dockerignore entry) so VITE_* values are baked
-# into the bundle at build time. VITE_YJS_PORT is exposed as a build arg so
-# the bundle knows the host port the yjs relay will be reachable on.
+# Compiles the React app to static assets with Vite. Build-time VITE_* values
+# are supplied explicitly through build args instead of copying .env files.
+# VITE_YJS_PORT tells the bundle which host port exposes the yjs relay.
 FROM node:20-alpine AS build
 
 WORKDIR /app

@@ -78,25 +78,28 @@ export function useAdminRole({
         // the same identity is then "admin of two boards at once". Non-creators
         // must use the PIN-gated Transfer Admin flow to take over.
         if (!isBoardCreatedByMe(boardCode, boardToken)) return;
-        const online = Object.values(pmap)
-          .filter((p) => Date.now() - (p.lastSeen || 0) < ONLINE_WINDOW)
-          .map((p) => p.userId)
-          .sort();
-        const winner = online[0];
-        if (winner === userId) {
-          // Re-read adminUserId from yMeta right before claiming. The await
-          // calls above let other clients (or our own remote update) write
-          // adminUserId in between; without this CAS-style guard we'd
-          // overwrite a fresh claim with our own and produce two admins
-          // diverging until the next sync round.
-          const latestAdmin = window.storage?.getAdminUserId?.();
-          if (latestAdmin && latestAdmin !== userId) return;
-          // Immediate flush — bypass the 200ms debounce so the claim lands
-          // in yMeta on the first tick. Otherwise a second client racing
-          // the same election can miss our write and double-claim.
-          patchMeta({ adminUserId: userId, adminName: effectiveName });
-          setToast({ msg: t('transfer.becomeAdmin'), type: 'info' });
-        }
+        // The creator is the only eligible claimant, so there is no election to
+        // run. Picking a winner from every online user was self-defeating: a
+        // guest whose random userId sorted first became the "winner", the
+        // creator then failed `winner === userId`, and the guest had already
+        // returned at the gate above — leaving the board with no admin at all.
+        //
+        // Re-read adminUserId from yMeta right before claiming. The await
+        // calls above let other clients (or our own remote update) write
+        // adminUserId in between; without this CAS-style guard we'd
+        // overwrite a fresh claim with our own and produce two admins
+        // diverging until the next sync round. Compare against the value we
+        // sampled before those awaits, not against our own id: in the very
+        // case this election exists for — a stale admin who left — the field
+        // still holds that departed user's id, which never equals ours, so
+        // comparing to `userId` aborted the claim every single time.
+        const latestAdmin = window.storage?.getAdminUserId?.();
+        if (latestAdmin !== adminUserId) return;
+        // Immediate flush — bypass the 200ms debounce so the claim lands
+        // in yMeta on the first tick. Otherwise a second client racing
+        // the same election can miss our write and double-claim.
+        patchMeta({ adminUserId: userId, adminName: effectiveName });
+        setToast({ msg: t('transfer.becomeAdmin'), type: 'info' });
       }
     };
     beat();
@@ -117,7 +120,16 @@ export function useAdminRole({
       setToast({ msg: t('common.adminOnly'), type: 'warn' });
       return;
     }
-    if (pinSessionOkRef.current) { onSuccess(); return; }
+    if (pinSessionOkRef.current) {
+      // Revalidate here too: React state may lag behind the live admin role.
+      if (window.storage?.getAdminUserId?.() !== userId) {
+        pinSessionOkRef.current = false;
+        setToast({ msg: t('common.adminOnly'), type: 'warn' });
+        return;
+      }
+      onSuccess();
+      return;
+    }
     if (typeof crypto === 'undefined' || !crypto.subtle) {
       setToast({ msg: t('pin.needsHttps') || 'Admin PIN requires HTTPS', type: 'warn' });
       return;
@@ -128,6 +140,18 @@ export function useAdminRole({
       error: null,
       onSuccess: async (pin) => {
         const hash = await hashAdminPin(boardCode, pin);
+        // Revalidate before anything is written, not just at button press.
+        // `isAdmin` was captured when this callback was built; the role can be
+        // transferred away while the modal is open or during the hash above.
+        // This has to precede the patchMeta below — otherwise someone who has
+        // just lost the role still writes adminPinHash into the shared board.
+        // adminClaim already does a live re-read before committing; this path
+        // was the asymmetric one.
+        if (window.storage?.getAdminUserId?.() !== userId) {
+          setPinPromptCfg(null);
+          setToast({ msg: t('common.adminOnly'), type: 'warn' });
+          return;
+        }
         const cur = boardRef.current.adminPinHash;
         if (!cur) {
           // Set mode — persist the new PIN's hash into the shared board.
@@ -143,7 +167,7 @@ export function useAdminRole({
       },
       onCancel: () => setPinPromptCfg(null),
     });
-  }, [isAdmin, boardCode, boardRef, patchMeta, setToast]);
+  }, [isAdmin, userId, boardCode, boardRef, patchMeta, setToast]);
 
   // Claim admin when there is none active. Anyone holding the PIN can take
   // over a vacant role. Without this flow a board where the creator lost
@@ -184,8 +208,10 @@ export function useAdminRole({
         }
         // CAS-style re-check post-await — if a peer just claimed admin in
         // the meantime, abort rather than overwrite their fresh claim.
+        const latestPresence = (await storage.get('presence', true))?.value || {};
         const latestAdmin = window.storage?.getAdminUserId?.();
-        if (latestAdmin && onlineUsers.some((u) => u.userId === latestAdmin)) {
+        const latestAdminSeen = latestAdmin ? latestPresence[latestAdmin]?.lastSeen || 0 : 0;
+        if (latestAdmin && Date.now() - latestAdminSeen < ONLINE_WINDOW) {
           setPinPromptCfg(null);
           setToast({ msg: t('common.adminOnly'), type: 'warn' });
           return;
@@ -202,7 +228,7 @@ export function useAdminRole({
       },
       onCancel: () => setPinPromptCfg(null),
     });
-  }, [isAdmin, userId, userName, boardCode, onlineUsers, boardRef, patchMeta, setToast]);
+  }, [isAdmin, userId, userName, boardCode, onlineUsers, boardRef, patchMeta, setToast, storage]);
 
   const adminTransfer = useCallback((toId) => {
     if (!isAdmin) return;

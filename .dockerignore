@@ -4,6 +4,11 @@ yjs-db
 .git
 .gitignore
 .DS_Store
+.env
+.env.*
+uploads
+cloudflared*.yml
+.playwright-cli
 *.log
 npm-debug.log*
 Dockerfile*
