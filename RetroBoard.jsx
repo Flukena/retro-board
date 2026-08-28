@@ -58,6 +58,10 @@ const ZONE_MIN_W = 240;
 const ZONE_MIN_H = 200;
 const IMAGE_MIN_W = 60;
 const IMAGE_MIN_H = 40;
+const TEXT_W = 400;
+const TEXT_H = 80;
+const TEXT_MIN_W = 60;
+const TEXT_MIN_H = 30;
 const IMAGE_MAX_DIM = 1200; // resize larger imports down to this max edge
 // Hard cap on accepted image blob size before any resize/upload. Larger
 // files are rejected up front so we don't OOM the page decoding them.
@@ -428,6 +432,7 @@ const centerOf = (it) => {
     const h = it.h || STICKY_H;
     return { x: it.x + w / 2, y: it.y + h / 2 };
   }
+  if (it.type === 'text') return { x: it.x + (it.w || TEXT_W) / 2, y: it.y + (it.h || TEXT_H) / 2 };
   if (it.type === 'image') return { x: it.x + (it.w || 200) / 2, y: it.y + (it.h || 200) / 2 };
   return { x: it.x, y: it.y };
 };
@@ -771,6 +776,11 @@ const TextCard = React.memo(function TextCard({
         cursor: isEditing ? 'text' : 'grab',
         userSelect: 'none',
         padding: '4px 8px',
+        width: it.w || TEXT_W,
+        height: it.h || TEXT_H,
+        overflow: 'hidden',
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-word',
         outline: selected ? '2px dashed #2563eb' : 'none',
         outlineOffset: 6,
         borderRadius: 6,
@@ -778,18 +788,18 @@ const TextCard = React.memo(function TextCard({
       }}
     >
       {isEditing ? (
-        <input
+        <textarea
           ref={editAreaRef}
           value={it.text || ''}
           onChange={(e) => onTextChange(it.id, { text: e.target.value })}
-          onKeyDown={(e) => onTextKeyDown(e, { singleLine: true })}
+          onKeyDown={(e) => onTextKeyDown(e)}
           onBlur={() => onTextBlur(it.id)}
           onMouseDown={(e) => e.stopPropagation()}
           style={{
-            fontFamily: 'inherit', fontSize: it.fontSize || 40,
-            color: it.fontColor || 'var(--text)',
+            width: '100%', height: '100%',
             background: 'transparent', border: 'none', outline: 'none',
-            minWidth: 220,
+            resize: 'none', fontFamily: 'inherit', fontSize: it.fontSize || 40,
+            color: it.fontColor || 'var(--text)',
           }}
         />
       ) : it.text}
@@ -1066,8 +1076,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     const wy1 = (viewportSize.h - cullViewport.y) / z;
     const margin = 600 / z;
     return sortedItems.filter((it) => {
-      const iw = it.w || (it.type === 'sticky' ? STICKY_W : it.type === 'text' ? 400 : 200);
-      const ih = it.h || (it.type === 'sticky' ? STICKY_H : it.type === 'text' ? 80 : 200);
+      const iw = it.w || (it.type === 'sticky' ? STICKY_W : it.type === 'text' ? TEXT_W : 200);
+      const ih = it.h || (it.type === 'sticky' ? STICKY_H : it.type === 'text' ? TEXT_H : 200);
       // Zones host a title bar that hangs above their box — extend the AABB
       // upward by a conservative title height so the bar isn't clipped first.
       const topPad = it.type === 'zone' ? Math.max(ZONE_TITLE_H, (it.fontSize || 14) + 18) : 0;
@@ -1717,6 +1727,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       type: 'text',
       x: wx,
       y: wy,
+      w: TEXT_W,
+      h: TEXT_H,
       authorId: userId,
       authorName: userName,
       createdAt: Date.now(),
@@ -2564,12 +2576,24 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     } else {
       draggedIds.add(zone.id);
       const zoneArea = zone.w * zone.h;
+      const allZones = boardRef.current.items.filter((i) => i.type === 'zone');
+      // Pass 1: pull in nested zones exactly as before (strictly smaller, to avoid
+      // mutual-containment loops between overlapping zones of similar size).
+      allZones.forEach((z) => {
+        if (z.id === zone.id) return;
+        if (z.w * z.h >= zoneArea) return;
+        if (insideZone(centerOf(z), zone)) draggedIds.add(z.id);
+      });
+      // Pass 2: pull in non-zone items only if `zone` (or a nested zone just
+      // pulled in above) is their SMALLEST enclosing zone — otherwise they belong
+      // to some other, more specific zone that isn't moving, and must stay put.
+      // Same tie-break convention as finalizeVotingSession/exportBoardCsv.
       boardRef.current.items.forEach((it) => {
-        if (it.id === zone.id) return;
-        if (!insideZone(centerOf(it), zone)) return;
-        // Avoid mutual-containment loops between zones — only pull in strictly-smaller zones.
-        if (it.type === 'zone' && it.w * it.h >= zoneArea) return;
-        draggedIds.add(it.id);
+        if (it.type === 'zone' || draggedIds.has(it.id)) return;
+        const owner = allZones
+          .filter((z) => insideZone(centerOf(it), z))
+          .sort((za, zc) => (za.w * za.h) - (zc.w * zc.h))[0];
+        if (owner && draggedIds.has(owner.id)) draggedIds.add(it.id);
       });
     }
     const start = { x: e.clientX, y: e.clientY };
@@ -2662,7 +2686,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     setSelectedId, settleWheelBeforeInteraction,
   ]);
 
-  /* ----- Generic item resize (zone / sticky / image) ----- */
+  /* ----- Generic item resize (zone / sticky / image / text) ----- */
   const startItemResize = useCallback((e, item, corner) => {
     if (spaceHeldRef.current || e.button === 1) { startPan(e); return; }
     if (item.type === 'zone' && item.locked) return;
@@ -2671,9 +2695,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     let minH = ZONE_MIN_H;
     if (item.type === 'sticky') { minW = STICKY_MIN_W; minH = STICKY_MIN_H; }
     else if (item.type === 'image') { minW = IMAGE_MIN_W; minH = IMAGE_MIN_H; }
+    else if (item.type === 'text') { minW = TEXT_MIN_W; minH = TEXT_MIN_H; }
     const aspectLock = item.type === 'image' && !e.altKey;
-    const w0 = item.w || (item.type === 'sticky' ? STICKY_W : 200);
-    const h0 = item.h || (item.type === 'sticky' ? STICKY_H : 200);
+    const w0 = item.w || (item.type === 'sticky' ? STICKY_W : item.type === 'text' ? TEXT_W : 200);
+    const h0 = item.h || (item.type === 'sticky' ? STICKY_H : item.type === 'text' ? TEXT_H : 200);
     const start = { x: e.clientX, y: e.clientY };
     const initial = { x: item.x, y: item.y, w: w0, h: h0 };
     if (!requireMove([item.id])) return;
@@ -2758,8 +2783,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     let maxX = -Infinity; let maxY = -Infinity;
     const seeds = new Map();
     items.forEach((it) => {
-      const w = it.w || (it.type === 'sticky' ? STICKY_W : it.type === 'image' ? 200 : 0);
-      const h = it.h || (it.type === 'sticky' ? STICKY_H : it.type === 'image' ? 200 : 0);
+      const w = it.w || (it.type === 'sticky' ? STICKY_W : it.type === 'image' ? 200 : it.type === 'text' ? TEXT_W : 0);
+      const h = it.h || (it.type === 'sticky' ? STICKY_H : it.type === 'image' ? 200 : it.type === 'text' ? TEXT_H : 0);
       seeds.set(it.id, { type: it.type, x: it.x, y: it.y, w, h });
       if (it.x < minX) minX = it.x;
       if (it.y < minY) minY = it.y;
@@ -2778,11 +2803,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     let minScaleY = 0.1;
     seeds.forEach((s) => {
       if (s.w > 0) {
-        const mw = s.type === 'sticky' ? STICKY_MIN_W : s.type === 'image' ? IMAGE_MIN_W : ZONE_MIN_W;
+        const mw = s.type === 'sticky' ? STICKY_MIN_W : s.type === 'image' ? IMAGE_MIN_W : s.type === 'text' ? TEXT_MIN_W : ZONE_MIN_W;
         minScaleX = Math.max(minScaleX, mw / s.w);
       }
       if (s.h > 0) {
-        const mh = s.type === 'sticky' ? STICKY_MIN_H : s.type === 'image' ? IMAGE_MIN_H : ZONE_MIN_H;
+        const mh = s.type === 'sticky' ? STICKY_MIN_H : s.type === 'image' ? IMAGE_MIN_H : s.type === 'text' ? TEXT_MIN_H : ZONE_MIN_H;
         minScaleY = Math.max(minScaleY, mh / s.h);
       }
     });
@@ -3472,8 +3497,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     let minX = Infinity; let minY = Infinity;
     let maxX = -Infinity; let maxY = -Infinity;
     items.forEach((it) => {
-      const w = it.w || (it.type === 'sticky' ? STICKY_W : it.type === 'image' ? 200 : 0);
-      const h = it.h || (it.type === 'sticky' ? STICKY_H : it.type === 'image' ? 200 : 0);
+      const w = it.w || (it.type === 'sticky' ? STICKY_W : it.type === 'image' ? 200 : it.type === 'text' ? TEXT_W : 0);
+      const h = it.h || (it.type === 'sticky' ? STICKY_H : it.type === 'image' ? 200 : it.type === 'text' ? TEXT_H : 0);
       if (it.x < minX) minX = it.x;
       if (it.y < minY) minY = it.y;
       if (it.x + w > maxX) maxX = it.x + w;
@@ -3792,10 +3817,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
 
     if (!selectedItem) return null;
     if (selectedItem.type === 'zone' && selectedItem.locked) return null;
-    const resizable = selectedItem.type === 'zone' || selectedItem.type === 'sticky' || selectedItem.type === 'image';
+    const resizable = selectedItem.type === 'zone' || selectedItem.type === 'sticky' || selectedItem.type === 'image' || selectedItem.type === 'text';
     if (!resizable) return null;
-    const w = selectedItem.w || (selectedItem.type === 'sticky' ? STICKY_W : 200);
-    const h = selectedItem.h || (selectedItem.type === 'sticky' ? STICKY_H : 200);
+    const w = selectedItem.w || (selectedItem.type === 'sticky' ? STICKY_W : selectedItem.type === 'text' ? TEXT_W : 200);
+    const h = selectedItem.h || (selectedItem.type === 'sticky' ? STICKY_H : selectedItem.type === 'text' ? TEXT_H : 200);
     const corners = [
       { k: 'nw', sx: selectedItem.x,     sy: selectedItem.y,     cursor: 'nwse-resize' },
       { k: 'ne', sx: selectedItem.x + w, sy: selectedItem.y,     cursor: 'nesw-resize' },
