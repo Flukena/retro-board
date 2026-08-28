@@ -166,6 +166,7 @@ const dict = {
     'vote.setup.unlimitedTime': 'ไม่จำกัดเวลา',
     'vote.setup.voteLimit': 'จำนวนโหวต/คน',
     'vote.setup.unlimitedVotes': 'ไม่จำกัด',
+    'vote.setup.hideResults': 'ซ่อนคะแนนระหว่างโหวต',
     'vote.setup.start': 'เริ่ม',
 
     // reset votes / clear / transfer
@@ -377,6 +378,7 @@ const dict = {
     'vote.setup.unlimitedTime': 'No time limit',
     'vote.setup.voteLimit': 'Votes per person',
     'vote.setup.unlimitedVotes': 'Unlimited',
+    'vote.setup.hideResults': 'Hide counts while voting',
     'vote.setup.start': 'Start',
 
     'reset.confirm.head': 'Reset all votes?',

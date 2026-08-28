@@ -151,7 +151,7 @@ const DEFAULT_BOARD = {
   // right away; an admin can flip this to pause voting mid-session.
   votingLocked: false,
   allRevealed: false,
-  // timer: { startedAt, endsAt: number|null, voteLimit: number|null }
+  // timer: { startedAt, endsAt: number|null, voteLimit: number|null, hideResults: boolean }
   // - endsAt=null   → no time limit, admin must stop manually
   // - voteLimit=null → unlimited votes per user
   timer: null,
@@ -456,7 +456,7 @@ const csvEsc = (v) => {
 
 const StickyCard = React.memo(function StickyCard({
   item, selected, isEditing, isOwner, allRevealed, dense,
-  voted, voteCount, voteFlash, top3, votingAllowedNow,
+  voted, voteCount, voteFlash, top3, votingAllowedNow, showVoteCount,
   // `lang` is unused inside the body, but its presence as a prop
   // forces a re-render when language changes so t() picks up new strings.
   lang,
@@ -619,12 +619,14 @@ const StickyCard = React.memo(function StickyCard({
             }
           >
             <ThumbsUp size={votingAllowedNow ? 30 : 12} />
-            <span
-              key={voteCount}
-              style={{ display: 'inline-block', animation: 'rb-bump 0.35s ease', transformOrigin: 'center' }}
-            >
-              {voteCount}
-            </span>
+            {showVoteCount && (
+              <span
+                key={voteCount}
+                style={{ display: 'inline-block', animation: 'rb-bump 0.35s ease', transformOrigin: 'center' }}
+              >
+                {voteCount}
+              </span>
+            )}
           </button>
           {voteFlash && (
             <span
@@ -1913,9 +1915,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
      Admin gates
      ============================================================ */
   const editingAllowed = isAdmin || !board.editingLocked;
-  const canModifyOwnedItem = useCallback((item) => (
-    editingAllowed && (item.authorId === userId || isAdmin || item.type === 'zone')
-  ), [editingAllowed, isAdmin, userId]);
+  const canModifyOwnedItem = useCallback((item) => editingAllowed, [editingAllowed]);
 
   const canDeleteItem = useCallback((item) => (
     canModifyOwnedItem(item) && !(item.type === 'zone' && item.locked)
@@ -1941,6 +1941,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   // is an in-session pause an admin can toggle; default unlocked so starting a
   // timer enables voting immediately.
   const votingAllowedNow = timerActive && !board.votingLocked;
+  const hideVoteCounts = timerActive && !!timer?.hideResults && !isAdmin;
 
   const requireEdit = useCallback(() => {
     if (!editingAllowed) {
@@ -3097,7 +3098,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     patchMeta({ [key]: !boardRef.current[key] });
   }, [isAdmin, patchMeta]);
 
-  const adminStartTimer = useCallback((minutes, voteLimit) => {
+  const adminStartTimer = useCallback((minutes, voteLimit, hideResults) => {
     if (!isAdmin) return;
     const startedAt = Date.now();
     const endsAt = minutes && minutes > 0 ? startedAt + minutes * 60000 : null;
@@ -3105,7 +3106,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     // Wipe vote keys so each user starts with a clean quota under the new limit.
     window.storage?.clearAllVotes?.();
     // Each new session starts unlocked so voting works right away.
-    patchMeta({ timer: { startedAt, endsAt, voteLimit: limit }, lastResultsAt: null, votingLocked: false });
+    patchMeta({ timer: { startedAt, endsAt, voteLimit: limit, hideResults: !!hideResults }, lastResultsAt: null, votingLocked: false });
     setTimerSetupOpen(false);
     setToast({
       msg: t('vote.session.started', {
@@ -3436,6 +3437,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       voteFlash={voteFlashes[it.id] || null}
       top3={topVotedIds.has(it.id)}
       votingAllowedNow={votingAllowedNow}
+      showVoteCount={!hideVoteCounts}
       lang={lang}
       onStartDrag={startItemDrag}
       onBeginFocus={beginFocus}
@@ -3503,6 +3505,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       voteFlashes,
       topVotedIds,
       votingAllowedNow,
+      hideVoteCounts,
       userId,
       board.allRevealed,
       denseRender,
@@ -5247,7 +5250,8 @@ function TimerSetup({ onClose, onStart }) {
   const [noTimeLimit, setNoTimeLimit] = useState(false);
   const [votes, setVotes] = useState(3);
   const [unlimitedVotes, setUnlimitedVotes] = useState(false);
-  const submit = () => onStart(noTimeLimit ? 0 : minutes, unlimitedVotes ? null : votes);
+  const [hideResults, setHideResults] = useState(false);
+  const submit = () => onStart(noTimeLimit ? 0 : minutes, unlimitedVotes ? null : votes, hideResults);
   return (
     <div
       data-board-shortcuts="off"
@@ -5348,6 +5352,11 @@ function TimerSetup({ onClose, onStart }) {
           }}
         />
       </div>
+
+      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginBottom: 14, fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>
+        <input type="checkbox" checked={hideResults} onChange={(e) => setHideResults(e.target.checked)} />
+        {t('vote.setup.hideResults')}
+      </label>
 
       <button
         type="button"
