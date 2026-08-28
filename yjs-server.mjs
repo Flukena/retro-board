@@ -393,6 +393,10 @@ wss.on('connection', (conn, req) => {
   const docName = docNameFromRequest(req);
   const logDocName = rawDocNameFromRequest(req) ? docName : '<root>';
   console.log('[yjs] conn open', { docName: roomLogId(logDocName), origin: req.headers.origin });
+  conn.on('error', (err) => {
+    console.warn('[yjs] conn error', { docName: roomLogId(logDocName), err: err.message, code: err.code });
+    try { conn.terminate(); } catch { /* already closed */ }
+  });
   // Token-bucket rate limit. Refill smoothly; over-budget closes the WS.
   const bucket = {
     msgs: RL_MAX_MSGS,
