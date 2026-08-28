@@ -2117,6 +2117,13 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     });
   }, [cancelPendingWheel, liveApplyViewport]);
 
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    el.addEventListener('wheel', onCanvasWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onCanvasWheel);
+  }, [onCanvasWheel, loaded]);
+
   const startPan = useCallback((e) => {
     if (interactionRef.current !== null) return false;
     e.preventDefault();
@@ -4632,7 +4639,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         onMouseDownCapture={onCanvasMouseDownCapture}
         onMouseDown={onCanvasMouseDown}
         onDoubleClick={onCanvasDoubleClick}
-        onWheel={onCanvasWheel}
         onDragOver={onCanvasDragOver}
         onDrop={onCanvasDrop}
         className="rb-no-select"
