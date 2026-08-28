@@ -440,40 +440,78 @@ const centerOf = (it) => {
 const insideZone = (p, z) =>
   p.x >= z.x && p.x <= z.x + z.w && p.y >= z.y && p.y <= z.y + z.h;
 
+const isNestedIn = (z, ancestor, allItems) => {
+  let current = z;
+  const visited = new Set();
+  while (!visited.has(current.id)) {
+    visited.add(current.id);
+    const parent = effectiveOwnerZone(current, allItems);
+    if (!parent) return false;
+    if (parent.id === ancestor.id) return true;
+    current = parent;
+  }
+  return false;
+};
+
 // Ids of every item that moves together with `zone` for drag/z-order: the zone
-// itself, any zone nested strictly inside it, and any sticky/image/text whose
-// smallest enclosing zone is `zone` or one of those nested zones.
+// itself, any persistently nested zone, and any sticky/image/text owned by the
+// root zone or one of those nested zones.
 const zoneGroupIds = (zone, allItems) => {
   const ids = new Set([zone.id]);
-  const zoneArea = zone.w * zone.h;
   const allZones = allItems.filter((i) => i.type === 'zone');
   allZones.forEach((z) => {
-    if (z.id === zone.id || z.w * z.h >= zoneArea) return;
-    if (insideZone(centerOf(z), zone)) ids.add(z.id);
+    if (z.id !== zone.id && isNestedIn(z, zone, allItems)) ids.add(z.id);
   });
   allItems.forEach((it) => {
     if (it.type === 'zone' || ids.has(it.id)) return;
-    const owner = allZones
-      .filter((z) => insideZone(centerOf(it), z))
-      .sort((za, zc) => (za.w * za.h) - (zc.w * zc.h))[0];
+    const owner = effectiveOwnerZone(it, allItems);
     if (owner && ids.has(owner.id)) ids.add(it.id);
   });
   return ids;
 };
 
-// Smallest enclosing zone for a card, or null if it's outside every zone.
-const stickyOwnerZone = (item, allItems) => {
+// Mirrors centerOf's per-type size defaults, so a dimensionless legacy item
+// can't trivially satisfy resolveOwnerZone's strictly-larger guard below.
+const effectiveArea = (it) => {
+  if (it.type === 'zone') return it.w * it.h;
+  const w = it.w || (it.type === 'sticky' ? STICKY_W : it.type === 'text' ? TEXT_W : it.type === 'image' ? 200 : 0);
+  const h = it.h || (it.type === 'sticky' ? STICKY_H : it.type === 'text' ? TEXT_H : it.type === 'image' ? 200 : 0);
+  return w * h;
+};
+
+// Pure geometric lookup, used only when writing a new persistent owner.
+const resolveOwnerZone = (item, allItems) => {
   const c = centerOf(item);
-  return allItems
-    .filter((z) => z.type === 'zone' && insideZone(c, z))
-    .sort((a, b) => (a.w * a.h) - (b.w * b.h))[0] || null;
+  const area = effectiveArea(item);
+  const candidates = allItems.filter((z) => (
+    z.type === 'zone' && z.id !== item.id && z.w * z.h > area && insideZone(c, z)
+  ));
+  if (!candidates.length) return null;
+  const minArea = Math.min(...candidates.map((z) => z.w * z.h));
+  const tied = candidates.filter((z) => z.w * z.h === minArea);
+  if (tied.length > 1) {
+    const incumbent = tied.find((z) => z.id === item.parentZoneId);
+    if (incumbent) return incumbent;
+  }
+  return tied[0];
+};
+
+// A persisted owner wins while it still covers the item. Explicit null means
+// durably unzoned; only legacy items with no field fall back to geometry.
+const effectiveOwnerZone = (item, allItems) => {
+  if (Object.prototype.hasOwnProperty.call(item, 'parentZoneId')) {
+    if (!item.parentZoneId) return null;
+    const z = allItems.find((i) => i.id === item.parentZoneId && i.type === 'zone' && i.id !== item.id);
+    return (z && insideZone(centerOf(item), z)) ? z : null;
+  }
+  return resolveOwnerZone(item, allItems);
 };
 
 // A card's owner zone can hide/reveal its own private cards independently of
 // the board-wide (now-legacy) allRevealed flag; falls back to that flag once
 // outside every zone, or for boards where the zone never set its own value.
 const effectiveRevealed = (item, allItems, boardAllRevealed) => {
-  const zone = stickyOwnerZone(item, allItems);
+  const zone = effectiveOwnerZone(item, allItems);
   return zone ? (zone.revealed ?? boardAllRevealed) : boardAllRevealed;
 };
 
@@ -1123,17 +1161,15 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   }, [sortedItems, cullViewport, viewportSize]);
 
   // Single O(n*z) pass instead of O(n) per zone on every render. Counts stickies
-  // whose center lies inside each zone, keyed by zone id.
+  // by their effective owner zone, keyed by zone id.
   const zoneChildCount = useMemo(() => {
     const counts = new Map();
     const zones = board.items.filter((i) => i.type === 'zone');
     zones.forEach((z) => counts.set(z.id, 0));
     board.items.forEach((it) => {
       if (it.type !== 'sticky') return;
-      const c = centerOf(it);
-      zones.forEach((z) => {
-        if (insideZone(c, z)) counts.set(z.id, (counts.get(z.id) || 0) + 1);
-      });
+      const owner = effectiveOwnerZone(it, board.items);
+      if (owner) counts.set(owner.id, (counts.get(owner.id) || 0) + 1);
     });
     return counts;
   }, [board.items]);
@@ -1147,11 +1183,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     const stickies = board.items.filter((i) => i.type === 'sticky');
     const result = new Set();
     zones.forEach((z) => {
-      const owned = stickies.filter((s) => {
-        const c = centerOf(s);
-        const owner = board.items.filter((i) => i.type === 'zone').filter((zz) => insideZone(c, zz)).sort((a, b) => (a.w * a.h) - (b.w * b.h))[0];
-        return owner?.id === z.id;
-      }).filter((s) => voteCountOf(s.id) > 0).sort((a, b) => voteCountOf(b.id) - voteCountOf(a.id)).slice(0, 3);
+      const owned = stickies
+        .filter((s) => effectiveOwnerZone(s, board.items)?.id === z.id)
+        .filter((s) => voteCountOf(s.id) > 0)
+        .sort((a, b) => voteCountOf(b.id) - voteCountOf(a.id))
+        .slice(0, 3);
       owned.forEach((s) => result.add(s.id));
     });
     return result;
@@ -1473,14 +1509,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     // columns), the smallest enclosing zone wins — otherwise the wrapper
     // would scoop up every sticky and pile them at its corner.
     const zones = [zone];
-    const allZones = b.items.filter((i) => i.type === 'zone');
     const stickies = b.items.filter((i) => i.type === 'sticky');
     const ownerByStickyId = new Map();
     stickies.forEach((s) => {
-      const c = centerOf(s);
-      const owner = allZones
-        .filter((z) => insideZone(c, z))
-        .sort((za, zc) => (za.w * za.h) - (zc.w * zc.h))[0];
+      const owner = effectiveOwnerZone(s, b.items);
       if (owner) ownerByStickyId.set(s.id, owner.id);
     });
     const newItems = [...b.items];
@@ -1740,9 +1772,14 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     // Inherit the color of the deepest enclosing zone — when zones overlap
     // (e.g. Retro Loop's wrapper around the inner columns), the smallest one
     // wins so the sticky picks up the column color, not the frame's.
-    const enclosingZone = boardRef.current.items
-      .filter((i) => i.type === 'zone' && insideZone({ x: wx, y: wy }, i))
-      .sort((a, b) => (a.w * a.h) - (b.w * b.h))[0];
+    const enclosingZone = resolveOwnerZone({
+      id: null,
+      type: 'sticky',
+      x: wx - STICKY_W / 2,
+      y: wy - STICKY_H / 2,
+      w: STICKY_W,
+      h: STICKY_H,
+    }, boardRef.current.items);
     const color = enclosingZone
       ? enclosingZone.color
       : Math.floor(Math.random() * COLORS.length);
@@ -1774,6 +1811,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       createdAt: Date.now(),
       text: '',
       color,
+      parentZoneId: enclosingZone?.id ?? null,
       rotation: (Math.random() * 3 - 1.5),
       private: true,
       ...(fontSize ? { fontSize } : {}),
@@ -1797,6 +1835,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       createdAt: Date.now(),
       text: t('tool.text'),
     };
+    it.parentZoneId = resolveOwnerZone(it, boardRef.current.items)?.id ?? null;
     addItemLocal(it);
     setSelectedId(it.id);
     updateFocusedText(`${it.id}:text`);
@@ -1817,6 +1856,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       authorName: userName,
       createdAt: Date.now(),
     };
+    it.parentZoneId = resolveOwnerZone(it, boardRef.current.items)?.id ?? null;
     addItemLocal(it);
     setSelectedId(it.id);
     return it.id;
@@ -1845,6 +1885,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       authorName: userName,
       createdAt: Date.now(),
     };
+    it.parentZoneId = resolveOwnerZone(it, boardRef.current.items)?.id ?? null;
     addItemLocal(it);
     setSelectedId(it.id);
     return it.id;
@@ -1955,6 +1996,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       authorName: userName,
       createdAt: Date.now(),
     }));
+    zones.forEach((z) => { z.parentZoneId = resolveOwnerZone(z, zones)?.id ?? null; });
     addItemsLocal(zones);
     setTemplatesOpen(false);
   }, [userId, userName, addItemsLocal, screenToWorld, customTemplates]);
@@ -2017,7 +2059,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     const stickies = board.items.filter((i) => i.type === 'sticky');
     return [
       ...zones.map((z) => `z:${z.id}:${z.x}:${z.y}:${z.w}:${z.h}:${z.voteTimer?.endsAt || 0}:${z.voteTimer?.voteLimit ?? ''}:${z.voteTimer?.hideResults ? 1 : 0}:${z.votingLocked ? 1 : 0}:${z.revealed == null ? '' : z.revealed ? 1 : 0}`),
-      ...stickies.map((s) => `s:${s.id}:${s.x}:${s.y}:${s.w || STICKY_W}:${s.h || STICKY_H}`),
+      ...stickies.map((s) => `s:${s.id}:${s.x}:${s.y}:${s.w || STICKY_W}:${s.h || STICKY_H}:${Object.prototype.hasOwnProperty.call(s, 'parentZoneId') ? (s.parentZoneId || 'null') : 'unset'}`),
     ]
       .sort()
       .join('|');
@@ -2025,11 +2067,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
 
   const stickyVotingContext = useMemo(() => {
     const map = new Map();
-    const zones = board.items.filter((i) => i.type === 'zone');
     const stickies = board.items.filter((i) => i.type === 'sticky');
     stickies.forEach((s) => {
-      const c = centerOf(s);
-      const zone = zones.filter((z) => insideZone(c, z)).sort((za, zc) => (za.w * za.h) - (zc.w * zc.h))[0];
+      const zone = effectiveOwnerZone(s, board.items);
       const zTimer = zone?.voteTimer;
       const zActive = !!zTimer && (!zTimer.endsAt || zTimer.endsAt > now);
       map.set(s.id, {
@@ -2071,9 +2111,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
      ============================================================ */
   const toggleVote = useCallback((it) => {
     const items = boardRef.current.items;
-    const zones = items.filter((i) => i.type === 'zone');
-    const c = centerOf(it);
-    const ownerZone = zones.filter((z) => insideZone(c, z)).sort((za, zc) => (za.w * za.h) - (zc.w * zc.h))[0];
+    const ownerZone = effectiveOwnerZone(it, items);
     const zTimer = ownerZone?.voteTimer;
     const zActive = !!zTimer && (!zTimer.endsAt || zTimer.endsAt > Date.now());
     const allowed = !!ownerZone && zActive && !ownerZone.votingLocked;
@@ -2564,7 +2602,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     } else {
       dragIds = new Set([item.id]);
     }
+    const primaryIds = dragIds;
     const start = { x: e.clientX, y: e.clientY };
+    let lastClient = { x: start.x, y: start.y };
     const seeds = new Map();
     boardRef.current.items.forEach((it) => {
       if (dragIds.has(it.id)) seeds.set(it.id, { x: it.x, y: it.y });
@@ -2602,7 +2642,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       setToast({ msg: t('common.warnItemBusy'), type: 'warn' });
       abortGesture();
     };
-    const applyMove = (clientX, clientY) => {
+    const applyMove = (clientX, clientY, isFinal = false) => {
+      lastClient = { x: clientX, y: clientY };
       const dx = clientX - start.x;
       const dy = clientY - start.y;
       if (!moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
@@ -2619,6 +2660,29 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       const wy = dy / z;
       const entries = [];
       seeds.forEach((seed, id) => entries.push({ id, patch: { x: seed.x + wx, y: seed.y + wy } }));
+      if (isFinal) {
+        const patchById = new Map(entries.map((entry) => [entry.id, entry.patch]));
+        const finalItems = boardRef.current.items.map((it) => (
+          patchById.has(it.id) ? { ...it, ...patchById.get(it.id) } : it
+        ));
+        primaryIds.forEach((id) => {
+          const it = finalItems.find((i) => i.id === id);
+          if (!it || (it.type === 'zone' && it.locked)) return;
+          const newParentId = resolveOwnerZone(it, finalItems)?.id ?? null;
+          if (!Object.prototype.hasOwnProperty.call(it, 'parentZoneId') || it.parentZoneId !== newParentId) {
+            const entry = entries.find((en) => en.id === id);
+            if (entry) entry.patch.parentZoneId = newParentId;
+            else entries.push({ id, patch: { parentZoneId: newParentId } });
+          }
+          if (it.type === 'zone') {
+            finalItems.forEach((child) => {
+              if (child.parentZoneId === id && !insideZone(centerOf(child), it)) {
+                entries.push({ id: child.id, patch: { parentZoneId: null } });
+              }
+            });
+          }
+        });
+      }
       commitGeometry(entries);
     };
     const onMove = (ev) => {
@@ -2637,7 +2701,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       if (pending) { const p = pending; pending = null; applyMove(p.x, p.y); }
       if (finished) return;
       finished = true;
-      if (moved) endGeometry();
+      if (moved) {
+        applyMove(lastClient.x, lastClient.y, true);
+        endGeometry();
+      }
       dragItemsRef.current = null;
       if (claimed) storage.setLocalBusyItems('geometry', []);
       interactionRef.current = null;
@@ -2678,6 +2745,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     // Read selection via ref so this callback stays stable across selections.
     const liveSelectedIds = selectedIdsRef.current;
     const inMultiSelect = liveSelectedIds.has(zone.id) && liveSelectedIds.size > 1;
+    const primaryIds = inMultiSelect ? new Set(liveSelectedIds) : new Set([zone.id]);
     const draggedIds = new Set();
     if (inMultiSelect) {
       liveSelectedIds.forEach((id) => draggedIds.add(id));
@@ -2685,6 +2753,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       zoneGroupIds(zone, boardRef.current.items).forEach((id) => draggedIds.add(id));
     }
     const start = { x: e.clientX, y: e.clientY };
+    let lastClient = { x: start.x, y: start.y };
     const initial = new Map();
     boardRef.current.items.forEach((it) => {
       if (draggedIds.has(it.id)) initial.set(it.id, { x: it.x, y: it.y });
@@ -2720,7 +2789,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       setToast({ msg: t('common.warnItemBusy'), type: 'warn' });
       abortGesture();
     };
-    const applyMove = (clientX, clientY) => {
+    const applyMove = (clientX, clientY, isFinal = false) => {
+      lastClient = { x: clientX, y: clientY };
       const dx = clientX - start.x;
       const dy = clientY - start.y;
       if (!moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
@@ -2737,6 +2807,29 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       const wy = dy / z;
       const entries = [];
       initial.forEach((seed, id) => entries.push({ id, patch: { x: seed.x + wx, y: seed.y + wy } }));
+      if (isFinal) {
+        const patchById = new Map(entries.map((entry) => [entry.id, entry.patch]));
+        const finalItems = boardRef.current.items.map((it) => (
+          patchById.has(it.id) ? { ...it, ...patchById.get(it.id) } : it
+        ));
+        primaryIds.forEach((id) => {
+          const it = finalItems.find((i) => i.id === id);
+          if (!it || (it.type === 'zone' && it.locked)) return;
+          const newParentId = resolveOwnerZone(it, finalItems)?.id ?? null;
+          if (!Object.prototype.hasOwnProperty.call(it, 'parentZoneId') || it.parentZoneId !== newParentId) {
+            const entry = entries.find((en) => en.id === id);
+            if (entry) entry.patch.parentZoneId = newParentId;
+            else entries.push({ id, patch: { parentZoneId: newParentId } });
+          }
+          if (it.type === 'zone') {
+            finalItems.forEach((child) => {
+              if (child.parentZoneId === id && !insideZone(centerOf(child), it)) {
+                entries.push({ id: child.id, patch: { parentZoneId: null } });
+              }
+            });
+          }
+        });
+      }
       commitGeometry(entries);
     };
     const onMove = (ev) => {
@@ -2755,7 +2848,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       if (pending) { const p = pending; pending = null; applyMove(p.x, p.y); }
       if (finished) return;
       finished = true;
-      if (moved) endGeometry();
+      if (moved) {
+        applyMove(lastClient.x, lastClient.y, true);
+        endGeometry();
+      }
       dragItemsRef.current = null;
       if (claimed) storage.setLocalBusyItems('geometry', []);
       interactionRef.current = null;
@@ -2794,6 +2890,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     interactionRef.current = { kind: 'drag' };
     dragItemsRef.current = new Set([item.id]);
     let finished = false;
+    let lastEntries = null;
     const onMove = (ev) => {
       const z = viewportRef.current.zoom;
       let dx = (ev.clientX - start.x) / z;
@@ -2828,7 +2925,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         if (corner === 'nw' || corner === 'ne') y = initial.y + (initial.h - minH);
         h = minH;
       }
-      commitGeometry([{ id: item.id, patch: { x, y, w, h } }]);
+      lastEntries = [{ id: item.id, patch: { x, y, w, h } }];
+      commitGeometry(lastEntries);
     };
     const removeListeners = () => {
       window.removeEventListener('mousemove', onMove);
@@ -2839,6 +2937,35 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     const finalize = () => {
       if (finished) return;
       finished = true;
+      if (lastEntries) {
+        const entries = lastEntries.map((entry) => ({ id: entry.id, patch: { ...entry.patch } }));
+        const patchById = new Map(entries.map((entry) => [entry.id, entry.patch]));
+        const finalItems = boardRef.current.items.map((it) => (
+          patchById.has(it.id) ? { ...it, ...patchById.get(it.id) } : it
+        ));
+        const finalSelf = finalItems.find((it) => it.id === item.id);
+        // Durable self-orphan: resizing off an explicitly-tracked owner must
+        // drop it for good, same as a drag would — otherwise it silently
+        // reattaches the moment that zone is later moved/resized back over it.
+        if (finalSelf && Object.prototype.hasOwnProperty.call(item, 'parentZoneId') && item.parentZoneId) {
+          const owner = finalItems.find((it) => it.id === item.parentZoneId && it.type === 'zone');
+          if (!owner || !insideZone(centerOf(finalSelf), owner)) {
+            const entry = entries.find((en) => en.id === item.id);
+            if (entry) entry.patch.parentZoneId = null;
+            else entries.push({ id: item.id, patch: { parentZoneId: null } });
+          }
+        }
+        if (item.type === 'zone' && finalSelf) {
+          finalItems.forEach((child) => {
+            if (child.parentZoneId === item.id && !insideZone(centerOf(child), finalSelf)) {
+              const entry = entries.find((en) => en.id === child.id);
+              if (entry) entry.patch.parentZoneId = null;
+              else entries.push({ id: child.id, patch: { parentZoneId: null } });
+            }
+          });
+        }
+        commitGeometry(entries);
+      }
       endGeometry();
       dragItemsRef.current = null;
       storage.setLocalBusyItems('geometry', []);
@@ -2866,6 +2993,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     e.stopPropagation();
     const items = boardRef.current.items.filter((it) => selectedIds.has(it.id));
     if (items.length < 2) return;
+    const originalById = new Map(items.map((it) => [it.id, it]));
     // Snapshot initial bbox and per-item geometry.
     let minX = Infinity; let minY = Infinity;
     let maxX = -Infinity; let maxY = -Infinity;
@@ -2904,6 +3032,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     interactionRef.current = { kind: 'drag' };
     dragItemsRef.current = new Set(seeds.keys());
     let finished = false;
+    let lastEntries = null;
     // Signs that map a corner's outward direction onto positive growth — using
     // these on raw deltas (not abs) keeps shrink and grow symmetric so the
     // aspect lock holds in both directions.
@@ -2943,6 +3072,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         if (seed.h > 0) patch.h = seed.h * sy;
         entries.push({ id, patch });
       });
+      lastEntries = entries;
       commitGeometry(entries);
     };
     const removeListeners = () => {
@@ -2954,6 +3084,46 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     const finalize = () => {
       if (finished) return;
       finished = true;
+      if (lastEntries) {
+        const entries = lastEntries.map((entry) => ({ id: entry.id, patch: { ...entry.patch } }));
+        const patchById = new Map(entries
+          .filter((entry) => {
+            const it = boardRef.current.items.find((candidate) => candidate.id === entry.id);
+            return !(it?.type === 'zone' && it.locked);
+          })
+          .map((entry) => [entry.id, entry.patch]));
+        const finalItems = boardRef.current.items.map((it) => (
+          patchById.has(it.id) ? { ...it, ...patchById.get(it.id) } : it
+        ));
+        // Durable self-orphan: any explicitly-tracked item in the group that
+        // resized off its owner must drop it for good (mirrors the solo
+        // resize path) — otherwise it silently reattaches later.
+        seeds.forEach((seed, id) => {
+          const original = originalById.get(id);
+          if (!original || !Object.prototype.hasOwnProperty.call(original, 'parentZoneId') || !original.parentZoneId) return;
+          const finalSelf = finalItems.find((it) => it.id === id);
+          if (!finalSelf) return;
+          const owner = finalItems.find((it) => it.id === original.parentZoneId && it.type === 'zone');
+          if (!owner || !insideZone(centerOf(finalSelf), owner)) {
+            const entry = entries.find((en) => en.id === id);
+            if (entry) entry.patch.parentZoneId = null;
+            else entries.push({ id, patch: { parentZoneId: null } });
+          }
+        });
+        seeds.forEach((seed, id) => {
+          if (seed.type !== 'zone') return;
+          const finalZone = finalItems.find((it) => it.id === id);
+          if (!finalZone || finalZone.locked) return;
+          finalItems.forEach((child) => {
+            if (child.parentZoneId === id && !insideZone(centerOf(child), finalZone)) {
+              const entry = entries.find((en) => en.id === child.id);
+              if (entry) entry.patch.parentZoneId = null;
+              else entries.push({ id: child.id, patch: { parentZoneId: null } });
+            }
+          });
+        });
+        commitGeometry(entries);
+      }
       endGeometry();
       dragItemsRef.current = null;
       storage.setLocalBusyItems('geometry', []);
@@ -2983,6 +3153,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     if (!requireEdit() || !sourceItems?.length) return;
     const b = boardRef.current;
     let stripped = 0;
+    const idMap = new Map(sourceItems.map((it) => [it.id, uid()]));
     const clones = sourceItems.map((it) => {
       // Don't carry forward text from private cards the user can't see.
       const isHidden = it.type === 'sticky'
@@ -2992,7 +3163,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       if (isHidden) stripped += 1;
       const clone = {
         ...it,
-        id: uid(),
+        id: idMap.get(it.id),
         x: (it.x ?? 0) + offset,
         y: (it.y ?? 0) + offset,
         text: isHidden ? '' : it.text,
@@ -3001,6 +3172,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         createdAt: Date.now(),
       };
       delete clone.zIndex;
+      clone.parentZoneId = idMap.has(it.parentZoneId)
+        ? idMap.get(it.parentZoneId)
+        : (resolveOwnerZone(clone, b.items)?.id ?? null);
       return clone;
     });
     addItemsLocal(clones);
@@ -3236,13 +3410,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     const startedAt = Date.now();
     const endsAt = minutes && minutes > 0 ? startedAt + minutes * 60000 : null;
     const limit = voteLimit && voteLimit > 0 ? voteLimit : null;
-    const zones = items.filter((i) => i.type === 'zone');
     const stickies = items.filter((i) => i.type === 'sticky');
     const idleZoneIdSet = new Set(idleZones.map((z) => z.id));
     const ownedIds = [];
     stickies.forEach((s) => {
-      const c = centerOf(s);
-      const owner = zones.filter((z) => insideZone(c, z)).sort((za, zc) => (za.w * za.h) - (zc.w * zc.h))[0];
+      const owner = effectiveOwnerZone(s, items);
       if (owner && idleZoneIdSet.has(owner.id)) ownedIds.push(s.id);
     });
     if (ownedIds.length) window.storage?.clearVotesForItems?.(ownedIds);
@@ -3375,7 +3547,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     const b = boardRef.current;
     const voteSnap = window.storage?.snapshotVotes?.() || new Map();
     const children = b.items
-      .filter((i) => i.type === 'sticky' && insideZone(centerOf(i), zone))
+      .filter((i) => i.type === 'sticky' && effectiveOwnerZone(i, b.items)?.id === zone.id)
       .sort((a, c) => (voteSnap.get(c.id)?.size ?? 0) - (voteSnap.get(a.id)?.size ?? 0));
     const lines = [];
     lines.push([
@@ -3421,10 +3593,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     const stickies = b.items.filter((i) => i.type === 'sticky');
     const ownerByStickyId = new Map();
     stickies.forEach((s) => {
-      const c = centerOf(s);
-      const owner = zones
-        .filter((z) => insideZone(c, z))
-        .sort((za, zc) => (za.w * za.h) - (zc.w * zc.h))[0];
+      const owner = effectiveOwnerZone(s, b.items);
       if (owner) ownerByStickyId.set(s.id, owner.id);
     });
     const noZoneLabel = t('export.csv.unassigned');
