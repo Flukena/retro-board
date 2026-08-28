@@ -461,6 +461,22 @@ const zoneGroupIds = (zone, allItems) => {
   return ids;
 };
 
+// Smallest enclosing zone for a card, or null if it's outside every zone.
+const stickyOwnerZone = (item, allItems) => {
+  const c = centerOf(item);
+  return allItems
+    .filter((z) => z.type === 'zone' && insideZone(c, z))
+    .sort((a, b) => (a.w * a.h) - (b.w * b.h))[0] || null;
+};
+
+// A card's owner zone can hide/reveal its own private cards independently of
+// the board-wide (now-legacy) allRevealed flag; falls back to that flag once
+// outside every zone, or for boards where the zone never set its own value.
+const effectiveRevealed = (item, allItems, boardAllRevealed) => {
+  const zone = stickyOwnerZone(item, allItems);
+  return zone ? (zone.revealed ?? boardAllRevealed) : boardAllRevealed;
+};
+
 // Shared by exportZoneCsv / exportBoardCsv.
 const csvColorName = (i) => ['yellow', 'red', 'green', 'blue', 'purple', 'orange'][i] || String(i);
 const csvEsc = (v) => {
@@ -482,7 +498,7 @@ const csvEsc = (v) => {
 
 const StickyCard = React.memo(function StickyCard({
   item, selected, isEditing, isOwner, allRevealed, dense,
-  voted, voteCount, voteFlash, top3, votingAllowedNow, showVoteCount,
+  voted, voteCount, voteFlash, top3, votingAllowedNow, showVoteCount, inZone,
   // `lang` is unused inside the body, but its presence as a prop
   // forces a re-render when language changes so t() picks up new strings.
   lang,
@@ -640,6 +656,7 @@ const StickyCard = React.memo(function StickyCard({
             }}
             title={
               hideContent ? t('sticky.hideContent')
+              : !inZone ? t('vote.noZone')
               : !votingAllowedNow ? t('vote.notStartedYet')
               : voted ? t('vote.tooltip.unvote') : t('vote.tooltip.vote')
             }
@@ -1041,10 +1058,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   }, []);
 
   /* ---------- Derived ---------- */
-  const timer = board.timer;
-  const timerActive = !!timer && (!timer.endsAt || timer.endsAt > now);
-  const timerHasDeadline = !!timer && !!timer.endsAt;
-  const timerHasLimit = !!timer && timer.voteLimit != null;
   const onlineUsers = useMemo(() => {
     const t = now;
     return Object.values(presence).filter((p) => t - (p.lastSeen || 0) < ONLINE_WINDOW);
@@ -1130,13 +1143,19 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const didUserVoteOn = useCallback((id) => !!votesByItem.get(id)?.has(userId), [votesByItem, userId]);
 
   const topVotedIds = useMemo(() => {
-    if (!board.lastResultsAt || timerActive) return new Set();
-    const stickies = board.items
-      .filter((i) => i.type === 'sticky' && voteCountOf(i.id) > 0)
-      .sort((a, b) => voteCountOf(b.id) - voteCountOf(a.id))
-      .slice(0, 3);
-    return new Set(stickies.map((s) => s.id));
-  }, [board, timerActive, voteCountOf]);
+    const zones = board.items.filter((i) => i.type === 'zone' && i.lastResultsAt && !i.voteTimer);
+    const stickies = board.items.filter((i) => i.type === 'sticky');
+    const result = new Set();
+    zones.forEach((z) => {
+      const owned = stickies.filter((s) => {
+        const c = centerOf(s);
+        const owner = board.items.filter((i) => i.type === 'zone').filter((zz) => insideZone(c, zz)).sort((a, b) => (a.w * a.h) - (b.w * b.h))[0];
+        return owner?.id === z.id;
+      }).filter((s) => voteCountOf(s.id) > 0).sort((a, b) => voteCountOf(b.id) - voteCountOf(a.id)).slice(0, 3);
+      owned.forEach((s) => result.add(s.id));
+    });
+    return result;
+  }, [board, voteCountOf]);
 
   /* ============================================================
      Load identity + initial board
@@ -1435,7 +1454,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
      `now` also gates online-presence freshness, and heartbeats fire every
      5s anyway. Cuts idle parent re-renders 5x.
      ============================================================ */
-  const tickInterval = timer && timer.endsAt ? 1000 : 5000;
+  const tickInterval = board.items.some((i) => i.type === 'zone' && i.voteTimer?.endsAt) ? 1000 : 5000;
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), tickInterval);
     return () => clearInterval(id);
@@ -1445,19 +1464,21 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   // (desc), reposition, and end the session. Shared by both ways a voting
   // session can end: the deadline auto-expiring (below) and an admin
   // stopping it early (adminStopTimer) — both must produce the same result.
-  const finalizeVotingSession = useCallback(() => {
+  const finalizeVotingSession = useCallback((zoneId) => {
     if (!isAdmin) return;
     const b = boardRef.current;
-    if (!b.timer) return;
+    const zone = b.items.find((i) => i.id === zoneId && i.type === 'zone');
+    if (!zone?.voteTimer) return;
     // If zones overlap (e.g. Retro Loop's wrapper around Good/Bad/Try
     // columns), the smallest enclosing zone wins — otherwise the wrapper
     // would scoop up every sticky and pile them at its corner.
-    const zones = b.items.filter((i) => i.type === 'zone');
+    const zones = [zone];
+    const allZones = b.items.filter((i) => i.type === 'zone');
     const stickies = b.items.filter((i) => i.type === 'sticky');
     const ownerByStickyId = new Map();
     stickies.forEach((s) => {
       const c = centerOf(s);
-      const owner = zones
+      const owner = allZones
         .filter((z) => insideZone(c, z))
         .sort((za, zc) => (za.w * za.h) - (zc.w * zc.h))[0];
       if (owner) ownerByStickyId.set(s.id, owner.id);
@@ -1519,9 +1540,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     // (derived change — propagates to peers but stays off the undo stack).
     setBoard((prev) => ({
       ...prev,
-      items: newItems,
-      timer: null,
-      lastResultsAt: finalizedAt,
+      items: newItems.map((it) => (it.id === zoneId ? { ...it, voteTimer: null, lastResultsAt: finalizedAt } : it)),
     }));
     if (geomEntries.length) {
       // The sort is an authoritative reposition — it must win over any
@@ -1531,23 +1550,30 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       geomEntries.forEach((e) => recentlyMovedRef.current.delete(e.id));
       storage.updateItems(geomEntries, { silent: true });
     }
-    // Clearing the timer ends the session, so voting stops (timerActive=false).
-    storage.setMeta({ timer: null, lastResultsAt: finalizedAt }, { silent: true });
+    storage.updateItem(zoneId, { voteTimer: null, lastResultsAt: finalizedAt }, { silent: true });
     let totalVotes = 0;
     const voters = new Set();
-    votesByItem.forEach((set) => { totalVotes += set.size; set.forEach((v) => voters.add(v)); });
+    stickies
+      .filter((s) => ownerByStickyId.get(s.id) === zoneId)
+      .forEach((s) => {
+        const set = votesByItem.get(s.id);
+        if (!set) return;
+        totalVotes += set.size;
+        set.forEach((v) => voters.add(v));
+      });
     setToast({ msg: t('vote.results', { n: totalVotes, users: voters.size }), type: 'info' });
   }, [isAdmin, votesByItem, voteCountOf, t]);
 
   useEffect(() => {
-    if (!isAdmin || !timer) return;
-    // Only auto-end if a deadline was set and has passed.
-    if (!timer.endsAt || timer.endsAt > now) return;
-    // Timer just expired — admin finalizes results.
-    const b = boardRef.current;
-    if (!b.timer || !b.timer.endsAt || b.timer.endsAt > Date.now()) return;
-    finalizeVotingSession();
-  }, [now, timer, isAdmin, board.items, votesByItem, finalizeVotingSession]);
+    if (!isAdmin) return;
+    const expiredZone = board.items.find((i) => (
+      i.type === 'zone' && i.voteTimer?.endsAt && i.voteTimer.endsAt <= now
+    ));
+    if (!expiredZone) return;
+    const liveZone = boardRef.current.items.find((i) => i.id === expiredZone.id && i.type === 'zone');
+    if (!liveZone?.voteTimer?.endsAt || liveZone.voteTimer.endsAt > Date.now()) return;
+    finalizeVotingSession(expiredZone.id);
+  }, [now, isAdmin, board.items, votesByItem, finalizeVotingSession]);
 
   /* ============================================================
      Persist viewport (per-user) — debounced lightly
@@ -1563,22 +1589,38 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
      Counting actual votes cast keeps quotas in sync across devices and
      reset themselves automatically when admin clears votes.
      ============================================================ */
+  const anyZoneVotingActive = useMemo(
+    () => board.items.some((i) => i.type === 'zone' && i.voteTimer),
+    [board.items],
+  );
+
+  // Strictest voteLimit among currently-active zone sessions — for the
+  // player-list "quota full" badge. Concurrent zones can carry different
+  // limits; the smallest is the one a player actually hits first.
+  const activeZoneVoteLimit = useMemo(() => {
+    const limits = board.items
+      .filter((i) => i.type === 'zone' && i.voteTimer && (!i.voteTimer.endsAt || i.voteTimer.endsAt > now))
+      .map((z) => z.voteTimer.voteLimit)
+      .filter((l) => l != null);
+    return limits.length ? Math.min(...limits) : null;
+  }, [board.items, now]);
+
   const votesUsed = useMemo(() => {
-    if (!userId || !timer) return 0;
+    if (!userId || !anyZoneVotingActive) return 0;
     let count = 0;
     votesByItem.forEach((set) => { if (set.has(userId)) count += 1; });
     return count;
-  }, [votesByItem, userId, timer]);
+  }, [votesByItem, userId, anyZoneVotingActive]);
 
   // Per-user vote tallies for the player list: userId → number of votes cast.
   const votesUsedByUser = useMemo(() => {
     const m = new Map();
-    if (!timer) return m;
+    if (!anyZoneVotingActive) return m;
     votesByItem.forEach((set) => {
       set.forEach((uid) => { m.set(uid, (m.get(uid) || 0) + 1); });
     });
     return m;
-  }, [votesByItem, timer]);
+  }, [votesByItem, anyZoneVotingActive]);
 
   /* ============================================================
      Auto-dismiss toast
@@ -1970,11 +2012,37 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     return true;
   }, [canDeleteItem, editingAllowed, removeItemUnchecked]);
 
-  // Voting is only possible while a vote session (timer) is running. The lock
-  // is an in-session pause an admin can toggle; default unlocked so starting a
-  // timer enables voting immediately.
-  const votingAllowedNow = timerActive && !board.votingLocked;
-  const hideVoteCounts = timerActive && !!timer?.hideResults && !isAdmin;
+  const zoneVotingSignature = useMemo(() => {
+    const zones = board.items.filter((i) => i.type === 'zone');
+    const stickies = board.items.filter((i) => i.type === 'sticky');
+    return [
+      ...zones.map((z) => `z:${z.id}:${z.x}:${z.y}:${z.w}:${z.h}:${z.voteTimer?.endsAt || 0}:${z.voteTimer?.voteLimit ?? ''}:${z.voteTimer?.hideResults ? 1 : 0}:${z.votingLocked ? 1 : 0}:${z.revealed == null ? '' : z.revealed ? 1 : 0}`),
+      ...stickies.map((s) => `s:${s.id}:${s.x}:${s.y}:${s.w || STICKY_W}:${s.h || STICKY_H}`),
+    ]
+      .sort()
+      .join('|');
+  }, [board.items]);
+
+  const stickyVotingContext = useMemo(() => {
+    const map = new Map();
+    const zones = board.items.filter((i) => i.type === 'zone');
+    const stickies = board.items.filter((i) => i.type === 'sticky');
+    stickies.forEach((s) => {
+      const c = centerOf(s);
+      const zone = zones.filter((z) => insideZone(c, z)).sort((za, zc) => (za.w * za.h) - (zc.w * zc.h))[0];
+      const zTimer = zone?.voteTimer;
+      const zActive = !!zTimer && (!zTimer.endsAt || zTimer.endsAt > now);
+      map.set(s.id, {
+        votingAllowedNow: !!zone && zActive && !zone.votingLocked,
+        hideVoteCounts: zActive && !!zTimer?.hideResults && !isAdmin,
+        revealed: zone ? (zone.revealed ?? board.allRevealed) : board.allRevealed,
+        inZone: !!zone,
+      });
+    });
+    return map;
+    // Deliberately excludes now so active timers do not rebuild every sticky once per second.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoneVotingSignature, board.allRevealed, isAdmin]);
 
   const requireEdit = useCallback(() => {
     if (!editingAllowed) {
@@ -2002,7 +2070,14 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
      Voting
      ============================================================ */
   const toggleVote = useCallback((it) => {
-    if (!votingAllowedNow) {
+    const items = boardRef.current.items;
+    const zones = items.filter((i) => i.type === 'zone');
+    const c = centerOf(it);
+    const ownerZone = zones.filter((z) => insideZone(c, z)).sort((za, zc) => (za.w * za.h) - (zc.w * zc.h))[0];
+    const zTimer = ownerZone?.voteTimer;
+    const zActive = !!zTimer && (!zTimer.endsAt || zTimer.endsAt > Date.now());
+    const allowed = !!ownerZone && zActive && !ownerZone.votingLocked;
+    if (!allowed) {
       setToast({ msg: t('vote.notStarted'), type: 'warn' });
       return;
     }
@@ -2011,17 +2086,17 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     // concurrent remote writes see the latest value.
     const live = window.storage.snapshotVotes();
     const has = !!live.get(it.id)?.has(userId);
-    if (!has && timer && timer.voteLimit != null) {
+    if (!has && zTimer.voteLimit != null) {
       let used = 0;
       live.forEach((set) => { if (set.has(userId)) used += 1; });
-      if (used >= timer.voteLimit) {
+      if (used >= zTimer.voteLimit) {
         setToast({ msg: t('vote.outOfQuota'), type: 'warn' });
         return;
       }
     }
     window.storage.setVote(it.id, userId, !has);
     if (!has) flashVote(it.id);
-  }, [votingAllowedNow, timer, userId, flashVote]);
+  }, [userId, flashVote, t]);
 
   /* ============================================================
      Interactions: pan, zoom, drag, resize
@@ -2906,14 +2981,14 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   /* ----- Duplicate selected items (offset clones into board) ----- */
   const duplicateItems = useCallback((sourceItems, offset = 24) => {
     if (!requireEdit() || !sourceItems?.length) return;
-    const allRevealed = boardRef.current.allRevealed;
+    const b = boardRef.current;
     let stripped = 0;
     const clones = sourceItems.map((it) => {
       // Don't carry forward text from private cards the user can't see.
       const isHidden = it.type === 'sticky'
         && it.private
         && it.authorId !== userId
-        && !allRevealed;
+        && !effectiveRevealed(it, b.items, b.allRevealed);
       if (isHidden) stripped += 1;
       const clone = {
         ...it,
@@ -3143,39 +3218,73 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     patchMeta({ [key]: !boardRef.current[key] });
   }, [isAdmin, patchMeta]);
 
-  const adminStartTimer = useCallback((minutes, voteLimit, hideResults) => {
+  const adminStartTimer = useCallback((zoneId, minutes, voteLimit, hideResults) => {
     if (!isAdmin) return;
+    const items = boardRef.current.items;
+    const rootZone = items.find((i) => i.id === zoneId && i.type === 'zone');
+    if (!rootZone) return;
+    const cascadeZoneIds = [...zoneGroupIds(rootZone, items)]
+      .filter((id) => items.find((i) => i.id === id)?.type === 'zone');
+    const isZoneSessionActive = (z) => !!z.voteTimer && (!z.voteTimer.endsAt || z.voteTimer.endsAt > Date.now());
+    const targetZones = cascadeZoneIds.map((id) => items.find((i) => i.id === id));
+    const idleZones = targetZones.filter((z) => !isZoneSessionActive(z));
+    const skippedCount = targetZones.length - idleZones.length;
+    if (idleZones.length === 0) {
+      setToast({ msg: t('vote.session.allActive'), type: 'warn' });
+      return;
+    }
     const startedAt = Date.now();
     const endsAt = minutes && minutes > 0 ? startedAt + minutes * 60000 : null;
     const limit = voteLimit && voteLimit > 0 ? voteLimit : null;
-    // Wipe vote keys so each user starts with a clean quota under the new limit.
-    window.storage?.clearAllVotes?.();
-    // Each new session starts unlocked so voting works right away.
-    patchMeta({ timer: { startedAt, endsAt, voteLimit: limit, hideResults: !!hideResults }, lastResultsAt: null, votingLocked: false });
+    const zones = items.filter((i) => i.type === 'zone');
+    const stickies = items.filter((i) => i.type === 'sticky');
+    const idleZoneIdSet = new Set(idleZones.map((z) => z.id));
+    const ownedIds = [];
+    stickies.forEach((s) => {
+      const c = centerOf(s);
+      const owner = zones.filter((z) => insideZone(c, z)).sort((za, zc) => (za.w * za.h) - (zc.w * zc.h))[0];
+      if (owner && idleZoneIdSet.has(owner.id)) ownedIds.push(s.id);
+    });
+    if (ownedIds.length) window.storage?.clearVotesForItems?.(ownedIds);
+    const entries = idleZones.map((z) => ({
+      id: z.id,
+      patch: { voteTimer: { startedAt, endsAt, voteLimit: limit, hideResults: !!hideResults }, lastResultsAt: null, votingLocked: false },
+    }));
+    setBoard((prev) => ({
+      ...prev,
+      items: prev.items.map((it) => {
+        const e = entries.find((en) => en.id === it.id);
+        return e ? { ...it, ...e.patch } : it;
+      }),
+    }));
+    storage.updateItems(entries);
     setTimerSetupOpen(false);
     setToast({
-      msg: t('vote.session.started', {
-        limit: limit ? t('vote.session.votesLimit', { n: limit }) : t('vote.session.unlimited'),
-        time: minutes ? t('vote.session.minutes', { n: minutes }) : t('vote.session.noTime'),
-      }),
+      msg: skippedCount > 0
+        ? t('vote.session.startedPartial', { skipped: skippedCount })
+        : t('vote.session.started', {
+            limit: limit ? t('vote.session.votesLimit', { n: limit }) : t('vote.session.unlimited'),
+            time: minutes ? t('vote.session.minutes', { n: minutes }) : t('vote.session.noTime'),
+          }),
       type: 'session',
     });
-  }, [isAdmin, patchMeta]);
+  }, [isAdmin]);
 
-  const adminExtendTimer = useCallback((minutes) => {
-    if (!isAdmin || !timer) return;
-    const cur = boardRef.current.timer;
-    if (!cur) return;
+  const adminExtendTimer = useCallback((zoneId, minutes) => {
+    if (!isAdmin) return;
+    const zone = boardRef.current.items.find((i) => i.id === zoneId && i.type === 'zone');
+    if (!zone?.voteTimer) return;
+    const cur = zone.voteTimer;
     const base = cur.endsAt && cur.endsAt > Date.now() ? cur.endsAt : Date.now();
-    patchMeta({ timer: { ...cur, endsAt: base + minutes * 60000 } });
-  }, [isAdmin, timer, patchMeta]);
+    updateItem(zoneId, { voteTimer: { ...cur, endsAt: base + minutes * 60000 } });
+  }, [isAdmin, updateItem]);
 
-  const adminStopTimer = useCallback(() => {
-    if (!isAdmin || !timer) return;
-    // Route through the same sort/reposition/finalize path as a natural
-    // deadline expiry, so stopping early doesn't skip the vote-count sort.
-    finalizeVotingSession();
-  }, [isAdmin, timer, finalizeVotingSession]);
+  const adminStopTimer = useCallback((zoneId) => {
+    if (!isAdmin) return;
+    const zone = boardRef.current.items.find((i) => i.id === zoneId && i.type === 'zone');
+    if (!zone?.voteTimer) return;
+    finalizeVotingSession(zoneId);
+  }, [isAdmin, finalizeVotingSession]);
 
   const adminClearBoard = useCallback(() => {
     if (!isAdmin) return;
@@ -3198,6 +3307,19 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     if (!isAdmin) return;
     // Votes live in CRDT keys; clearing them re-renders via the vote subscription.
     window.storage?.clearAllVotes?.();
+    const zoneEntries = boardRef.current.items
+      .filter((i) => i.type === 'zone' && (i.voteTimer || i.lastResultsAt))
+      .map((z) => ({ id: z.id, patch: { voteTimer: null, lastResultsAt: null } }));
+    if (zoneEntries.length) {
+      setBoard((prev) => ({
+        ...prev,
+        items: prev.items.map((it) => {
+          const e = zoneEntries.find((en) => en.id === it.id);
+          return e ? { ...it, ...e.patch } : it;
+        }),
+      }));
+      storage.updateItems(zoneEntries);
+    }
     patchMeta({ lastResultsAt: null });
     setConfirmResetVotes(false);
     setToast({ msg: t('reset.done'), type: 'info' });
@@ -3264,7 +3386,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       t('export.csv.createdAt'),
     ].map(csvEsc).join(','));
     children.forEach((sticky) => {
-      const hide = sticky.private && sticky.authorId !== userId && !b.allRevealed;
+      const hide = sticky.private && sticky.authorId !== userId
+        && !effectiveRevealed(sticky, b.items, b.allRevealed);
       lines.push([
         hide ? t('export.csv.hidden') : (sticky.text || ''),
         sticky.authorName || '',
@@ -3317,7 +3440,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       t('export.csv.createdAt'),
     ].map(csvEsc).join(','));
     const pushRow = (zoneLabel, sticky) => {
-      const hide = sticky.private && sticky.authorId !== userId && !b.allRevealed;
+      const hide = sticky.private && sticky.authorId !== userId
+        && !effectiveRevealed(sticky, b.items, b.allRevealed);
       lines.push([
         zoneLabel,
         hide ? t('export.csv.hidden') : (sticky.text || ''),
@@ -3475,14 +3599,15 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       selected={selectedIds.has(it.id)}
       isEditing={focusedTextId === `${it.id}:text`}
       isOwner={it.authorId === userId}
-      allRevealed={board.allRevealed}
+      allRevealed={stickyVotingContext.get(it.id)?.revealed ?? board.allRevealed}
       dense={denseRender}
       voted={didUserVoteOn(it.id)}
       voteCount={voteCountOf(it.id)}
       voteFlash={voteFlashes[it.id] || null}
       top3={topVotedIds.has(it.id)}
-      votingAllowedNow={votingAllowedNow}
-      showVoteCount={!hideVoteCounts}
+      votingAllowedNow={stickyVotingContext.get(it.id)?.votingAllowedNow ?? false}
+      showVoteCount={!(stickyVotingContext.get(it.id)?.hideVoteCounts ?? false)}
+      inZone={stickyVotingContext.get(it.id)?.inZone ?? false}
       lang={lang}
       onStartDrag={startItemDrag}
       onBeginFocus={beginFocus}
@@ -3549,10 +3674,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       votesByItem,
       voteFlashes,
       topVotedIds,
-      votingAllowedNow,
-      hideVoteCounts,
+      stickyVotingContext,
       userId,
-      board.allRevealed,
       denseRender,
       lang,
       zoneChildCount,
@@ -3746,6 +3869,48 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           >
             <Download size={15} />
           </button>
+        )}
+        {selectedItem.type === 'zone' && isAdmin && (
+          <button
+            type="button"
+            onClick={() => updateItem(selectedItem.id, { votingLocked: !selectedItem.votingLocked })}
+            disabled={!selectedItem.voteTimer}
+            title={selectedItem.votingLocked ? t('zone.unlockVote') : t('zone.lockVote')}
+            style={iconBtn(!!selectedItem.voteTimer)}
+          >
+            {selectedItem.votingLocked ? <Ban size={15} /> : <ThumbsUp size={15} />}
+          </button>
+        )}
+        {selectedItem.type === 'zone' && isAdmin && (
+          <button
+            type="button"
+            onClick={() => updateItem(selectedItem.id, { revealed: !selectedItem.revealed })}
+            title={selectedItem.revealed ? t('zone.hideCards') : t('zone.revealCards')}
+            style={iconBtn(true)}
+          >
+            {selectedItem.revealed ? <EyeOff size={15} /> : <Eye size={15} />}
+          </button>
+        )}
+        {selectedItem.type === 'zone' && isAdmin && (
+          <div style={{ position: 'relative' }}>
+            <button
+              type="button"
+              onClick={() => {
+                if (selectedItem.voteTimer) { adminStopTimer(selectedItem.id); }
+                else { setTimerSetupOpen((v) => !v); }
+              }}
+              title={selectedItem.voteTimer ? t('topbar.stopVote') : t('zone.startVote')}
+              style={iconBtn(true)}
+            >
+              {selectedItem.voteTimer ? <Square size={15} /> : <ThumbsUp size={15} />}
+            </button>
+            {timerSetupOpen && (
+              <TimerSetup
+                onClose={() => setTimerSetupOpen(false)}
+                onStart={(m, v, h) => adminStartTimer(selectedItem.id, m, v, h)}
+              />
+            )}
+          </div>
         )}
         <button
           type="button"
@@ -3942,41 +4107,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           icon={board.editingLocked ? <Lock size={16} /> : <Unlock size={16} />}
           label={board.editingLocked ? t('topbar.unlockEdit') : t('topbar.lockEdit')}
         />
-        <TopBtn
-          title={board.votingLocked ? t('topbar.unlockVote') : t('topbar.lockVote')}
-          onClick={() => adminToggle('votingLocked')}
-          active={board.votingLocked}
-          enabled={isAdmin}
-          icon={board.votingLocked ? <Ban size={16} /> : <ThumbsUp size={16} />}
-          label={board.votingLocked ? t('topbar.unlockVote') : t('topbar.lockVote')}
-        />
-        <TopBtn
-          title={board.allRevealed ? t('topbar.hide') : t('topbar.reveal')}
-          onClick={() => adminToggle('allRevealed')}
-          active={board.allRevealed}
-          enabled={isAdmin}
-          icon={board.allRevealed ? <EyeOff size={16} /> : <Eye size={16} />}
-          label={board.allRevealed ? t('topbar.hide') : t('topbar.reveal')}
-        />
-        <div style={{ position: 'relative' }}>
-          <TopBtn
-            title={timer ? t('topbar.stopVote') : t('topbar.vote')}
-            onClick={() => {
-              if (!isAdmin) { setToast({ msg: t('common.adminOnly'), type: 'warn' }); return; }
-              if (timer) { adminStopTimer(); } else { setTimerSetupOpen((v) => !v); }
-            }}
-            active={!!timer}
-            enabled={isAdmin}
-            icon={timer ? <Square size={16} /> : <ThumbsUp size={16} />}
-            label={timer ? t('topbar.stopVote') : t('topbar.vote')}
-          />
-          {timerSetupOpen && isAdmin && (
-            <TimerSetup
-              onClose={() => setTimerSetupOpen(false)}
-              onStart={adminStartTimer}
-            />
-          )}
-        </div>
         <TopBarDivider />
         {/* Hidden file input — opened via the More menu's Import action. */}
         <input
@@ -4217,7 +4347,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                 const isMe = u.userId === userId;
                 const isUserAdmin = u.userId === board.adminUserId;
                 const used = votesUsedByUser.get(u.userId) || 0;
-                const limit = timer?.voteLimit ?? null;
+                // Concurrent zone sessions can carry different vote limits — use
+                // the strictest active one so "full" doesn't under-warn.
+                const limit = activeZoneVoteLimit;
                 const isFull = limit != null && used >= limit;
                 return (
                   <div
@@ -4305,34 +4437,35 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     );
   };
 
-  // Floating timer dock — anchored bottom-center, sits above the templates /
-  // zoom controls. Owns its own extend/stop affordances so the top bar stays
-  // free of admin clutter while a vote session is running.
-  const renderTimerDock = () => {
-    if (!timer) return null;
-    const remainingMs = timer.endsAt ? timer.endsAt - now : null;
+  const renderTimerDockFor = (zone) => {
+    const zTimer = zone.voteTimer;
+    const remainingMs = zTimer.endsAt ? zTimer.endsAt - now : null;
     const isUrgent = remainingMs != null && remainingMs < 30000;
-    const votesLeft = timer.voteLimit != null ? Math.max(0, timer.voteLimit - votesUsed) : null;
+    const votesLeft = zTimer.voteLimit != null ? Math.max(0, zTimer.voteLimit - votesUsed) : null;
     return (
       <div
-        key={timer.startedAt}
+        key={zone.id}
         style={{
-          position: 'fixed', left: '50%', bottom: 16, transform: 'translateX(-50%)',
           background: 'var(--bg-elev)',
           color: 'var(--text)',
           border: '1px solid var(--border-soft)',
           padding: '8px 12px', borderRadius: 14,
           display: 'flex', alignItems: 'center', gap: 12,
-          zIndex: 41,
           boxShadow: '0 12px 30px rgba(0,0,0,0.18)',
-          // Under 30s left, layer a looping red pulse over the entrance animation
-          // (rb-pulse keeps the translateX(-50%) the dock needs to stay centred).
           animation: isUrgent
             ? 'rb-banner-in 0.35s cubic-bezier(.2,1,.3,1) both, rb-pulse 1s ease-in-out infinite'
             : 'rb-banner-in 0.35s cubic-bezier(.2,1,.3,1) both',
           backdropFilter: 'blur(8px)',
         }}
       >
+        <span
+          style={{
+            maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            fontSize: 12, fontWeight: 700, color: 'var(--text-mid)',
+          }}
+        >
+          {zone.title || t('export.csv.untitledZone')}
+        </span>
         <div
           style={{
             display: 'flex', alignItems: 'center', gap: 8,
@@ -4354,7 +4487,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           }}
         >
           {votesLeft != null
-            ? t('vote.banner.votesLeft', { used: votesLeft, limit: timer.voteLimit })
+            ? t('vote.banner.votesLeft', { used: votesLeft, limit: zTimer.voteLimit })
             : t('vote.banner.unlimited')}
         </span>
         {isAdmin && (
@@ -4364,7 +4497,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
               <button
                 key={m}
                 type="button"
-                onClick={() => adminExtendTimer(m)}
+                onClick={() => adminExtendTimer(zone.id, m)}
                 title={t('topbar.extend', { m }) || `+${m}m`}
                 style={{
                   background: 'transparent',
@@ -4382,7 +4515,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
             <div aria-hidden style={{ width: 1, height: 22, background: 'var(--border-soft)' }} />
             <button
               type="button"
-              onClick={adminStopTimer}
+              onClick={() => adminStopTimer(zone.id)}
               title={t('topbar.stopVote')}
               style={{
                 background: '#dc2626', color: '#fff',
@@ -4396,6 +4529,21 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
             </button>
           </>
         )}
+      </div>
+    );
+  };
+
+  const renderTimerDocks = () => {
+    const activeZones = board.items.filter((i) => i.type === 'zone' && i.voteTimer);
+    if (!activeZones.length) return null;
+    return (
+      <div
+        style={{
+          position: 'fixed', left: '50%', bottom: 16, transform: 'translateX(-50%)',
+          display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center', zIndex: 41,
+        }}
+      >
+        {activeZones.map((z) => renderTimerDockFor(z))}
       </div>
     );
   };
@@ -4617,8 +4765,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
 
       <style>{`
         @keyframes rb-pulse {
-          0%, 100% { transform: translateX(-50%) scale(1); box-shadow: 0 0 0 0 rgba(220,38,38,0.5); }
-          50% { transform: translateX(-50%) scale(1.04); box-shadow: 0 0 0 12px rgba(220,38,38,0); }
+          0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(220,38,38,0.5); }
+          50% { transform: scale(1.04); box-shadow: 0 0 0 12px rgba(220,38,38,0); }
         }
         @keyframes rb-appear {
           0%   { opacity: 0; transform: scale(0.78); }
@@ -4645,8 +4793,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           100% { opacity: 1; transform: translate(-50%, 0) scale(1); }
         }
         @keyframes rb-banner-in {
-          0%   { opacity: 0; transform: translateX(-50%) translateY(-14px) scale(0.9); }
-          100% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+          0%   { opacity: 0; transform: translateY(-14px) scale(0.9); }
+          100% { opacity: 1; transform: translateY(0) scale(1); }
         }
         @keyframes rb-pop {
           0%   { opacity: 0; transform: scale(0.9); }
@@ -4737,7 +4885,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       {/* Floating UI */}
       {renderTopBar()}
       {renderBottomBar()}
-      {renderTimerDock()}
+      {renderTimerDocks()}
       {renderActionToolbar()}
       {renderResizeHandles()}
 

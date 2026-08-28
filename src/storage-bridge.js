@@ -717,6 +717,14 @@ if (provider) {
       if (!keys.length) return;
       ydoc.transact(() => { keys.forEach((k) => ymap.delete(k)); }, 'local');
     },
+    clearVotesForItems(itemIds) {
+      if (!itemIds || !itemIds.length) return;
+      const prefixes = itemIds.map((id) => `${VOTE_PREFIX}${id}:`);
+      const keys = [];
+      ymap.forEach((_v, k) => { if (prefixes.some((p) => k.startsWith(p))) keys.push(k); });
+      if (!keys.length) return;
+      ydoc.transact(() => { keys.forEach((k) => ymap.delete(k)); }, 'local');
+    },
     onVotesChange(handler) { voteEmitter.addEventListener('change', handler); },
     offVotesChange(handler) { voteEmitter.removeEventListener('change', handler); },
 
