@@ -440,6 +440,27 @@ const centerOf = (it) => {
 const insideZone = (p, z) =>
   p.x >= z.x && p.x <= z.x + z.w && p.y >= z.y && p.y <= z.y + z.h;
 
+// Ids of every item that moves together with `zone` for drag/z-order: the zone
+// itself, any zone nested strictly inside it, and any sticky/image/text whose
+// smallest enclosing zone is `zone` or one of those nested zones.
+const zoneGroupIds = (zone, allItems) => {
+  const ids = new Set([zone.id]);
+  const zoneArea = zone.w * zone.h;
+  const allZones = allItems.filter((i) => i.type === 'zone');
+  allZones.forEach((z) => {
+    if (z.id === zone.id || z.w * z.h >= zoneArea) return;
+    if (insideZone(centerOf(z), zone)) ids.add(z.id);
+  });
+  allItems.forEach((it) => {
+    if (it.type === 'zone' || ids.has(it.id)) return;
+    const owner = allZones
+      .filter((z) => insideZone(centerOf(it), z))
+      .sort((za, zc) => (za.w * za.h) - (zc.w * zc.h))[0];
+    if (owner && ids.has(owner.id)) ids.add(it.id);
+  });
+  return ids;
+};
+
 // Shared by exportZoneCsv / exportBoardCsv.
 const csvColorName = (i) => ['yellow', 'red', 'green', 'blue', 'purple', 'orange'][i] || String(i);
 const csvEsc = (v) => {
@@ -2368,8 +2389,14 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const bringToFront = useCallback((ids) => {
     if (!ids?.size || interactionRef.current !== null) return;
     const items = boardRef.current.items;
+    const targetIds = new Set(ids);
+    items.forEach((it) => {
+      if (it.type === 'zone' && ids.has(it.id)) {
+        zoneGroupIds(it, items).forEach((id) => targetIds.add(id));
+      }
+    });
     const selected = items
-      .filter((it) => ids.has(it.id))
+      .filter((it) => targetIds.has(it.id))
       .sort(compareZOrder);
     if (selected.length === 0 || !requireEdit()) return;
     if (!selected.every(canModifyOwnedItem)) return;
@@ -2383,8 +2410,14 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const sendToBack = useCallback((ids) => {
     if (!ids?.size || interactionRef.current !== null) return;
     const items = boardRef.current.items;
+    const targetIds = new Set(ids);
+    items.forEach((it) => {
+      if (it.type === 'zone' && ids.has(it.id)) {
+        zoneGroupIds(it, items).forEach((id) => targetIds.add(id));
+      }
+    });
     const selected = items
-      .filter((it) => ids.has(it.id))
+      .filter((it) => targetIds.has(it.id))
       .sort((a, b) => compareZOrder(b, a));
     if (selected.length === 0 || !requireEdit()) return;
     if (!selected.every(canModifyOwnedItem)) return;
@@ -2574,27 +2607,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     if (inMultiSelect) {
       liveSelectedIds.forEach((id) => draggedIds.add(id));
     } else {
-      draggedIds.add(zone.id);
-      const zoneArea = zone.w * zone.h;
-      const allZones = boardRef.current.items.filter((i) => i.type === 'zone');
-      // Pass 1: pull in nested zones exactly as before (strictly smaller, to avoid
-      // mutual-containment loops between overlapping zones of similar size).
-      allZones.forEach((z) => {
-        if (z.id === zone.id) return;
-        if (z.w * z.h >= zoneArea) return;
-        if (insideZone(centerOf(z), zone)) draggedIds.add(z.id);
-      });
-      // Pass 2: pull in non-zone items only if `zone` (or a nested zone just
-      // pulled in above) is their SMALLEST enclosing zone — otherwise they belong
-      // to some other, more specific zone that isn't moving, and must stay put.
-      // Same tie-break convention as finalizeVotingSession/exportBoardCsv.
-      boardRef.current.items.forEach((it) => {
-        if (it.type === 'zone' || draggedIds.has(it.id)) return;
-        const owner = allZones
-          .filter((z) => insideZone(centerOf(it), z))
-          .sort((za, zc) => (za.w * za.h) - (zc.w * zc.h))[0];
-        if (owner && draggedIds.has(owner.id)) draggedIds.add(it.id);
-      });
+      zoneGroupIds(zone, boardRef.current.items).forEach((id) => draggedIds.add(id));
     }
     const start = { x: e.clientX, y: e.clientY };
     const initial = new Map();
