@@ -69,7 +69,7 @@ const IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 // Must match the server's MIME_EXT allowlist (yjs-server.mjs) — anything
 // outside this set is rejected by /upload regardless of the resize path.
 const UPLOADABLE_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
-const ZONE_TITLE_H = 32;
+const ZONE_TITLE_H = 40;
 const DRAG_THRESHOLD = 4;
 const ZOOM_MIN = 0.15;
 const ZOOM_MAX = 3.0;
@@ -685,7 +685,7 @@ const ZoneCard = React.memo(function ZoneCard({
   void lang;
   const it = item;
   const c = COLORS[it.color] || COLORS[0];
-  const titleFs = it.fontSize || 14;
+  const titleFs = it.fontSize || 16;
   const titleH = Math.max(ZONE_TITLE_H, titleFs + 18);
   return (
     <div
