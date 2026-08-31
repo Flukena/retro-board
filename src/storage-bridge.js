@@ -725,6 +725,20 @@ if (provider) {
       if (!keys.length) return;
       ydoc.transact(() => { keys.forEach((k) => ymap.delete(k)); }, 'local');
     },
+    startVoteSession(rootZoneId, timerPatch, staleResultZoneIds, clearedItemIds) {
+      ydoc.transact(() => {
+        patchExistingItem(rootZoneId, timerPatch);
+        staleResultZoneIds.forEach((id) => patchExistingItem(id, { lastResultsAt: null }));
+        if (clearedItemIds.length) {
+          const prefixes = clearedItemIds.map((id) => `${VOTE_PREFIX}${id}:`);
+          const keys = [];
+          ymap.forEach((_v, k) => {
+            if (prefixes.some((prefix) => k.startsWith(prefix))) keys.push(k);
+          });
+          keys.forEach((k) => ymap.delete(k));
+        }
+      }, 'local');
+    },
     onVotesChange(handler) { voteEmitter.addEventListener('change', handler); },
     offVotesChange(handler) { voteEmitter.removeEventListener('change', handler); },
 

@@ -507,6 +507,38 @@ const effectiveOwnerZone = (item, allItems) => {
   return resolveOwnerZone(item, allItems);
 };
 
+// Nearest zone — the item's own owner, or the nearest ancestor via the
+// ownership chain — that currently has an active voteTimer. Mutual exclusion
+// at start time guarantees at most one zone in a chain is active at once.
+const activeVoteZone = (item, allItems, atTime) => {
+  let zone = effectiveOwnerZone(item, allItems);
+  const visited = new Set();
+  while (zone && !visited.has(zone.id)) {
+    visited.add(zone.id);
+    const timer = zone.voteTimer;
+    if (timer && (!timer.endsAt || timer.endsAt > atTime)) return zone;
+    zone = effectiveOwnerZone(zone, allItems);
+  }
+  return null;
+};
+
+// True if this zone, or any ancestor in its ownership chain, currently holds
+// a voteTimer — presence-based (not endsAt-gated) so a deeper untimered
+// descendant is still treated as "live" while its governing ancestor's
+// session hasn't been finalized yet. Used to keep a stale "finished" badge
+// from exposing a live in-progress tally anywhere beneath it, not just on
+// the zone that stores the timer.
+const zoneHasActiveGovernor = (zone, allItems) => {
+  let z = zone;
+  const visited = new Set();
+  while (z && !visited.has(z.id)) {
+    visited.add(z.id);
+    if (z.voteTimer) return true;
+    z = effectiveOwnerZone(z, allItems);
+  }
+  return false;
+};
+
 // A card's owner zone can hide/reveal its own private cards independently of
 // the board-wide (now-legacy) allRevealed flag; falls back to that flag once
 // outside every zone, or for boards where the zone never set its own value.
@@ -1179,16 +1211,26 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const didUserVoteOn = useCallback((id) => !!votesByItem.get(id)?.has(userId), [votesByItem, userId]);
 
   const topVotedIds = useMemo(() => {
-    const zones = board.items.filter((i) => i.type === 'zone' && i.lastResultsAt && !i.voteTimer);
+    const finishedRoots = board.items.filter((i) => i.type === 'zone' && i.lastResultsAt && !i.voteTimer);
     const stickies = board.items.filter((i) => i.type === 'sticky');
     const result = new Set();
-    zones.forEach((z) => {
-      const owned = stickies
-        .filter((s) => effectiveOwnerZone(s, board.items)?.id === z.id)
-        .filter((s) => voteCountOf(s.id) > 0)
-        .sort((a, b) => voteCountOf(b.id) - voteCountOf(a.id))
-        .slice(0, 3);
-      owned.forEach((s) => result.add(s.id));
+    finishedRoots.forEach((root) => {
+      const groupZoneIds = [...zoneGroupIds(root, board.items)]
+        .filter((id) => {
+          const zone = board.items.find((i) => i.id === id);
+          // Never expose a live in-progress tally through an ancestor's stale
+          // finished-results badge — including a deeper untimered
+          // descendant governed by a timer further up its own chain.
+          return zone?.type === 'zone' && !zoneHasActiveGovernor(zone, board.items);
+        });
+      groupZoneIds.forEach((zoneId) => {
+        const owned = stickies
+          .filter((s) => effectiveOwnerZone(s, board.items)?.id === zoneId)
+          .filter((s) => voteCountOf(s.id) > 0)
+          .sort((a, b) => voteCountOf(b.id) - voteCountOf(a.id))
+          .slice(0, 3);
+        owned.forEach((s) => result.add(s.id));
+      });
     });
     return result;
   }, [board, voteCountOf]);
@@ -1503,12 +1545,19 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const finalizeVotingSession = useCallback((zoneId) => {
     if (!isAdmin) return;
     const b = boardRef.current;
-    const zone = b.items.find((i) => i.id === zoneId && i.type === 'zone');
-    if (!zone?.voteTimer) return;
+    const rootZone = b.items.find((i) => i.id === zoneId && i.type === 'zone');
+    if (!rootZone?.voteTimer) return;
     // If zones overlap (e.g. Retro Loop's wrapper around Good/Bad/Try
     // columns), the smallest enclosing zone wins — otherwise the wrapper
     // would scoop up every sticky and pile them at its corner.
-    const zones = [zone];
+    const zones = [...zoneGroupIds(rootZone, b.items)]
+      .map((id) => b.items.find((i) => i.id === id))
+      // A descendant with its own live voteTimer runs an independent
+      // session mutual exclusion should have prevented — never let this
+      // root's widened finalize trample it (legacy cascaded boards in
+      // flight across a deploy, or a same-instant start race).
+      .filter((zone) => zone && zone.type === 'zone' && (zone.id === zoneId || !zone.voteTimer));
+    const groupZoneIdSet = new Set(zones.map((zone) => zone.id));
     const stickies = b.items.filter((i) => i.type === 'sticky');
     const ownerByStickyId = new Map();
     stickies.forEach((s) => {
@@ -1580,13 +1629,16 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       // otherwise the self-echoed 'system' write below gets reverted back
       // to the pre-sort dragged position by the recentlyMoved guard.
       geomEntries.forEach((e) => recentlyMovedRef.current.delete(e.id));
-      storage.updateItems(geomEntries, { silent: true });
     }
-    storage.updateItem(zoneId, { voteTimer: null, lastResultsAt: finalizedAt }, { silent: true });
+    const allEntries = [
+      ...geomEntries,
+      { id: zoneId, patch: { voteTimer: null, lastResultsAt: finalizedAt } },
+    ];
+    if (allEntries.length) storage.updateItems(allEntries, { silent: true });
     let totalVotes = 0;
     const voters = new Set();
     stickies
-      .filter((s) => ownerByStickyId.get(s.id) === zoneId)
+      .filter((s) => groupZoneIdSet.has(ownerByStickyId.get(s.id)))
       .forEach((s) => {
         const set = votesByItem.get(s.id);
         if (!set) return;
@@ -2058,7 +2110,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     const zones = board.items.filter((i) => i.type === 'zone');
     const stickies = board.items.filter((i) => i.type === 'sticky');
     return [
-      ...zones.map((z) => `z:${z.id}:${z.x}:${z.y}:${z.w}:${z.h}:${z.voteTimer?.endsAt || 0}:${z.voteTimer?.voteLimit ?? ''}:${z.voteTimer?.hideResults ? 1 : 0}:${z.votingLocked ? 1 : 0}:${z.revealed == null ? '' : z.revealed ? 1 : 0}`),
+      ...zones.map((z) => `z:${z.id}:${z.x}:${z.y}:${z.w}:${z.h}:${z.voteTimer?.endsAt || 0}:${z.voteTimer?.voteLimit ?? ''}:${z.voteTimer?.hideResults ? 1 : 0}:${z.votingLocked ? 1 : 0}:${z.revealed == null ? '' : z.revealed ? 1 : 0}:${z.parentZoneId ?? ''}`),
       ...stickies.map((s) => `s:${s.id}:${s.x}:${s.y}:${s.w || STICKY_W}:${s.h || STICKY_H}:${Object.prototype.hasOwnProperty.call(s, 'parentZoneId') ? (s.parentZoneId || 'null') : 'unset'}`),
     ]
       .sort()
@@ -2070,11 +2122,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     const stickies = board.items.filter((i) => i.type === 'sticky');
     stickies.forEach((s) => {
       const zone = effectiveOwnerZone(s, board.items);
-      const zTimer = zone?.voteTimer;
-      const zActive = !!zTimer && (!zTimer.endsAt || zTimer.endsAt > now);
+      const voteZone = activeVoteZone(s, board.items, now);
+      const voteTimer = voteZone?.voteTimer;
       map.set(s.id, {
-        votingAllowedNow: !!zone && zActive && !zone.votingLocked,
-        hideVoteCounts: zActive && !!zTimer?.hideResults && !isAdmin,
+        votingAllowedNow: !!voteZone && !voteZone.votingLocked,
+        hideVoteCounts: !!voteTimer?.hideResults && !isAdmin,
         revealed: zone ? (zone.revealed ?? board.allRevealed) : board.allRevealed,
         inZone: !!zone,
       });
@@ -2111,10 +2163,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
      ============================================================ */
   const toggleVote = useCallback((it) => {
     const items = boardRef.current.items;
-    const ownerZone = effectiveOwnerZone(it, items);
-    const zTimer = ownerZone?.voteTimer;
-    const zActive = !!zTimer && (!zTimer.endsAt || zTimer.endsAt > Date.now());
-    const allowed = !!ownerZone && zActive && !ownerZone.votingLocked;
+    const voteZone = activeVoteZone(it, items, Date.now());
+    const zTimer = voteZone?.voteTimer;
+    const allowed = !!voteZone && !voteZone.votingLocked;
     if (!allowed) {
       setToast({ msg: t('vote.notStarted'), type: 'warn' });
       return;
@@ -3171,6 +3222,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         authorName: userName,
         createdAt: Date.now(),
       };
+      if (clone.type === 'zone') {
+        clone.voteTimer = null;
+        clone.lastResultsAt = null;
+        clone.votingLocked = false;
+      }
       delete clone.zIndex;
       clone.parentZoneId = idMap.has(it.parentZoneId)
         ? idMap.get(it.parentZoneId)
@@ -3397,50 +3453,69 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     const items = boardRef.current.items;
     const rootZone = items.find((i) => i.id === zoneId && i.type === 'zone');
     if (!rootZone) return;
-    const cascadeZoneIds = [...zoneGroupIds(rootZone, items)]
-      .filter((id) => items.find((i) => i.id === id)?.type === 'zone');
-    const isZoneSessionActive = (z) => !!z.voteTimer && (!z.voteTimer.endsAt || z.voteTimer.endsAt > Date.now());
-    const targetZones = cascadeZoneIds.map((id) => items.find((i) => i.id === id));
-    const idleZones = targetZones.filter((z) => !isZoneSessionActive(z));
-    const skippedCount = targetZones.length - idleZones.length;
-    if (idleZones.length === 0) {
-      setToast({ msg: t('vote.session.allActive'), type: 'warn' });
+    const nowMs = Date.now();
+    // Presence-based, not endsAt-based: an expired-but-not-yet-finalized
+    // timer still blocks a related start — the natural-expiry reaper hasn't
+    // run yet, and letting a new session start in that window lets the
+    // reaper's later widened finalize trample it once it does run.
+    const isActive = (zone) => !!zone?.voteTimer;
+    const descendantZones = [...zoneGroupIds(rootZone, items)]
+      .map((id) => items.find((i) => i.id === id))
+      .filter((zone) => zone && zone.type === 'zone');
+    // A related session must be stopped before this zone can start one.
+    let relatedActive = descendantZones.some(isActive);
+    if (!relatedActive) {
+      let ancestor = effectiveOwnerZone(rootZone, items);
+      const visited = new Set();
+      while (ancestor && !visited.has(ancestor.id)) {
+        if (isActive(ancestor)) {
+          relatedActive = true;
+          break;
+        }
+        visited.add(ancestor.id);
+        ancestor = effectiveOwnerZone(ancestor, items);
+      }
+    }
+    if (relatedActive) {
+      setToast({ msg: t('vote.session.relatedActive'), type: 'warn' });
       return;
     }
-    const startedAt = Date.now();
+    const startedAt = nowMs;
     const endsAt = minutes && minutes > 0 ? startedAt + minutes * 60000 : null;
     const limit = voteLimit && voteLimit > 0 ? voteLimit : null;
-    const stickies = items.filter((i) => i.type === 'sticky');
-    const idleZoneIdSet = new Set(idleZones.map((z) => z.id));
-    const ownedIds = [];
-    stickies.forEach((s) => {
-      const owner = effectiveOwnerZone(s, items);
-      if (owner && idleZoneIdSet.has(owner.id)) ownedIds.push(s.id);
-    });
-    if (ownedIds.length) window.storage?.clearVotesForItems?.(ownedIds);
-    const entries = idleZones.map((z) => ({
-      id: z.id,
-      patch: { voteTimer: { startedAt, endsAt, voteLimit: limit, hideResults: !!hideResults }, lastResultsAt: null, votingLocked: false },
-    }));
+    const timerPatch = {
+      voteTimer: { startedAt, endsAt, voteLimit: limit, hideResults: !!hideResults },
+      lastResultsAt: null,
+      votingLocked: false,
+    };
+    const capturedIds = items
+      .filter((item) => item.type === 'sticky')
+      .filter((sticky) => {
+        const owner = effectiveOwnerZone(sticky, items);
+        return !!owner && (owner.id === rootZone.id || isNestedIn(owner, rootZone, items));
+      })
+      .map((sticky) => sticky.id);
+    const staleResultZoneIds = descendantZones
+      .filter((zone) => zone.lastResultsAt)
+      .map((zone) => zone.id);
+    window.storage.startVoteSession(zoneId, timerPatch, staleResultZoneIds, capturedIds);
     setBoard((prev) => ({
       ...prev,
       items: prev.items.map((it) => {
-        const e = entries.find((en) => en.id === it.id);
-        return e ? { ...it, ...e.patch } : it;
+        if (it.id === zoneId) return { ...it, ...timerPatch };
+        if (staleResultZoneIds.includes(it.id)) return { ...it, lastResultsAt: null };
+        return it;
       }),
     }));
-    storage.updateItems(entries);
     setTimerSetupOpen(false);
     setToast({
-      msg: skippedCount > 0
-        ? t('vote.session.startedPartial', { skipped: skippedCount })
-        : t('vote.session.started', {
-            limit: limit ? t('vote.session.votesLimit', { n: limit }) : t('vote.session.unlimited'),
-            time: minutes ? t('vote.session.minutes', { n: minutes }) : t('vote.session.noTime'),
-          }),
-      type: 'session',
+      msg: t('vote.session.started', {
+        limit: limit ? t('vote.session.votesLimit', { n: limit }) : t('vote.session.unlimited'),
+        time: minutes ? t('vote.session.minutes', { n: minutes }) : t('vote.session.noTime'),
+      }),
+      type: 'info',
     });
-  }, [isAdmin]);
+  }, [isAdmin, t]);
 
   const adminExtendTimer = useCallback((zoneId, minutes) => {
     if (!isAdmin) return;
@@ -3686,13 +3761,18 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const confirmImport = useCallback(() => {
     if (!pendingImport || !isAdmin) return;
     const { parsed } = pendingImport;
+    const importedItems = parsed.board.items.map((item) => (
+      item.type === 'zone'
+        ? { ...item, voteTimer: null, lastResultsAt: null, votingLocked: false }
+        : item
+    ));
     // Wipe vote keys first — incoming userIds reference the source room.
     window.storage?.clearAllVotes?.();
     // Restore board fields (drop unrelated keys to avoid sneaking in bad shape).
     // Full replace so removed items are deleted from Yjs, not just hidden.
     replaceBoardLocal({
       ...DEFAULT_BOARD,
-      items: parsed.board.items,
+      items: importedItems,
       timer: parsed.board.timer || null,
       editingLocked: !!parsed.board.editingLocked,
       // Older exports predate votingLocked; default to unlocked when absent.
@@ -3877,6 +3957,12 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     }
     const can = canModifyOwnedItem(selectedItem);
     const canDelete = canDeleteItem(selectedItem);
+    const nestedZoneCount = selectedItem.type === 'zone'
+      ? [...zoneGroupIds(selectedItem, board.items)].filter((id) => (
+          id !== selectedItem.id
+          && board.items.find((item) => item.id === id)?.type === 'zone'
+        )).length
+      : 0;
     return (
       <div
         style={{
@@ -4077,6 +4163,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
               <TimerSetup
                 onClose={() => setTimerSetupOpen(false)}
                 onStart={(m, v, h) => adminStartTimer(selectedItem.id, m, v, h)}
+                nestedZoneCount={nestedZoneCount}
               />
             )}
           </div>
@@ -5606,7 +5693,7 @@ function Avatar({ id, name, crown, ring, small }) {
   );
 }
 
-function TimerSetup({ onClose, onStart }) {
+function TimerSetup({ onClose, onStart, nestedZoneCount }) {
   const [minutes, setMinutes] = useState(3);
   const [noTimeLimit, setNoTimeLimit] = useState(false);
   const [votes, setVotes] = useState(3);
@@ -5633,6 +5720,12 @@ function TimerSetup({ onClose, onStart }) {
           <X size={16} />
         </button>
       </div>
+
+      {nestedZoneCount > 0 && (
+        <div style={{ marginBottom: 12, fontSize: 12, color: 'var(--text-muted)' }}>
+          {t('vote.session.coversNested', { n: nestedZoneCount })}
+        </div>
+      )}
 
       {/* Duration */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
