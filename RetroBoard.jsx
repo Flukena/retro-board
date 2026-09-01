@@ -594,9 +594,11 @@ const csvEsc = (v) => {
    and selection changes no longer re-render every other card.
    ============================================================ */
 
+const MEDAL_BY_RANK = { 1: '🥇', 2: '🥈', 3: '🥉' };
+
 const StickyCard = React.memo(function StickyCard({
   item, selected, isEditing, isOwner, allRevealed, dense,
-  voted, voteCount, voteFlash, top3, votingAllowedNow, showVoteCount, inZone,
+  voted, voteCount, voteFlash, voteRank, votingAllowedNow, showVoteCount, inZone,
   // `lang` is unused inside the body, but its presence as a prop
   // forces a re-render when language changes so t() picks up new strings.
   lang,
@@ -610,6 +612,7 @@ const StickyCard = React.memo(function StickyCard({
   const w = it.w || STICKY_W;
   const h = it.h || STICKY_H;
   const rot = selected ? 0 : it.rotation;
+  const top3 = voteRank != null;
   return (
     <div
       onMouseDown={(e) => { if (!isEditing) onStartDrag(e, it); }}
@@ -657,6 +660,19 @@ const StickyCard = React.memo(function StickyCard({
       {it.private && !allRevealed && isOwner && (
         <div style={{ position: 'absolute', top: 6, right: 6, color: c.border }}>
           <Lock size={14} />
+        </div>
+      )}
+
+      {top3 && (
+        <div
+          title={t('vote.rank', { n: voteRank })}
+          style={{
+            position: 'absolute', top: -10, left: -10, fontSize: 22,
+            filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.35))',
+            lineHeight: 1, pointerEvents: 'none',
+          }}
+        >
+          {MEDAL_BY_RANK[voteRank]}
         </div>
       )}
 
@@ -1365,10 +1381,14 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const voteCountOf = useCallback((id) => votesByItem.get(id)?.size ?? 0, [votesByItem]);
   const didUserVoteOn = useCallback((id) => !!votesByItem.get(id)?.has(userId), [votesByItem, userId]);
 
-  const topVotedIds = useMemo(() => {
+  // Map of stickyId -> rank (1, 2, or 3) among its own zone's votes, once
+  // that zone's results are finalized — drives both the top3 glow and the
+  // medal badge (🥇🥈🥉). Rank is per-zone, not board-wide: each zone in a
+  // finished vote group gets its own #1/#2/#3.
+  const topVotedRanks = useMemo(() => {
     const finishedRoots = board.items.filter((i) => i.type === 'zone' && i.lastResultsAt && !i.voteTimer);
     const stickies = board.items.filter((i) => i.type === 'sticky');
-    const result = new Set();
+    const result = new Map();
     finishedRoots.forEach((root) => {
       const groupZoneIds = [...zoneGroupIds(root, board.items)]
         .filter((id) => {
@@ -1384,7 +1404,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           .filter((s) => voteCountOf(s.id) > 0)
           .sort((a, b) => voteCountOf(b.id) - voteCountOf(a.id))
           .slice(0, 3);
-        owned.forEach((s) => result.add(s.id));
+        owned.forEach((s, idx) => result.set(s.id, idx + 1));
       });
     });
     return result;
@@ -4055,7 +4075,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       voted={didUserVoteOn(it.id)}
       voteCount={voteCountOf(it.id)}
       voteFlash={voteFlashes[it.id] || null}
-      top3={topVotedIds.has(it.id)}
+      voteRank={topVotedRanks.get(it.id)}
       votingAllowedNow={stickyVotingContext.get(it.id)?.votingAllowedNow ?? false}
       showVoteCount={!(stickyVotingContext.get(it.id)?.hideVoteCounts ?? false)}
       inZone={stickyVotingContext.get(it.id)?.inZone ?? false}
@@ -4124,7 +4144,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       focusedTextId,
       votesByItem,
       voteFlashes,
-      topVotedIds,
+      topVotedRanks,
       stickyVotingContext,
       userId,
       denseRender,
@@ -5989,7 +6009,7 @@ function TimerSetup({ onClose, onStart, nestedZoneCount }) {
   const [noTimeLimit, setNoTimeLimit] = useState(false);
   const [votes, setVotes] = useState(3);
   const [unlimitedVotes, setUnlimitedVotes] = useState(false);
-  const [hideResults, setHideResults] = useState(false);
+  const [hideResults, setHideResults] = useState(true);
   const [showNonVoters, setShowNonVoters] = useState(false);
   const submit = () => onStart(noTimeLimit ? 0 : minutes, unlimitedVotes ? null : votes, hideResults, showNonVoters);
   return (
