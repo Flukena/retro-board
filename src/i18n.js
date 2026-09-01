@@ -162,6 +162,7 @@ const dict = {
     'vote.banner.votesLeft': '{used}/{limit} votes',
     'vote.banner.timeLeft': '{time}',
     'vote.results': 'ผลโหวต: {n} votes จาก {users} users',
+    'vote.results.didntVote': 'ไม่ได้โหวต: {names}',
     'vote.session.started': 'เริ่ม vote session • {limit} • {time}',
     'vote.session.relatedActive': 'มีโซนที่เกี่ยวข้องในกลุ่มนี้กำลังโหวตอยู่ — กรุณาหยุดก่อน',
     'vote.session.coversNested': 'จะเปิดให้โหวตได้ในโซนย่อยอีก {n} โซนด้วย (ต้องไม่มีโซนไหนกำลังโหวตอยู่)',
@@ -175,6 +176,7 @@ const dict = {
     'vote.setup.voteLimit': 'จำนวนโหวต/คน',
     'vote.setup.unlimitedVotes': 'ไม่จำกัด',
     'vote.setup.hideResults': 'ซ่อนคะแนนระหว่างโหวต',
+    'vote.setup.showNonVoters': 'บอกว่าใครไม่ได้โหวตตอนจบ',
     'vote.setup.start': 'เริ่ม',
 
     // reset votes / clear / transfer
@@ -382,6 +384,7 @@ const dict = {
     'vote.banner.votesLeft': '{used}/{limit} votes',
     'vote.banner.timeLeft': '{time}',
     'vote.results': 'Results: {n} votes from {users} users',
+    'vote.results.didntVote': "Didn't vote: {names}",
     'vote.session.started': 'Vote session started • {limit} • {time}',
     'vote.session.relatedActive': 'A related zone in this group is already voting — stop it first',
     'vote.session.coversNested': 'Also enables voting in {n} nested zone(s) (none of them can already be voting)',
@@ -395,6 +398,7 @@ const dict = {
     'vote.setup.voteLimit': 'Votes per person',
     'vote.setup.unlimitedVotes': 'Unlimited',
     'vote.setup.hideResults': 'Hide counts while voting',
+    'vote.setup.showNonVoters': "Announce who didn't vote at the end",
     'vote.setup.start': 'Start',
 
     'reset.confirm.head': 'Reset all votes?',

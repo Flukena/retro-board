@@ -1645,8 +1645,13 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         totalVotes += set.size;
         set.forEach((v) => voters.add(v));
       });
-    setToast({ msg: t('vote.results', { n: totalVotes, users: voters.size }), type: 'info' });
-  }, [isAdmin, votesByItem, voteCountOf, t]);
+    let msg = t('vote.results', { n: totalVotes, users: voters.size });
+    if (rootZone.voteTimer.showNonVoters) {
+      const nonVoters = onlineUsers.filter((u) => !voters.has(u.userId)).map((u) => u.name);
+      if (nonVoters.length) msg += ` ${t('vote.results.didntVote', { names: nonVoters.join(', ') })}`;
+    }
+    setToast({ msg, type: 'info' });
+  }, [isAdmin, votesByItem, voteCountOf, onlineUsers, t]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -3465,7 +3470,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     patchMeta({ [key]: !boardRef.current[key] });
   }, [isAdmin, patchMeta]);
 
-  const adminStartTimer = useCallback((zoneId, minutes, voteLimit, hideResults) => {
+  const adminStartTimer = useCallback((zoneId, minutes, voteLimit, hideResults, showNonVoters) => {
     if (!isAdmin) return;
     const items = boardRef.current.items;
     const rootZone = items.find((i) => i.id === zoneId && i.type === 'zone');
@@ -3501,7 +3506,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     const endsAt = minutes && minutes > 0 ? startedAt + minutes * 60000 : null;
     const limit = voteLimit && voteLimit > 0 ? voteLimit : null;
     const timerPatch = {
-      voteTimer: { startedAt, endsAt, voteLimit: limit, hideResults: !!hideResults },
+      voteTimer: {
+        startedAt, endsAt, voteLimit: limit, hideResults: !!hideResults, showNonVoters: !!showNonVoters,
+      },
       lastResultsAt: null,
       votingLocked: false,
     };
@@ -4179,7 +4186,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
             {timerSetupOpen && (
               <TimerSetup
                 onClose={() => setTimerSetupOpen(false)}
-                onStart={(m, v, h) => adminStartTimer(selectedItem.id, m, v, h)}
+                onStart={(m, v, h, s) => adminStartTimer(selectedItem.id, m, v, h, s)}
                 nestedZoneCount={nestedZoneCount}
               />
             )}
@@ -5716,7 +5723,8 @@ function TimerSetup({ onClose, onStart, nestedZoneCount }) {
   const [votes, setVotes] = useState(3);
   const [unlimitedVotes, setUnlimitedVotes] = useState(false);
   const [hideResults, setHideResults] = useState(false);
-  const submit = () => onStart(noTimeLimit ? 0 : minutes, unlimitedVotes ? null : votes, hideResults);
+  const [showNonVoters, setShowNonVoters] = useState(false);
+  const submit = () => onStart(noTimeLimit ? 0 : minutes, unlimitedVotes ? null : votes, hideResults, showNonVoters);
   return (
     <div
       data-board-shortcuts="off"
@@ -5827,6 +5835,11 @@ function TimerSetup({ onClose, onStart, nestedZoneCount }) {
       <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginBottom: 14, fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>
         <input type="checkbox" checked={hideResults} onChange={(e) => setHideResults(e.target.checked)} />
         {t('vote.setup.hideResults')}
+      </label>
+
+      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginBottom: 14, fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>
+        <input type="checkbox" checked={showNonVoters} onChange={(e) => setShowNonVoters(e.target.checked)} />
+        {t('vote.setup.showNonVoters')}
       </label>
 
       <button
