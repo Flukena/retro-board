@@ -1692,19 +1692,29 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const votesUsed = useMemo(() => {
     if (!userId || !anyZoneVotingActive) return 0;
     let count = 0;
-    votesByItem.forEach((set) => { if (set.has(userId)) count += 1; });
+    // Only count votes on cards still under an active session — a vote from
+    // an earlier, already-finished session must not linger against a fresh
+    // session's quota.
+    votesByItem.forEach((set, id) => {
+      if (!set.has(userId)) return;
+      const item = board.items.find((i) => i.id === id);
+      if (item && activeVoteZone(item, board.items, now)) count += 1;
+    });
     return count;
-  }, [votesByItem, userId, anyZoneVotingActive]);
+  }, [votesByItem, userId, anyZoneVotingActive, board.items, now]);
 
-  // Per-user vote tallies for the player list: userId → number of votes cast.
+  // Per-user vote tallies for the player list: userId → number of votes cast
+  // on cards still under an active session (see votesUsed above).
   const votesUsedByUser = useMemo(() => {
     const m = new Map();
     if (!anyZoneVotingActive) return m;
-    votesByItem.forEach((set) => {
+    votesByItem.forEach((set, id) => {
+      const item = board.items.find((i) => i.id === id);
+      if (!item || !activeVoteZone(item, board.items, now)) return;
       set.forEach((uid) => { m.set(uid, (m.get(uid) || 0) + 1); });
     });
     return m;
-  }, [votesByItem, anyZoneVotingActive]);
+  }, [votesByItem, anyZoneVotingActive, board.items, now]);
 
   /* ============================================================
      Auto-dismiss toast
@@ -2177,7 +2187,14 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     const has = !!live.get(it.id)?.has(userId);
     if (!has && zTimer.voteLimit != null) {
       let used = 0;
-      live.forEach((set) => { if (set.has(userId)) used += 1; });
+      // Only count votes on cards still under an active session — a vote
+      // cast in an earlier, already-finished session (anywhere on the
+      // board) must not eat into a brand-new session's quota.
+      live.forEach((set, id) => {
+        if (!set.has(userId)) return;
+        const votedItem = items.find((i) => i.id === id);
+        if (votedItem && activeVoteZone(votedItem, items, Date.now())) used += 1;
+      });
       if (used >= zTimer.voteLimit) {
         setToast({ msg: t('vote.outOfQuota'), type: 'warn' });
         return;
