@@ -336,7 +336,7 @@ const fireBoardChange = (origin) => {
   // remote (provider as origin) and undoRedo: dispatch.
   if (origin === 'local' && !isUndoRedo) return;
   emitter.dispatchEvent(new CustomEvent('change', {
-    detail: { scope: 's', key: 'boardState', value: readBoardSnapshot() },
+    detail: { scope: 's', key: 'boardState', value: readBoardSnapshot(), isUndoRedo },
   }));
 };
 

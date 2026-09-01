@@ -1391,12 +1391,22 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
      Realtime push: subscribe to storage change events.
      Polling kept as a long-interval safety net only.
      ============================================================ */
-  const applyRemoteBoard = useCallback((remote) => {
+  const applyRemoteBoard = useCallback((remote, isUndoRedo) => {
     if (!remote) return;
+    // Undo/redo is a deliberate, authoritative correction — never let the
+    // "protect a just-finished local drag from a stale peer echo" grace
+    // window (recentlyMovedRef, below) mask it back to the pre-undo
+    // position. Without this, undoing a drag reverts the Yjs doc correctly
+    // but the on-screen sticky stays put until a refresh clears the ref.
+    if (isUndoRedo) recentlyMovedRef.current.clear();
     const focusedItemId = focusedTextIdRef.current?.split(':')[0] || null;
     if (focusedItemId && !remote.items?.some((it) => it.id === focusedItemId)) {
       const localFocused = boardRef.current.items.find((it) => it.id === focusedItemId);
-      const isRecentLocalCreate = localFocused
+      // A "recent local create" is normally preserved against a stale peer
+      // echo that just hasn't caught up yet — but an undo/redo removing the
+      // item IS the authoritative state, not staleness, so it must win even
+      // if the create happened moments ago.
+      const isRecentLocalCreate = !isUndoRedo && localFocused
         && localFocused.authorId === userIdRef.current
         && (localFocused.createdAt || 0) > Date.now() - 8000;
       if (!isRecentLocalCreate) updateFocusedText(null);
@@ -1447,10 +1457,12 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       // yet. Without this, a peer echo arriving in the gap between a local
       // create and its WS flush silently strips the new item from React state.
       // Only items WE just authored within the last few seconds qualify — older
-      // missing items are genuine peer-deletes that must be honored.
+      // missing items are genuine peer-deletes that must be honored. An
+      // undo/redo removing the item is likewise authoritative, not a stale
+      // echo, so it's never re-added here either.
       const RECENT_AUTHOR_WINDOW_MS = 8000;
       const cutoff = Date.now() - RECENT_AUTHOR_WINDOW_MS;
-      const localOnly = prev.items.filter((p) => (
+      const localOnly = isUndoRedo ? [] : prev.items.filter((p) => (
         !remoteIds.has(p.id)
         && p.authorId === userIdRef.current
         && (p.createdAt || 0) > cutoff
@@ -1463,12 +1475,12 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   useEffect(() => {
     if (!loaded) return undefined;
     const handler = (e) => {
-      const { scope, key, value } = e.detail || {};
+      const { scope, key, value, isUndoRedo } = e.detail || {};
       if (scope !== 's') return;
       // applyRemoteBoard preserves geometry for items in dragItemsRef and
       // text fields for the currently focused textarea, so we can apply
       // remote updates live even while the user drags.
-      if (key === 'boardState') applyRemoteBoard(value);
+      if (key === 'boardState') applyRemoteBoard(value, isUndoRedo);
       else if (key === 'presence') setPresence(value || {});
       else if (key === 'customTemplates') setCustomTemplates(value || []);
     };
@@ -1754,10 +1766,18 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     return () => window.storage?.offUndoChange?.(sync);
   }, []);
 
+  // A drag in progress holds dragItemsRef, which applyRemoteBoard's merge
+  // logic uses to keep showing the item at its live (not-yet-committed)
+  // mouse position. Undoing mid-drag would apply the revert underneath that
+  // override — invisible until the drag ends, and then the drag's own
+  // trailing flush would overwrite the revert right back into Yjs.
+  const midDrag = () => !!(dragItemsRef.current && dragItemsRef.current.size > 0);
   const doUndo = useCallback(() => {
+    if (midDrag()) { setToast({ msg: t('topbar.finishDragFirst'), type: 'warn' }); return; }
     if (!window.storage?.undo?.()) setToast({ msg: t('topbar.nothingToUndo'), type: 'warn' });
   }, [t]);
   const doRedo = useCallback(() => {
+    if (midDrag()) { setToast({ msg: t('topbar.finishDragFirst'), type: 'warn' }); return; }
     if (!window.storage?.redo?.()) setToast({ msg: t('topbar.nothingToRedo'), type: 'warn' });
   }, [t]);
 
