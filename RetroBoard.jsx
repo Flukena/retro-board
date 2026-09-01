@@ -547,11 +547,21 @@ const zoneHasActiveGovernor = (zone, allItems) => {
 };
 
 // A card's owner zone can hide/reveal its own private cards independently of
-// the board-wide (now-legacy) allRevealed flag; falls back to that flag once
-// outside every zone, or for boards where the zone never set its own value.
+// the board-wide (now-legacy) allRevealed flag. A zone that has never had its
+// own toggle clicked (revealed == null) inherits from the nearest ancestor
+// zone that HAS an explicit value instead of jumping straight to the board
+// default — so hiding a wrapper zone also hides a nested zone that hasn't
+// set its own override, while a nested zone with its own explicit setting
+// still keeps it (mirrors the ownership-chain walk activeVoteZone uses).
 const effectiveRevealed = (item, allItems, boardAllRevealed) => {
-  const zone = effectiveOwnerZone(item, allItems);
-  return zone ? (zone.revealed ?? boardAllRevealed) : boardAllRevealed;
+  let zone = effectiveOwnerZone(item, allItems);
+  const visited = new Set();
+  while (zone && !visited.has(zone.id)) {
+    if (zone.revealed != null) return zone.revealed;
+    visited.add(zone.id);
+    zone = effectiveOwnerZone(zone, allItems);
+  }
+  return boardAllRevealed;
 };
 
 // Shared by exportZoneCsv / exportBoardCsv.
@@ -2270,7 +2280,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       map.set(s.id, {
         votingAllowedNow: !!voteZone && !voteZone.votingLocked,
         hideVoteCounts: !!voteTimer?.hideResults && !isAdmin,
-        revealed: zone ? (zone.revealed ?? board.allRevealed) : board.allRevealed,
+        revealed: effectiveRevealed(s, board.items, board.allRevealed),
         inZone: !!zone,
       });
     });
