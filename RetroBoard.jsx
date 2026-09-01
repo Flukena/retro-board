@@ -10,7 +10,7 @@ import {
   ChevronDown, X, Sparkles, AlertCircle, Type, Copy,
   Image as ImageIcon, MousePointer2, RotateCcw,
   Languages, Sun, Moon, Monitor, Download, Upload, Undo2, Redo2,
-  MoreHorizontal, Ban, Check, BringToFront, SendToBack,
+  MoreHorizontal, Ban, Check, BringToFront, SendToBack, HelpCircle,
 } from 'lucide-react';
 import { t, useLang } from './src/i18n.js';
 import { useTheme, nextThemePref } from './src/theme.js';
@@ -152,6 +152,17 @@ const getTemplates = () => ({
 });
 
 const TIMER_PRESETS = [1, 3, 5, 10];
+
+// Help modal sections, in display order. `color` indexes COLORS so each
+// section's accent dot matches a real sticky-note color from the palette.
+const HELP_SECTIONS = [
+  { key: 'collab', color: 0 },
+  { key: 'canvas', color: 2 },
+  { key: 'zones', color: 3 },
+  { key: 'reveal', color: 4 },
+  { key: 'voting', color: 1 },
+  { key: 'admin', color: 5 },
+];
 
 const DEFAULT_BOARD = {
   items: [],
@@ -3886,6 +3897,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const fileInputRef = useRef(null);
   const [pendingImport, setPendingImport] = useState(null); // { file, parsed }
   const [importBusy, setImportBusy] = useState(false); // sanitizing legacy images before write
+  const [helpOpen, setHelpOpen] = useState(false);
 
   const onImportPick = useCallback(() => {
     if (!isAdmin) { setToast({ msg: t('common.adminOnly'), type: 'warn' }); return; }
@@ -4614,6 +4626,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                     setMoreMenuOpen(false);
                     onImportPick();
                   }}
+                />
+                <MoreMenuItem
+                  icon={<HelpCircle size={15} />}
+                  label={t('help.menuLabel')}
+                  onClick={() => { setMoreMenuOpen(false); setHelpOpen(true); }}
                 />
                 <MoreMenuDivider />
                 <MoreMenuItem
@@ -5521,6 +5538,66 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                 }}
               >{importBusy ? t('import.processing') : t('import.confirm.ok')}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {helpOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setHelpOpen(false)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 100,
+            background: 'var(--bg-modal-veil)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 20,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'var(--bg-elev)', borderRadius: 14, padding: 24,
+              width: '100%', maxWidth: 680, maxHeight: '82vh', overflowY: 'auto',
+              boxShadow: 'var(--shadow-modal)',
+              animation: 'rb-pop 0.2s ease-out',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <HelpCircle size={22} color="var(--accent)" />
+                <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--text)' }}>{t('help.title')}</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setHelpOpen(false)}
+                aria-label={t('common.close')}
+                style={{
+                  background: 'transparent', border: 'none', color: 'var(--text-muted)',
+                  cursor: 'pointer', padding: 4, display: 'inline-flex',
+                }}
+              ><X size={18} />
+              </button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+              {HELP_SECTIONS.map((s) => (
+                <div key={s.key}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <span style={{
+                      width: 10, height: 10, borderRadius: 3, flexShrink: 0,
+                      background: COLORS[s.color].border,
+                    }}
+                    />
+                    <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--text)' }}>{t(`help.${s.key}.title`)}</div>
+                  </div>
+                  <ul style={{ margin: 0, paddingLeft: 22, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {t(`help.${s.key}.body`).split('\n').map((line) => (
+                      <li key={line} style={{ fontSize: 13.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>{line}</li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
             </div>
           </div>
         </div>
