@@ -1741,8 +1741,12 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     return () => window.storage?.offUndoChange?.(sync);
   }, []);
 
-  const doUndo = useCallback(() => { window.storage?.undo?.(); }, []);
-  const doRedo = useCallback(() => { window.storage?.redo?.(); }, []);
+  const doUndo = useCallback(() => {
+    if (!window.storage?.undo?.()) setToast({ msg: t('topbar.nothingToUndo'), type: 'warn' });
+  }, [t]);
+  const doRedo = useCallback(() => {
+    if (!window.storage?.redo?.()) setToast({ msg: t('topbar.nothingToRedo'), type: 'warn' });
+  }, [t]);
 
   /* ============================================================
      Block browser zoom outside the board canvas.
@@ -4370,12 +4374,14 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           title={t('topbar.undo')}
           onClick={doUndo}
           enabled={undoState.canUndo}
+          disabledHint={t('topbar.nothingToUndo')}
           icon={<Undo2 size={16} />}
         />
         <TopBtn
           title={t('topbar.redo')}
           onClick={doRedo}
           enabled={undoState.canRedo}
+          disabledHint={t('topbar.nothingToRedo')}
           icon={<Redo2 size={16} />}
         />
         <TopBarDivider />
@@ -4721,7 +4727,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     const zTimer = zone.voteTimer;
     const remainingMs = zTimer.endsAt ? zTimer.endsAt - now : null;
     const isUrgent = remainingMs != null && remainingMs < 30000;
-    const votesLeft = zTimer.voteLimit != null ? Math.max(0, zTimer.voteLimit - votesUsed) : null;
+    // used/limit, ascending — matches the players-list badge's semantics
+    // (votesUsedByUser), so the same "X/Y" shape means the same thing
+    // everywhere instead of counting up in one place and down in another.
     return (
       <div
         key={zone.id}
@@ -4766,8 +4774,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
             whiteSpace: 'nowrap',
           }}
         >
-          {votesLeft != null
-            ? t('vote.banner.votesLeft', { used: votesLeft, limit: zTimer.voteLimit })
+          {zTimer.voteLimit != null
+            ? t('vote.banner.votesUsed', { used: votesUsed, limit: zTimer.voteLimit })
             : t('vote.banner.unlimited')}
         </span>
         {isAdmin && (
@@ -5609,7 +5617,9 @@ function AdminPinModal({ cfg, onCancel, onSubmit }) {
   );
 }
 
-function TopBtn({ title, onClick, active, enabled, icon, label, danger }) {
+function TopBtn({
+  title, onClick, active, enabled, icon, label, danger, disabledHint,
+}) {
   const baseColor = active
     ? 'var(--warn-text)'
     : danger
@@ -5619,7 +5629,7 @@ function TopBtn({ title, onClick, active, enabled, icon, label, danger }) {
     <button
       type="button"
       onClick={onClick}
-      title={enabled ? title : `${title} (admin only)`}
+      title={enabled ? title : (disabledHint || `${title} (admin only)`)}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 6,
         background: active ? 'var(--warn-bg)' : 'transparent',
