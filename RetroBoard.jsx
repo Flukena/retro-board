@@ -634,7 +634,8 @@ const StickyCard = React.memo(function StickyCard({
         animation: top3 ? 'rb-glow 1.6s ease-in-out infinite, rb-appear-rot 0.28s ease-out' : 'rb-appear-rot 0.28s ease-out',
         // Drop the blurred shadow in dense mode — the 1.5px border still
         // separates cards, and overlapping blur is the main cluster paint cost.
-        // The top3 result glow is kept (only ≤3 cards, meaningful highlight).
+        // The top3 glow is kept (only ≤3 cards, meaningful highlight);
+        // the medal badge below adds the specific rank on top of it.
         boxShadow: top3
           ? `0 0 0 3px #fbbf24, 0 8px 24px rgba(251,191,36,0.6), 0 6px 14px rgba(0,0,0,0.12)`
           : (dense ? 'none' : '0 6px 14px rgba(0,0,0,0.12)'),
@@ -667,8 +668,8 @@ const StickyCard = React.memo(function StickyCard({
         <div
           title={t('vote.rank', { n: voteRank })}
           style={{
-            position: 'absolute', top: -10, left: -10, fontSize: 22,
-            filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.35))',
+            position: 'absolute', top: 6, left: 6, fontSize: 18,
+            filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.35))',
             lineHeight: 1, pointerEvents: 'none',
           }}
         >
