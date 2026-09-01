@@ -69,6 +69,13 @@ const IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 // Must match the server's MIME_EXT allowlist (yjs-server.mjs) — anything
 // outside this set is rejected by /upload regardless of the resize path.
 const UPLOADABLE_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+// A full board import writes every item in one Yjs transaction, which the
+// WebsocketProvider then sends as a single WS frame. Must stay safely under
+// the server's per-frame cap (RL_MAX_BYTES in yjs-server.mjs, 2MB) — legacy
+// exports with embedded base64 images get converted back to short URLs
+// before this check (see sanitizeImportedImages), but this is the
+// belt-and-suspenders net for anything that still doesn't fit.
+const IMPORT_MAX_SNAPSHOT_BYTES = 1.5 * 1024 * 1024;
 const ZONE_TITLE_H = 40;
 const DRAG_THRESHOLD = 4;
 const ZOOM_MIN = 0.15;
@@ -954,6 +961,133 @@ const ImageCard = React.memo(function ImageCard({ item, selected, dense, onStart
 });
 
 /* ============================================================
+   Image upload prep (shared by paste/drop and legacy-import sanitization)
+   ============================================================ */
+
+// Decode a blob, downscale to IMAGE_MAX_DIM if needed, and re-encode to fit
+// IMAGE_MAX_BYTES if the resize round-trip pushed it back over. Caller is
+// expected to have already checked type/original size. Returns null if no
+// re-encode gets it under the cap.
+const prepareImageBlob = async (blob) => {
+  // Decode via an object URL (not a base64 data URL) — images are uploaded
+  // to the server as raw bytes now, so there's no reason to pay for base64
+  // encoding just to read dimensions / draw into a resize canvas.
+  const objectUrl = URL.createObjectURL(blob);
+  const img = new Image();
+  try {
+    await new Promise((res, rej) => {
+      img.onload = res;
+      img.onerror = rej;
+      img.src = objectUrl;
+    });
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+  let finalBlob = blob;
+  let nw = img.naturalWidth;
+  let nh = img.naturalHeight;
+  const maxEdge = Math.max(nw, nh);
+  if (maxEdge > IMAGE_MAX_DIM) {
+    const r = IMAGE_MAX_DIM / maxEdge;
+    const cw = Math.round(nw * r);
+    const ch = Math.round(nh * r);
+    const canvas = document.createElement('canvas');
+    canvas.width = cw;
+    canvas.height = ch;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, cw, ch);
+    // JPEG keeps size down; PNG keeps transparency.
+    const isTransparent = blob.type.includes('png') || blob.type.includes('gif') || blob.type.includes('webp');
+    finalBlob = await new Promise((res) => canvas.toBlob(res, isTransparent ? 'image/png' : 'image/jpeg', 0.85));
+    nw = cw;
+    nh = ch;
+  }
+  // Belt-and-suspenders payload cap. The original blob.size check rejects
+  // huge originals, but a lossless PNG re-encode of a transparent image can
+  // balloon past it — cap what actually gets uploaded and stored server-side.
+  if (!finalBlob || finalBlob.size > IMAGE_MAX_BYTES) {
+    // Try re-encoding as JPEG first (drops transparency but saves ~60%).
+    const canvas = document.createElement('canvas');
+    canvas.width = nw;
+    canvas.height = nh;
+    canvas.getContext('2d').drawImage(img, 0, 0, nw, nh);
+    const jpeg = await new Promise((res) => canvas.toBlob(res, 'image/jpeg', 0.8));
+    if (jpeg && jpeg.size <= IMAGE_MAX_BYTES) {
+      finalBlob = jpeg;
+    } else {
+      return null;
+    }
+  }
+  return { blob: finalBlob, nw, nh };
+};
+
+// Decode manually instead of fetch(dataUrl) — the page's CSP connect-src
+// doesn't list `data:`, so fetch() of a data URL is blocked in production.
+const dataUrlToBlob = (dataUrl) => {
+  const commaIdx = dataUrl.indexOf(',');
+  const header = dataUrl.slice('data:'.length, commaIdx);
+  const isBase64 = header.endsWith(';base64');
+  const mime = (isBase64 ? header.slice(0, -';base64'.length) : header) || 'application/octet-stream';
+  const data = dataUrl.slice(commaIdx + 1);
+  const binary = isBase64 ? atob(data) : decodeURIComponent(data);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+};
+
+// Server 429s ("image upload failed: 429") when the per-IP upload bucket is
+// exhausted — re-uploading many legacy images back to back can hit this.
+// Any other failure (bad format, network) won't fix itself on retry.
+const uploadWithRetry = async (blob, attempts = 6) => {
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      return await window.storage.uploadImage(blob);
+    } catch (err) {
+      if (i === attempts - 1 || !/: 429$/.test(err.message)) throw err;
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((res) => { setTimeout(res, 1100); });
+    }
+  }
+  return null; // unreachable — loop always returns or throws
+};
+
+// Legacy exports (from before server-hosted image storage) embed images as
+// base64 data URLs directly on the item. Writing those into Yjs as-is can
+// produce a single transaction bigger than the yjs-server WS frame cap —
+// the server silently refuses the oversized frame, so the import never
+// reaches persistence or any other peer while the importer's own optimistic
+// state still shows it (a split-brain). Re-upload each one through the
+// normal image pipeline so it shrinks back to a short URL before it's ever
+// written to the board.
+const sanitizeImportedImages = async (items) => {
+  let skipped = 0;
+  const out = [];
+  // eslint-disable-next-line no-restricted-syntax
+  for (const item of items) {
+    if (item.type !== 'image' || typeof item.src !== 'string' || !item.src.startsWith('data:')) {
+      out.push(item);
+      continue;
+    }
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const rawBlob = await dataUrlToBlob(item.src);
+      const prepared = rawBlob.size > IMAGE_MAX_BYTES || !UPLOADABLE_IMAGE_TYPES.has(rawBlob.type)
+        ? null
+        // eslint-disable-next-line no-await-in-loop
+        : await prepareImageBlob(rawBlob);
+      if (!prepared) { skipped += 1; continue; }
+      // eslint-disable-next-line no-await-in-loop
+      const url = await uploadWithRetry(prepared.blob);
+      out.push({ ...item, src: url, natW: prepared.nw, natH: prepared.nh });
+    } catch {
+      skipped += 1;
+    }
+  }
+  return { items: out, skipped };
+};
+
+/* ============================================================
    Component
    ============================================================ */
 
@@ -1675,7 +1809,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         : onlineUsers.filter((u) => !voters.has(u.userId)).map((u) => u.name);
       if (incomplete.length) msg += ` ${t('vote.results.incompleteVoters', { names: incomplete.join(', ') })}`;
     }
-    setToast({ msg, type: 'info' });
+    // Sticky: this can list every non-voter by name — the normal 3.2s
+    // auto-dismiss isn't enough time to read it during a live meeting.
+    setToast({ msg, type: 'info', sticky: true });
   }, [isAdmin, votesByItem, voteCountOf, onlineUsers, t]);
 
   useEffect(() => {
@@ -1750,7 +1886,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
      Auto-dismiss toast
      ============================================================ */
   useEffect(() => {
-    if (!toast) return undefined;
+    if (!toast || toast.sticky) return undefined;
     const t = setTimeout(() => setToast(null), 3200);
     return () => clearTimeout(t);
   }, [toast]);
@@ -2009,68 +2145,23 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       });
       return;
     }
-    // Decode via an object URL (not a base64 data URL) — images are uploaded
-    // to the server as raw bytes now, so there's no reason to pay for base64
-    // encoding just to read dimensions / draw into a resize canvas.
-    const objectUrl = URL.createObjectURL(blob);
-    const img = new Image();
-    try {
-      await new Promise((res, rej) => {
-        img.onload = res;
-        img.onerror = rej;
-        img.src = objectUrl;
+    const prepared = await prepareImageBlob(blob);
+    if (!prepared) {
+      setToast({
+        msg: t('image.tooLarge', { mb: (IMAGE_MAX_BYTES / 1024 / 1024).toFixed(0) })
+          || `Image too large (max ${(IMAGE_MAX_BYTES / 1024 / 1024).toFixed(0)} MB)`,
+        type: 'warn',
       });
-    } finally {
-      URL.revokeObjectURL(objectUrl);
-    }
-    let finalBlob = blob;
-    let nw = img.naturalWidth;
-    let nh = img.naturalHeight;
-    const maxEdge = Math.max(nw, nh);
-    if (maxEdge > IMAGE_MAX_DIM) {
-      const r = IMAGE_MAX_DIM / maxEdge;
-      const cw = Math.round(nw * r);
-      const ch = Math.round(nh * r);
-      const canvas = document.createElement('canvas');
-      canvas.width = cw;
-      canvas.height = ch;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, cw, ch);
-      // JPEG keeps size down; PNG keeps transparency.
-      const isTransparent = blob.type.includes('png') || blob.type.includes('gif') || blob.type.includes('webp');
-      finalBlob = await new Promise((res) => canvas.toBlob(res, isTransparent ? 'image/png' : 'image/jpeg', 0.85));
-      nw = cw;
-      nh = ch;
-    }
-    // Belt-and-suspenders payload cap. The original blob.size check rejects
-    // huge originals, but a lossless PNG re-encode of a transparent image can
-    // balloon past it — cap what actually gets uploaded and stored server-side.
-    if (!finalBlob || finalBlob.size > IMAGE_MAX_BYTES) {
-      // Try re-encoding as JPEG first (drops transparency but saves ~60%).
-      const canvas = document.createElement('canvas');
-      canvas.width = nw;
-      canvas.height = nh;
-      canvas.getContext('2d').drawImage(img, 0, 0, nw, nh);
-      const jpeg = await new Promise((res) => canvas.toBlob(res, 'image/jpeg', 0.8));
-      if (jpeg && jpeg.size <= IMAGE_MAX_BYTES) {
-        finalBlob = jpeg;
-      } else {
-        setToast({
-          msg: t('image.tooLarge', { mb: (IMAGE_MAX_BYTES / 1024 / 1024).toFixed(0) })
-            || `Image too large (max ${(IMAGE_MAX_BYTES / 1024 / 1024).toFixed(0)} MB)`,
-          type: 'warn',
-        });
-        return;
-      }
+      return;
     }
     let url;
     try {
-      url = await window.storage.uploadImage(finalBlob);
+      url = await window.storage.uploadImage(prepared.blob);
     } catch {
       setToast({ msg: t('image.uploadFailed') || 'Image upload failed', type: 'warn' });
       return;
     }
-    addImage(worldX, worldY, url, nw, nh);
+    addImage(worldX, worldY, url, prepared.nw, prepared.nh);
   }, [addImage, setToast]);
 
   const applyTemplate = useCallback((key) => {
@@ -3784,6 +3875,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
 
   const fileInputRef = useRef(null);
   const [pendingImport, setPendingImport] = useState(null); // { file, parsed }
+  const [importBusy, setImportBusy] = useState(false); // sanitizing legacy images before write
 
   const onImportPick = useCallback(() => {
     if (!isAdmin) { setToast({ msg: t('common.adminOnly'), type: 'warn' }); return; }
@@ -3819,14 +3911,35 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     }
   }, []);
 
-  const confirmImport = useCallback(() => {
-    if (!pendingImport || !isAdmin) return;
+  const confirmImport = useCallback(async () => {
+    if (!pendingImport || !isAdmin || importBusy) return;
     const { parsed } = pendingImport;
-    const importedItems = parsed.board.items.map((item) => (
+    const rawItems = parsed.board.items.map((item) => (
       item.type === 'zone'
         ? { ...item, voteTimer: null, lastResultsAt: null, votingLocked: false }
         : item
     ));
+    setImportBusy(true);
+    let importedItems;
+    let skippedImages;
+    try {
+      const sanitized = await sanitizeImportedImages(rawItems);
+      importedItems = sanitized.items;
+      skippedImages = sanitized.skipped;
+    } catch (err) {
+      setImportBusy(false);
+      setToast({ msg: t('import.fail', { err: err.message }), type: 'warn' });
+      return;
+    }
+    const snapshotBytes = new TextEncoder().encode(JSON.stringify(importedItems)).length;
+    if (snapshotBytes > IMPORT_MAX_SNAPSHOT_BYTES) {
+      setImportBusy(false);
+      setToast({
+        msg: t('import.tooLarge', { mb: (IMPORT_MAX_SNAPSHOT_BYTES / 1024 / 1024).toFixed(1) }),
+        type: 'warn',
+      });
+      return;
+    }
     // Wipe vote keys first — incoming userIds reference the source room.
     window.storage?.clearAllVotes?.();
     // Restore board fields (drop unrelated keys to avoid sneaking in bad shape).
@@ -3862,8 +3975,14 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     }
     const n = parsed.board.items.length;
     setPendingImport(null);
-    setToast({ msg: t('import.done', { n }), type: 'info' });
-  }, [pendingImport, isAdmin, replaceBoardLocal]);
+    setImportBusy(false);
+    setToast({
+      msg: skippedImages
+        ? t('import.doneWithSkipped', { n, skipped: skippedImages })
+        : t('import.done', { n }),
+      type: 'info',
+    });
+  }, [pendingImport, isAdmin, importBusy, replaceBoardLocal]);
 
   /* ============================================================
      Rendering helpers
@@ -5361,7 +5480,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
               <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--text)' }}>{t('import.confirm.head')}</div>
             </div>
             <div style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 18 }}>
-              {t('import.confirm.body', {
+              {importBusy ? t('import.processing') : t('import.confirm.body', {
                 n: pendingImport.parsed?.board?.items?.length ?? 0,
                 file: pendingImport.name,
               })}
@@ -5371,22 +5490,26 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                 type="button"
                 autoFocus
                 onClick={() => setPendingImport(null)}
+                disabled={importBusy}
                 style={{
                   background: 'var(--bg-panel-2)', color: 'var(--text-mid)', border: 'none',
                   padding: '8px 16px', borderRadius: 8, fontWeight: 600,
-                  cursor: 'pointer', fontSize: 14,
+                  cursor: importBusy ? 'not-allowed' : 'pointer', fontSize: 14,
+                  opacity: importBusy ? 0.6 : 1,
                 }}
               >{t('common.cancel')}
               </button>
               <button
                 type="button"
                 onClick={confirmImport}
+                disabled={importBusy}
                 style={{
                   background: 'var(--accent)', color: '#fff', border: 'none',
                   padding: '8px 16px', borderRadius: 8, fontWeight: 600,
-                  cursor: 'pointer', fontSize: 14,
+                  cursor: importBusy ? 'not-allowed' : 'pointer', fontSize: 14,
+                  opacity: importBusy ? 0.6 : 1,
                 }}
-              >{t('import.confirm.ok')}
+              >{importBusy ? t('import.processing') : t('import.confirm.ok')}
               </button>
             </div>
           </div>
@@ -5467,8 +5590,22 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
             fontSize: 14, fontWeight: 500, zIndex: 200,
             boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
             animation: 'rb-toast-in 0.28s ease-out',
+            display: 'flex', alignItems: 'center', gap: 10,
           }}
-        >{toast.msg}
+        >
+          <span>{toast.msg}</span>
+          {toast.sticky && (
+            <button
+              type="button"
+              onClick={() => setToast(null)}
+              aria-label={t('common.close')}
+              style={{
+                background: 'transparent', border: 'none', color: '#fff',
+                opacity: 0.8, cursor: 'pointer', padding: 2, display: 'inline-flex',
+              }}
+            ><X size={14} />
+            </button>
+          )}
         </div>
       )}
     </div>
