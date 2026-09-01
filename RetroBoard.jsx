@@ -1637,18 +1637,31 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     if (allEntries.length) storage.updateItems(allEntries, { silent: true });
     let totalVotes = 0;
     const voters = new Set();
+    const votesByUser = new Map();
     stickies
       .filter((s) => groupZoneIdSet.has(ownerByStickyId.get(s.id)))
       .forEach((s) => {
         const set = votesByItem.get(s.id);
         if (!set) return;
         totalVotes += set.size;
-        set.forEach((v) => voters.add(v));
+        set.forEach((v) => {
+          voters.add(v);
+          votesByUser.set(v, (votesByUser.get(v) || 0) + 1);
+        });
       });
     let msg = t('vote.results', { n: totalVotes, users: voters.size });
     if (rootZone.voteTimer.showNonVoters) {
-      const nonVoters = onlineUsers.filter((u) => !voters.has(u.userId)).map((u) => u.name);
-      if (nonVoters.length) msg += ` ${t('vote.results.didntVote', { names: nonVoters.join(', ') })}`;
+      const limit = rootZone.voteTimer.voteLimit;
+      // With a quota, "incomplete" covers both zero votes and a partial
+      // count (0/N is just the zero case of falling short of N) — one
+      // unified list instead of two separate ones. Without a quota there's
+      // no "full" to fall short of, so only the zero-vote case applies.
+      const incomplete = limit != null
+        ? onlineUsers
+          .filter((u) => (votesByUser.get(u.userId) || 0) < limit)
+          .map((u) => `${u.name} (${votesByUser.get(u.userId) || 0}/${limit})`)
+        : onlineUsers.filter((u) => !voters.has(u.userId)).map((u) => u.name);
+      if (incomplete.length) msg += ` ${t('vote.results.incompleteVoters', { names: incomplete.join(', ') })}`;
     }
     setToast({ msg, type: 'info' });
   }, [isAdmin, votesByItem, voteCountOf, onlineUsers, t]);
