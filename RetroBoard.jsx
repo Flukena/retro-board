@@ -11,7 +11,15 @@ import {
   Image as ImageIcon, MousePointer2, RotateCcw,
   Languages, Sun, Moon, Monitor, Download, Upload, Undo2, Redo2,
   MoreHorizontal, Ban, Check, BringToFront, SendToBack, HelpCircle,
+  MessageSquare,
 } from 'lucide-react';
+import { COMMENT_MAX_LEN } from './src/comment-schema.js';
+import {
+  IMPORT_MAX_BUNDLE_BYTES,
+  IMPORT_MAX_FILE_BYTES,
+  importBundleByteLength,
+  normalizeImportManifest,
+} from './src/import-schema.js';
 import { t, useLang } from './src/i18n.js';
 import { useTheme, nextThemePref } from './src/theme.js';
 import { useUserIdentity } from './src/useUserIdentity.js';
@@ -75,7 +83,6 @@ const UPLOADABLE_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp',
 // exports with embedded base64 images get converted back to short URLs
 // before this check (see sanitizeImportedImages), but this is the
 // belt-and-suspenders net for anything that still doesn't fit.
-const IMPORT_MAX_SNAPSHOT_BYTES = 1.5 * 1024 * 1024;
 const ZONE_TITLE_H = 40;
 const DRAG_THRESHOLD = 4;
 const ZOOM_MIN = 0.15;
@@ -100,6 +107,10 @@ const RECENT_MOVE_WINDOW_MS = 8000;
 // per-card shadows/filters — overlapping blur kernels are the dominant paint
 // cost when cards cluster. Cards stay separated by their borders.
 const DENSE_CARD_THRESHOLD = 60;
+const COMMENT_PREVIEW_TEXT_LIMIT = 120;
+const COMMENT_CAROUSEL_MS = 3600;
+const EMPTY_COMMENT_PREVIEWS = [];
+const EMPTY_COMMENTS = [];
 
 // Built-in templates are evaluated lazily so titles re-localize on lang change.
 const getTemplates = () => ({
@@ -575,6 +586,16 @@ const effectiveRevealed = (item, allItems, boardAllRevealed) => {
   return boardAllRevealed;
 };
 
+// One privacy predicate for every non-owner view (card chrome, modal, copy,
+// and exports). Keeping it beside effectiveRevealed prevents those surfaces
+// from drifting when nested-zone inheritance changes.
+const isStickyHiddenForUser = (item, allItems, boardAllRevealed, userId) => (
+  item?.type === 'sticky'
+  && item.private
+  && item.authorId !== userId
+  && !effectiveRevealed(item, allItems, boardAllRevealed)
+);
+
 // Shared by exportZoneCsv / exportBoardCsv.
 const csvColorName = (i) => ['yellow', 'red', 'green', 'blue', 'purple', 'orange'][i] || String(i);
 const csvEsc = (v) => {
@@ -599,10 +620,12 @@ const MEDAL_BY_RANK = { 1: '🥇', 2: '🥈', 3: '🥉' };
 const StickyCard = React.memo(function StickyCard({
   item, selected, isEditing, isOwner, allRevealed, dense,
   voted, voteCount, voteFlash, voteRank, votingAllowedNow, showVoteCount, inZone,
+  commentCount, commentPreviews,
   // `lang` is unused inside the body, but its presence as a prop
   // forces a re-render when language changes so t() picks up new strings.
   lang,
   onStartDrag, onBeginFocus, onTextChange, onTextKeyDown, onTextBlur, onToggleVote,
+  onOpenComments,
   editAreaRef,
 }) {
   void lang;
@@ -613,10 +636,25 @@ const StickyCard = React.memo(function StickyCard({
   const h = it.h || STICKY_H;
   const rot = selected ? 0 : it.rotation;
   const top3 = voteRank != null;
+  const [hovered, setHovered] = useState(false);
+  const [commentPreviewIndex, setCommentPreviewIndex] = useState(0);
+  const commentPreview = commentPreviews[commentPreviewIndex] ?? commentPreviews[0] ?? '';
+  const showCommentPreview = !hideContent && !!commentPreview;
+  const showCommentEntry = !hideContent && (commentCount > 0 || hovered);
+  useEffect(() => {
+    setCommentPreviewIndex(0);
+    if (hideContent || commentPreviews.length < 2) return undefined;
+    const timer = setInterval(() => {
+      setCommentPreviewIndex((index) => (index + 1) % commentPreviews.length);
+    }, COMMENT_CAROUSEL_MS);
+    return () => clearInterval(timer);
+  }, [commentPreviews, hideContent]);
   return (
     <div
       onMouseDown={(e) => { if (!isEditing) onStartDrag(e, it); }}
       onDoubleClick={(e) => { e.stopPropagation(); if (!hideContent) onBeginFocus(it, 'text'); }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
         position: 'absolute',
         left: it.x,
@@ -652,24 +690,81 @@ const StickyCard = React.memo(function StickyCard({
         outlineOffset: 6,
         display: 'flex',
         flexDirection: 'column',
-        overflow: 'hidden',
+        // Keep the card's own content clipped in its inner regions, but let
+        // rank decorations sit across the edge of the physical card.
+        overflow: 'visible',
         // Scope paint/layout to this sticky so a hover/vote on one card
         // doesn't trigger repaints of neighbours sharing the same layer.
-        contain: 'layout paint style',
+        // Paint containment clips descendants at the card edge even when
+        // overflow is visible. Drop only that containment for winners so the
+        // oversized medal can deliberately protrude beyond the card.
+        contain: top3 ? 'layout style' : 'layout paint style',
       }}
     >
-      {it.private && !allRevealed && isOwner && (
-        <div style={{ position: 'absolute', top: 6, right: 6, color: c.border }}>
-          <Lock size={14} />
-        </div>
-      )}
+      <div style={{
+        position: 'absolute', top: 6, right: 6, zIndex: 2,
+        width: 'calc(100% - 12px)', display: 'flex', alignItems: 'center',
+        justifyContent: 'flex-end', gap: 4, pointerEvents: 'none',
+      }}>
+        {it.private && !allRevealed && isOwner && (
+          <Lock size={14} color={c.border} style={{ flexShrink: 0 }} />
+        )}
+        {showCommentEntry && (
+          <button
+            type="button"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); if (!hideContent) onOpenComments(it); }}
+            disabled={hideContent}
+            title={t('comments.tooltip')}
+            aria-label={t('comments.tooltip')}
+            style={{
+              pointerEvents: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5,
+              minWidth: 28, width: showCommentPreview ? '72%' : 'auto',
+              maxWidth: showCommentPreview ? '72%' : (commentCount > 0 ? 54 : 40), height: 26,
+              padding: showCommentPreview ? '3px 6px' : '3px 7px',
+              background: 'rgba(255,255,255,0.78)', color: '#374151',
+              border: '1px solid rgba(0,0,0,0.08)', borderRadius: 8,
+              boxShadow: '0 2px 6px rgba(0,0,0,0.08)',
+              fontFamily: 'inherit', fontSize: 11, fontWeight: 600,
+              cursor: hideContent ? 'not-allowed' : 'pointer',
+              opacity: hideContent ? 0.45 : (commentCount > 0 ? 0.92 : 0.65),
+              overflow: 'hidden',
+            }}
+          >
+            <MessageSquare size={12} style={{ flexShrink: 0 }} />
+            {showCommentPreview && (
+              <span style={{ minWidth: 0, flex: 1, overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                <span
+                  key={`${commentPreviewIndex}:${commentPreview}`}
+                  className={commentPreviews.length > 1 ? 'rb-comment-slide' : undefined}
+                  style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                >
+                  {commentPreview}
+                </span>
+              </span>
+            )}
+            {commentCount > 0 && (
+              <span style={{
+                flexShrink: 0, minWidth: 16, height: 16, padding: '0 4px',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                borderRadius: 999, background: c.border, color: '#fff',
+                fontSize: 10, lineHeight: 1,
+              }}>
+                {commentCount}
+              </span>
+            )}
+          </button>
+        )}
+      </div>
 
       {top3 && (
         <div
           title={t('vote.rank', { n: voteRank })}
           style={{
-            position: 'absolute', top: 6, left: 6, fontSize: 18,
-            filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.35))',
+            position: 'absolute', top: -24, left: -24, zIndex: 3,
+            width: 64, height: 64, display: 'grid', placeItems: 'center',
+            fontSize: 56,
+            filter: 'drop-shadow(0 4px 7px rgba(0,0,0,0.38))',
             lineHeight: 1, pointerEvents: 'none',
           }}
         >
@@ -688,6 +783,7 @@ const StickyCard = React.memo(function StickyCard({
           filter: hideContent && !dense ? 'blur(8px)' : 'none',
           userSelect: hideContent ? 'none' : 'auto',
           color: it.fontColor || STICKY_AUTO_TEXT,
+          paddingTop: showCommentPreview ? 24 : (top3 ? 16 : 0),
         }}
       >
         {(() => {
@@ -1184,6 +1280,12 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       ? window.storage.snapshotVotes()
       : new Map()
   ));
+  const [commentsByItem, setCommentsByItem] = useState(() => (
+    typeof window !== 'undefined' && window.storage?.snapshotComments
+      ? window.storage.snapshotComments()
+      : new Map()
+  ));
+  const commentPreviewCacheRef = useRef(new Map());
   const [creationMode, setCreationMode] = useState(null); // 'zone' | 'select' | null
   const clipboardRef = useRef(null);
   const [zonePreview, setZonePreview] = useState(null); // {x,y,w,h} in world coords
@@ -1197,6 +1299,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const [fontColorOpen, setFontColorOpen] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
+  const [commentsOpenFor, setCommentsOpenFor] = useState(null);
   const [customTemplates, setCustomTemplates] = useState([]);
   const [toast, setToastRaw] = useState(null);
   const setToast = useCallback((next) => {
@@ -1217,6 +1320,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const [now, setNow] = useState(Date.now());
   const [loaded, setLoaded] = useState(false);
   const [confirmResetVotes, setConfirmResetVotes] = useState(false);
+  const [confirmUnlockAll, setConfirmUnlockAll] = useState(false);
   const [undoState, setUndoState] = useState({ canUndo: false, canRedo: false });
 
   const focusedTextIdRef = useRef(null);
@@ -1381,6 +1485,33 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   // Vote derivation helpers — read from the CRDT-backed per-user keys.
   const voteCountOf = useCallback((id) => votesByItem.get(id)?.size ?? 0, [votesByItem]);
   const didUserVoteOn = useCallback((id) => !!votesByItem.get(id)?.has(userId), [votesByItem, userId]);
+  const commentCountOf = useCallback((id) => commentsByItem.get(id)?.length ?? 0, [commentsByItem]);
+  const commentPreviewsByItem = useMemo(() => {
+    const previous = commentPreviewCacheRef.current;
+    const previews = new Map();
+    commentsByItem.forEach((comments, itemId) => {
+      const entries = [...comments]
+        .reverse()
+        .map((comment) => {
+          const text = String(comment.text || '').replace(/\s+/g, ' ').trim();
+          return text.length > COMMENT_PREVIEW_TEXT_LIMIT
+            ? `${text.slice(0, COMMENT_PREVIEW_TEXT_LIMIT).trimEnd()}…`
+            : text;
+        })
+        .filter(Boolean);
+      if (entries.length) {
+        const cached = previous.get(itemId);
+        const unchanged = cached
+          && cached.length === entries.length
+          && cached.every((text, index) => text === entries[index]);
+        previews.set(itemId, unchanged ? cached : entries);
+      }
+    });
+    return previews;
+  }, [commentsByItem]);
+  useEffect(() => {
+    commentPreviewCacheRef.current = commentPreviewsByItem;
+  }, [commentPreviewsByItem]);
 
   // Map of stickyId -> rank (1, 2, or 3) among its own zone's votes, once
   // that zone's results are finalized — drives both the top3 glow and the
@@ -1531,10 +1662,36 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     // resize path (solo, group, zone-carries-children) funnels through here,
     // so filtering here also covers a locked zone caught in someone else's
     // multi-select drag, not just its own title bar / resize handles.
-    const filtered = entries.filter((e) => {
-      const it = boardRef.current.items.find((i) => i.id === e.id);
-      return !(it?.type === 'zone' && it.locked);
-    });
+    //
+    // A locked zone should still be carried along when a larger unlocked
+    // ANCESTOR zone is the one being dragged — lock means "don't let a user
+    // grab/resize this zone directly", not "detach it from its parent's
+    // movement". A locked zone's patch is allowed only when ALL of:
+    //   - it's a pure x/y move (no w/h — resize never gets a pass, otherwise
+    //     a group-resize could still rescale a locked nested zone), and
+    //   - its immediate owner zone also has a patch in this same batch, and
+    //   - that owner is itself allowed to move (checked recursively, so a
+    //     locked zone under another locked, non-moving zone stays put too —
+    //     the owner's mere presence in the batch isn't proof it's moving,
+    //     since the owner itself may get filtered out).
+    const itemById = new Map(boardRef.current.items.map((i) => [i.id, i]));
+    const patchById = new Map(entries.map((e) => [e.id, e.patch]));
+    const isPureMove = (patch) => !('w' in patch) && !('h' in patch);
+    const allowedCache = new Map();
+    const isAllowed = (id) => {
+      if (allowedCache.has(id)) return allowedCache.get(id);
+      allowedCache.set(id, false); // guards a cyclic parentZoneId chain
+      const it = itemById.get(id);
+      let result = true;
+      if (it?.type === 'zone' && it.locked) {
+        const patch = patchById.get(id);
+        const parent = patch && isPureMove(patch) ? effectiveOwnerZone(it, boardRef.current.items) : null;
+        result = !!(parent && patchById.has(parent.id) && isAllowed(parent.id));
+      }
+      allowedCache.set(id, result);
+      return result;
+    };
+    const filtered = entries.filter((e) => isAllowed(e.id));
     if (!filtered.length) return;
     const byId = new Map(filtered.map((e) => [e.id, e.patch]));
     setBoard((prev) => ({
@@ -1672,6 +1829,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         setVotesByItem(window.storage.snapshotVotes());
       }
     };
+    const commentHandler = () => {
+      if (typeof window !== 'undefined' && window.storage?.snapshotComments) {
+        setCommentsByItem(window.storage.snapshotComments());
+      }
+    };
     const resync = () => {
       storage.get('boardState', true).then((r) => {
         if (r?.value) applyRemoteBoard(r.value);
@@ -1685,6 +1847,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         if (Array.isArray(r?.value)) setCustomTemplates(r.value);
       });
       voteHandler();
+      commentHandler();
     };
     resync();
     const offSyncRefresh = window.storage?.onSynced?.(resync) || (() => {});
@@ -1696,16 +1859,23 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       const pRec = await storage.get('presence', true);
       if (pRec?.value) setPresence(pRec.value);
       voteHandler();
+      commentHandler();
     };
     const interval = setInterval(safetyTick, POLL_SAFETY);
     if (typeof window !== 'undefined' && window.storage?.onVotesChange) {
       window.storage.onVotesChange(voteHandler);
+    }
+    if (typeof window !== 'undefined' && window.storage?.onCommentsChange) {
+      window.storage.onCommentsChange(commentHandler);
     }
     return () => {
       stopped = true;
       if (typeof storage.off === 'function') storage.off(handler);
       if (typeof window !== 'undefined' && window.storage?.offVotesChange) {
         window.storage.offVotesChange(voteHandler);
+      }
+      if (typeof window !== 'undefined' && window.storage?.offCommentsChange) {
+        window.storage.offCommentsChange(commentHandler);
       }
       clearInterval(interval);
       offSyncRefresh();
@@ -1952,12 +2122,20 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const midDrag = () => !!(dragItemsRef.current && dragItemsRef.current.size > 0);
   const doUndo = useCallback(() => {
     if (midDrag()) { setToast({ msg: t('topbar.finishDragFirst'), type: 'warn' }); return; }
+    if (!isAdmin && boardRef.current.editingLocked) {
+      setToast({ msg: t('common.warnLockEdit'), type: 'warn' });
+      return;
+    }
     if (!window.storage?.undo?.()) setToast({ msg: t('topbar.nothingToUndo'), type: 'warn' });
-  }, [t]);
+  }, [isAdmin, t]);
   const doRedo = useCallback(() => {
     if (midDrag()) { setToast({ msg: t('topbar.finishDragFirst'), type: 'warn' }); return; }
+    if (!isAdmin && boardRef.current.editingLocked) {
+      setToast({ msg: t('common.warnLockEdit'), type: 'warn' });
+      return;
+    }
     if (!window.storage?.redo?.()) setToast({ msg: t('topbar.nothingToRedo'), type: 'warn' });
-  }, [t]);
+  }, [isAdmin, t]);
 
   /* ============================================================
      Block browser zoom outside the board canvas.
@@ -2027,17 +2205,18 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
      ============================================================ */
 
   const removeItemUnchecked = useCallback((id) => {
-    // One Yjs transaction so Cmd+Z restores the item AND its votes together.
+    // One Yjs transaction so Cmd+Z restores the item and its related state together.
     // Falls back to the two-call path if the bridge is an older build that
     // doesn't expose the combined helper yet.
-    if (window.storage?.deleteItemWithVotes) {
-      window.storage.deleteItemWithVotes(id);
+    if (window.storage?.deleteItemWithVotesAndComments) {
+      window.storage.deleteItemWithVotesAndComments(id);
       // React state still needs to drop the item — the deepObserver fires a
       // synthetic boardState change, but only for non-local origins. Our own
       // delete is 'local', so do it explicitly here.
       setBoard((prev) => ({ ...prev, items: prev.items.filter((it) => it.id !== id) }));
     } else {
       window.storage?.clearVotesFor?.(id);
+      window.storage?.clearCommentsForItems?.([id]);
       setBoard((prev) => ({ ...prev, items: prev.items.filter((it) => it.id !== id) }));
       storage.removeItem(id);
     }
@@ -2311,7 +2490,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       const voteTimer = voteZone?.voteTimer;
       map.set(s.id, {
         votingAllowedNow: !!voteZone && !voteZone.votingLocked,
-        hideVoteCounts: !!voteTimer?.hideResults && !isAdmin,
+        // "Hide counts" is session-wide, including the admin who started it.
+        // Results become visible to everyone again as soon as the session ends.
+        hideVoteCounts: !!voteTimer?.hideResults,
         revealed: effectiveRevealed(s, board.items, board.allRevealed),
         inZone: !!zone,
       });
@@ -2319,7 +2500,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     return map;
     // Deliberately excludes now so active timers do not rebuild every sticky once per second.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [zoneVotingSignature, board.allRevealed, isAdmin]);
+  }, [zoneVotingSignature, board.allRevealed]);
 
   const requireEdit = useCallback(() => {
     if (!editingAllowed) {
@@ -2330,6 +2511,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   }, [editingAllowed]);
 
   const requireMove = useCallback((candidateIds) => {
+    if (!editingAllowed) {
+      setToast({ msg: t('common.warnLockEdit'), type: 'warn' });
+      return false;
+    }
     const ids = Array.from(new Set(
       Array.from(candidateIds || []).filter((id) => typeof id === 'string' && id.length > 0),
     )).sort();
@@ -2341,7 +2526,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     }
     storage.setLocalBusyItems('geometry', ids);
     return true;
-  }, []);
+  }, [editingAllowed]);
 
   /* ============================================================
      Voting
@@ -2378,6 +2563,51 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     window.storage.setVote(it.id, userId, !has);
     if (!has) flashVote(it.id);
   }, [userId, flashVote, t]);
+
+  const openComments = useCallback((item) => {
+    setCommentsOpenFor(item.id);
+  }, []);
+
+  const addCommentTo = useCallback((item, text) => {
+    if (!editingAllowed) {
+      setToast({ msg: t('common.warnLockEdit'), type: 'warn' });
+      return false;
+    }
+    const trimmed = text.trim();
+    if (!trimmed || !window.storage?.addComment) return false;
+    return window.storage.addComment(item.id, {
+      id: uid(),
+      authorId: userId,
+      authorName: userName,
+      text: trimmed,
+      createdAt: Date.now(),
+    });
+  }, [editingAllowed, userId, userName, t]);
+
+  const deleteCommentFrom = useCallback((itemId, commentId) => {
+    if (!editingAllowed) {
+      setToast({ msg: t('common.warnLockEdit'), type: 'warn' });
+      return;
+    }
+    window.storage?.deleteComment?.(itemId, commentId);
+  }, [editingAllowed, t]);
+
+  const commentsOpenItem = useMemo(
+    () => (commentsOpenFor
+      ? board.items.find((candidate) => candidate.id === commentsOpenFor) ?? null
+      : null),
+    [commentsOpenFor, board.items],
+  );
+  const commentsOpenReadable = !!commentsOpenItem && !isStickyHiddenForUser(
+    commentsOpenItem, board.items, board.allRevealed, userId,
+  );
+
+  // A remote zone-hide or item deletion must revoke an already-open comment
+  // view. Depend on the derived boolean so unrelated board updates do not
+  // repeatedly run this synchronization effect.
+  useEffect(() => {
+    if (commentsOpenFor && !commentsOpenReadable) setCommentsOpenFor(null);
+  }, [commentsOpenFor, commentsOpenReadable]);
 
   /* ============================================================
      Interactions: pan, zoom, drag, resize
@@ -3399,10 +3629,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     const idMap = new Map(sourceItems.map((it) => [it.id, uid()]));
     const clones = sourceItems.map((it) => {
       // Don't carry forward text from private cards the user can't see.
-      const isHidden = it.type === 'sticky'
-        && it.private
-        && it.authorId !== userId
-        && !effectiveRevealed(it, b.items, b.allRevealed);
+      const isHidden = isStickyHiddenForUser(it, b.items, b.allRevealed, userId);
       if (isHidden) stripped += 1;
       const clone = {
         ...it,
@@ -3439,6 +3666,13 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     const onKey = (e) => {
       if (focusedTextIdRef.current) return;
       if (nameModalOpen) return;
+      if (commentsOpenReadable) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          setCommentsOpenFor(null);
+        }
+        return;
+      }
       const el = e.target instanceof Element ? e.target : null;
       if (el?.closest(
         'input, textarea, select, [contenteditable="true"], '
@@ -3520,7 +3754,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [
-    nameModalOpen, selectedIds, deleteItemsIfAllowed, duplicateItems, doUndo, doRedo,
+    nameModalOpen, commentsOpenReadable, selectedIds, deleteItemsIfAllowed, duplicateItems, doUndo, doRedo,
     fitToContent, fitToSelection, zoomBy, resetZoom,
     bringToFront, sendToBack, bringForward, sendBackward,
   ]);
@@ -3530,6 +3764,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
      ============================================================ */
   useEffect(() => {
     const onPaste = async (e) => {
+      if (commentsOpenReadable) return;
       if (focusedTextIdRef.current) return; // let inputs handle paste
       const items = e.clipboardData?.items || [];
       for (const it of items) {
@@ -3547,7 +3782,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     };
     window.addEventListener('paste', onPaste);
     return () => window.removeEventListener('paste', onPaste);
-  }, [importImageFromBlob, screenToWorld, requireEdit]);
+  }, [commentsOpenReadable, importImageFromBlob, screenToWorld, requireEdit]);
 
   const onCanvasDragOver = useCallback((e) => {
     if (e.dataTransfer?.types?.includes('Files')) e.preventDefault();
@@ -3586,10 +3821,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
      Live editing: focus textarea, save every keystroke (debounced).
      ============================================================ */
   const canEditItem = useCallback((it) => {
-    if (!it) return false;
-    if (!editingAllowed && it.authorId !== userId && !isAdmin) return false;
-    return true;
-  }, [editingAllowed, isAdmin, userId]);
+    return !!it && editingAllowed;
+  }, [editingAllowed]);
 
   const beginFocus = useCallback((it, fieldKey = 'text') => {
     if (!canEditItem(it)) {
@@ -3730,6 +3963,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const adminClearBoard = useCallback(() => {
     if (!isAdmin) return;
     window.storage?.clearAllVotes?.();
+    window.storage?.clearAllComments?.();
     // Full replace: drop every item, reset session meta, preserve admin identity.
     replaceBoardLocal({
       ...boardRef.current,
@@ -3752,18 +3986,42 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       .filter((i) => i.type === 'zone' && (i.voteTimer || i.lastResultsAt))
       .map((z) => ({ id: z.id, patch: { voteTimer: null, lastResultsAt: null } }));
     if (zoneEntries.length) {
+      const patchById = new Map(zoneEntries.map((entry) => [entry.id, entry.patch]));
       setBoard((prev) => ({
         ...prev,
-        items: prev.items.map((it) => {
-          const e = zoneEntries.find((en) => en.id === it.id);
-          return e ? { ...it, ...e.patch } : it;
-        }),
+        items: prev.items.map((it) => (
+          patchById.has(it.id) ? { ...it, ...patchById.get(it.id) } : it
+        )),
       }));
       storage.updateItems(zoneEntries);
     }
     patchMeta({ lastResultsAt: null });
     setConfirmResetVotes(false);
     setToast({ msg: t('reset.done'), type: 'info' });
+  }, [isAdmin, patchMeta]);
+
+  // Clears every protective flag on the board in one go: per-zone locks,
+  // per-sticky privacy, and the board-wide edit lock. A durable reset (not a
+  // display-only override like "reveal all cards") so the objects stay
+  // unlocked/public after a reload, not just for the current view.
+  const adminUnlockAll = useCallback(() => {
+    if (!isAdmin) return;
+    const entries = boardRef.current.items
+      .filter((i) => (i.type === 'zone' && i.locked) || (i.type === 'sticky' && i.private))
+      .map((i) => ({ id: i.id, patch: i.type === 'zone' ? { locked: false } : { private: false } }));
+    if (entries.length) {
+      const patchById = new Map(entries.map((entry) => [entry.id, entry.patch]));
+      setBoard((prev) => ({
+        ...prev,
+        items: prev.items.map((it) => (
+          patchById.has(it.id) ? { ...it, ...patchById.get(it.id) } : it
+        )),
+      }));
+      storage.updateItems(entries);
+    }
+    patchMeta({ editingLocked: false });
+    setConfirmUnlockAll(false);
+    setToast({ msg: t('unlockAll.done'), type: 'info' });
   }, [isAdmin, patchMeta]);
 
   /* ----- Export / Import ----- */
@@ -3777,6 +4035,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     const voteSnap = window.storage?.snapshotVotes?.() || new Map();
     const votes = {};
     voteSnap.forEach((set, itemId) => { votes[itemId] = Array.from(set); });
+    const commentSnap = window.storage?.snapshotComments?.() || new Map();
+    const comments = {};
+    commentSnap.forEach((entries, itemId) => { comments[itemId] = entries; });
     const payload = {
       version: 1,
       exportedAt: Date.now(),
@@ -3790,6 +4051,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         lastResultsAt: b.lastResultsAt,
       },
       votes,
+      comments,
       customTemplates,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -3827,8 +4089,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       t('export.csv.createdAt'),
     ].map(csvEsc).join(','));
     children.forEach((sticky) => {
-      const hide = sticky.private && sticky.authorId !== userId
-        && !effectiveRevealed(sticky, b.items, b.allRevealed);
+      const hide = isStickyHiddenForUser(sticky, b.items, b.allRevealed, userId);
       lines.push([
         hide ? t('export.csv.hidden') : (sticky.text || ''),
         sticky.authorName || '',
@@ -3878,8 +4139,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       t('export.csv.createdAt'),
     ].map(csvEsc).join(','));
     const pushRow = (zoneLabel, sticky) => {
-      const hide = sticky.private && sticky.authorId !== userId
-        && !effectiveRevealed(sticky, b.items, b.allRevealed);
+      const hide = isStickyHiddenForUser(sticky, b.items, b.allRevealed, userId);
       lines.push([
         zoneLabel,
         hide ? t('export.csv.hidden') : (sticky.text || ''),
@@ -3930,25 +4190,14 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     e.target.value = ''; // allow re-picking the same file later
     if (!file) return;
     try {
+      if (file.size > IMPORT_MAX_FILE_BYTES) {
+        throw new Error(`file exceeds ${(IMPORT_MAX_FILE_BYTES / 1024 / 1024).toFixed(0)} MB`);
+      }
       const text = await file.text();
       const parsed = JSON.parse(text);
-      if (!parsed?.board?.items || !Array.isArray(parsed.board.items)) {
-        throw new Error('missing board.items');
-      }
       const importedAt = Date.now();
-      const zLimit = Number.MAX_SAFE_INTEGER - parsed.board.items.length - 1;
-      parsed.board.items = parsed.board.items.map((item, index) => {
-        const normalized = { ...item };
-        normalized.createdAt = Number.isFinite(item?.createdAt)
-          && Math.abs(item.createdAt) <= zLimit
-          ? item.createdAt
-          : importedAt + index;
-        if (!Number.isFinite(item?.zIndex) || Math.abs(item.zIndex) > zLimit) {
-          delete normalized.zIndex;
-        }
-        return normalized;
-      });
-      setPendingImport({ name: file.name, parsed });
+      const manifest = normalizeImportManifest(parsed, importedAt);
+      setPendingImport({ name: file.name, parsed, ...manifest });
     } catch (err) {
       setToast({ msg: t('import.fail', { err: err.message }), type: 'warn' });
     }
@@ -3956,8 +4205,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
 
   const confirmImport = useCallback(async () => {
     if (!pendingImport || !isAdmin || importBusy) return;
-    const { parsed } = pendingImport;
-    const rawItems = parsed.board.items.map((item) => (
+    const {
+      parsed, items, voteEntries, commentEntries, customTemplates: importedTemplates,
+    } = pendingImport;
+    const rawItems = items.map((item) => (
       item.type === 'zone'
         ? { ...item, voteTimer: null, lastResultsAt: null, votingLocked: false }
         : item
@@ -3974,20 +4225,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       setToast({ msg: t('import.fail', { err: err.message }), type: 'warn' });
       return;
     }
-    const snapshotBytes = new TextEncoder().encode(JSON.stringify(importedItems)).length;
-    if (snapshotBytes > IMPORT_MAX_SNAPSHOT_BYTES) {
-      setImportBusy(false);
-      setToast({
-        msg: t('import.tooLarge', { mb: (IMPORT_MAX_SNAPSHOT_BYTES / 1024 / 1024).toFixed(1) }),
-        type: 'warn',
-      });
-      return;
-    }
-    // Wipe vote keys first — incoming userIds reference the source room.
-    window.storage?.clearAllVotes?.();
-    // Restore board fields (drop unrelated keys to avoid sneaking in bad shape).
-    // Full replace so removed items are deleted from Yjs, not just hidden.
-    replaceBoardLocal({
+    const nextBoard = {
       ...DEFAULT_BOARD,
       items: importedItems,
       timer: parsed.board.timer || null,
@@ -4003,20 +4241,32 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       adminUserId: boardRef.current.adminUserId,
       adminName: boardRef.current.adminName,
       adminPinHash: boardRef.current.adminPinHash,
+    };
+    const snapshotBytes = importBundleByteLength({
+      board: nextBoard,
+      votes: voteEntries,
+      comments: commentEntries,
+      customTemplates: importedTemplates,
     });
-    // Replay votes — each (itemId, userId) pair becomes its own CRDT key so
-    // they survive concurrent edits in the destination room.
-    if (parsed.votes && typeof parsed.votes === 'object') {
-      Object.entries(parsed.votes).forEach(([itemId, voters]) => {
-        if (!Array.isArray(voters)) return;
-        voters.forEach((u) => window.storage?.setVote?.(itemId, u, true));
+    if (snapshotBytes > IMPORT_MAX_BUNDLE_BYTES) {
+      setImportBusy(false);
+      setToast({
+        msg: t('import.tooLarge', { mb: (IMPORT_MAX_BUNDLE_BYTES / 1024 / 1024).toFixed(1) }),
+        type: 'warn',
       });
+      return;
     }
-    if (Array.isArray(parsed.customTemplates)) {
-      setCustomTemplates(parsed.customTemplates);
-      storage.set('customTemplates', parsed.customTemplates, true);
+    const imported = window.storage?.importBundle?.(
+      nextBoard, voteEntries, commentEntries, importedTemplates,
+    );
+    if (!imported) {
+      setImportBusy(false);
+      setToast({ msg: t('import.fail', { err: 'invalid import bundle' }), type: 'warn' });
+      return;
     }
-    const n = parsed.board.items.length;
+    setBoard(nextBoard);
+    if (Array.isArray(importedTemplates)) setCustomTemplates(importedTemplates);
+    const n = importedItems.length;
     setPendingImport(null);
     setImportBusy(false);
     setToast({
@@ -4025,7 +4275,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         : t('import.done', { n }),
       type: 'info',
     });
-  }, [pendingImport, isAdmin, importBusy, replaceBoardLocal]);
+  }, [pendingImport, isAdmin, importBusy]);
 
   /* ============================================================
      Rendering helpers
@@ -4080,6 +4330,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       votingAllowedNow={stickyVotingContext.get(it.id)?.votingAllowedNow ?? false}
       showVoteCount={!(stickyVotingContext.get(it.id)?.hideVoteCounts ?? false)}
       inZone={stickyVotingContext.get(it.id)?.inZone ?? false}
+      commentCount={commentCountOf(it.id)}
+      commentPreviews={commentPreviewsByItem.get(it.id) ?? EMPTY_COMMENT_PREVIEWS}
       lang={lang}
       onStartDrag={startItemDrag}
       onBeginFocus={beginFocus}
@@ -4087,6 +4339,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       onTextKeyDown={onTextKeyDown}
       onTextBlur={onTextBlur}
       onToggleVote={toggleVote}
+      onOpenComments={openComments}
       editAreaRef={editAreaRef}
     />
   );
@@ -4144,6 +4397,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       selectedIds,
       focusedTextId,
       votesByItem,
+      commentsByItem,
+      commentPreviewsByItem,
       voteFlashes,
       topVotedRanks,
       stickyVotingContext,
@@ -4158,6 +4413,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       onTextKeyDown,
       onTextBlur,
       toggleVote,
+      openComments,
     ],
   );
 
@@ -4178,8 +4434,19 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       sx = selectedItem.x * v.zoom + v.x + 60;
       sy = selectedItem.y * v.zoom + v.y - 14;
     }
+    // The toolbar is translated upward by its own height. Keep its bottom
+    // anchor far enough below the 60px top bar that admin controls cannot sit
+    // above it and intercept clicks (most visible on fitted/zoomed-out zones).
+    sy = Math.max(sy, 112);
     const can = canModifyOwnedItem(selectedItem);
     const canDelete = canDeleteItem(selectedItem);
+    // A zone with no explicit override inherits visibility from its nearest
+    // ancestor (or the legacy board-wide value). The eye action must toggle
+    // that effective state; toggling the raw undefined value would write true
+    // again when an inherited-visible zone is clicked, making "hide" a no-op.
+    const selectedZoneRevealed = selectedItem.type === 'zone'
+      ? (selectedItem.revealed ?? effectiveRevealed(selectedItem, board.items, board.allRevealed))
+      : false;
     const nestedZoneCount = selectedItem.type === 'zone'
       ? [...zoneGroupIds(selectedItem, board.items)].filter((id) => (
           id !== selectedItem.id
@@ -4362,11 +4629,12 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         {selectedItem.type === 'zone' && isAdmin && (
           <button
             type="button"
-            onClick={() => updateItem(selectedItem.id, { revealed: !selectedItem.revealed })}
-            title={selectedItem.revealed ? t('zone.hideCards') : t('zone.revealCards')}
+            onClick={() => updateItem(selectedItem.id, { revealed: !selectedZoneRevealed })}
+            title={selectedZoneRevealed ? t('zone.hideCards') : t('zone.revealCards')}
+            aria-label={selectedZoneRevealed ? t('zone.hideCards') : t('zone.revealCards')}
             style={iconBtn(true)}
           >
-            {selectedItem.revealed ? <EyeOff size={15} /> : <Eye size={15} />}
+            {selectedZoneRevealed ? <EyeOff size={15} /> : <Eye size={15} />}
           </button>
         )}
         {selectedItem.type === 'zone' && isAdmin && (
@@ -4380,7 +4648,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
               title={selectedItem.voteTimer ? t('topbar.stopVote') : t('zone.startVote')}
               style={iconBtn(true)}
             >
-              {selectedItem.voteTimer ? <Square size={15} /> : <ThumbsUp size={15} />}
+              {selectedItem.voteTimer ? <Square size={15} /> : <Play size={15} />}
             </button>
             {timerSetupOpen && (
               <TimerSetup
@@ -4654,6 +4922,16 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                   onClick={() => { setMoreMenuOpen(false); setHelpOpen(true); }}
                 />
                 <MoreMenuDivider />
+                <MoreMenuItem
+                  icon={<Unlock size={15} />}
+                  label={t('topbar.unlockAll')}
+                  disabled={!isAdmin}
+                  onClick={() => {
+                    if (!isAdmin) { setToast({ msg: t('common.adminOnly'), type: 'warn' }); return; }
+                    setMoreMenuOpen(false);
+                    setConfirmUnlockAll(true);
+                  }}
+                />
                 <MoreMenuItem
                   icon={<RotateCcw size={15} />}
                   label={t('topbar.resetVotes')}
@@ -5292,6 +5570,18 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           0%, 100% { box-shadow: 0 0 0 3px rgba(251,191,36,0.7), 0 0 18px rgba(251,191,36,0.6), 0 6px 14px rgba(0,0,0,0.12); }
           50%      { box-shadow: 0 0 0 3px rgba(251,191,36,1.0), 0 0 28px rgba(251,191,36,1.0), 0 6px 14px rgba(0,0,0,0.12); }
         }
+        @keyframes rb-comment-slide {
+          0%   { opacity: 0; transform: translateX(10px); }
+          18%  { opacity: 1; transform: translateX(0); }
+          82%  { opacity: 1; transform: translateX(0); }
+          100% { opacity: 0; transform: translateX(-10px); }
+        }
+        .rb-comment-slide {
+          animation: rb-comment-slide ${COMMENT_CAROUSEL_MS}ms ease-in-out both;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .rb-comment-slide { animation: none !important; }
+        }
         .rb-no-select * { user-select: none; }
       `}</style>
 
@@ -5452,6 +5742,57 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       )}
 
       {/* Reset votes confirm */}
+      {confirmUnlockAll && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'fixed', inset: 0, zIndex: 100,
+            background: 'rgba(0,0,0,0.4)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          <div
+            style={{
+              background: 'var(--bg-elev)', borderRadius: 14, padding: 24,
+              minWidth: 320, boxShadow: 'var(--shadow-modal)',
+              animation: 'rb-pop 0.2s ease-out',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+              <Unlock size={22} color="var(--accent)" />
+              <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--text)' }}>{t('unlockAll.confirm.head')}</div>
+            </div>
+            <div style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 18 }}>
+              {t('unlockAll.confirm.body')}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                type="button"
+                autoFocus
+                onClick={() => setConfirmUnlockAll(false)}
+                style={{
+                  background: 'var(--bg-panel-2)', color: 'var(--text-mid)', border: 'none',
+                  padding: '8px 16px', borderRadius: 8, fontWeight: 600,
+                  cursor: 'pointer', fontSize: 14,
+                }}
+              >{t('common.cancel')}
+              </button>
+              <button
+                type="button"
+                onClick={() => requireAdminPin(adminUnlockAll)}
+                style={{
+                  background: 'var(--accent)', color: '#fff', border: 'none',
+                  padding: '8px 16px', borderRadius: 8, fontWeight: 600,
+                  cursor: 'pointer', fontSize: 14,
+                }}
+              >{t('unlockAll.confirm.ok')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {confirmResetVotes && (
         <div
           role="dialog"
@@ -5563,6 +5904,17 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           </div>
         </div>
       )}
+
+      {commentsOpenReadable ? (
+        <CommentsModal
+          item={commentsOpenItem}
+          comments={commentsByItem.get(commentsOpenItem.id) ?? EMPTY_COMMENTS}
+          editingAllowed={editingAllowed}
+          onAdd={(text) => addCommentTo(commentsOpenItem, text)}
+          onDelete={(commentId) => deleteCommentFrom(commentsOpenItem.id, commentId)}
+          onClose={() => setCommentsOpenFor(null)}
+        />
+      ) : null}
 
       {helpOpen && (
         <div
@@ -5766,6 +6118,144 @@ const zoomBtn = {
   display: 'inline-flex',
   alignItems: 'center',
 };
+
+function CommentsModal({ item, comments, editingAllowed, onAdd, onDelete, onClose }) {
+  const [draft, setDraft] = useState('');
+  const fmtAgo = (ts) => {
+    const diff = Date.now() - ts;
+    if (diff < 60_000) return t('common.justNow');
+    if (diff < 3600_000) return t('common.minutesAgo', { n: Math.floor(diff / 60000) });
+    if (diff < 86_400_000) return t('common.hoursAgo', { n: Math.floor(diff / 3_600_000) });
+    return t('common.daysAgo', { n: Math.floor(diff / 86_400_000) });
+  };
+  const submit = () => {
+    const text = draft.trim();
+    if (!text || !editingAllowed) return;
+    if (onAdd(text) !== false) setDraft('');
+  };
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="comments-dialog-title"
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 100,
+        background: 'var(--bg-modal-veil)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 20,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: 'var(--bg-elev)', borderRadius: 14, padding: 24,
+          width: '100%', maxWidth: 560, maxHeight: '82vh',
+          boxShadow: 'var(--shadow-modal)', animation: 'rb-pop 0.2s ease-out',
+          display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <MessageSquare size={22} color="var(--accent)" />
+            <div id="comments-dialog-title" style={{ fontSize: 17, fontWeight: 700, color: 'var(--text)' }}>{t('comments.title')}</div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={t('common.close')}
+            autoFocus={!editingAllowed}
+            style={{
+              background: 'transparent', border: 'none', color: 'var(--text-muted)',
+              cursor: 'pointer', padding: 4, display: 'inline-flex',
+            }}
+          ><X size={18} />
+          </button>
+        </div>
+        {item.text && (
+          <div style={{
+            color: 'var(--text-muted)', fontSize: 13, marginBottom: 12,
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}
+          >{item.text}
+          </div>
+        )}
+        <div style={{ flex: 1, minHeight: 120, overflowY: 'auto', marginBottom: 16 }}>
+          {comments.length === 0 ? (
+            <div style={{ color: 'var(--text-faint)', fontSize: 14, textAlign: 'center', padding: '32px 0' }}>
+              {t('comments.empty')}
+            </div>
+          ) : comments.map((comment) => (
+            <div
+              key={comment.id}
+              style={{
+                padding: '10px 0', borderBottom: '1px solid var(--border-soft)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                <span style={{ color: 'var(--text)', fontSize: 13, fontWeight: 700 }}>
+                  {comment.authorName || 'Anon'}
+                </span>
+                <span style={{ color: 'var(--text-faint)', fontSize: 11 }}>{fmtAgo(comment.createdAt)}</span>
+                <div style={{ flex: 1 }} />
+                {editingAllowed && (
+                  <button
+                    type="button"
+                    onClick={() => onDelete(comment.id)}
+                    title={t('comments.delete')}
+                    aria-label={t('comments.delete')}
+                    style={{
+                      background: 'transparent', border: 'none', color: 'var(--text-faint)',
+                      cursor: 'pointer', padding: 3, display: 'inline-flex',
+                    }}
+                  ><Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+              <div style={{ color: 'var(--text-mid)', fontSize: 14, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                {comment.text}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ borderTop: '1px solid var(--border-soft)', paddingTop: 16 }}>
+          <textarea
+            autoFocus={editingAllowed}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submit();
+              if (e.key === 'Escape') onClose();
+            }}
+            maxLength={COMMENT_MAX_LEN}
+            disabled={!editingAllowed}
+            placeholder={t('comments.placeholder')}
+            style={{
+              width: '100%', minHeight: 80, resize: 'vertical', boxSizing: 'border-box',
+              padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 8,
+              background: 'var(--bg-panel)', color: 'var(--text)', fontFamily: 'inherit',
+              fontSize: 14, outline: 'none',
+            }}
+          />
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+            <button
+              type="button"
+              onClick={submit}
+              disabled={!editingAllowed || !draft.trim()}
+              style={{
+                background: 'var(--accent)', color: '#fff', border: 'none',
+                padding: '8px 16px', borderRadius: 8, fontWeight: 600, fontSize: 14,
+                cursor: (!editingAllowed || !draft.trim()) ? 'not-allowed' : 'pointer',
+                opacity: (!editingAllowed || !draft.trim()) ? 0.5 : 1,
+              }}
+            >{t('comments.send')}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function AdminPinModal({ cfg, onCancel, onSubmit }) {
   const [pin, setPin] = useState('');

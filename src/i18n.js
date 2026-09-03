@@ -53,6 +53,7 @@ const dict = {
     'topbar.vote': 'Vote',
     'topbar.stopVote': 'Stop Vote',
     'topbar.extend': '+{n}m',
+    'topbar.unlockAll': 'Unlock all',
     'topbar.resetVotes': 'Reset votes',
     'topbar.resetVotesTitle': 'รีเซ็ตโหวต',
     'topbar.clear': 'Clear',
@@ -172,6 +173,13 @@ const dict = {
     'sticky.delete': 'ลบ',
     'sticky.private.placeholder': '••••••',
 
+    'comments.title': 'ความคิดเห็น',
+    'comments.empty': 'ยังไม่มีความคิดเห็น',
+    'comments.placeholder': 'เขียนความคิดเห็น…',
+    'comments.send': 'ส่ง',
+    'comments.delete': 'ลบความคิดเห็น',
+    'comments.tooltip': 'เปิดความคิดเห็น',
+
     // vote
     'vote.notStarted': 'ยังไม่ได้เปิด vote session',
     'vote.notStartedYet': 'ยังไม่เปิด vote session',
@@ -202,7 +210,11 @@ const dict = {
     'vote.setup.showNonVoters': 'บอกว่าใครโหวตไม่ครบตอนจบ',
     'vote.setup.start': 'เริ่ม',
 
-    // reset votes / clear / transfer
+    // unlock all / reset votes / clear / transfer
+    'unlockAll.confirm.head': 'ปลดล็อกทั้งหมด?',
+    'unlockAll.confirm.body': 'ปลดล็อกทุกโซนที่ถูกล็อก เปิดให้เห็น sticky ที่ตั้งเป็น private ทุกใบ และปิด "Lock editing" ของบอร์ด',
+    'unlockAll.confirm.ok': 'ปลดล็อกทั้งหมด',
+    'unlockAll.done': 'ปลดล็อกทุกอย่างในบอร์ดแล้ว',
     'reset.confirm.head': 'รีเซ็ตโหวตทั้งบอร์ด?',
     'reset.confirm.body': 'ลบจำนวนโหวตของทุก sticky ในบอร์ด — sticky และเนื้อหายังอยู่ครบ',
     'reset.confirm.body2': 'โควต้าโหวตของทุกคนจะรีเซ็ตตามอัตโนมัติ',
@@ -303,6 +315,7 @@ const dict = {
     'topbar.vote': 'Vote',
     'topbar.stopVote': 'Stop Vote',
     'topbar.extend': '+{n}m',
+    'topbar.unlockAll': 'Unlock all',
     'topbar.resetVotes': 'Reset votes',
     'topbar.resetVotesTitle': 'Reset votes',
     'topbar.clear': 'Clear',
@@ -418,6 +431,13 @@ const dict = {
     'sticky.delete': 'Delete',
     'sticky.private.placeholder': '••••••',
 
+    'comments.title': 'Comments',
+    'comments.empty': 'No comments yet',
+    'comments.placeholder': 'Write a comment…',
+    'comments.send': 'Send',
+    'comments.delete': 'Delete comment',
+    'comments.tooltip': 'Open comments',
+
     'vote.notStarted': 'No vote session started',
     'vote.notStartedYet': 'No vote session yet',
     'vote.noZone': 'This card isn\'t in a zone — it can\'t be voted on',
@@ -447,6 +467,10 @@ const dict = {
     'vote.setup.showNonVoters': "Announce who didn't vote fully at the end",
     'vote.setup.start': 'Start',
 
+    'unlockAll.confirm.head': 'Unlock everything?',
+    'unlockAll.confirm.body': 'Unlocks every locked zone, makes every private sticky visible, and turns off the board\'s "Lock editing".',
+    'unlockAll.confirm.ok': 'Unlock all',
+    'unlockAll.done': 'Unlocked everything on the board',
     'reset.confirm.head': 'Reset all votes?',
     'reset.confirm.body': 'Clears vote counts on every sticky — content is preserved.',
     'reset.confirm.body2': 'Everyone\'s vote quota will reset automatically.',

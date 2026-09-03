@@ -30,6 +30,7 @@
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import { parseRoute } from './router.js';
+import { COMMENT_MAX_LEN, isSafeId, normalizeComment } from './comment-schema.js';
 
 const route = parseRoute();
 if (route.kind !== 'board') {
@@ -355,15 +356,19 @@ yMeta.observe((event) => {
 });
 
 // ---------------------------------------------------------------------------
-// Vote keys — unchanged from the previous design. Each vote lives at its own
-// key in `ymap`, so toggling never trample-overwrites another user's vote.
+// Votes and comments live at independent keys in `ymap`, so concurrent writes
+// never trample-overwrite another user's contribution.
 // ---------------------------------------------------------------------------
 const VOTE_KEY = (itemId, userId) => keyOf('s', `vote:${itemId}:${userId}`, '');
 const VOTE_PREFIX = 's||vote:';
-// Item / user IDs are generated via `uid()` (lowercase alphanumeric) — anything
-// outside this character set should be rejected before being baked into a vote
-// key, otherwise `parseVoteKey`'s indexOf(':') split goes wrong.
-const ID_SAFE_RE = /^[A-Za-z0-9_-]+$/;
+const COMMENT_KEY = (itemId, commentId) => keyOf('s', `comment:${itemId}:${commentId}`, '');
+const COMMENT_PREFIX = 's||comment:';
+
+const isLiveSticky = (itemId) => {
+  if (!isSafeId(itemId)) return false;
+  const item = yItems.get(itemId);
+  return item instanceof Y.Map && item.get('type') === 'sticky';
+};
 
 const parseVoteKey = (mapKey) => {
   if (!mapKey.startsWith(VOTE_PREFIX)) return null;
@@ -373,11 +378,26 @@ const parseVoteKey = (mapKey) => {
   return { itemId: rest.slice(0, sep), userId: rest.slice(sep + 1) };
 };
 
+const parseCommentKey = (mapKey) => {
+  if (!mapKey.startsWith(COMMENT_PREFIX)) return null;
+  const rest = mapKey.slice(COMMENT_PREFIX.length);
+  const sep = rest.indexOf(':');
+  if (sep < 0) return null;
+  return { itemId: rest.slice(0, sep), commentId: rest.slice(sep + 1) };
+};
+
 const voteEmitter = new EventTarget();
 ymap.observe((event) => {
   let dirty = false;
   event.keysChanged.forEach((k) => { if (k.startsWith(VOTE_PREFIX)) dirty = true; });
   if (dirty) voteEmitter.dispatchEvent(new Event('change'));
+});
+
+const commentEmitter = new EventTarget();
+ymap.observe((event) => {
+  let dirty = false;
+  event.keysChanged.forEach((k) => { if (k.startsWith(COMMENT_PREFIX)) dirty = true; });
+  if (dirty) commentEmitter.dispatchEvent(new Event('change'));
 });
 
 // Keys that should never enter the undo stack even when written with shared=true.
@@ -667,28 +687,86 @@ if (provider) {
       writeBoardSnapshot(board, originOf(opts));
     },
 
+    // Restore a fully preflighted backup as one Yjs transaction. Keeping the
+    // board, votes, comments, and shared templates together avoids partial
+    // imports and prevents one WebSocket update / O(N) snapshot rebuild per
+    // comment. Validate again here because window.storage is a public seam.
+    importBundle(board, voteEntries, commentEntries, customTemplates) {
+      if (!board || typeof board !== 'object' || !Array.isArray(board.items)) return false;
+      if (!Array.isArray(voteEntries) || !Array.isArray(commentEntries)) return false;
+      if (customTemplates != null && !Array.isArray(customTemplates)) return false;
+
+      const itemTypes = new Map();
+      for (const item of board.items) {
+        if (!item || typeof item !== 'object' || !isSafeId(item.id) || itemTypes.has(item.id)) return false;
+        if (!['sticky', 'zone', 'text', 'image'].includes(item.type)) return false;
+        itemTypes.set(item.id, item.type);
+      }
+
+      const normalizedVotes = [];
+      const seenVotes = new Set();
+      for (const entry of voteEntries) {
+        if (!entry || itemTypes.get(entry.itemId) !== 'sticky' || !isSafeId(entry.userId)) return false;
+        const key = VOTE_KEY(entry.itemId, entry.userId);
+        if (seenVotes.has(key)) return false;
+        seenVotes.add(key);
+        normalizedVotes.push(key);
+      }
+
+      const normalizedComments = [];
+      const seenComments = new Set();
+      for (const entry of commentEntries) {
+        if (!entry || itemTypes.get(entry.itemId) !== 'sticky') return false;
+        const comment = normalizeComment(entry.comment, entry.comment?.id);
+        if (!comment) return false;
+        const key = COMMENT_KEY(entry.itemId, comment.id);
+        if (seenComments.has(key)) return false;
+        seenComments.add(key);
+        normalizedComments.push({ key, comment });
+      }
+
+      const relatedKeys = [];
+      ymap.forEach((_value, key) => {
+        if (key.startsWith(VOTE_PREFIX) || key.startsWith(COMMENT_PREFIX)) relatedKeys.push(key);
+      });
+      ydoc.transact(() => {
+        // writeBoardSnapshot's nested transaction joins this active outer
+        // transaction in Yjs, so peers and UndoManager observe one command.
+        writeBoardSnapshot(board, 'local');
+        relatedKeys.forEach((key) => ymap.delete(key));
+        normalizedVotes.forEach((key) => ymap.set(key, 1));
+        normalizedComments.forEach(({ key, comment }) => ymap.set(key, comment));
+        if (Array.isArray(customTemplates)) {
+          ymap.set(keyOf('s', 'customTemplates', ''), customTemplates);
+        }
+      }, 'local');
+      return true;
+    },
+
     setVote(itemId, voterId, on) {
       // Strict id format so a `:` in the key never confuses parseVoteKey on
       // the read-back path. Both ids come from `uid()` (alphanumeric) in
       // practice; this guard also rejects malicious values smuggled through
       // import flows.
-      if (!ID_SAFE_RE.test(itemId) || !ID_SAFE_RE.test(voterId)) return;
+      if (!isLiveSticky(itemId) || !isSafeId(voterId)) return;
       const k = VOTE_KEY(itemId, voterId);
       ydoc.transact(() => {
         if (on) ymap.set(k, 1);
         else ymap.delete(k);
       }, 'local');
     },
-    // Delete an item AND clear all votes on it in a single Yjs transaction so
-    // a single Cmd+Z restores both. Previously these were two separate
-    // transactions that often missed the 500ms UndoManager merge window.
-    deleteItemWithVotes(itemId) {
-      if (!ID_SAFE_RE.test(itemId)) return;
-      const prefix = `${VOTE_PREFIX}${itemId}:`;
-      const voteKeys = [];
-      ymap.forEach((_v, k) => { if (k.startsWith(prefix)) voteKeys.push(k); });
+    // Delete an item and its related flat keys in a single transaction so
+    // Cmd+Z restores the complete item state together.
+    deleteItemWithVotesAndComments(itemId) {
+      if (!isSafeId(itemId)) return;
+      const votePrefix = `${VOTE_PREFIX}${itemId}:`;
+      const commentPrefix = `${COMMENT_PREFIX}${itemId}:`;
+      const relatedKeys = [];
+      ymap.forEach((_v, k) => {
+        if (k.startsWith(votePrefix) || k.startsWith(commentPrefix)) relatedKeys.push(k);
+      });
       ydoc.transact(() => {
-        voteKeys.forEach((k) => ymap.delete(k));
+        relatedKeys.forEach((k) => ymap.delete(k));
         if (yItems.has(itemId)) yItems.delete(itemId);
       }, 'local');
     },
@@ -697,7 +775,7 @@ if (provider) {
       ymap.forEach((val, key) => {
         if (!val) return;
         const p = parseVoteKey(key);
-        if (!p) return;
+        if (!p || !isLiveSticky(p.itemId) || !isSafeId(p.userId)) return;
         let s = out.get(p.itemId);
         if (!s) { s = new Set(); out.set(p.itemId, s); }
         s.add(p.userId);
@@ -711,6 +789,7 @@ if (provider) {
       ydoc.transact(() => { keys.forEach((k) => ymap.delete(k)); }, 'local');
     },
     clearVotesFor(itemId) {
+      if (!isSafeId(itemId)) return;
       const prefix = `${VOTE_PREFIX}${itemId}:`;
       const keys = [];
       ymap.forEach((_v, k) => { if (k.startsWith(prefix)) keys.push(k); });
@@ -719,9 +798,71 @@ if (provider) {
     },
     clearVotesForItems(itemIds) {
       if (!itemIds || !itemIds.length) return;
-      const prefixes = itemIds.map((id) => `${VOTE_PREFIX}${id}:`);
+      const prefixes = itemIds.filter(isSafeId).map((id) => `${VOTE_PREFIX}${id}:`);
+      if (!prefixes.length) return;
       const keys = [];
       ymap.forEach((_v, k) => { if (prefixes.some((p) => k.startsWith(p))) keys.push(k); });
+      if (!keys.length) return;
+      ydoc.transact(() => { keys.forEach((k) => ymap.delete(k)); }, 'local');
+    },
+    addComment(itemId, comment) {
+      if (!isLiveSticky(itemId) || !comment) return false;
+      const value = normalizeComment(comment, comment.id, Date.now());
+      if (!value) return false;
+      const key = COMMENT_KEY(itemId, value.id);
+      if (ymap.has(key)) return false;
+      ydoc.transact(() => ymap.set(key, value), 'local');
+      return true;
+    },
+    editComment(itemId, commentId, text) {
+      if (!isLiveSticky(itemId) || !isSafeId(commentId)) return false;
+      const key = COMMENT_KEY(itemId, commentId);
+      const existing = ymap.get(key);
+      if (!existing) return false;
+      const nextText = typeof text === 'string' ? text.trim().slice(0, COMMENT_MAX_LEN) : '';
+      if (!nextText) return false;
+      const normalized = normalizeComment(existing, commentId, Date.now());
+      if (!normalized) return false;
+      ydoc.transact(() => {
+        ymap.set(key, { ...normalized, text: nextText, editedAt: Date.now() });
+      }, 'local');
+      return true;
+    },
+    deleteComment(itemId, commentId) {
+      if (!isSafeId(itemId) || !isSafeId(commentId)) return false;
+      const key = COMMENT_KEY(itemId, commentId);
+      if (!ymap.has(key)) return false;
+      ydoc.transact(() => ymap.delete(key), 'local');
+      return true;
+    },
+    snapshotComments() {
+      const out = new Map();
+      ymap.forEach((comment, key) => {
+        const parsed = parseCommentKey(key);
+        if (!parsed || !isLiveSticky(parsed.itemId)) return;
+        const normalized = normalizeComment(comment, parsed.commentId);
+        if (!normalized) return;
+        let comments = out.get(parsed.itemId);
+        if (!comments) { comments = []; out.set(parsed.itemId, comments); }
+        comments.push(normalized);
+      });
+      out.forEach((comments) => comments.sort((a, b) => (
+        (a.createdAt || 0) - (b.createdAt || 0) || a.id.localeCompare(b.id)
+      )));
+      return out;
+    },
+    clearCommentsForItems(itemIds) {
+      if (!itemIds || !itemIds.length) return;
+      const prefixes = itemIds.filter(isSafeId).map((id) => `${COMMENT_PREFIX}${id}:`);
+      if (!prefixes.length) return;
+      const keys = [];
+      ymap.forEach((_v, k) => { if (prefixes.some((p) => k.startsWith(p))) keys.push(k); });
+      if (!keys.length) return;
+      ydoc.transact(() => { keys.forEach((k) => ymap.delete(k)); }, 'local');
+    },
+    clearAllComments() {
+      const keys = [];
+      ymap.forEach((_v, k) => { if (k.startsWith(COMMENT_PREFIX)) keys.push(k); });
       if (!keys.length) return;
       ydoc.transact(() => { keys.forEach((k) => ymap.delete(k)); }, 'local');
     },
@@ -741,6 +882,8 @@ if (provider) {
     },
     onVotesChange(handler) { voteEmitter.addEventListener('change', handler); },
     offVotesChange(handler) { voteEmitter.removeEventListener('change', handler); },
+    onCommentsChange(handler) { commentEmitter.addEventListener('change', handler); },
+    offCommentsChange(handler) { commentEmitter.removeEventListener('change', handler); },
 
     // True once the WebSocket has finished its initial state exchange with
     // the server. RetroBoard gates admin election on this so a returning
@@ -771,9 +914,9 @@ if (provider) {
 // ---------------------------------------------------------------------------
 // Undo / Redo via Y.UndoManager.
 //
-// Tracks operations on yItems, yMeta, and ymap (vote keys + customTemplates).
+// Tracks operations on yItems, yMeta, and ymap (votes, comments, and customTemplates).
 // `trackedOrigins: ['local']` means:
-//   - Local board edits, vote toggles, customTemplate saves → tracked.
+//   - Local board edits, vote/comment changes, customTemplate saves → tracked.
 //   - Remote peer writes (origin = WebsocketProvider) → ignored, so undo
 //     never reverses another user's work.
 //   - Per-device settings + presence (origin = 'system') → ignored.
