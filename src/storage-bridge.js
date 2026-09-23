@@ -13,6 +13,9 @@
 //                   own Y.Map, each field its own key. Concurrent edits to
 //                   different items, or to different fields of the same item,
 //                   merge cleanly instead of LWW-trampling each other.
+//                   Editable `text` / `title` fields are nested Y.Text values,
+//                   so simultaneous edits inside the same field also merge at
+//                   character level.
 //        - yMeta  : Y.Map of board-level fields (timer, editingLocked,
 //                   allRevealed, lastResultsAt, adminUserId).
 //
@@ -29,8 +32,31 @@
 
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
+import { createMotionPublisher, sendOnlyLocalAwareness } from './awareness-transport.js';
 import { parseRoute } from './router.js';
+import {
+  getActiveRoomSession,
+  getRoomWebSocketBaseUrl,
+  roomFetch,
+} from './room-session.js';
 import { COMMENT_MAX_LEN, isSafeId, normalizeComment } from './comment-schema.js';
+import {
+  readPlayerPresence,
+  normalizePlayerCursor,
+  normalizePlayerView,
+} from './player-cursors.js';
+import {
+  collaborativeTextToString,
+  isCollaborativeTextField,
+  setCollaborativeTextField,
+} from './collaborative-text.js';
+import { normalizeRuntimeImageSource } from './security-boundaries.js';
+import { repairStoredBoardGeometry } from './stored-geometry-repair.js';
+import {
+  geometryErrorForBoard,
+  geometryErrorForItem,
+  geometryErrorForPatch,
+} from './board-geometry.js';
 
 const route = parseRoute();
 if (route.kind !== 'board') {
@@ -44,15 +70,30 @@ if (route.kind !== 'board') {
     getRemoteBusyItems() { return new Map(); },
     onBusyChange() { return () => {}; },
     offBusyChange() { /* noop */ },
+    getRemoteEditingItems() { return new Map(); },
+    onEditingChange() { return () => {}; },
+    offEditingChange() { /* noop */ },
+    setLocalSelectedItems() { /* noop */ },
+    getRemoteSelectedItems() { return new Map(); },
+    onSelectionChange() { return () => {}; },
+    offSelectionChange() { /* noop */ },
+    getPresenceSnapshot() { return {}; },
+    onPresenceChange() { return () => {}; },
+    offPresenceChange() { /* noop */ },
+    setLocalCursor() { /* noop */ },
+    setLocalView() { /* noop */ },
   };
 }
 
-// Fold the URL-fragment token into the room name so the yjs doc is reachable
-// only by clients who already know the full share URL. Legacy /b/CODE links
-// (no token) keep the original room name for backward compat.
-const ROOM = route.token
-  ? `board-${route.code}-${route.token}`
-  : `board-${route.code || 'unused'}`;
+// main.jsx imports this bridge only after exchanging the fragment capability
+// for an HttpOnly room cookie. The provider room is an opaque, non-secret
+// handle, so neither the WebSocket URL nor its BroadcastChannel name contains
+// the bearer token or the canonical LevelDB document name.
+const activeRoomSession = route.kind === 'board' ? getActiveRoomSession() : null;
+if (route.kind === 'board' && !activeRoomSession) {
+  throw new Error('room session has not been established');
+}
+const ROOM = activeRoomSession?.roomHandle || `landing-${route.code || 'unused'}`;
 
 // Some per-device prefs (display name) are scoped per-board so identity
 // doesn't leak across rooms — moving from board A (where you're admin "Alice")
@@ -65,7 +106,10 @@ const ROOM = route.token
 const PER_BOARD_LOCAL_KEYS = new Set(['userName', 'viewport']);
 const localStorageKeyFor = (key) => {
   if (PER_BOARD_LOCAL_KEYS.has(key) && route.code) {
-    const scope = route.token ? `${route.code}-${route.token}` : route.code;
+    // Scope with the non-secret server handle. Older builds embedded the
+    // bearer token in localStorage key names, which needlessly exposed it to
+    // diagnostics and storage snapshots.
+    const scope = activeRoomSession?.roomHandle || route.code;
     return `rb_local_${key}__${scope}`;
   }
   return `rb_local_${key}`;
@@ -76,9 +120,7 @@ const localStorageKeyFor = (key) => {
 // compose can host the relay on a non-default port without colliding with a
 // host-side `npm run yjs` someone may have running.
 const YJS_LOCAL_PORT = import.meta.env.VITE_YJS_PORT || '1234';
-const WS_URL = window.location.protocol === 'https:'
-  ? `wss://${window.location.host}/yjs`
-  : `ws://${window.location.hostname}:${YJS_LOCAL_PORT}`;
+const WS_URL = getRoomWebSocketBaseUrl();
 
 // Same origin-resolution rule as WS_URL above, for the image upload/serve
 // HTTP routes that live on the same yjs-server process (reachable at /yjs/*
@@ -86,8 +128,6 @@ const WS_URL = window.location.protocol === 'https:'
 const resolveServerUrl = (path) => (window.location.protocol === 'https:'
   ? `${window.location.origin}/yjs${path}`
   : `http://${window.location.hostname}:${YJS_LOCAL_PORT}${path}`);
-const UPLOAD_URL = resolveServerUrl('/upload');
-
 const ydoc = new Y.Doc();
 const ymap = ydoc.getMap('kv');
 const yItems = ydoc.getMap('items');
@@ -95,8 +135,18 @@ const yMeta = ydoc.getMap('meta');
 
 let provider = null;
 if (route.kind === 'board') {
-  provider = new WebsocketProvider(WS_URL, ROOM, ydoc, { connect: true });
+  provider = new WebsocketProvider(WS_URL, ROOM, ydoc, {
+    connect: false,
+    // Bind the relay connection to this one Yjs awareness identity. The ID is
+    // not a credential; it lets the server distinguish our own state from
+    // y-websocket's legitimate BroadcastChannel/snapshot echoes.
+    params: { awarenessId: String(ydoc.clientID) },
+  });
+  sendOnlyLocalAwareness(provider);
+  provider.connect();
 }
+const motionPublisher = provider ? createMotionPublisher(provider.awareness) : null;
+ydoc.on('destroy', () => motionPublisher?.destroy());
 
 const CLIENT_ID_KEY = 'rb_clientId';
 let clientId;
@@ -122,6 +172,26 @@ let undoManager = null;
 // stale client tab still running the old code) doesn't trample the granular
 // React state.
 const LEGACY_BOARD_KEY = 's||boardState';
+const BOARD_ITEM_TYPES = new Set(['sticky', 'zone', 'text', 'image']);
+
+const boardItemWriteError = (item) => {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return 'item must be an object';
+  if (!isSafeId(item.id)) return 'item has an invalid id';
+  if (!BOARD_ITEM_TYPES.has(item.type)) return `item ${item.id} has an invalid type`;
+  return null;
+};
+
+const boardItemsWriteError = (items) => {
+  if (!Array.isArray(items)) return 'board items must be an array';
+  const ids = new Set();
+  for (const item of items) {
+    const error = boardItemWriteError(item);
+    if (error) return error;
+    if (ids.has(item.id)) return `duplicate item id: ${item.id}`;
+    ids.add(item.id);
+  }
+  return geometryErrorForBoard(items);
+};
 
 // ---------------------------------------------------------------------------
 // Board snapshot helpers — convert between the React-friendly flat shape and
@@ -138,17 +208,34 @@ const valuesEqual = (a, b) => {
   try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; }
 };
 
+const setItemField = (yItem, field, value) => {
+  if (value === undefined) {
+    yItem.delete(field);
+    return;
+  }
+  if (isCollaborativeTextField(field) && typeof value === 'string') {
+    setCollaborativeTextField(yItem, field, value);
+    return;
+  }
+  yItem.set(field, value);
+};
+
+const readItemSnapshot = (yItem, id) => {
+  if (!(yItem instanceof Y.Map)) return null;
+  const item = Object.assign(Object.create(null), { id });
+  yItem.forEach((value, key) => { item[key] = collaborativeTextToString(value); });
+  return item;
+};
+
 const readBoardSnapshot = () => {
   const items = [];
   // Y.Map iterates in insertion order, which matches the order items were
   // added across the doc's history — deterministic on all peers.
   yItems.forEach((yItem, id) => {
-    if (!(yItem instanceof Y.Map)) return;
-    const obj = { id };
-    yItem.forEach((val, key) => { obj[key] = val; });
-    items.push(obj);
+    const item = readItemSnapshot(yItem, id);
+    if (item) items.push(item);
   });
-  const meta = {};
+  const meta = Object.create(null);
   yMeta.forEach((val, key) => {
     if (key.startsWith(META_INTERNAL_PREFIX)) return;
     meta[key] = val;
@@ -157,7 +244,8 @@ const readBoardSnapshot = () => {
 };
 
 const writeBoardSnapshot = (newBoard, origin = 'local') => {
-  if (!newBoard || typeof newBoard !== 'object') return;
+  if (!newBoard || typeof newBoard !== 'object' || !Array.isArray(newBoard.items)) return false;
+  if (boardItemsWriteError(newBoard.items)) return false;
   const cur = readBoardSnapshot();
   const curById = new Map();
   cur.items.forEach((it) => curById.set(it.id, it));
@@ -180,7 +268,7 @@ const writeBoardSnapshot = (newBoard, origin = 'local') => {
         yItem = new Y.Map();
         Object.entries(nItem).forEach(([k, v]) => {
           if (k === 'id' || v === undefined) return;
-          yItem.set(k, v);
+          setItemField(yItem, k, v);
         });
         yItems.set(id, yItem);
         return;
@@ -194,8 +282,7 @@ const writeBoardSnapshot = (newBoard, origin = 'local') => {
         const ov = oItem ? oItem[field] : undefined;
         const nv = nItem[field];
         if (valuesEqual(ov, nv)) return;
-        if (nv === undefined) yItem.delete(field);
-        else yItem.set(field, nv);
+        setItemField(yItem, field, nv);
       });
     });
     // Board-level meta diff (everything except `items`)
@@ -212,6 +299,7 @@ const writeBoardSnapshot = (newBoard, origin = 'local') => {
       else yMeta.set(key, nv);
     });
   }, origin);
+  return true;
 };
 
 // ---------------------------------------------------------------------------
@@ -230,13 +318,13 @@ const seedItem = (id, fields) => {
   const yItem = new Y.Map();
   Object.entries(fields).forEach(([k, v]) => {
     if (k === 'id' || v === undefined) return;
-    yItem.set(k, v);
+    setItemField(yItem, k, v);
   });
   yItems.set(id, yItem);
 };
 
 const createItem = (id, fields) => {
-  if (yItems.has(id)) return false;
+  if (yItems.has(id) || geometryErrorForItem({ ...fields, id })) return false;
   seedItem(id, fields);
   return true;
 };
@@ -244,10 +332,11 @@ const createItem = (id, fields) => {
 const patchExistingItem = (id, patch) => {
   const yItem = yItems.get(id);
   if (!(yItem instanceof Y.Map)) return false;
+  const current = readItemSnapshot(yItem, id);
+  if (!current || geometryErrorForPatch(current, patch)) return false;
   Object.entries(patch).forEach(([k, v]) => {
     if (k === 'id') return;
-    if (v === undefined) yItem.delete(k);
-    else yItem.set(k, v);
+    setItemField(yItem, k, v);
   });
   return true;
 };
@@ -276,12 +365,7 @@ const tryMigrate = () => {
   ydoc.transact(() => {
     (legacy.items || []).forEach((it) => {
       if (!it || !it.id) return;
-      const yItem = new Y.Map();
-      Object.entries(it).forEach(([k, v]) => {
-        if (k === 'id' || v === undefined) return;
-        yItem.set(k, v);
-      });
-      yItems.set(it.id, yItem);
+      seedItem(it.id, it);
     });
     Object.entries(legacy).forEach(([k, v]) => {
       if (k === 'items' || v === undefined || v === null) return;
@@ -294,11 +378,36 @@ const tryMigrate = () => {
   migrationDone = true;
 };
 
+// Existing boards stored editable fields as scalar strings. Upgrade them
+// after every sync (a no-op once upgraded) so both old boards and items added
+// by a stale client gain character-level CRDT merging without a manual reset.
+const ensureCollaborativeTextFields = () => {
+  ydoc.transact(() => {
+    yItems.forEach((yItem) => {
+      if (!(yItem instanceof Y.Map)) return;
+      const type = yItem.get('type');
+      const fields = type === 'zone' ? ['title'] : (type === 'sticky' || type === 'text' ? ['text'] : []);
+      fields.forEach((field) => {
+        const value = yItem.get(field);
+        if (typeof value === 'string') setItemField(yItem, field, value);
+      });
+    });
+  }, 'system');
+};
+
 if (provider) {
   provider.on('sync', (isSynced) => {
-    if (isSynced) tryMigrate();
+    if (isSynced) {
+      tryMigrate();
+      repairStoredBoardGeometry(ydoc, yItems);
+      ensureCollaborativeTextFields();
+    }
   });
-  if (provider.synced) tryMigrate();
+  if (provider.synced) {
+    tryMigrate();
+    repairStoredBoardGeometry(ydoc, yItems);
+    ensureCollaborativeTextFields();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -386,17 +495,59 @@ const parseCommentKey = (mapKey) => {
   return { itemId: rest.slice(0, sep), commentId: rest.slice(sep + 1) };
 };
 
+// Keep the flat persisted key format for existing rooms, but index its hot
+// read path in memory. A single vote/comment event now touches one sticky;
+// import/delete can still mutate many keys in one Yjs transaction.
+const indexedVotes = new Map();
+const indexedComments = new Map();
+const commentSnapshots = new Map();
+
 const voteEmitter = new EventTarget();
 ymap.observe((event) => {
   let dirty = false;
-  event.keysChanged.forEach((k) => { if (k.startsWith(VOTE_PREFIX)) dirty = true; });
+  const changed = new Map();
+  event.keysChanged.forEach((key) => {
+    const parsed = parseVoteKey(key);
+    if (!parsed || !isSafeId(parsed.itemId) || !isSafeId(parsed.userId)) return;
+    dirty = true;
+    let voters = changed.get(parsed.itemId);
+    if (!voters) {
+      voters = new Set(indexedVotes.get(parsed.itemId) || []);
+      changed.set(parsed.itemId, voters);
+    }
+    if (ymap.get(key)) voters.add(parsed.userId);
+    else voters.delete(parsed.userId);
+  });
+  changed.forEach((voters, itemId) => {
+    if (voters.size) indexedVotes.set(itemId, voters);
+    else indexedVotes.delete(itemId);
+  });
   if (dirty) voteEmitter.dispatchEvent(new Event('change'));
 });
 
 const commentEmitter = new EventTarget();
 ymap.observe((event) => {
   let dirty = false;
-  event.keysChanged.forEach((k) => { if (k.startsWith(COMMENT_PREFIX)) dirty = true; });
+  const changedIds = new Set();
+  event.keysChanged.forEach((key) => {
+    const parsed = parseCommentKey(key);
+    if (!parsed || !isSafeId(parsed.itemId) || !isSafeId(parsed.commentId)) return;
+    dirty = true;
+    changedIds.add(parsed.itemId);
+    let comments = indexedComments.get(parsed.itemId);
+    if (!comments) { comments = new Map(); indexedComments.set(parsed.itemId, comments); }
+    const normalized = normalizeComment(ymap.get(key), parsed.commentId);
+    if (normalized) comments.set(parsed.commentId, normalized);
+    else comments.delete(parsed.commentId);
+    if (!comments.size) indexedComments.delete(parsed.itemId);
+  });
+  changedIds.forEach((itemId) => {
+    const comments = indexedComments.get(itemId);
+    if (!comments) { commentSnapshots.delete(itemId); return; }
+    commentSnapshots.set(itemId, [...comments.values()].sort((a, b) => (
+      (a.createdAt || 0) - (b.createdAt || 0) || a.id.localeCompare(b.id)
+    )));
+  });
   if (dirty) commentEmitter.dispatchEvent(new Event('change'));
 });
 
@@ -415,14 +566,20 @@ const NEVER_UNDO_KEYS = new Set(['presence']);
 // ---------------------------------------------------------------------------
 const presenceEmitter = new EventTarget();
 const busyEmitter = new EventTarget();
+const editingEmitter = new EventTarget();
+const selectionEmitter = new EventTarget();
+const AWARENESS_MAX_ITEM_IDS = 256;
+const AWARENESS_MAX_ITEM_ID_LENGTH = 128;
 const localBusySources = {
   text: new Set(),
   geometry: new Set(),
 };
 const normalizeBusyIds = (ids) => Array.from(new Set(
   (Array.isArray(ids) || ids instanceof Set ? Array.from(ids) : [])
-    .filter((id) => typeof id === 'string' && id.length > 0),
-)).sort();
+    .filter((id) => typeof id === 'string'
+      && id.length > 0
+      && id.length <= AWARENESS_MAX_ITEM_ID_LENGTH),
+)).sort().slice(0, AWARENESS_MAX_ITEM_IDS);
 const setLocalBusyItems = (source, ids) => {
   if (!provider || (source !== 'text' && source !== 'geometry')) return;
   const normalized = normalizeBusyIds(ids);
@@ -431,9 +588,17 @@ const setLocalBusyItems = (source, ids) => {
     ...localBusySources.text,
     ...localBusySources.geometry,
   ]);
-  const current = normalizeBusyIds(provider.awareness.getLocalState()?.busyItems);
-  if (current.length === busyItems.length && current.every((id, i) => id === busyItems[i])) return;
-  provider.awareness.setLocalStateField('busyItems', busyItems.length ? busyItems : null);
+  const editingItemId = Array.from(localBusySources.text)[0] || null;
+  const localState = provider.awareness.getLocalState() || {};
+  const current = normalizeBusyIds(localState.busyItems);
+  const busyUnchanged = current.length === busyItems.length
+    && current.every((id, i) => id === busyItems[i]);
+  if (busyUnchanged && (localState.editingItemId || null) === editingItemId) return;
+  provider.awareness.setLocalState({
+    ...localState,
+    busyItems: busyItems.length ? busyItems : null,
+    editingItemId,
+  });
 };
 const readRemoteBusyOwners = () => {
   const out = new Map();
@@ -453,20 +618,52 @@ const remoteBusySignature = (busy) => Array.from(busy.entries())
   .map(([itemId, owners]) => `${itemId}:${Array.from(owners.keys()).sort((a, b) => a - b).join(',')}`)
   .join('|');
 let lastRemoteBusySignature = '';
-const readPresenceMap = () => {
-  if (!provider) return {};
-  const out = {};
-  provider.awareness.getStates().forEach((state) => {
-    if (!state || !state.user || !state.user.userId) return;
-    // Same person in two tabs → two awareness slots, same logical userId.
-    // Collapse to the freshest entry so the UI shows them once.
-    const prev = out[state.user.userId];
-    if (!prev || (state.user.lastSeen || 0) > (prev.lastSeen || 0)) {
-      out[state.user.userId] = state.user;
-    }
+const readRemoteEditingOwners = () => {
+  const out = new Map();
+  if (!provider) return out;
+  provider.awareness.getStates().forEach((state, awarenessClientId) => {
+    if (awarenessClientId === provider.awareness.clientID) return;
+    const itemId = typeof state?.editingItemId === 'string' ? state.editingItemId : '';
+    if (!itemId) return;
+    let owners = out.get(itemId);
+    if (!owners) { owners = new Map(); out.set(itemId, owners); }
+    owners.set(awarenessClientId, state?.user || null);
   });
   return out;
 };
+const remoteEditingSignature = (editing) => Array.from(editing.entries())
+  .sort(([a], [b]) => a.localeCompare(b))
+  .map(([itemId, owners]) => `${itemId}:${Array.from(owners.entries())
+    .sort(([a], [b]) => a - b)
+    .map(([clientId, user]) => `${clientId}:${user?.userId || ''}:${user?.name || ''}`)
+    .join(',')}`)
+  .join('|');
+let lastRemoteEditingSignature = '';
+const readRemoteSelectionOwners = () => {
+  const out = new Map();
+  if (!provider) return out;
+  provider.awareness.getStates().forEach((state, awarenessClientId) => {
+    if (awarenessClientId === provider.awareness.clientID) return;
+    normalizeBusyIds(state?.selectedItems).forEach((itemId) => {
+      let owners = out.get(itemId);
+      if (!owners) { owners = new Map(); out.set(itemId, owners); }
+      owners.set(awarenessClientId, state?.user || null);
+    });
+  });
+  return out;
+};
+const remoteSelectionSignature = (selection) => Array.from(selection.entries())
+  .sort(([a], [b]) => a.localeCompare(b))
+  .map(([itemId, owners]) => `${itemId}:${Array.from(owners.entries())
+    .sort(([a], [b]) => a - b)
+    .map(([clientId, user]) => `${clientId}:${user?.userId || ''}:${user?.name || ''}`)
+    .join(',')}`)
+  .join('|');
+let lastRemoteSelectionSignature = '';
+const readPresenceMap = () => readPlayerPresence(
+  provider?.awareness.getStates() || new Map(),
+);
+
 if (provider) {
   provider.awareness.on('change', () => {
     const busy = readRemoteBusyOwners();
@@ -475,12 +672,25 @@ if (provider) {
       lastRemoteBusySignature = signature;
       busyEmitter.dispatchEvent(new CustomEvent('change', { detail: busy }));
     }
-    presenceEmitter.dispatchEvent(new Event('change'));
+    const editing = readRemoteEditingOwners();
+    const editingSignature = remoteEditingSignature(editing);
+    if (editingSignature !== lastRemoteEditingSignature) {
+      lastRemoteEditingSignature = editingSignature;
+      editingEmitter.dispatchEvent(new CustomEvent('change', { detail: editing }));
+    }
+    const selection = readRemoteSelectionOwners();
+    const selectionSignature = remoteSelectionSignature(selection);
+    if (selectionSignature !== lastRemoteSelectionSignature) {
+      lastRemoteSelectionSignature = selectionSignature;
+      selectionEmitter.dispatchEvent(new CustomEvent('change', { detail: selection }));
+    }
+    const presence = readPresenceMap();
+    presenceEmitter.dispatchEvent(new CustomEvent('change', { detail: presence }));
     // Fan into the main change emitter so existing storage.on('change')
     // handlers (RetroBoard's applyRemoteBoard router) keep receiving
     // presence updates the same way they used to.
     emitter.dispatchEvent(new CustomEvent('change', {
-      detail: { scope: 's', key: 'presence', value: readPresenceMap() },
+      detail: { scope: 's', key: 'presence', value: presence },
     }));
   });
 }
@@ -612,6 +822,12 @@ if (provider) {
     },
     on(handler) { emitter.addEventListener('change', handler); },
     off(handler) { emitter.removeEventListener('change', handler); },
+    getPresenceSnapshot() { return readPresenceMap(); },
+    onPresenceChange(handler) {
+      presenceEmitter.addEventListener('change', handler);
+      return () => presenceEmitter.removeEventListener('change', handler);
+    },
+    offPresenceChange(handler) { presenceEmitter.removeEventListener('change', handler); },
     setLocalBusyItems,
     findRemoteBusyItem(ids) {
       const busy = readRemoteBusyOwners();
@@ -629,50 +845,113 @@ if (provider) {
       return () => busyEmitter.removeEventListener('change', handler);
     },
     offBusyChange(handler) { busyEmitter.removeEventListener('change', handler); },
+    getRemoteEditingItems() { return readRemoteEditingOwners(); },
+    onEditingChange(handler) {
+      editingEmitter.addEventListener('change', handler);
+      return () => editingEmitter.removeEventListener('change', handler);
+    },
+    offEditingChange(handler) { editingEmitter.removeEventListener('change', handler); },
+    setLocalSelectedItems(ids) {
+      if (!provider) return;
+      const selectedItems = normalizeBusyIds(ids);
+      const localState = provider.awareness.getLocalState() || {};
+      const current = normalizeBusyIds(localState.selectedItems);
+      const unchanged = current.length === selectedItems.length
+        && current.every((id, index) => id === selectedItems[index]);
+      if (unchanged) return;
+      provider.awareness.setLocalStateField(
+        'selectedItems',
+        selectedItems.length ? selectedItems : null,
+      );
+    },
+    getRemoteSelectedItems() { return readRemoteSelectionOwners(); },
+    onSelectionChange(handler) {
+      selectionEmitter.addEventListener('change', handler);
+      return () => selectionEmitter.removeEventListener('change', handler);
+    },
+    offSelectionChange(handler) { selectionEmitter.removeEventListener('change', handler); },
+    setLocalCursor(cursor) {
+      if (!motionPublisher) return;
+      if (cursor == null) { motionPublisher.set('cursor', null); return; }
+      const normalized = normalizePlayerCursor({ ...cursor, updatedAt: Date.now() });
+      if (normalized) motionPublisher.set('cursor', normalized);
+    },
+    setLocalView(view) {
+      if (!motionPublisher) return;
+      if (view == null) { motionPublisher.set('view', null); return; }
+      const normalized = normalizePlayerView({ ...view, updatedAt: Date.now() });
+      if (normalized) motionPublisher.set('view', normalized);
+    },
 
     // Uploads an image blob to the server and resolves to its served URL.
     async uploadImage(blob) {
-      const res = await fetch(UPLOAD_URL, {
+      const res = await roomFetch('upload', {
         method: 'POST',
         body: blob,
         headers: { 'Content-Type': blob.type },
       });
       if (!res.ok) throw new Error(`image upload failed: ${res.status}`);
-      const { url } = await res.json();
-      return resolveServerUrl(url);
+      const payload = await res.json();
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)
+          || Object.keys(payload).length !== 1 || typeof payload.url !== 'string') {
+        throw new Error('invalid image upload response');
+      }
+      const url = normalizeRuntimeImageSource(payload.url, {
+        pageOrigin: window.location.origin,
+        relayBaseUrl: resolveServerUrl('/'),
+        roomHandle: activeRoomSession.roomHandle,
+      });
+      if (!url) throw new Error('invalid image upload URL');
+      return url;
     },
 
     // --- Granular board writes (delta-only; see helpers above) ---
     addItem(item, opts) {
-      if (!item || !item.id) return;
-      ydoc.transact(() => { seedItem(item.id, item); }, originOf(opts));
+      if (boardItemWriteError(item) || geometryErrorForItem(item) || yItems.has(item.id)) return false;
+      ydoc.transact(() => { createItem(item.id, item); }, originOf(opts));
+      return true;
     },
     addItems(items, opts) {
-      if (!Array.isArray(items) || !items.length) return;
+      if (!Array.isArray(items) || !items.length) return false;
+      if (boardItemsWriteError(items) || items.some((item) => yItems.has(item.id))) return false;
       ydoc.transact(() => {
         items.forEach((item) => {
-          if (item && item.id) createItem(item.id, item);
+          createItem(item.id, item);
         });
       }, originOf(opts));
+      return true;
     },
     updateItem(id, patch, opts) {
-      if (!id || !patch || typeof patch !== 'object') return;
+      if (!id || !patch || typeof patch !== 'object') return false;
+      const current = readItemSnapshot(yItems.get(id), id);
+      if (!current
+        || ('type' in patch && patch.type !== current.type)
+        || geometryErrorForPatch(current, patch)) return false;
       ydoc.transact(() => { patchExistingItem(id, patch); }, originOf(opts));
+      return true;
     },
     updateItems(entries, opts) {
-      if (!Array.isArray(entries) || !entries.length) return;
+      if (!Array.isArray(entries) || !entries.length) return false;
+      const valid = entries.every((entry) => {
+        if (!entry?.id || !entry.patch || typeof entry.patch !== 'object') return false;
+        const current = readItemSnapshot(yItems.get(entry.id), entry.id);
+        if (!current || ('type' in entry.patch && entry.patch.type !== current.type)) return false;
+        return geometryErrorForPatch(current, entry.patch) == null;
+      });
+      if (!valid) return false;
       ydoc.transact(() => {
         entries.forEach((e) => {
-          if (e && e.id && e.patch) patchExistingItem(e.id, e.patch);
+          patchExistingItem(e.id, e.patch);
         });
       }, originOf(opts));
+      return true;
     },
     removeItem(id, opts) {
       if (!id) return;
       ydoc.transact(() => { if (yItems.has(id)) yItems.delete(id); }, originOf(opts));
     },
     setMeta(patch, opts) {
-      if (!patch || typeof patch !== 'object') return;
+      if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return false;
       ydoc.transact(() => {
         Object.entries(patch).forEach(([k, v]) => {
           if (k.startsWith(META_INTERNAL_PREFIX)) return;
@@ -680,11 +959,12 @@ if (provider) {
           else yMeta.set(k, v);
         });
       }, originOf(opts));
+      return true;
     },
     // Full board replace — for import / clear only. Reuses the proven
     // delete-missing + per-field upsert diff.
     replaceBoard(board, opts) {
-      writeBoardSnapshot(board, originOf(opts));
+      return writeBoardSnapshot(board, originOf(opts));
     },
 
     // Restore a fully preflighted backup as one Yjs transaction. Keeping the
@@ -695,6 +975,7 @@ if (provider) {
       if (!board || typeof board !== 'object' || !Array.isArray(board.items)) return false;
       if (!Array.isArray(voteEntries) || !Array.isArray(commentEntries)) return false;
       if (customTemplates != null && !Array.isArray(customTemplates)) return false;
+      if (boardItemsWriteError(board.items)) return false;
 
       const itemTypes = new Map();
       for (const item of board.items) {
@@ -772,13 +1053,8 @@ if (provider) {
     },
     snapshotVotes() {
       const out = new Map();
-      ymap.forEach((val, key) => {
-        if (!val) return;
-        const p = parseVoteKey(key);
-        if (!p || !isLiveSticky(p.itemId) || !isSafeId(p.userId)) return;
-        let s = out.get(p.itemId);
-        if (!s) { s = new Set(); out.set(p.itemId, s); }
-        s.add(p.userId);
+      indexedVotes.forEach((voters, itemId) => {
+        if (isLiveSticky(itemId)) out.set(itemId, voters);
       });
       return out;
     },
@@ -837,18 +1113,9 @@ if (provider) {
     },
     snapshotComments() {
       const out = new Map();
-      ymap.forEach((comment, key) => {
-        const parsed = parseCommentKey(key);
-        if (!parsed || !isLiveSticky(parsed.itemId)) return;
-        const normalized = normalizeComment(comment, parsed.commentId);
-        if (!normalized) return;
-        let comments = out.get(parsed.itemId);
-        if (!comments) { comments = []; out.set(parsed.itemId, comments); }
-        comments.push(normalized);
+      commentSnapshots.forEach((comments, itemId) => {
+        if (isLiveSticky(itemId)) out.set(itemId, comments);
       });
-      out.forEach((comments) => comments.sort((a, b) => (
-        (a.createdAt || 0) - (b.createdAt || 0) || a.id.localeCompare(b.id)
-      )));
       return out;
     },
     clearCommentsForItems(itemIds) {
@@ -867,6 +1134,10 @@ if (provider) {
       ydoc.transact(() => { keys.forEach((k) => ymap.delete(k)); }, 'local');
     },
     startVoteSession(rootZoneId, timerPatch, staleResultZoneIds, clearedItemIds) {
+      const root = yItems.get(rootZoneId);
+      if (!(root instanceof Y.Map) || root.get('type') !== 'zone'
+          || root.get('voteTimer') || !timerPatch?.voteTimer
+          || !Array.isArray(staleResultZoneIds) || !Array.isArray(clearedItemIds)) return false;
       ydoc.transact(() => {
         patchExistingItem(rootZoneId, timerPatch);
         staleResultZoneIds.forEach((id) => patchExistingItem(id, { lastResultsAt: null }));
@@ -879,6 +1150,7 @@ if (provider) {
           keys.forEach((k) => ymap.delete(k));
         }
       }, 'local');
+      return true;
     },
     onVotesChange(handler) { voteEmitter.addEventListener('change', handler); },
     offVotesChange(handler) { voteEmitter.removeEventListener('change', handler); },
@@ -956,11 +1228,9 @@ if (provider) {
   });
 }
 
-// Token-redacted room label for any place we log the room name. The token
-// is the only auth gate to the doc, so we never want it landing in console
-// output that can be captured by screen-recordings, browser extensions, or
-// remote-debug bridges.
-const ROOM_LABEL = route.token ? `board-${route.code}-<token>` : ROOM;
+// Use the visible board code in diagnostics. The actual provider room handle
+// is non-secret, but omitting it keeps logs stable and easy to correlate.
+const ROOM_LABEL = `board-${route.code || 'unused'}`;
 
 if (provider) {
   provider.on('status', (ev) => {

@@ -3,12 +3,14 @@ export const COMMENT_AUTHOR_NAME_MAX_LEN = 120;
 export const COMMENT_ID_MAX_LEN = 128;
 
 const ID_SAFE_RE = /^[A-Za-z0-9_-]+$/;
+const OBJECT_META_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 export const isSafeId = (value) => (
   typeof value === 'string'
   && value.length > 0
   && value.length <= COMMENT_ID_MAX_LEN
   && ID_SAFE_RE.test(value)
+  && !OBJECT_META_KEYS.has(value)
 );
 
 const boundedString = (value, maxLength) => (

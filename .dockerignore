@@ -8,6 +8,10 @@ yjs-db
 .env.*
 uploads
 cloudflared*.yml
+cloudflared-credentials.json
+*.pem
+*.key
+*.p12
 .playwright-cli
 *.log
 npm-debug.log*

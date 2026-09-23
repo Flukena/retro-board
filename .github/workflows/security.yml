@@ -1,0 +1,230 @@
+name: Security checks
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+  schedule:
+    - cron: "23 3 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-audit:
+    name: Test, build, and audit production dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      COMPOSE_PROJECT_NAME: retroboardci
+      TRIVY_DISABLE_TELEMETRY: true
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build production bundle
+        run: npm run build
+
+      - name: Audit locked dependencies
+        run: npm audit --audit-level=high
+
+      - name: Validate production Compose
+        run: docker compose -f docker-compose.prod.yml config --quiet
+
+      - name: Scan container build configuration
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          # Trivy's default matcher misses names with a second suffix such as
+          # Dockerfile.web.prod, so require an explicit all-Dockerfiles pattern.
+          TRIVY_FILE_PATTERNS: dockerfile:.*Dockerfile.*
+        with:
+          version: v0.74.0
+          scan-type: config
+          scan-ref: .
+          scanners: misconfig
+          skip-dirs: node_modules,.git,dist
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          hide-progress: true
+
+      - name: Scan committed sources for secrets
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.74.0
+          scan-type: fs
+          scan-ref: .
+          scanners: secret
+          skip-dirs: node_modules,.git,dist,.playwright-cli
+          exit-code: "1"
+          hide-progress: true
+
+      - name: Build production images
+        run: docker compose -f docker-compose.prod.yml build --pull --no-cache volume-init yjs web cloudflared
+
+      - name: Verify tunnel binary and ingress configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          image=retroboardci-cloudflared:latest
+          test "$(docker image inspect --format '{{.Config.User}}' "$image")" = "65532:65532"
+          version="$(docker run --rm --read-only --cap-drop ALL \
+            --security-opt no-new-privileges "$image" version)"
+          case "$version" in
+            "cloudflared version 2026.8.3 "*) ;;
+            *) exit 1 ;;
+          esac
+          docker run --rm --read-only --cap-drop ALL \
+            --security-opt no-new-privileges \
+            -v "$PWD/cloudflared.prod.example.yml:/etc/cloudflared/config.yml:ro" \
+            "$image" tunnel --config /etc/cloudflared/config.yml ingress validate
+
+      - name: Scan Yjs runtime image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.74.0
+          image-ref: retroboardci-yjs:latest
+          scanners: vuln
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+
+      - name: Scan web runtime image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.74.0
+          image-ref: retroboardci-web:latest
+          scanners: vuln
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+
+      - name: Scan volume-init image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.74.0
+          image-ref: retroboardci-volume-init:latest
+          scanners: vuln
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+
+      - name: Scan tunnel image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.74.0
+          image-ref: retroboardci-cloudflared:latest
+          scanners: vuln
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+
+      - name: Smoke-test hardened application containers
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup() {
+            docker compose -f docker-compose.prod.yml down --volumes
+          }
+          trap cleanup EXIT
+          docker compose -f docker-compose.prod.yml up -d --wait --wait-timeout 90 yjs web
+          docker compose -f docker-compose.prod.yml exec -T yjs node --input-type=module -e "
+            const base = 'http://127.0.0.1:1234';
+            const ready = await fetch(base + '/readyz');
+            const create = await fetch(base + '/api/rooms', {
+              method: 'POST',
+              headers: {
+                origin: 'https://retro.sagonzis.space',
+                'content-type': 'application/json',
+              },
+              body: '{}',
+            });
+            const hostile = await fetch(base + '/api/rooms', {
+              method: 'POST',
+              headers: {
+                origin: 'https://evil.example',
+                'content-type': 'application/json',
+              },
+              body: '{}',
+            });
+            const web = await fetch('http://web:8080/');
+            const expectedHeaders = {
+              'content-security-policy': \"default-src 'self'\",
+              'cross-origin-opener-policy': 'same-origin',
+              'cross-origin-resource-policy': 'same-origin',
+              'referrer-policy': 'no-referrer',
+              'strict-transport-security': 'max-age=',
+              'x-content-type-options': 'nosniff',
+            };
+            const badHeaders = Object.entries(expectedHeaders)
+              .filter(([name, value]) => !(web.headers.get(name) || '').includes(value));
+            if (ready.status !== 200 || create.status !== 201 || hostile.status !== 403 ||
+                web.status !== 200 || badHeaders.length) {
+              throw new Error(JSON.stringify({
+                ready: ready.status,
+                create: create.status,
+                hostile: hostile.status,
+                web: web.status,
+                badHeaders,
+              }));
+            }
+          "
+          for service in yjs web; do
+            id="$(docker compose -f docker-compose.prod.yml ps -q "$service")"
+            docker inspect "$id" | jq -e '
+              .[0].HostConfig.ReadonlyRootfs == true and
+              .[0].HostConfig.CapDrop == ["ALL"] and
+              .[0].HostConfig.SecurityOpt == ["no-new-privileges:true"] and
+              (.[0].HostConfig.PortBindings | length) == 0 and
+              .[0].HostConfig.LogConfig.Type == "local" and
+              .[0].HostConfig.LogConfig.Config["max-size"] == "10m" and
+              .[0].HostConfig.LogConfig.Config["max-file"] == "3" and
+              .[0].HostConfig.Memory > 0 and
+              .[0].HostConfig.NanoCpus > 0 and
+              .[0].HostConfig.PidsLimit > 0 and
+              .[0].Config.User != "" and
+              .[0].Config.User != "0" and
+              .[0].Config.User != "root"
+            ' >/dev/null
+          done
+          docker network inspect retroboardci_app_internal | jq -e '.[0].Internal == true' >/dev/null
+
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4
+        with:
+          languages: javascript-typescript
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4
+        with:
+          category: /language:javascript-typescript

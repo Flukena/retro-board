@@ -4,9 +4,13 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   server: {
-    host: '0.0.0.0',
+    // Local commands stay loopback-only. Docker opts into 0.0.0.0 with the
+    // explicit VITE_DEV_HOST environment variable in docker-compose.yml.
+    host: process.env.VITE_DEV_HOST || '127.0.0.1',
     port: 5173,
     strictPort: false,
-    allowedHosts: ['retro.sagonzis.space', '.sagonzis.space', 'localhost'],
+    // Production is served by nginx. Keeping the development allowlist local
+    // prevents DNS-rebinding access to a developer's Vite process.
+    allowedHosts: ['localhost', '127.0.0.1'],
   },
 });

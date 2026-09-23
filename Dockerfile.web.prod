@@ -2,25 +2,34 @@
 # Compiles the React app to static assets with Vite. Build-time VITE_* values
 # are supplied explicitly through build args instead of copying .env files.
 # VITE_YJS_PORT tells the bundle which host port exposes the yjs relay.
-FROM node:20-alpine AS build
+FROM node:24-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf AS build
 
 WORKDIR /app
 
+RUN apk upgrade --no-cache
+
 COPY package.json package-lock.json* ./
-RUN npm ci
+RUN npm ci --ignore-scripts --no-audit --no-fund \
+    && npm cache clean --force
 
 ARG VITE_YJS_PORT=1234
 ENV VITE_YJS_PORT=${VITE_YJS_PORT}
 
-COPY . .
+COPY --chown=node:node . .
+RUN chown node:node /app
+USER node
 RUN npm run build
 
 # ---- runtime stage ------------------------------------------------------
 # Plain nginx serving the built bundle. Smaller and faster than `vite preview`.
-FROM nginx:1.27-alpine AS runtime
+FROM nginxinc/nginx-unprivileged:1.30-alpine@sha256:9b87ad3dd9f431c733f19dfb278c7eb3dba9dca381942c79818bb42f1a566a83 AS runtime
 
-COPY --from=build /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+USER root
+RUN apk upgrade --no-cache
+USER 101
 
-EXPOSE 80
+COPY --chown=101:101 --from=build /app/dist /usr/share/nginx/html
+COPY --chown=101:101 nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 8080
 CMD ["nginx", "-g", "daemon off;"]

@@ -3,6 +3,25 @@ import {
   isSafeId,
   normalizeComment,
 } from './comment-schema.js';
+import {
+  BOARD_TEXT_MAX_LENGTH,
+  IMPORT_COORDINATE_MAX_ABS,
+  IMPORT_DIMENSION_MAX,
+  IMPORT_FONT_SIZE_MAX,
+  IMPORT_MAX_CUSTOM_TEMPLATES,
+  IMPORT_MAX_TEMPLATE_ZONES,
+  IMPORT_MAX_TOTAL_TEMPLATE_ZONES,
+  IMAGE_SOURCE_MAX_DIMENSION,
+  IMAGE_SOURCE_MAX_PIXELS,
+  TEMPLATE_NAME_MAX_LENGTH,
+  ZONE_TITLE_MAX_LENGTH,
+  isSafeImportedImageSource,
+} from './security-boundaries.js';
+import {
+  GEOMETRY_SOURCE,
+  geometryErrorForItem,
+  repairBoardGeometry,
+} from './board-geometry.js';
 
 export const IMPORT_MAX_FILE_BYTES = 25 * 1024 * 1024;
 // A full import becomes one Yjs update. The encoded CRDT update is larger
@@ -23,6 +42,199 @@ const fail = (message) => {
   throw new Error(message);
 };
 
+const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
+const safeTimestamp = (value, fallback) => (
+  Number.isSafeInteger(value) && value >= 0 ? value : fallback
+);
+const finiteWithin = (value, maxAbs) => Number.isFinite(value) && Math.abs(value) <= maxAbs;
+const positiveWithin = (value, max) => Number.isFinite(value) && value > 0 && value <= max;
+
+const readBoundedString = (value, maxLength, label, { optional = false } = {}) => {
+  if (value == null && optional) return '';
+  if (typeof value !== 'string') fail(`${label} must be a string`);
+  if (value.length > maxLength) fail(`${label} is too long (max ${maxLength})`);
+  return value;
+};
+
+const readOptionalBoolean = (record, key, label) => {
+  if (!hasOwn(record, key)) return undefined;
+  if (typeof record[key] !== 'boolean') fail(`${label} must be a boolean`);
+  return record[key];
+};
+
+const readOptionalNullableBoolean = (record, key, label) => {
+  if (!hasOwn(record, key) || record[key] == null) return undefined;
+  return readOptionalBoolean(record, key, label);
+};
+
+const normalizeColor = (value, label) => {
+  if (value == null) return undefined;
+  if (!Number.isInteger(value) || value < 0 || value > 5) fail(`${label} has an invalid color`);
+  return value;
+};
+
+const normalizeFontColor = (value, label) => {
+  if (value == null) return undefined;
+  if (typeof value !== 'string' || !/^#[0-9a-f]{6}$/i.test(value)) {
+    fail(`${label} has an invalid fontColor`);
+  }
+  return value.toLowerCase();
+};
+
+const normalizeTemplateZone = (zone, templateId, index) => {
+  const label = `template ${templateId} zone ${index + 1}`;
+  if (!isPlainRecord(zone)) fail(`${label} is not an object`);
+  if (!finiteWithin(zone.x, IMPORT_COORDINATE_MAX_ABS)
+    || !finiteWithin(zone.y, IMPORT_COORDINATE_MAX_ABS)) {
+    fail(`${label} has invalid coordinates`);
+  }
+  if (!positiveWithin(zone.w, IMPORT_DIMENSION_MAX)
+    || !positiveWithin(zone.h, IMPORT_DIMENSION_MAX)) {
+    fail(`${label} has invalid dimensions`);
+  }
+  const title = readBoundedString(zone.title ?? '', ZONE_TITLE_MAX_LENGTH, `${label} title`);
+  const color = normalizeColor(zone.color, label);
+  return {
+    title,
+    color: color ?? 0,
+    x: zone.x,
+    y: zone.y,
+    w: zone.w,
+    h: zone.h,
+  };
+};
+
+export const normalizeCustomTemplates = (value, importedAt = Date.now()) => {
+  if (value == null) return null;
+  if (!Array.isArray(value)) fail('customTemplates must be an array');
+  if (value.length > IMPORT_MAX_CUSTOM_TEMPLATES) {
+    fail(`too many custom templates (max ${IMPORT_MAX_CUSTOM_TEMPLATES})`);
+  }
+  const ids = new Set();
+  let totalZones = 0;
+  return value.map((template, index) => {
+    if (!isPlainRecord(template)) fail(`custom template ${index + 1} is not an object`);
+    if (!isSafeId(template.id)) fail(`custom template ${index + 1} has an invalid id`);
+    if (ids.has(template.id)) fail(`duplicate custom template id: ${template.id}`);
+    ids.add(template.id);
+    const name = readBoundedString(
+      template.name,
+      TEMPLATE_NAME_MAX_LENGTH,
+      `custom template ${template.id} name`,
+    ).trim();
+    if (!name) fail(`custom template ${template.id} has an empty name`);
+    if (!Array.isArray(template.zones) || template.zones.length === 0) {
+      fail(`custom template ${template.id} must contain zones`);
+    }
+    if (template.zones.length > IMPORT_MAX_TEMPLATE_ZONES) {
+      fail(`custom template ${template.id} has too many zones (max ${IMPORT_MAX_TEMPLATE_ZONES})`);
+    }
+    totalZones += template.zones.length;
+    if (totalZones > IMPORT_MAX_TOTAL_TEMPLATE_ZONES) {
+      fail(`custom templates have too many zones (max ${IMPORT_MAX_TOTAL_TEMPLATE_ZONES})`);
+    }
+    return {
+      id: template.id,
+      name,
+      zones: template.zones.map((zone, zoneIndex) => (
+        normalizeTemplateZone(zone, template.id, zoneIndex)
+      )),
+      createdAt: safeTimestamp(template.createdAt, importedAt + index),
+    };
+  });
+};
+
+const normalizeBoardItem = (item, index, importedAt, zLimit) => {
+  if (!isPlainRecord(item)) fail(`item ${index + 1} is not an object`);
+  if (!isSafeId(item.id)) fail(`item ${index + 1} has an invalid id`);
+  if (!ITEM_TYPES.has(item.type)) fail(`item ${item.id} has an invalid type`);
+  const geometryError = geometryErrorForItem(item);
+  if (geometryError) fail(geometryError);
+
+  const normalized = {
+    id: item.id,
+    type: item.type,
+    x: item.x,
+    y: item.y,
+    authorId: isSafeId(item.authorId) ? item.authorId : '',
+    authorName: typeof item.authorName === 'string'
+      ? item.authorName.slice(0, COMMENT_AUTHOR_NAME_MAX_LEN)
+      : '',
+    createdAt: safeTimestamp(item.createdAt, importedAt + index),
+  };
+  ['w', 'h'].forEach((field) => {
+    if (item[field] != null) normalized[field] = item[field];
+  });
+  if (hasOwn(item, 'parentZoneId')) normalized.parentZoneId = item.parentZoneId;
+
+  const color = normalizeColor(item.color, `item ${item.id}`);
+  if (color != null) normalized.color = color;
+  const fontColor = normalizeFontColor(item.fontColor, `item ${item.id}`);
+  if (fontColor != null) normalized.fontColor = fontColor;
+  if (item.fontSize != null) {
+    if (!positiveWithin(item.fontSize, IMPORT_FONT_SIZE_MAX)) {
+      fail(`item ${item.id} has an invalid fontSize`);
+    }
+    normalized.fontSize = item.fontSize;
+  }
+  if (item.rotation != null) {
+    if (!Number.isFinite(item.rotation) || Math.abs(item.rotation) > 360) {
+      fail(`item ${item.id} has an invalid rotation`);
+    }
+    normalized.rotation = item.rotation;
+  }
+  if (Number.isFinite(item.zIndex) && Math.abs(item.zIndex) <= zLimit) {
+    normalized.zIndex = item.zIndex;
+  } else if (item.zIndex != null) {
+    fail(`item ${item.id} has an invalid zIndex`);
+  }
+
+  if (item.type === 'sticky' || item.type === 'text') {
+    normalized.text = readBoundedString(
+      item.text ?? '', BOARD_TEXT_MAX_LENGTH, `item ${item.id} text`,
+    );
+  }
+  if (item.type === 'sticky') {
+    const privateValue = readOptionalBoolean(item, 'private', `item ${item.id} private`);
+    normalized.private = privateValue ?? false;
+  }
+  if (item.type === 'zone') {
+    normalized.title = readBoundedString(
+      item.title ?? '', ZONE_TITLE_MAX_LENGTH, `zone ${item.id} title`,
+    );
+    const locked = readOptionalBoolean(item, 'locked', `zone ${item.id} locked`);
+    // `null`/missing means inherit from the nearest ancestor zone or board.
+    const revealed = readOptionalNullableBoolean(item, 'revealed', `zone ${item.id} revealed`);
+    if (locked != null) normalized.locked = locked;
+    if (revealed != null) normalized.revealed = revealed;
+  }
+  if (item.type === 'image') {
+    if (!isSafeImportedImageSource(item.src)) fail(`image ${item.id} has an invalid src`);
+    normalized.src = item.src;
+    const hasNatW = item.natW != null;
+    const hasNatH = item.natH != null;
+    if (hasNatW !== hasNatH) fail(`image ${item.id} has incomplete natural dimensions`);
+    if (hasNatW) {
+      if (!positiveWithin(item.natW, IMAGE_SOURCE_MAX_DIMENSION)
+        || !positiveWithin(item.natH, IMAGE_SOURCE_MAX_DIMENSION)
+        || item.natW * item.natH > IMAGE_SOURCE_MAX_PIXELS) {
+        fail(`image ${item.id} has invalid natural dimensions`);
+      }
+      normalized.natW = item.natW;
+      normalized.natH = item.natH;
+    }
+  }
+  return normalized;
+};
+
+const normalizeBoardMeta = (board) => ({
+  timer: null,
+  editingLocked: board.editingLocked === true,
+  votingLocked: board.votingLocked === true,
+  allRevealed: board.allRevealed === true,
+  lastResultsAt: safeTimestamp(board.lastResultsAt, null),
+});
+
 // Validate and normalize every cross-reference before an import is allowed to
 // replace live state. This module deliberately has no browser/Yjs dependency,
 // making malformed backups testable without connecting to a room.
@@ -31,47 +243,19 @@ export const normalizeImportManifest = (parsed, importedAt = Date.now()) => {
     fail('missing board.items');
   }
   if (parsed.board.items.length > IMPORT_MAX_ITEMS) fail(`too many items (max ${IMPORT_MAX_ITEMS})`);
+  const repaired = repairBoardGeometry(parsed.board.items, {
+    source: GEOMETRY_SOURCE.LEGACY_IMPORT,
+  });
+  const manifest = {
+    ...parsed,
+    board: { ...parsed.board, items: repaired.items },
+  };
 
-  const zLimit = Number.MAX_SAFE_INTEGER - parsed.board.items.length - 1;
+  const zLimit = Number.MAX_SAFE_INTEGER - manifest.board.items.length - 1;
   const itemById = new Map();
-  const items = parsed.board.items.map((item, index) => {
-    if (!isPlainRecord(item)) fail(`item ${index + 1} is not an object`);
-    if (!isSafeId(item.id)) fail(`item ${index + 1} has an invalid id`);
-    if (itemById.has(item.id)) fail(`duplicate item id: ${item.id}`);
-    if (!ITEM_TYPES.has(item.type)) fail(`item ${item.id} has an invalid type`);
-    if (!Number.isFinite(item.x) || !Number.isFinite(item.y)) {
-      fail(`item ${item.id} has invalid coordinates`);
-    }
-    if (item.type === 'zone' && (
-      !Number.isFinite(item.w) || item.w <= 0 || !Number.isFinite(item.h) || item.h <= 0
-    )) {
-      fail(`zone ${item.id} has invalid dimensions`);
-    }
-    ['w', 'h'].forEach((field) => {
-      if (item[field] != null && (!Number.isFinite(item[field]) || item[field] <= 0)) {
-        fail(`item ${item.id} has an invalid ${field}`);
-      }
-    });
-    const normalized = { ...item };
-    normalized.authorId = isSafeId(item.authorId) ? item.authorId : '';
-    normalized.authorName = typeof item.authorName === 'string'
-      ? item.authorName.slice(0, COMMENT_AUTHOR_NAME_MAX_LEN)
-      : '';
-    if (item.type === 'sticky' || item.type === 'text') {
-      normalized.text = typeof item.text === 'string' ? item.text : '';
-    }
-    if (item.type === 'zone') {
-      normalized.title = typeof item.title === 'string' ? item.title : '';
-    }
-    if (item.type === 'image' && typeof item.src !== 'string') {
-      fail(`image ${item.id} has an invalid src`);
-    }
-    normalized.createdAt = Number.isFinite(item.createdAt) && Math.abs(item.createdAt) <= zLimit
-      ? item.createdAt
-      : importedAt + index;
-    if (!Number.isFinite(item.zIndex) || Math.abs(item.zIndex) > zLimit) delete normalized.zIndex;
-    if (!Number.isFinite(item.rotation)) delete normalized.rotation;
-    if (!Number.isFinite(item.fontSize) || item.fontSize <= 0) delete normalized.fontSize;
+  const items = manifest.board.items.map((item, index) => {
+    const normalized = normalizeBoardItem(item, index, importedAt, zLimit);
+    if (itemById.has(normalized.id)) fail(`duplicate item id: ${normalized.id}`);
     itemById.set(item.id, normalized);
     return normalized;
   });
@@ -95,9 +279,9 @@ export const normalizeImportManifest = (parsed, importedAt = Date.now()) => {
 
   const voteEntries = [];
   const voteKeys = new Set();
-  if (parsed.votes != null) {
-    if (!isPlainRecord(parsed.votes)) fail('votes must be an object');
-    Object.entries(parsed.votes).forEach(([itemId, voters]) => {
+  if (manifest.votes != null) {
+    if (!isPlainRecord(manifest.votes)) fail('votes must be an object');
+    Object.entries(manifest.votes).forEach(([itemId, voters]) => {
       if (itemById.get(itemId)?.type !== 'sticky') fail(`votes reference a non-sticky item: ${itemId}`);
       if (!Array.isArray(voters)) fail(`votes for ${itemId} must be an array`);
       voters.forEach((userId) => {
@@ -112,9 +296,9 @@ export const normalizeImportManifest = (parsed, importedAt = Date.now()) => {
   }
 
   const commentEntries = [];
-  if (parsed.comments != null) {
-    if (!isPlainRecord(parsed.comments)) fail('comments must be an object');
-    Object.entries(parsed.comments).forEach(([itemId, comments]) => {
+  if (manifest.comments != null) {
+    if (!isPlainRecord(manifest.comments)) fail('comments must be an object');
+    Object.entries(manifest.comments).forEach(([itemId, comments]) => {
       if (itemById.get(itemId)?.type !== 'sticky') fail(`comments reference a non-sticky item: ${itemId}`);
       if (!Array.isArray(comments)) fail(`comments for ${itemId} must be an array`);
       if (comments.length > IMPORT_MAX_COMMENTS_PER_ITEM) {
@@ -134,12 +318,20 @@ export const normalizeImportManifest = (parsed, importedAt = Date.now()) => {
     });
   }
 
-  const customTemplates = parsed.customTemplates == null ? null : parsed.customTemplates;
-  if (customTemplates !== null && !Array.isArray(customTemplates)) fail('customTemplates must be an array');
-  const recordCount = items.length + voteEntries.length + commentEntries.length + (customTemplates?.length ?? 0);
+  const customTemplates = normalizeCustomTemplates(manifest.customTemplates, importedAt);
+  const customTemplateZoneCount = customTemplates?.reduce((sum, template) => sum + template.zones.length, 0) ?? 0;
+  const recordCount = items.length + voteEntries.length + commentEntries.length
+    + (customTemplates?.length ?? 0) + customTemplateZoneCount;
   if (recordCount > IMPORT_MAX_RECORDS) fail(`too many records (max ${IMPORT_MAX_RECORDS})`);
 
-  return { items, voteEntries, commentEntries, customTemplates };
+  return {
+    items,
+    voteEntries,
+    commentEntries,
+    customTemplates,
+    boardMeta: normalizeBoardMeta(manifest.board),
+    geometryRepairs: repaired.repairs,
+  };
 };
 
 export const importBundleByteLength = (bundle) => (

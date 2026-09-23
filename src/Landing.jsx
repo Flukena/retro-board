@@ -1,18 +1,26 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Sparkles, Plus, Clock, ArrowRight, Trash2, Languages, Sun, Moon, Monitor,
 } from 'lucide-react';
 import {
-  generateBoardCode, generateBoardToken, gotoBoard, loadRecents, forgetRecent,
-  markBoardCreated,
+  gotoBoard, loadRecents, forgetRecent, markBoardCreated, rememberRecent,
 } from './router.js';
 import { t, useLang } from './i18n.js';
 import { useTheme, nextThemePref } from './theme.js';
+import { DISPLAY_NAME_MAX_LENGTH } from './security-boundaries.js';
+import {
+  ROOM_SESSION_ERROR,
+  RoomSessionError,
+  createRoom,
+} from './room-session.js';
 
 export default function Landing() {
   const [recents, setRecents] = useState([]);
   const [joinCode, setJoinCode] = useState('');
   const [boardName, setBoardName] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState(null);
+  const creatingRef = useRef(false);
   const [lang, setLang] = useLang();
   const { pref: themePref, setThemePref } = useTheme();
 
@@ -68,17 +76,29 @@ export default function Landing() {
     };
   }, []);
 
-  const createBoard = () => {
-    // Each new board gets a high-entropy URL fragment token. Combined with the
-    // board code, the resulting yjs doc name is unguessable, so only people
-    // with the full share link can join — no PIN prompt at the door.
-    const code = generateBoardCode();
-    const token = generateBoardToken();
-    // Stamp this browser as the creator so the board's admin auto-election
-    // promotes us on first heartbeat. Other browsers opening the share link
-    // never get this flag and stay non-admin unless transferred via PIN.
-    markBoardCreated(code, token);
-    gotoBoard(code, token);
+  const createBoard = async () => {
+    if (creatingRef.current) return;
+    creatingRef.current = true;
+    setCreating(true);
+    setCreateError(null);
+    try {
+      // The relay, not the browser, allocates and registers the room. Only
+      // after a successful 201 do we remember creator status and navigate.
+      const { code, token } = await createRoom();
+      markBoardCreated(code, token);
+      rememberRecent(code, boardName, token);
+      gotoBoard(code, token);
+    } catch (error) {
+      const rateLimited = error instanceof RoomSessionError
+        && error.code === ROOM_SESSION_ERROR.RATE_LIMITED;
+      setCreateError({
+        code: rateLimited ? ROOM_SESSION_ERROR.RATE_LIMITED : ROOM_SESSION_ERROR.UNAVAILABLE,
+        retryAfterSeconds: rateLimited ? error.retryAfterSeconds : null,
+      });
+    } finally {
+      creatingRef.current = false;
+      setCreating(false);
+    }
   };
 
   const join = () => {
@@ -185,17 +205,32 @@ export default function Landing() {
             <input
               value={boardName}
               onChange={(e) => setBoardName(e.target.value)}
+              maxLength={DISPLAY_NAME_MAX_LENGTH}
               placeholder={t('landing.create.namePlaceholder')}
               style={inputStyle}
             />
             <button
               type="button"
               onClick={createBoard}
-              style={primaryBtn}
+              disabled={creating}
+              style={{
+                ...primaryBtn,
+                cursor: creating ? 'not-allowed' : 'pointer',
+                opacity: creating ? 0.65 : 1,
+              }}
             >
-              <Plus size={16} /> {t('landing.create.btn')}
+              <Plus size={16} /> {creating ? t('landing.create.creating') : t('landing.create.btn')}
             </button>
           </div>
+          {createError && (
+            <div role="alert" style={{ marginTop: 10, color: 'var(--danger)', fontSize: 13 }}>
+              {createError.code === ROOM_SESSION_ERROR.RATE_LIMITED
+                ? t('landing.create.error.rateLimited', {
+                  seconds: createError.retryAfterSeconds || 2,
+                })
+                : t('landing.create.error.unavailable')}
+            </div>
+          )}
         </div>
 
         {/* Join card */}

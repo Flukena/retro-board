@@ -1,0 +1,17 @@
+tunnel: REPLACE_WITH_TUNNEL_ID
+credentials-file: /etc/cloudflared/creds.json
+
+# Copy this file to the ignored `cloudflared.prod.yml`, then replace the
+# hostname. The application services are reachable only through this tunnel.
+ingress:
+  - hostname: retro.example.com
+    path: ^/yjs(/.*)?$
+    service: http://yjs:1234
+    originRequest:
+      connectTimeout: 30s
+      tcpKeepAlive: 30s
+
+  - hostname: retro.example.com
+    service: http://web:8080
+
+  - service: http_status:404

@@ -1,0 +1,65 @@
+# Build the latest reviewed Cloudflare release from its immutable upstream
+# commit. The vendor image for 2026.8.3 was published before fixes for the Go
+# toolchain, x/crypto, and gRPC vulnerabilities used by this binary. Keep the
+# release source fixed while applying only those security dependency updates.
+FROM golang:1.26.8-alpine@sha256:ce864e7223ac17b1775e6fd0b4c0db580c2eb50e7953a427916379e4b92a1628 AS build
+
+ARG TARGETOS=linux
+ARG TARGETARCH
+
+ENV CGO_ENABLED=0 \
+    CONTAINER_BUILD=1 \
+    CLOUDFLARED_SOURCE_COMMIT=fe70e951a3c52d92abf9f6c4248e32937b2f42fc \
+    CLOUDFLARED_SOURCE_SHA256=908aab97646925b8df7cd832c3aed96113cff070d3b41f665ffa55a86f1b04b5 \
+    CLOUDFLARED_VERSION=2026.8.3 \
+    GOTOOLCHAIN=local \
+    GOPROXY=https://proxy.golang.org \
+    GOSUMDB=sum.golang.org
+
+WORKDIR /src
+
+RUN apk upgrade --no-cache \
+    && apk add --no-cache ca-certificates \
+    && wget -qO /tmp/cloudflared.tar.gz \
+        "https://codeload.github.com/cloudflare/cloudflared/tar.gz/${CLOUDFLARED_SOURCE_COMMIT}" \
+    && echo "${CLOUDFLARED_SOURCE_SHA256}  /tmp/cloudflared.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/cloudflared.tar.gz --strip-components=1 \
+    && rm /tmp/cloudflared.tar.gz
+
+# Fail the build if a resolver change silently alters the reviewed dependency
+# graph or drops either patched version. Go also verifies downloaded modules
+# with its public checksum database.
+RUN go mod edit -require=golang.org/x/crypto@v0.55.0 \
+    && go mod edit -require=google.golang.org/grpc@v1.83.2 \
+    && go mod tidy \
+    && go mod verify \
+    && echo "928afbdff9aea07c19c62da6d3fda8ddb21c426002baaf7fc4617f678130017e  go.mod" | sha256sum -c - \
+    && echo "62a28b3dbda3be0a4dc72a9c093bdf4fdc98f5a86e064c9d6e6093fdaab65e93  go.sum" | sha256sum -c - \
+    && test "$(go list -mod=mod -m -f '{{.Version}}' golang.org/x/crypto)" = "v0.55.0" \
+    && test "$(go list -mod=mod -m -f '{{.Version}}' google.golang.org/grpc)" = "v1.83.2"
+
+RUN resolved_arch="${TARGETARCH:-$(go env GOARCH)}" \
+    && GOOS="${TARGETOS}" GOARCH="${resolved_arch}" \
+       go build -mod=mod -trimpath -buildvcs=false \
+       -ldflags="-s -w -X main.Version=${CLOUDFLARED_VERSION} -X main.BuildTime=2026-08-31T09:48:10Z -X github.com/cloudflare/cloudflared/metrics.Runtime=virtual" \
+       -o /out/cloudflared ./cmd/cloudflared
+
+# A small, patched runtime still provides the public CA bundle required for
+# the tunnel's outbound TLS connections. Build tools and module caches stay in
+# the discarded stage.
+FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+
+RUN apk upgrade --no-cache \
+    && apk add --no-cache ca-certificates \
+    && addgroup -S -g 65532 cloudflared \
+    && adduser -S -D -H -u 65532 -G cloudflared cloudflared
+
+LABEL org.opencontainers.image.source="https://github.com/cloudflare/cloudflared" \
+      org.opencontainers.image.version="2026.8.3-security.2" \
+      org.opencontainers.image.revision="fe70e951a3c52d92abf9f6c4248e32937b2f42fc"
+
+COPY --from=build --chown=65532:65532 /out/cloudflared /usr/local/bin/cloudflared
+
+USER 65532:65532
+ENTRYPOINT ["cloudflared", "--no-autoupdate"]
+CMD ["version"]

@@ -1,17 +1,31 @@
-FROM node:20-alpine
+FROM node:24-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf
 
 WORKDIR /app
+
+# Pull fixed Alpine packages published after the immutable base digest. The
+# digest pins the upstream filesystem; this explicit upgrade closes the gap
+# between Node image releases and Alpine security repository updates.
+RUN apk upgrade --no-cache
 
 # Install only the runtime deps the yjs server needs (yjs, y-websocket,
 # y-leveldb, ws). package-lock.json is included so installs are deterministic.
 COPY package.json package-lock.json* ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
+    && npm cache clean --force \
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+    && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 
-# Server entrypoint — kept separate from the rest of the source so this
-# layer rebuilds only when the file actually changes.
-COPY yjs-server.mjs ./
+# Server entrypoint and its shared pure domain modules.
+COPY --chown=node:node yjs-server.mjs ./
+COPY --chown=node:node src/board-geometry.js src/security-boundaries.js src/vote-finalization.js ./src/
+
+# Named volumes inherit these ownership bits on first creation, allowing the
+# runtime to persist data without retaining root inside the container.
+RUN mkdir -p /data /uploads \
+    && chown -R node:node /app /data /uploads
 
 ENV YJS_PORT=1234
+ENV YJS_HOST=0.0.0.0
 ENV YJS_DB_DIR=/data
 ENV YJS_UPLOADS_DIR=/uploads
 
@@ -19,4 +33,5 @@ EXPOSE 1234
 
 # LevelDB lives on a named volume mounted at /data, uploaded images on a
 # separate one at /uploads, so both survive restarts.
+USER node
 CMD ["node", "yjs-server.mjs"]

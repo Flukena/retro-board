@@ -4,22 +4,51 @@
 #   - web : host 15173 -> container 5173
 # The browser learns the yjs port via VITE_YJS_PORT (see storage-bridge.js).
 services:
+  volume-init:
+    build:
+      context: .
+      dockerfile: Dockerfile.volume-init
+    user: "0:0"
+    command: ["sh", "-c", "chown -R 1000:1000 /data /uploads"]
+    volumes:
+      - yjs_data:/data
+      - yjs_uploads:/uploads
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [CHOWN]
+    security_opt:
+      - no-new-privileges:true
+    network_mode: none
+    restart: "no"
+
   yjs:
     build:
       context: .
       dockerfile: Dockerfile.yjs
-    container_name: retro-yjs
     ports:
-      - "11234:1234"
+      - "127.0.0.1:11234:1234"
     volumes:
       # Persists LevelDB across container restarts. The yjs-server writes to
       # /data inside the container (YJS_DB_DIR is set in Dockerfile.yjs).
       - yjs_data:/data
       # Uploaded image files (YJS_UPLOADS_DIR, set in Dockerfile.yjs).
       - yjs_uploads:/uploads
+    environment:
+      - YJS_HOST=0.0.0.0
+      - YJS_ALLOW_INSECURE_HTTP=true
+      - YJS_ALLOWED_ORIGINS=http://localhost:15173,http://127.0.0.1:15173
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:1234/"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:1234/readyz"]
       interval: 30s
       timeout: 3s
       retries: 3
@@ -28,9 +57,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.web
-    container_name: retro-web
     ports:
-      - "15173:5173"
+      - "127.0.0.1:15173:5173"
     volumes:
       # Mount source for HMR. The anonymous volume on /app/node_modules
       # shadows the host node_modules so the container keeps the deps
@@ -40,11 +68,17 @@ services:
     environment:
       # File-watching over bind-mounts on macOS needs polling.
       - CHOKIDAR_USEPOLLING=true
+      # The package/vite defaults stay loopback-only outside Docker.
+      - VITE_DEV_HOST=0.0.0.0
       # Tells the in-browser bundle which host port the yjs relay is on.
       - VITE_YJS_PORT=11234
     depends_on:
-      - yjs
+      yjs:
+        condition: service_healthy
     restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
   yjs_data:

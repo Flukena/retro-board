@@ -4,23 +4,30 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 0.0.0.0",
+    "dev": "vite",
     "yjs": "node yjs-server.mjs",
-    "start": "vite --host 0.0.0.0",
+    "yjs:dev": "YJS_ALLOW_INSECURE_HTTP=true YJS_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173 node yjs-server.mjs",
+    "start": "vite",
+    "test": "node --test src/*.test.js *.test.mjs",
     "build": "vite build",
-    "preview": "vite preview --host 0.0.0.0"
+    "preview": "vite preview"
   },
   "dependencies": {
     "lucide-react": "^0.453.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "ws": "^8.20.1",
+    "ws": "^8.21.3",
     "y-leveldb": "^0.2.0",
     "y-websocket": "^1.5.4",
     "yjs": "^13.6.30"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.3.3",
-    "vite": "^5.4.10"
+    "@vitejs/plugin-react": "^6.1.1",
+    "vite": "^8.2.2"
+  },
+  "overrides": {
+    "y-websocket": {
+      "ws": "^6.2.6"
+    }
   }
 }

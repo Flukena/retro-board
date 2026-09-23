@@ -5,8 +5,6 @@ import { t } from './i18n.js';
 import { isBoardCreatedByMe } from './router.js';
 
 export const HEARTBEAT_MS = 5000;
-export const ONLINE_WINDOW = 12000;
-export const ADMIN_DEAD_MS = 15000;
 
 // Salted hash so the same PIN on different boards has different hashes,
 // blunting rainbow-table reuse. Web Crypto returns lowercase hex.
@@ -69,8 +67,7 @@ export function useAdminRole({
       if (!window.storage?.synced?.()) return;
       const adminUserId = window.storage?.getAdminUserId?.();
       const pmap = (await storage.get('presence', true))?.value || {};
-      const adminSeen = adminUserId ? pmap[adminUserId]?.lastSeen || 0 : 0;
-      const adminGone = !adminUserId || Date.now() - adminSeen > ADMIN_DEAD_MS;
+      const adminGone = !adminUserId || !pmap[adminUserId];
       if (adminGone) {
         // Only auto-claim admin in boards THIS browser created. Otherwise a
         // guest who happens to be alone in someone else's board (e.g. admin
@@ -98,7 +95,7 @@ export function useAdminRole({
         // Immediate flush — bypass the 200ms debounce so the claim lands
         // in yMeta on the first tick. Otherwise a second client racing
         // the same election can miss our write and double-claim.
-        patchMeta({ adminUserId: userId, adminName: effectiveName });
+        if (!patchMeta({ adminUserId: userId, adminName: effectiveName })) return;
         setToast({ msg: t('transfer.becomeAdmin'), type: 'info' });
       }
     };
@@ -155,7 +152,7 @@ export function useAdminRole({
         const cur = boardRef.current.adminPinHash;
         if (!cur) {
           // Set mode — persist the new PIN's hash into the shared board.
-          patchMeta({ adminPinHash: hash });
+          if (!patchMeta({ adminPinHash: hash })) return;
         } else if (cur !== hash) {
           // Verify mode — wrong PIN, keep modal open with error.
           setPinPromptCfg((cfg) => (cfg ? { ...cfg, error: 'wrong' } : cfg));
@@ -210,18 +207,17 @@ export function useAdminRole({
         // the meantime, abort rather than overwrite their fresh claim.
         const latestPresence = (await storage.get('presence', true))?.value || {};
         const latestAdmin = window.storage?.getAdminUserId?.();
-        const latestAdminSeen = latestAdmin ? latestPresence[latestAdmin]?.lastSeen || 0 : 0;
-        if (latestAdmin && Date.now() - latestAdminSeen < ONLINE_WINDOW) {
+        if (latestAdmin && latestPresence[latestAdmin]) {
           setPinPromptCfg(null);
           setToast({ msg: t('common.adminOnly'), type: 'warn' });
           return;
         }
-        patchMeta({
+        if (!patchMeta({
           adminUserId: userId,
           adminName: userName || 'Guest',
           // First-ever claim doubles as set-PIN.
           adminPinHash: curHash || hash,
-        });
+        })) return;
         pinSessionOkRef.current = true;
         setPinPromptCfg(null);
         setToast({ msg: t('transfer.becomeAdmin'), type: 'info' });
@@ -236,7 +232,7 @@ export function useAdminRole({
     // Immediate write — admin transfer is a hand-off; if our own heartbeat
     // fires first we'd still see ourselves as admin and could accidentally
     // rewrite the role back to us in the same tick.
-    patchMeta({ adminUserId: toId, adminName: toName });
+    if (!patchMeta({ adminUserId: toId, adminName: toName })) return;
     setToast({ msg: t('transfer.done'), type: 'info' });
   }, [isAdmin, presence, patchMeta, setToast]);
 

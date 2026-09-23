@@ -1,39 +1,170 @@
 # Security model
 
-## Trust boundary
+## Supported deployment model
 
-Retro Board uses a trusted-link model. The room URL contains the Yjs document name, `board-<code>-<token>`, and the random token is the only access control. `src/storage-bridge.js` builds `ROOM` from that value and connects directly with `WebsocketProvider`. There is no login, per-user authentication, or server-issued capability or session.
+Retro Board supports a **publicly reachable host with private, trusted-link
+rooms**. A room link is a bearer capability: anyone who receives the complete
+link is a fully trusted collaborator for that room. Do not post room links in
+public channels unless everyone who can obtain the link is intended to have
+full board access.
 
-Anyone who has the complete room URL is a fully trusted collaborator. They can read the board and submit arbitrary Yjs updates to it. Keep the URL secret and distribute it only to the intended group through a trusted, out-of-band channel.
+This is not a multi-tenant identity or authorization system. There are no user
+accounts, per-user ACLs, revocation, or server-enforced admin roles. An open
+room shared with mutually untrusted participants is therefore unsupported; it
+would require authenticated identities and server-side authorization.
 
-## Best-effort safeguards
+## Room capability and session flow
 
-These mechanisms protect availability and data integrity against accidents, bugs, and runaway clients. They do not create an authorization boundary against a malicious holder of the room link.
+New rooms are created by `POST /yjs/api/rooms`. The relay rate-limits creation,
+registers the room in persistent LevelDB metadata, and returns a random room
+code and capability token. Unknown WebSocket paths never create documents.
 
-- `yjs-server.mjs` applies a per-connection token-bucket rate limiter (`RL_MAX_MSGS`, `RL_REFILL_MSGS_PER_SEC`, `RL_MAX_BYTES`, and `RL_REFILL_BYTES_PER_SEC`). It closes an over-budget connection to protect Yjs and LevelDB capacity. A determined client can evade a per-connection limit by opening multiple connections.
-- The `WebSocketServer` in `yjs-server.mjs` sets `maxPayload: RL_MAX_BYTES`, so `ws` rejects an oversized frame before the Yjs message parser receives it.
-- The LevelDB calls in `yjs-server.mjs` go through `checkedGetYDoc`, `checkedStoreUpdate`, `checkedClearDocument`, and `checkedFlushDocument`. These wrappers detect the failure values that `y-leveldb` otherwise returns silently. `markStorageFailure`, `/readyz`, and the upgrade checks stop the relay from silently accepting new work after persistence degrades. They do not validate or authorize CRDT content from a peer.
-- When `YJS_ALLOWED_ORIGINS` is configured, `yjs-server.mjs` checks WebSocket and upload origins. This reduces accidental or browser-based cross-origin use; it is not authentication, and a non-browser client can supply an allowed Origin header.
-- The upload route in `yjs-server.mjs` has a separate per-IP token bucket, a 5 MiB limit, an image MIME allowlist, magic-byte checks, and no SVG support. These are input and capacity controls, not room authorization.
+The share URL keeps the capability in its fragment (`/b/<code>#<token>`), so it
+is not sent in the initial HTTP request or Referer. Before loading any board
+state, the client sends the code and token in the body of
+`POST /yjs/api/room-session`. A valid capability is exchanged for:
 
-## Not security enforcement
+- a short-lived, room-scoped, signed `HttpOnly; Secure; SameSite=Strict` cookie;
+- a stable opaque room handle used in WebSocket and upload paths.
 
-The following are intentional UX and policy controls for cooperating users. They reduce mistakes; they are not security controls and are not gaps to fix under this model.
+The raw capability and canonical LevelDB document name are consequently absent
+from WebSocket URLs and BroadcastChannel names. The client refreshes the
+session before expiry; the server also expires already-open WebSockets.
 
-- The admin role and admin PIN in `src/useAdminRole.js` are client-side gates. `hashAdminPin` compares a SHA-256 hash in the client against `adminPinHash`, which is stored in the shared Yjs `meta` map and is readable and writable by any peer with the link. The relay performs no server-side authorization check for admin-gated actions.
-- Vote quotas are checked in client UI logic against `timer.voteLimit`. `src/storage-bridge.js` exposes `setVote` as a direct Yjs map update, and the relay does not enforce a per-user count. A custom client can add vote keys without respecting the quota.
-- `board.editingLocked` is a UI convenience. It is stored in the shared Yjs `meta` map, and the client uses it to decide whether editing is allowed. The relay has no concept of a locked board and applies valid CRDT updates from any connected client.
+The capability is still present in the browser's URL fragment while a board is
+open. This browser also keeps capabilities for boards it created (and their
+recent-list entries) in local storage so those links continue to work after a
+refresh. Browser extensions, malware, or another person using the same browser
+profile may therefore recover them. Use a separate trusted profile for
+sensitive boards and remove recent entries before handing a shared device to
+someone else.
 
-A collaborator can bypass all of these controls by modifying local JavaScript state or by constructing Yjs messages directly. That behavior is inside the accepted trusted-link threat model.
+Existing tokenized LevelDB rooms are registered on startup without renaming
+their document keys. Direct token-bearing WebSocket URLs and tokenless legacy
+rooms are disabled by default. `YJS_ALLOW_LEGACY_URL_TOKENS` and
+`YJS_ALLOW_LEGACY_ROOMS` are migration switches, not production defaults.
 
-## Log redaction
+## What a link holder can do
 
-Server log sites in `yjs-server.mjs` use `roomLogId(docName)`: a truncated HMAC-SHA-256 of the document name keyed by a random per-process `ROOM_LOG_KEY`. Logs and observability tooling receive this one-way, per-process identifier instead of the raw room name and capability token.
+Every valid room session has raw read/write access to that room's Yjs document.
+A custom client can inspect and submit arbitrary CRDT updates. The following
+features are workflow controls for cooperating participants, not security
+boundaries:
 
-This limits accidental disclosure of the token through server logs. It does not protect the board from a client that already legitimately holds the room URL.
+- admin status and the shared admin PIN;
+- vote limits;
+- board and zone editing locks;
+- card hide/reveal state.
 
-## Deployment
+Presence is also untrusted. Display names, cursor/view data, and Yjs awareness
+IDs are supplied by each participant. The non-secret `awarenessId` WebSocket
+parameter only binds one claimed ID to one socket so relayed snapshots cannot
+inflate memory or overwrite an active peer; it does not authenticate a person.
+A malicious link holder can spoof presence fields or temporarily squat an
+offline participant's ID.
 
-Deploy Retro Board only to trusted, closed groups that receive room links out of band, such as an internal team retrospective. Treat anyone who receives or discovers a link as fully trusted for that room.
+Hidden card text is omitted from the normal DOM and redacted from exports made
+by non-owners. It is nevertheless synchronized in plaintext to every room
+peer, so a malicious link holder can read it with a custom client. Do not put
+secrets, credentials, personal data, or notes that other room participants
+must not see into a hidden card.
 
-Public or open deployment is not supported and is blocked pending dedicated follow-up work. Supporting untrusted audiences would require real per-user authentication and server-side authorization or capability checks. That work is explicitly not planned as part of this remediation pass.
+## Server safeguards
+
+The relay applies defense-in-depth controls for a publicly reachable service:
+
+- exact Origin checks on room creation, session exchange, uploads, and
+  WebSocket upgrades;
+- signed room cookies and authenticated, room-bound WebSocket/upload/image
+  paths;
+- global, per-IP, per-room, and per-connection traffic, WebSocket-admission,
+  cold-room hydration, and concurrency limits;
+- request, header, upload, document, update, backlog, database, and storage
+  quotas;
+- bounded awareness identities/state, preflighted sync responses, and
+  WebSocket egress budgets;
+- a cross-room active-document memory budget, throttled update-log compaction
+  and exact measurement, and hard byte/count caps on uncompacted persistence
+  churn;
+- streamed, atomic image uploads with size, MIME, and magic-byte validation;
+- per-IP, per-room, and global image-read request/byte budgets;
+- LevelDB failure detection, readiness failure, and peer shutdown instead of
+  acknowledging state that cannot be persisted;
+- keyed, truncated room identifiers in logs instead of raw capability tokens.
+
+These controls protect isolation and availability. They cannot make an
+authorized-but-malicious link holder safe within that holder's own room.
+
+Room creation is intentionally anonymous. The in-process global, per-IP, room,
+disk, and file-count limits bound one relay instance, but they do not prevent a
+distributed attacker from consuming the finite room or upload capacity. Public
+deployments must add edge rate limits or a managed challenge for room creation,
+plus edge rate limits for uploads and authenticated image reads, and alert
+before either persistent volume is full.
+
+New image URLs are authenticated and room-bound. Historical `/images/<id>`
+URLs remain unauthenticated compatibility capabilities: anyone who has one can
+read that image. Retiring a room makes its new room-bound image URLs
+unreachable, but does not erase image files or revoke historical legacy image
+URLs. Treat legacy images as already disclosed and remove retained files only
+as a deliberate, backed-up maintenance operation.
+
+## Production requirements
+
+- Serve the site only over HTTPS. Never enable `YJS_ALLOW_INSECURE_HTTP` in
+  production.
+- Direct `npm run yjs` starts on `127.0.0.1`; set `YJS_HOST=0.0.0.0` only
+  inside an isolated container network or another deliberately protected
+  network namespace.
+- Set `YJS_ALLOWED_ORIGINS` to the exact public origin. Do not use a wildcard.
+- Enable `YJS_TRUST_PROXY` only when direct access to the relay is impossible.
+  The production Compose stack satisfies this by publishing no application
+  ports and using Cloudflare Tunnel as the sole ingress.
+- Keep both legacy switches off after any controlled migration window.
+- Persist and back up the LevelDB volume, including `.room-session-key`, and
+  the uploads volume together. Alternatively provide a stable secret of at
+  least 32 bytes through `YJS_SESSION_SECRET`.
+- Protect tunnel credentials outside the repository, restrict their file
+  permissions, and rotate them if they have ever appeared in logs, commits, or
+  shared artifacts.
+- Keep the edge WAF and rate limiting enabled. Process-local limits reduce
+  abuse but are not a substitute for distributed edge controls. Cover at least
+  `/yjs/api/rooms`, `/yjs/api/room-session`, `/yjs/rooms/*/upload`, and
+  `/yjs/rooms/*/images/*`, plus WebSocket upgrade bursts on `/yjs/rooms/*`;
+  challenge responses must not be injected into the application's
+  authenticated session, upload, image, or WebSocket requests.
+- Keep `YJS_MAX_ACTIVE_DOCUMENT_BYTES` comfortably below the Yjs container
+  memory limit. The production defaults allow 32 MiB per document but only
+  96 MiB of conservative encoded state across all resident rooms, leaving
+  headroom for decoded CRDT structures, persistence work, and sync buffers.
+- Build and run the JavaScript services with the pinned Node.js 24 LTS image;
+  do not release with an end-of-life runtime.
+- Build the tunnel from the pinned upstream Cloudflare source commit in
+  `Dockerfile.cloudflared`. Its dependency overrides close advisories that are
+  still present in the vendor's `2026.8.3` container; remove the overrides only
+  after a newer reviewed upstream release contains equivalent or newer fixes.
+- Monitor `/yjs/readyz`, capacity responses (`429`, `503`, `507`), storage
+  usage, restarts, and WebSocket policy closes.
+- Run `npm test`, `npm run build`, the locked dependency audit, and the
+  container smoke tests before each release. CI and Dependabot configuration
+  are included in `.github/`.
+
+The production CSP currently names `https://retro.sagonzis.space`. If the
+public hostname changes, update both `nginx.conf` and `YJS_ALLOWED_ORIGINS`
+before deploying.
+
+## Incident handling
+
+A leaked room link grants room access until the room is operationally retired;
+there is no self-service rotation or revocation UI. Treat a suspected leak as a
+board compromise: export only known-safe content, create a new room, share its
+link through a trusted channel, and retire the old room with the one-shot
+`YJS_WIPE_DOCS` maintenance setting after stopping writes and taking a backup.
+The setting contains the canonical document name, which includes the secret,
+so supply it through a protected deployment secret rather than shared shell
+history or logs. Remove the setting immediately after the successful one-shot
+restart. Separately review retained uploads as described above.
+
+Do not include live room links, fragment tokens, cookies, board exports,
+browser traces, or tunnel credentials in bug reports. Redact them before
+sharing diagnostics.

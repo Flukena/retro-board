@@ -1,6 +1,7 @@
 import {
   useState, useRef, useEffect, useCallback,
 } from 'react';
+import { normalizeDisplayName } from './local-preferences.js';
 
 // Local participant identity: userId/userName plus the "set your name" modal.
 // `storage` is the board's window.storage-backed wrapper (see RetroBoard.jsx),
@@ -23,7 +24,8 @@ export function useUserIdentity(storage) {
   }, []);
 
   const saveName = useCallback(async () => {
-    const n = nameDraft.trim() || `Guest-${Math.floor(1000 + Math.random() * 9000)}`;
+    const n = normalizeDisplayName(nameDraft)
+      || `Guest-${Math.floor(1000 + Math.random() * 9000)}`;
     setUserName(n);
     setNameModalOpen(false);
     await storage.set('userName', n, false);

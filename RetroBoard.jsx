@@ -1,29 +1,83 @@
 // RetroBoard.jsx — Miro-style retrospective board (single-file artifact)
-// Last-write-wins sync via window.storage (no CRDT). Optimistic UI + debounced save.
+// Yjs-backed realtime board with character-level collaborative text editing.
 
 import React, {
-  useState, useEffect, useRef, useCallback, useMemo,
+  useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo,
 } from 'react';
 import {
   Trash2, Lock, Unlock, Eye, EyeOff, ZoomIn, ZoomOut, Maximize2,
-  ThumbsUp, Crown, Clock, Play, Square, LayoutTemplate,
+  ThumbsUp, Crown, Clock, Square, LayoutTemplate,
   ChevronDown, X, Sparkles, AlertCircle, Type, Copy,
   Image as ImageIcon, MousePointer2, RotateCcw,
   Languages, Sun, Moon, Monitor, Download, Upload, Undo2, Redo2,
-  MoreHorizontal, Ban, Check, BringToFront, SendToBack, HelpCircle,
-  MessageSquare,
+  MoreHorizontal, Check, BringToFront, SendToBack, HelpCircle,
+  MessageSquare, Map as MapIcon, LocateFixed,
 } from 'lucide-react';
 import { COMMENT_MAX_LEN } from './src/comment-schema.js';
 import {
   IMPORT_MAX_BUNDLE_BYTES,
   IMPORT_MAX_FILE_BYTES,
   importBundleByteLength,
+  normalizeCustomTemplates,
   normalizeImportManifest,
 } from './src/import-schema.js';
+import { parseBoardCsv } from './src/csv-import.js';
+import { createCsvExportArtifact, createJsonBackupArtifact } from './src/board-backup.js';
+import { geometryErrorForItem, geometryErrorForPatch } from './src/board-geometry.js';
+import {
+  BOARD_TEXT_MAX_LENGTH,
+  DISPLAY_NAME_MAX_LENGTH,
+  IMAGE_MAX_BYTES,
+  IMAGE_OUTPUT_MAX_DIMENSION,
+  TEMPLATE_NAME_MAX_LENGTH,
+  ZONE_TITLE_MAX_LENGTH,
+  classifyImportedImageSource,
+  imageInfoIsWithinLimits,
+  inspectRasterImageBlob,
+  isSafeImageMime,
+  normalizeRuntimeImageSource,
+  redactBoardExportForViewer,
+  stickyTextForDom,
+} from './src/security-boundaries.js';
 import { t, useLang } from './src/i18n.js';
+import { getActiveRoomSession } from './src/room-session.js';
 import { useTheme, nextThemePref } from './src/theme.js';
 import { useUserIdentity } from './src/useUserIdentity.js';
-import { useAdminRole, ONLINE_WINDOW } from './src/useAdminRole.js';
+import { useAdminRole } from './src/useAdminRole.js';
+import { clientPointToWorld } from './src/board-coordinates.js';
+import { buildTopVotedRanks } from './src/voting-results.js';
+import {
+  allowCanvasFileDrop,
+  dragClientPoint,
+  droppedImageBlobs,
+  resolveDropClientPoint,
+} from './src/image-drop.js';
+import { unlockEntriesForSelection } from './src/selection-actions.js';
+import {
+  buildMinimapModel,
+  centerViewportOnWorld,
+  minimapPointToWorld,
+  minimapViewportRect,
+} from './src/minimap.js';
+import {
+  cursorScreenPosition,
+  PLAYER_CURSOR_STALE_MS,
+  playerViewFromViewport,
+  visiblePlayerCursors,
+} from './src/player-cursors.js';
+import { summarizeRemoteEditors, summarizeRemoteSelectors } from './src/editing-presence.js';
+import {
+  describeTextReplacement,
+  mapSelectionIndexThroughReplacement,
+} from './src/collaborative-text.js';
+import { copyTextToClipboard } from './src/clipboard.js';
+import {
+  normalizeDisplayName,
+  normalizeStoredUserId,
+  normalizeViewport,
+} from './src/local-preferences.js';
+import { voteTimerIsOpen, voteTimerPhaseSignature } from './src/vote-timing.js';
+import { planVoteFinalization } from './src/vote-finalization.js';
 
 /* ============================================================
    Constants
@@ -62,6 +116,9 @@ const STICKY_W = 200;
 const STICKY_H = 180;
 const STICKY_MIN_W = 120;
 const STICKY_MIN_H = 100;
+// Let notes grow while typing, but keep a pasted essay from turning into a
+// many-thousand-pixel card. At the cap the editor becomes internally scrollable.
+const STICKY_AUTO_GROW_MAX_H = 900;
 const ZONE_MIN_W = 240;
 const ZONE_MIN_H = 200;
 const IMAGE_MIN_W = 60;
@@ -70,13 +127,6 @@ const TEXT_W = 400;
 const TEXT_H = 80;
 const TEXT_MIN_W = 60;
 const TEXT_MIN_H = 30;
-const IMAGE_MAX_DIM = 1200; // resize larger imports down to this max edge
-// Hard cap on accepted image blob size before any resize/upload. Larger
-// files are rejected up front so we don't OOM the page decoding them.
-const IMAGE_MAX_BYTES = 5 * 1024 * 1024;
-// Must match the server's MIME_EXT allowlist (yjs-server.mjs) — anything
-// outside this set is rejected by /upload regardless of the resize path.
-const UPLOADABLE_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 // A full board import writes every item in one Yjs transaction, which the
 // WebsocketProvider then sends as a single WS frame. Must stay safely under
 // the server's per-frame cap (RL_MAX_BYTES in yjs-server.mjs, 2MB) — legacy
@@ -87,6 +137,11 @@ const ZONE_TITLE_H = 40;
 const DRAG_THRESHOLD = 4;
 const ZOOM_MIN = 0.15;
 const ZOOM_MAX = 3.0;
+const MINIMAP_W = 220;
+const MINIMAP_H = 132;
+const MINIMAP_IDLE_MS = 1100;
+const CURSOR_BROADCAST_MS = 24;
+const FOLLOW_VIEWPORT_COMMIT_MS = 96;
 const SCROLL_WHEEL_ZOOM_KEY = 'rb_scroll_wheel_zoom';
 const POLL_SAFETY = 15000; // safety net only — Realtime push is primary
 const SAVE_DEBOUNCE = 200;
@@ -377,6 +432,15 @@ const storage = {
       window.storage.off(handler);
     }
   },
+  getPresenceSnapshot() {
+    try { return window.storage?.getPresenceSnapshot?.() || {}; } catch { return {}; }
+  },
+  onPresenceChange(handler) {
+    try { return window.storage?.onPresenceChange?.(handler) || (() => {}); } catch { return () => {}; }
+  },
+  offPresenceChange(handler) {
+    try { window.storage?.offPresenceChange?.(handler); } catch { /* noop fallback */ }
+  },
   setLocalBusyItems(source, ids) {
     try { window.storage?.setLocalBusyItems?.(source, ids); } catch { /* noop fallback */ }
   },
@@ -392,16 +456,42 @@ const storage = {
   offBusyChange(handler) {
     try { window.storage?.offBusyChange?.(handler); } catch { /* noop fallback */ }
   },
+  getRemoteEditingItems() {
+    try { return window.storage?.getRemoteEditingItems?.() || new Map(); } catch { return new Map(); }
+  },
+  onEditingChange(handler) {
+    try { return window.storage?.onEditingChange?.(handler) || (() => {}); } catch { return () => {}; }
+  },
+  offEditingChange(handler) {
+    try { window.storage?.offEditingChange?.(handler); } catch { /* noop fallback */ }
+  },
+  setLocalSelectedItems(ids) {
+    try { window.storage?.setLocalSelectedItems?.(ids); } catch { /* noop fallback */ }
+  },
+  getRemoteSelectedItems() {
+    try { return window.storage?.getRemoteSelectedItems?.() || new Map(); } catch { return new Map(); }
+  },
+  onSelectionChange(handler) {
+    try { return window.storage?.onSelectionChange?.(handler) || (() => {}); } catch { return () => {}; }
+  },
+  offSelectionChange(handler) {
+    try { window.storage?.offSelectionChange?.(handler); } catch { /* noop fallback */ }
+  },
   // --- Granular board writes ---
   // Pass through to the Yjs bridge when present; otherwise mutate the in-memory
   // board so dev/preview (no relay) stays consistent. Each maps to one Yjs
   // transaction in the bridge; `opts.silent` keeps derived writes off undo.
   addItem(item, opts) {
-    if (window.storage?.addItem) { window.storage.addItem(item, opts); return; }
+    if (window.storage?.addItem) {
+      try { return window.storage.addItem(item, opts) === true; } catch { return false; }
+    }
     const b = memBoard(); memSetBoard({ ...b, items: [...b.items, item] });
+    return true;
   },
   addItems(items, opts) {
-    if (window.storage?.addItems) { window.storage.addItems(items, opts); return; }
+    if (window.storage?.addItems) {
+      try { return window.storage.addItems(items, opts) === true; } catch { return false; }
+    }
     const b = memBoard();
     const ids = new Set(b.items.map((it) => it.id));
     const additions = [];
@@ -410,30 +500,46 @@ const storage = {
       ids.add(it.id);
       additions.push(it);
     });
+    if (additions.length !== items.length) return false;
     memSetBoard({ ...b, items: [...b.items, ...additions] });
+    return true;
   },
   updateItem(id, patch, opts) {
-    if (window.storage?.updateItem) { window.storage.updateItem(id, patch, opts); return; }
+    if (window.storage?.updateItem) {
+      try { return window.storage.updateItem(id, patch, opts) === true; } catch { return false; }
+    }
     const b = memBoard();
+    if (!b.items.some((it) => it.id === id)) return false;
     memSetBoard({ ...b, items: b.items.map((it) => (it.id === id ? memMerge(it, patch) : it)) });
+    return true;
   },
   updateItems(entries, opts) {
-    if (window.storage?.updateItems) { window.storage.updateItems(entries, opts); return; }
+    if (window.storage?.updateItems) {
+      try { return window.storage.updateItems(entries, opts) === true; } catch { return false; }
+    }
     const byId = new Map(entries.map((e) => [e.id, e.patch]));
     const b = memBoard();
+    if (entries.some((entry) => !b.items.some((it) => it.id === entry.id))) return false;
     memSetBoard({ ...b, items: b.items.map((it) => (byId.has(it.id) ? memMerge(it, byId.get(it.id)) : it)) });
+    return true;
   },
   removeItem(id, opts) {
     if (window.storage?.removeItem) { window.storage.removeItem(id, opts); return; }
     const b = memBoard(); memSetBoard({ ...b, items: b.items.filter((it) => it.id !== id) });
   },
   setMeta(patch, opts) {
-    if (window.storage?.setMeta) { window.storage.setMeta(patch, opts); return; }
+    if (window.storage?.setMeta) {
+      try { return window.storage.setMeta(patch, opts) === true; } catch { return false; }
+    }
     memSetBoard(memMerge(memBoard(), patch));
+    return true;
   },
   replaceBoard(board, opts) {
-    if (window.storage?.replaceBoard) { window.storage.replaceBoard(board, opts); return; }
+    if (window.storage?.replaceBoard) {
+      try { return window.storage.replaceBoard(board, opts) === true; } catch { return false; }
+    }
     memSetBoard(board);
+    return true;
   },
 };
 
@@ -545,7 +651,7 @@ const activeVoteZone = (item, allItems, atTime) => {
   while (zone && !visited.has(zone.id)) {
     visited.add(zone.id);
     const timer = zone.voteTimer;
-    if (timer && (!timer.endsAt || timer.endsAt > atTime)) return zone;
+    if (voteTimerIsOpen(timer, atTime)) return zone;
     zone = effectiveOwnerZone(zone, allItems);
   }
   return null;
@@ -617,8 +723,140 @@ const csvEsc = (v) => {
 
 const MEDAL_BY_RANK = { 1: '🥇', 2: '🥈', 3: '🥉' };
 
+const runtimeRelayBaseUrl = () => {
+  if (typeof window === 'undefined') return null;
+  return window.location.protocol === 'https:'
+    ? `${window.location.origin}/yjs/`
+    : `http://${window.location.hostname}:${import.meta.env.VITE_YJS_PORT || '1234'}/`;
+};
+
+const safeRuntimeImageSource = (value) => {
+  if (typeof window === 'undefined') return null;
+  return normalizeRuntimeImageSource(value, {
+    pageOrigin: window.location.origin,
+    relayBaseUrl: runtimeRelayBaseUrl(),
+    roomHandle: getActiveRoomSession()?.roomHandle,
+  });
+};
+
+const safeCustomTemplates = (value) => {
+  try {
+    return normalizeCustomTemplates(value, Date.now()) || [];
+  } catch {
+    return [];
+  }
+};
+
+const useBrowserLayoutEffect = (
+  typeof document !== 'undefined' && typeof document.createElement === 'function'
+    ? useLayoutEffect
+    : useEffect
+);
+
+const autoGrownStickyHeight = (height, overflow) => {
+  if (!Number.isFinite(overflow) || overflow <= 1) return height;
+  return Math.min(STICKY_AUTO_GROW_MAX_H, Math.ceil(height + overflow));
+};
+
+const useContentOverflow = (value, enabled = true, layoutKey = '', onOverflow = null) => {
+  const elementRef = useRef(null);
+  const [overflows, setOverflows] = useState(false);
+
+  useBrowserLayoutEffect(() => {
+    const node = elementRef.current;
+    if (!node || !enabled) {
+      setOverflows(false);
+      return undefined;
+    }
+    const measure = () => {
+      const overflow = node.scrollHeight - node.clientHeight;
+      setOverflows(overflow > 1);
+      if (overflow > 1) onOverflow?.(overflow);
+    };
+    measure();
+    if (typeof ResizeObserver !== 'function') return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [enabled, layoutKey, onOverflow, value]);
+
+  return [elementRef, overflows];
+};
+
+// A controlled input normally moves its caret when a remote value replaces
+// the DOM value. Keep a selection anchored through the minimal remote change,
+// while local keystrokes retain the browser's native selection behaviour.
+const CollaborativeTextEditor = ({
+  kind = 'textarea', editorRef, value, onValueChange, onContentOverflow, ...props
+}) => {
+  const elementRef = useRef(null);
+  const textValue = String(value ?? '');
+  const selectionRef = useRef({ start: textValue.length, end: textValue.length });
+  const selectionValueRef = useRef(textValue);
+
+  const assignRef = useCallback((node) => {
+    elementRef.current = node;
+    if (typeof editorRef === 'function') editorRef(node);
+    else if (editorRef) editorRef.current = node;
+  }, [editorRef]);
+
+  const rememberSelection = useCallback((node) => {
+    if (!node) return;
+    selectionRef.current = {
+      start: node.selectionStart ?? 0,
+      end: node.selectionEnd ?? node.selectionStart ?? 0,
+    };
+    selectionValueRef.current = node.value;
+  }, []);
+
+  useBrowserLayoutEffect(() => {
+    const node = elementRef.current;
+    const previousValue = selectionValueRef.current;
+    if (node && document.activeElement === node && previousValue !== textValue) {
+      const change = describeTextReplacement(previousValue, textValue);
+      const nextStart = Math.min(
+        textValue.length,
+        mapSelectionIndexThroughReplacement(selectionRef.current.start, change),
+      );
+      const nextEnd = Math.min(
+        textValue.length,
+        mapSelectionIndexThroughReplacement(selectionRef.current.end, change),
+      );
+      node.setSelectionRange(nextStart, nextEnd);
+      selectionRef.current = { start: nextStart, end: nextEnd };
+    }
+    selectionValueRef.current = textValue;
+  }, [textValue]);
+
+  useBrowserLayoutEffect(() => {
+    const node = elementRef.current;
+    if (!node || kind === 'input' || !onContentOverflow) return;
+    onContentOverflow(node.scrollHeight - node.clientHeight);
+  }, [kind, onContentOverflow, textValue]);
+
+  const handleChange = useCallback((event) => {
+    const node = event.currentTarget;
+    rememberSelection(node);
+    onValueChange(node.value, {
+      clientHeight: node.clientHeight,
+      scrollHeight: node.scrollHeight,
+    });
+  }, [onValueChange, rememberSelection]);
+
+  const Element = kind === 'input' ? 'input' : 'textarea';
+  return (
+    <Element
+      {...props}
+      ref={assignRef}
+      value={textValue}
+      onChange={handleChange}
+      onSelect={(event) => rememberSelection(event.currentTarget)}
+    />
+  );
+};
+
 const StickyCard = React.memo(function StickyCard({
-  item, selected, isEditing, isOwner, allRevealed, dense,
+  item, selected, remoteSelected, remoteSelectionHue, isEditing, isOwner, allRevealed, dense,
   voted, voteCount, voteFlash, voteRank, votingAllowedNow, showVoteCount, inZone,
   commentCount, commentPreviews,
   // `lang` is unused inside the body, but its presence as a prop
@@ -632,6 +870,7 @@ const StickyCard = React.memo(function StickyCard({
   const it = item;
   const c = COLORS[it.color] || COLORS[0];
   const hideContent = it.private && !allRevealed && !isOwner;
+  const visibleText = stickyTextForDom(it, hideContent);
   const w = it.w || STICKY_W;
   const h = it.h || STICKY_H;
   const rot = selected ? 0 : it.rotation;
@@ -641,6 +880,20 @@ const StickyCard = React.memo(function StickyCard({
   const commentPreview = commentPreviews[commentPreviewIndex] ?? commentPreviews[0] ?? '';
   const showCommentPreview = !hideContent && !!commentPreview;
   const showCommentEntry = !hideContent && (commentCount > 0 || hovered);
+  const growToFit = useCallback((overflow, patch = null) => {
+    const nextHeight = autoGrownStickyHeight(h, overflow);
+    if (patch) {
+      onTextChange(it.id, nextHeight > h ? { ...patch, h: nextHeight } : patch);
+    } else if (nextHeight > h) {
+      onTextChange(it.id, { h: nextHeight }, { silent: true });
+    }
+  }, [h, it.id, onTextChange]);
+  const [contentRef, contentOverflows] = useContentOverflow(
+    visibleText,
+    !hideContent && !isEditing,
+    `${it.fontSize || 15}:${h}:${showCommentPreview ? 1 : 0}:${top3 ? 1 : 0}`,
+    growToFit,
+  );
   useEffect(() => {
     setCommentPreviewIndex(0);
     if (hideContent || commentPreviews.length < 2) return undefined;
@@ -651,6 +904,7 @@ const StickyCard = React.memo(function StickyCard({
   }, [commentPreviews, hideContent]);
   return (
     <div
+      className={remoteSelected ? 'rb-remote-selected-card' : undefined}
       onMouseDown={(e) => { if (!isEditing) onStartDrag(e, it); }}
       onDoubleClick={(e) => { e.stopPropagation(); if (!hideContent) onBeginFocus(it, 'text'); }}
       onMouseEnter={() => setHovered(true)}
@@ -668,13 +922,18 @@ const StickyCard = React.memo(function StickyCard({
         boxSizing: 'border-box',
         transform: `rotate(${rot}deg)`,
         ['--rb-rot']: `${rot}deg`,
+        ['--rb-selector-hue']: remoteSelectionHue,
         transition: 'transform 0.18s ease, box-shadow 0.18s ease',
-        animation: top3 ? 'rb-glow 1.6s ease-in-out infinite, rb-appear-rot 0.28s ease-out' : 'rb-appear-rot 0.28s ease-out',
+        animation: remoteSelected
+          ? undefined
+          : (top3 ? 'rb-glow 1.6s ease-in-out infinite, rb-appear-rot 0.28s ease-out' : 'rb-appear-rot 0.28s ease-out'),
         // Drop the blurred shadow in dense mode — the 1.5px border still
         // separates cards, and overlapping blur is the main cluster paint cost.
         // The top3 glow is kept (only ≤3 cards, meaningful highlight);
         // the medal badge below adds the specific rank on top of it.
-        boxShadow: top3
+        boxShadow: remoteSelected
+          ? undefined
+          : top3
           ? `0 0 0 3px #fbbf24, 0 8px 24px rgba(251,191,36,0.6), 0 6px 14px rgba(0,0,0,0.12)`
           : (dense ? 'none' : '0 6px 14px rgba(0,0,0,0.12)'),
         cursor: 'grab',
@@ -698,7 +957,7 @@ const StickyCard = React.memo(function StickyCard({
         // Paint containment clips descendants at the card edge even when
         // overflow is visible. Drop only that containment for winners so the
         // oversized medal can deliberately protrude beyond the card.
-        contain: top3 ? 'layout style' : 'layout paint style',
+        contain: top3 || remoteSelected ? 'layout style' : 'layout paint style',
       }}
     >
       <div style={{
@@ -773,26 +1032,33 @@ const StickyCard = React.memo(function StickyCard({
       )}
 
       <div
+        ref={contentRef}
         style={{
           flex: 1,
           overflow: 'hidden',
+          position: 'relative',
           whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
-          // Dense mode skips the GPU blur AND the text (the overlay obscures the
-          // card); blur is only the obfuscation when text is actually rendered.
-          filter: hideContent && !dense ? 'blur(8px)' : 'none',
+          overflowWrap: 'anywhere',
+          // Hidden private text is omitted below, not visually obscured. CSS
+          // blur would leave the secret readable in the DOM/accessibility tree.
           userSelect: hideContent ? 'none' : 'auto',
           color: it.fontColor || STICKY_AUTO_TEXT,
           paddingTop: showCommentPreview ? 24 : (top3 ? 16 : 0),
         }}
       >
         {(() => {
+          if (hideContent) return null;
           if (isEditing) {
             return (
-              <textarea
-                ref={editAreaRef}
+              <CollaborativeTextEditor
+                editorRef={editAreaRef}
                 value={it.text || ''}
-                onChange={(e) => onTextChange(it.id, { text: e.target.value })}
+                maxLength={BOARD_TEXT_MAX_LENGTH}
+                onValueChange={(value, metrics) => growToFit(
+                  metrics.scrollHeight - metrics.clientHeight,
+                  { text: value },
+                )}
+                onContentOverflow={growToFit}
                 onKeyDown={(e) => onTextKeyDown(e)}
                 onBlur={() => onTextBlur(it.id)}
                 onMouseDown={(e) => e.stopPropagation()}
@@ -802,17 +1068,28 @@ const StickyCard = React.memo(function StickyCard({
                   background: 'transparent', border: 'none', outline: 'none',
                   resize: 'none', fontFamily: 'inherit', fontSize: it.fontSize || 15,
                   lineHeight: 1.5, color: it.fontColor || STICKY_AUTO_TEXT,
+                  boxSizing: 'border-box', overflowY: 'auto', overflowWrap: 'anywhere',
                 }}
               />
             );
           }
-          // Don't render hidden text at all in dense mode (cheaper + no leak).
-          if (hideContent && dense) return null;
-          if (it.text) return it.text;
+          if (visibleText) return visibleText;
           return isOwner
             ? <span style={{ color: STICKY_AUTO_TEXT_FAINT, fontStyle: 'italic' }}>{t('sticky.placeholder')}</span>
             : '';
         })()}
+        {contentOverflows && (
+          <span
+            aria-hidden="true"
+            style={{
+              position: 'absolute', right: 0, bottom: 0,
+              width: 44, textAlign: 'right', paddingRight: 2,
+              background: `linear-gradient(90deg, transparent, ${c.bg} 48%)`,
+              color: it.fontColor || STICKY_AUTO_TEXT, fontWeight: 700,
+              pointerEvents: 'none',
+            }}
+          >…</span>
+        )}
       </div>
 
       {hideContent && (
@@ -966,10 +1243,12 @@ const ZoneCard = React.memo(function ZoneCard({
         }}
       >
         {isEditingTitle ? (
-          <input
-            ref={editAreaRef}
+          <CollaborativeTextEditor
+            kind="input"
+            editorRef={editAreaRef}
             value={it.title || ''}
-            onChange={(e) => onTextChange(it.id, { title: e.target.value })}
+            maxLength={ZONE_TITLE_MAX_LENGTH}
+            onValueChange={(value) => onTextChange(it.id, { title: value })}
             onKeyDown={(e) => onTextKeyDown(e, { singleLine: true })}
             onBlur={() => onTextBlur(it.id)}
             onMouseDown={(e) => e.stopPropagation()}
@@ -1005,7 +1284,7 @@ const ZoneCard = React.memo(function ZoneCard({
 });
 
 const TextCard = React.memo(function TextCard({
-  item, selected, isEditing, lang,
+  item, selected, remoteSelected, remoteSelectionHue, isEditing, lang,
   onStartDrag, onBeginFocus, onTextChange, onTextKeyDown, onTextBlur,
   editAreaRef,
 }) {
@@ -1013,10 +1292,12 @@ const TextCard = React.memo(function TextCard({
   const it = item;
   return (
     <div
+      className={remoteSelected ? 'rb-remote-selected-card' : undefined}
       onMouseDown={(e) => { if (!isEditing) onStartDrag(e, it); }}
       onDoubleClick={(e) => { e.stopPropagation(); onBeginFocus(it, 'text'); }}
       style={{
         position: 'absolute',
+        ['--rb-selector-hue']: remoteSelectionHue,
         left: it.x,
         top: it.y,
         fontFamily: '"Caveat", "Sarabun", cursive',
@@ -1033,14 +1314,15 @@ const TextCard = React.memo(function TextCard({
         outline: selected ? '2px dashed #2563eb' : 'none',
         outlineOffset: 6,
         borderRadius: 6,
-        animation: 'rb-appear 0.28s ease-out',
+        animation: remoteSelected ? undefined : 'rb-appear 0.28s ease-out',
       }}
     >
       {isEditing ? (
-        <textarea
-          ref={editAreaRef}
+        <CollaborativeTextEditor
+          editorRef={editAreaRef}
           value={it.text || ''}
-          onChange={(e) => onTextChange(it.id, { text: e.target.value })}
+          maxLength={BOARD_TEXT_MAX_LENGTH}
+          onValueChange={(value) => onTextChange(it.id, { text: value })}
           onKeyDown={(e) => onTextKeyDown(e)}
           onBlur={() => onTextBlur(it.id)}
           onMouseDown={(e) => e.stopPropagation()}
@@ -1056,15 +1338,20 @@ const TextCard = React.memo(function TextCard({
   );
 });
 
-const ImageCard = React.memo(function ImageCard({ item, selected, dense, onStartDrag }) {
+const ImageCard = React.memo(function ImageCard({
+  item, selected, remoteSelected, remoteSelectionHue, dense, onStartDrag,
+}) {
   const it = item;
+  const safeSrc = safeRuntimeImageSource(it.src);
   const w = it.w || 200;
   const h = it.h || 200;
   return (
     <div
+      className={remoteSelected ? 'rb-remote-selected-card' : undefined}
       onMouseDown={(e) => onStartDrag(e, it)}
       style={{
         position: 'absolute',
+        ['--rb-selector-hue']: remoteSelectionHue,
         left: it.x,
         top: it.y,
         width: w,
@@ -1073,23 +1360,25 @@ const ImageCard = React.memo(function ImageCard({ item, selected, dense, onStart
         // radius keeps it cheap when many images are on screen, and dense mode
         // drops it entirely. CSS containment scopes layout/paint invalidation
         // to this card so a change in one image doesn't repaint neighbours.
-        filter: dense ? 'none' : 'drop-shadow(0 3px 6px rgba(0,0,0,0.18))',
+        filter: remoteSelected || dense ? 'none' : 'drop-shadow(0 3px 6px rgba(0,0,0,0.18))',
         outline: selected ? '2px solid #2563eb' : 'none',
         outlineOffset: 6,
         cursor: 'grab',
         userSelect: 'none',
-        animation: 'rb-appear 0.28s ease-out',
-        contain: 'layout paint style',
+        animation: remoteSelected ? undefined : 'rb-appear 0.28s ease-out',
+        contain: remoteSelected ? 'layout style' : 'layout paint style',
       }}
     >
-      <img
-        src={it.src}
-        alt=""
-        draggable={false}
-        loading="lazy"
-        decoding="async"
-        style={{ width: '100%', height: '100%', objectFit: 'fill', display: 'block' }}
-      />
+      {safeSrc && (
+        <img
+          src={safeSrc}
+          alt=""
+          draggable={false}
+          loading="lazy"
+          decoding="async"
+          style={{ width: '100%', height: '100%', objectFit: 'fill', display: 'block' }}
+        />
+      )}
     </div>
   );
 });
@@ -1098,14 +1387,17 @@ const ImageCard = React.memo(function ImageCard({ item, selected, dense, onStart
    Image upload prep (shared by paste/drop and legacy-import sanitization)
    ============================================================ */
 
-// Decode a blob, downscale to IMAGE_MAX_DIM if needed, and re-encode to fit
-// IMAGE_MAX_BYTES if the resize round-trip pushed it back over. Caller is
-// expected to have already checked type/original size. Returns null if no
-// re-encode gets it under the cap.
+const canvasToBlob = (canvas, type, quality) => (
+  new Promise((resolve) => canvas.toBlob(resolve, type, quality))
+);
+
+// Inspect headers before decode so malformed/decompression-bomb inputs are
+// rejected early. PNG/JPEG/WebP are always redrawn through a bounded canvas,
+// which strips EXIF and other metadata. GIFs retain animation only after a
+// full structural/frame-budget check in inspectRasterImageBlob.
 const prepareImageBlob = async (blob) => {
-  // Decode via an object URL (not a base64 data URL) — images are uploaded
-  // to the server as raw bytes now, so there's no reason to pay for base64
-  // encoding just to read dimensions / draw into a resize canvas.
+  const info = await inspectRasterImageBlob(blob);
+  if (!imageInfoIsWithinLimits(info)) return null;
   const objectUrl = URL.createObjectURL(blob);
   const img = new Image();
   try {
@@ -1114,59 +1406,58 @@ const prepareImageBlob = async (blob) => {
       img.onerror = rej;
       img.src = objectUrl;
     });
-  } finally {
-    URL.revokeObjectURL(objectUrl);
-  }
-  let finalBlob = blob;
-  let nw = img.naturalWidth;
-  let nh = img.naturalHeight;
-  const maxEdge = Math.max(nw, nh);
-  if (maxEdge > IMAGE_MAX_DIM) {
-    const r = IMAGE_MAX_DIM / maxEdge;
-    const cw = Math.round(nw * r);
-    const ch = Math.round(nh * r);
+    let nw = img.naturalWidth;
+    let nh = img.naturalHeight;
+    if (!Number.isSafeInteger(nw) || !Number.isSafeInteger(nh) || nw < 1 || nh < 1) return null;
+    // Browsers apply JPEG orientation while decoding, so a 90-degree EXIF
+    // rotation legitimately swaps the dimensions. Any other disagreement
+    // means the claimed header and decoded resource do not match.
+    const dimensionsMatch = (nw === info.width && nh === info.height)
+      || (nw === info.height && nh === info.width);
+    if (!dimensionsMatch) return null;
+
+    if (info.mime === 'image/gif') return { blob, nw, nh };
+
+    const maxEdge = Math.max(nw, nh);
+    const scale = Math.min(1, IMAGE_OUTPUT_MAX_DIMENSION / maxEdge);
+    const cw = Math.max(1, Math.round(nw * scale));
+    const ch = Math.max(1, Math.round(nh * scale));
     const canvas = document.createElement('canvas');
     canvas.width = cw;
     canvas.height = ch;
     const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
     ctx.drawImage(img, 0, 0, cw, ch);
-    // JPEG keeps size down; PNG keeps transparency.
-    const isTransparent = blob.type.includes('png') || blob.type.includes('gif') || blob.type.includes('webp');
-    finalBlob = await new Promise((res) => canvas.toBlob(res, isTransparent ? 'image/png' : 'image/jpeg', 0.85));
+
+    let finalBlob = await canvasToBlob(
+      canvas,
+      info.mime,
+      info.mime === 'image/png' ? undefined : 0.85,
+    );
     nw = cw;
     nh = ch;
-  }
-  // Belt-and-suspenders payload cap. The original blob.size check rejects
-  // huge originals, but a lossless PNG re-encode of a transparent image can
-  // balloon past it — cap what actually gets uploaded and stored server-side.
-  if (!finalBlob || finalBlob.size > IMAGE_MAX_BYTES) {
-    // Try re-encoding as JPEG first (drops transparency but saves ~60%).
-    const canvas = document.createElement('canvas');
-    canvas.width = nw;
-    canvas.height = nh;
-    canvas.getContext('2d').drawImage(img, 0, 0, nw, nh);
-    const jpeg = await new Promise((res) => canvas.toBlob(res, 'image/jpeg', 0.8));
-    if (jpeg && jpeg.size <= IMAGE_MAX_BYTES) {
-      finalBlob = jpeg;
-    } else {
-      return null;
+    if (!finalBlob || !isSafeImageMime(finalBlob.type) || finalBlob.size > IMAGE_MAX_BYTES) {
+      // A lossless canvas encoding can grow beyond the input cap. Fall back
+      // to bounded JPEG output; this intentionally drops transparency.
+      finalBlob = await canvasToBlob(canvas, 'image/jpeg', 0.8);
     }
+    if (!finalBlob || finalBlob.type !== 'image/jpeg' && finalBlob.type !== info.mime
+      || finalBlob.size < 1 || finalBlob.size > IMAGE_MAX_BYTES) return null;
+    return { blob: finalBlob, nw, nh };
+  } finally {
+    URL.revokeObjectURL(objectUrl);
   }
-  return { blob: finalBlob, nw, nh };
 };
 
 // Decode manually instead of fetch(dataUrl) — the page's CSP connect-src
 // doesn't list `data:`, so fetch() of a data URL is blocked in production.
 const dataUrlToBlob = (dataUrl) => {
-  const commaIdx = dataUrl.indexOf(',');
-  const header = dataUrl.slice('data:'.length, commaIdx);
-  const isBase64 = header.endsWith(';base64');
-  const mime = (isBase64 ? header.slice(0, -';base64'.length) : header) || 'application/octet-stream';
-  const data = dataUrl.slice(commaIdx + 1);
-  const binary = isBase64 ? atob(data) : decodeURIComponent(data);
+  const source = classifyImportedImageSource(dataUrl);
+  if (!source || source.kind !== 'data') throw new Error('invalid image data URL');
+  const binary = atob(source.payload);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-  return new Blob([bytes], { type: mime });
+  return new Blob([bytes], { type: source.mime });
 };
 
 // Server 429s ("image upload failed: 429") when the per-IP upload bucket is
@@ -1199,17 +1490,23 @@ const sanitizeImportedImages = async (items) => {
   const out = [];
   // eslint-disable-next-line no-restricted-syntax
   for (const item of items) {
-    if (item.type !== 'image' || typeof item.src !== 'string' || !item.src.startsWith('data:')) {
+    if (item.type !== 'image') {
       out.push(item);
+      continue;
+    }
+    const source = classifyImportedImageSource(item.src);
+    if (!source) { skipped += 1; continue; }
+    if (source.kind === 'server') {
+      const safeSrc = safeRuntimeImageSource(source.source);
+      if (!safeSrc) { skipped += 1; continue; }
+      out.push({ ...item, src: safeSrc });
       continue;
     }
     try {
       // eslint-disable-next-line no-await-in-loop
       const rawBlob = await dataUrlToBlob(item.src);
-      const prepared = rawBlob.size > IMAGE_MAX_BYTES || !UPLOADABLE_IMAGE_TYPES.has(rawBlob.type)
-        ? null
-        // eslint-disable-next-line no-await-in-loop
-        : await prepareImageBlob(rawBlob);
+      // eslint-disable-next-line no-await-in-loop
+      const prepared = await prepareImageBlob(rawBlob);
       if (!prepared) { skipped += 1; continue; }
       // eslint-disable-next-line no-await-in-loop
       const url = await uploadWithRetry(prepared.blob);
@@ -1263,6 +1560,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
 
   /* ---------- Presence (shared map) ---------- */
   const [presence, setPresence] = useState({});
+  const [remoteEditingItems, setRemoteEditingItems] = useState(() => storage.getRemoteEditingItems());
+  const [remoteSelectedItems, setRemoteSelectedItems] = useState(() => storage.getRemoteSelectedItems());
 
   /* ---------- UI state ---------- */
   const [selectedIds, setSelectedIds] = useState(() => new Set());
@@ -1288,6 +1587,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const commentPreviewCacheRef = useRef(new Map());
   const [creationMode, setCreationMode] = useState(null); // 'zone' | 'select' | null
   const clipboardRef = useRef(null);
+  const fileDragPointRef = useRef(null);
   const [zonePreview, setZonePreview] = useState(null); // {x,y,w,h} in world coords
   const creationModeRef = useRef(null);
   useEffect(() => { creationModeRef.current = creationMode; }, [creationMode]);
@@ -1295,6 +1595,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const [timerSetupOpen, setTimerSetupOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const [playerListOpen, setPlayerListOpen] = useState(false);
+  const [followedUserId, setFollowedUserId] = useState(null);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [fontColorOpen, setFontColorOpen] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -1388,7 +1689,27 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   // Pan updates these directly to skip React's render cycle entirely while
   // dragging — see startPan/applyViewportToDom below.
   const worldRef = useRef(null);
+  const worldMeasureRef = useRef(null);
   const gridRef = useRef(null);
+  const cursorLayerRef = useRef(null);
+  const cursorLastSentAtRef = useRef(0);
+  const cursorPendingRef = useRef(null);
+  const cursorBroadcastTimerRef = useRef(null);
+  const viewLastSentAtRef = useRef(0);
+  const viewPendingRef = useRef(null);
+  const viewBroadcastTimerRef = useRef(null);
+  const viewLastPublishedRef = useRef(null);
+  const followedUserIdRef = useRef(null);
+  const followViewportCommitRef = useRef(null);
+  const followLastCommitAtRef = useRef(0);
+  const followMotionFrameRef = useRef(null);
+  const followMotionPlayerRef = useRef(null);
+  const followMotionSignatureRef = useRef('');
+  const minimapPanelRef = useRef(null);
+  const minimapViewportRef = useRef(null);
+  const minimapModelRef = useRef(null);
+  const minimapHideTimerRef = useRef(null);
+  const minimapActivityAtRef = useRef(0);
   const saveTimerRef = useRef(null);
   const interactionRef = useRef(null);
   const editAreaRef = useRef(null);
@@ -1396,21 +1717,99 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const dragItemsRef = useRef(null);
   const activeGeometryFinalizerRef = useRef(null);
   const activeViewportFinalizerRef = useRef(null);
+  useEffect(() => { followedUserIdRef.current = followedUserId; }, [followedUserId]);
   useEffect(() => () => {
     activeGeometryFinalizerRef.current?.();
     activeViewportFinalizerRef.current?.();
     storage.setLocalBusyItems('geometry', []);
     storage.setLocalBusyItems('text', []);
+    storage.setLocalSelectedItems([]);
+    if (cursorBroadcastTimerRef.current != null) clearTimeout(cursorBroadcastTimerRef.current);
+    if (viewBroadcastTimerRef.current != null) clearTimeout(viewBroadcastTimerRef.current);
+    if (followViewportCommitRef.current != null) clearTimeout(followViewportCommitRef.current);
+    if (followMotionFrameRef.current != null) cancelAnimationFrame(followMotionFrameRef.current);
+    window.storage?.setLocalCursor?.(null);
+    window.storage?.setLocalView?.(null);
   }, []);
 
   /* ---------- Derived ---------- */
-  const onlineUsers = useMemo(() => {
-    const t = now;
-    return Object.values(presence).filter((p) => t - (p.lastSeen || 0) < ONLINE_WINDOW);
-  }, [presence, now]);
+  // Awareness owns liveness and expires peers using receiver-local time.
+  // Comparing sender lastSeen to our clock made connected players flicker.
+  const onlineUsers = useMemo(() => Object.values(presence), [presence]);
+
+  const playerCursors = useMemo(() => visiblePlayerCursors({
+    presence,
+    currentUserId: userId,
+    now,
+  }), [presence, userId, now]);
+
+  const followedPlayer = followedUserId
+    ? onlineUsers.find((player) => player.userId === followedUserId) || null
+    : null;
+  const followedCursor = followedUserId
+    ? playerCursors.find((player) => player.userId === followedUserId) || null
+    : null;
+  const followedView = Number.isFinite(followedPlayer?.view?.x)
+    && Number.isFinite(followedPlayer?.view?.y)
+    ? followedPlayer.view
+    : null;
+
+  const remoteEditorsByItem = useMemo(
+    () => summarizeRemoteEditors(remoteEditingItems),
+    [remoteEditingItems],
+  );
+
+  const remoteSelectorsByItem = useMemo(
+    () => summarizeRemoteSelectors(remoteSelectedItems),
+    [remoteSelectedItems],
+  );
+
+  const editingIndicators = useMemo(() => board.items.flatMap((item) => {
+    const editor = remoteEditorsByItem.get(item.id);
+    return editor ? [{ item, editor }] : [];
+  }), [board.items, remoteEditorsByItem]);
+
+  const selectionIndicators = useMemo(() => board.items.flatMap((item) => {
+    if (item.type === 'zone') return [];
+    const selector = remoteSelectorsByItem.get(item.id);
+    return selector ? [{ item, selector }] : [];
+  }), [board.items, remoteSelectorsByItem]);
+
+  useEffect(() => {
+    if (!loaded) return undefined;
+    const refresh = (event) => {
+      const next = event?.detail instanceof Map
+        ? event.detail
+        : storage.getRemoteEditingItems();
+      setRemoteEditingItems(new Map(next));
+    };
+    refresh();
+    const unsubscribe = storage.onEditingChange(refresh);
+    return () => unsubscribe?.();
+  }, [loaded]);
+
+  useEffect(() => {
+    if (!loaded) return undefined;
+    const refresh = (event) => {
+      const next = event?.detail instanceof Map
+        ? event.detail
+        : storage.getRemoteSelectedItems();
+      setRemoteSelectedItems(new Map(next));
+    };
+    refresh();
+    const unsubscribe = storage.onSelectionChange(refresh);
+    return () => unsubscribe?.();
+  }, [loaded]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    storage.setLocalSelectedItems(selectedIds);
+  }, [loaded, selectedIds]);
 
   const sortedItems = useMemo(() => {
-    return [...board.items].sort(compareZOrder);
+    return board.items
+      .filter((item) => geometryErrorForItem(item) == null)
+      .sort(compareZOrder);
   }, [board.items]);
 
   // Switch cards to cheap paint (no blurred shadow/filter) once the board holds
@@ -1434,6 +1833,139 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     const onResize = () => setViewportSize({ w: window.innerWidth, h: window.innerHeight });
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  const minimapModel = useMemo(() => buildMinimapModel({
+    items: sortedItems,
+    viewport,
+    viewportSize,
+    width: MINIMAP_W,
+    height: MINIMAP_H,
+  }), [sortedItems, viewport, viewportSize]);
+  minimapModelRef.current = minimapModel;
+
+  const revealMinimap = useCallback(() => {
+    const panel = minimapPanelRef.current;
+    if (!panel) return;
+    panel.style.opacity = '1';
+    panel.style.pointerEvents = 'auto';
+    if (minimapHideTimerRef.current != null) clearTimeout(minimapHideTimerRef.current);
+    const hideWhenIdle = () => {
+      const currentPanel = minimapPanelRef.current;
+      if (!currentPanel) return;
+      const hasFocus = currentPanel.contains(document.activeElement);
+      const isHovered = currentPanel.matches(':hover');
+      if (hasFocus || isHovered || interactionRef.current?.kind === 'minimap') {
+        minimapHideTimerRef.current = setTimeout(hideWhenIdle, MINIMAP_IDLE_MS);
+        return;
+      }
+      currentPanel.style.opacity = '0';
+      currentPanel.style.pointerEvents = 'none';
+      minimapHideTimerRef.current = null;
+    };
+    minimapHideTimerRef.current = setTimeout(hideWhenIdle, MINIMAP_IDLE_MS);
+  }, []);
+
+  const flushLocalCursor = useCallback(() => {
+    cursorBroadcastTimerRef.current = null;
+    const point = cursorPendingRef.current;
+    cursorPendingRef.current = null;
+    if (!point) return;
+    cursorLastSentAtRef.current = performance.now();
+    window.storage?.setLocalCursor?.(point);
+  }, []);
+
+  const publishLocalCursor = useCallback((point) => {
+    cursorPendingRef.current = point;
+    const elapsed = performance.now() - cursorLastSentAtRef.current;
+    if (elapsed >= CURSOR_BROADCAST_MS) {
+      if (cursorBroadcastTimerRef.current != null) {
+        clearTimeout(cursorBroadcastTimerRef.current);
+        cursorBroadcastTimerRef.current = null;
+      }
+      flushLocalCursor();
+      return;
+    }
+    if (cursorBroadcastTimerRef.current == null) {
+      cursorBroadcastTimerRef.current = setTimeout(flushLocalCursor, CURSOR_BROADCAST_MS - elapsed);
+    }
+  }, [flushLocalCursor]);
+
+  const clearLocalCursor = useCallback(() => {
+    cursorPendingRef.current = null;
+    if (cursorBroadcastTimerRef.current != null) {
+      clearTimeout(cursorBroadcastTimerRef.current);
+      cursorBroadcastTimerRef.current = null;
+    }
+    window.storage?.setLocalCursor?.(null);
+  }, []);
+
+  const flushLocalView = useCallback(() => {
+    viewBroadcastTimerRef.current = null;
+    const view = viewPendingRef.current;
+    viewPendingRef.current = null;
+    if (!view) return;
+    viewLastSentAtRef.current = performance.now();
+    viewLastPublishedRef.current = view;
+    window.storage?.setLocalView?.(view);
+  }, []);
+
+  const publishLocalView = useCallback((viewportValue) => {
+    const view = playerViewFromViewport(viewportValue, viewportSize);
+    if (!view) return;
+    const previous = viewLastPublishedRef.current;
+    if (previous
+      && Math.abs(previous.x - view.x) < 0.05
+      && Math.abs(previous.y - view.y) < 0.05
+      && Math.abs(previous.zoom - view.zoom) < 0.0001) {
+      viewPendingRef.current = null;
+      if (viewBroadcastTimerRef.current != null) {
+        clearTimeout(viewBroadcastTimerRef.current);
+        viewBroadcastTimerRef.current = null;
+      }
+      return;
+    }
+    viewPendingRef.current = view;
+    const elapsed = performance.now() - viewLastSentAtRef.current;
+    if (elapsed >= CURSOR_BROADCAST_MS) {
+      if (viewBroadcastTimerRef.current != null) {
+        clearTimeout(viewBroadcastTimerRef.current);
+        viewBroadcastTimerRef.current = null;
+      }
+      flushLocalView();
+      return;
+    }
+    if (viewBroadcastTimerRef.current == null) {
+      viewBroadcastTimerRef.current = setTimeout(flushLocalView, CURSOR_BROADCAST_MS - elapsed);
+    }
+  }, [flushLocalView, viewportSize]);
+
+  useEffect(() => {
+    if (!loaded || followedUserIdRef.current) return;
+    publishLocalView(viewport);
+  }, [loaded, viewport, viewportSize, publishLocalView]);
+
+  const onCanvasPointerActivity = useCallback((e) => {
+    const timestamp = performance.now();
+    if (timestamp - minimapActivityAtRef.current >= 180) {
+      minimapActivityAtRef.current = timestamp;
+      revealMinimap();
+    }
+    if (e.pointerType === 'touch') return;
+    const v = viewportRef.current;
+    publishLocalCursor({
+      x: (e.clientX - v.x) / v.zoom,
+      y: (e.clientY - v.y) / v.zoom,
+    });
+  }, [publishLocalCursor, revealMinimap]);
+
+  useEffect(() => {
+    window.addEventListener('blur', clearLocalCursor);
+    return () => window.removeEventListener('blur', clearLocalCursor);
+  }, [clearLocalCursor]);
+
+  useEffect(() => () => {
+    if (minimapHideTimerRef.current != null) clearTimeout(minimapHideTimerRef.current);
   }, []);
 
   // Snapped viewport — quantize pan/zoom so small movements don't invalidate
@@ -1513,33 +2045,17 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     commentPreviewCacheRef.current = commentPreviewsByItem;
   }, [commentPreviewsByItem]);
 
-  // Map of stickyId -> rank (1, 2, or 3) among its own zone's votes, once
-  // that zone's results are finalized — drives both the top3 glow and the
-  // medal badge (🥇🥈🥉). Rank is per-zone, not board-wide: each zone in a
-  // finished vote group gets its own #1/#2/#3.
+  // Map of stickyId -> rank (1, 2, or 3) once its zone's results are finalized.
+  // A finished root gets one shared podium across all nested zones — never a
+  // separate #1/#2/#3 per child. Drives both the glow and medal badge.
   const topVotedRanks = useMemo(() => {
-    const finishedRoots = board.items.filter((i) => i.type === 'zone' && i.lastResultsAt && !i.voteTimer);
-    const stickies = board.items.filter((i) => i.type === 'sticky');
-    const result = new Map();
-    finishedRoots.forEach((root) => {
-      const groupZoneIds = [...zoneGroupIds(root, board.items)]
-        .filter((id) => {
-          const zone = board.items.find((i) => i.id === id);
-          // Never expose a live in-progress tally through an ancestor's stale
-          // finished-results badge — including a deeper untimered
-          // descendant governed by a timer further up its own chain.
-          return zone?.type === 'zone' && !zoneHasActiveGovernor(zone, board.items);
-        });
-      groupZoneIds.forEach((zoneId) => {
-        const owned = stickies
-          .filter((s) => effectiveOwnerZone(s, board.items)?.id === zoneId)
-          .filter((s) => voteCountOf(s.id) > 0)
-          .sort((a, b) => voteCountOf(b.id) - voteCountOf(a.id))
-          .slice(0, 3);
-        owned.forEach((s, idx) => result.set(s.id, idx + 1));
-      });
+    return buildTopVotedRanks({
+      items: board.items,
+      voteCountOf,
+      groupIdsForZone: zoneGroupIds,
+      ownerZoneForItem: effectiveOwnerZone,
+      zoneHasActiveGovernor,
     });
-    return result;
   }, [board, voteCountOf]);
 
   /* ============================================================
@@ -1549,16 +2065,20 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     let cancelled = false;
     (async () => {
       const uRec = await storage.get('userId', false);
-      let id = uRec?.value;
+      let id = normalizeStoredUserId(uRec?.value);
       if (!id) {
         id = uid();
         await storage.set('userId', id, false);
       }
       const nRec = await storage.get('userName', false);
-      const name = nRec?.value || '';
+      const name = normalizeDisplayName(nRec?.value);
+      if (nRec?.value !== name) await storage.set('userName', name, false);
 
       const vRec = await storage.get('viewport', false);
-      const vp = vRec?.value || { x: 0, y: 0, zoom: 1 };
+      const vp = normalizeViewport(vRec?.value);
+      if (JSON.stringify(vRec?.value) !== JSON.stringify(vp)) {
+        await storage.set('viewport', vp, false);
+      }
 
       const bRec = await storage.get('boardState', true);
       const bs = bRec?.value || DEFAULT_BOARD;
@@ -1573,7 +2093,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       setViewport(vp);
       setBoard({ ...DEFAULT_BOARD, ...bs });
       setPresence(pmap);
-      setCustomTemplates(tpls);
+      setCustomTemplates(safeCustomTemplates(tpls));
       setLoaded(true);
 
       // No initial-load admin claim here. The race was: storage.get returns
@@ -1605,33 +2125,43 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   // applyRemoteBoard keep preserving local geometry for a grace period past
   // mouseup, not just while dragItemsRef marks an active drag.
   const recentlyMovedRef = useRef(new Map());
+  const lastWriteFailureRef = useRef(0);
+  const reportWriteFailure = useCallback(() => {
+    const nowMs = Date.now();
+    if (nowMs - lastWriteFailureRef.current < 3000) return;
+    lastWriteFailureRef.current = nowMs;
+    setToast({ msg: t('common.saveFailed'), type: 'warn' });
+  }, []);
 
   // ---- One-item field patch ----
   const updateItem = useCallback((id, patch, opts) => {
+    if (!storage.updateItem(id, patch, opts)) { reportWriteFailure(); return false; }
     setBoard((prev) => ({
       ...prev,
       items: prev.items.map((it) => (it.id === id ? { ...it, ...patch } : it)),
     }));
-    storage.updateItem(id, patch, opts);
-  }, []);
+    return true;
+  }, [reportWriteFailure]);
 
   // ---- Add one / many new items ----
   const addItemLocal = useCallback((item) => {
+    if (!storage.addItem(item)) { reportWriteFailure(); return false; }
     setBoard((prev) => ({ ...prev, items: [...prev.items, item] }));
-    storage.addItem(item);
-  }, []);
+    return true;
+  }, [reportWriteFailure]);
 
   const addItemsLocal = useCallback((items) => {
-    if (!items.length) return;
+    if (!items.length || !storage.addItems(items)) { reportWriteFailure(); return false; }
     setBoard((prev) => ({ ...prev, items: [...prev.items, ...items] }));
-    storage.addItems(items);
-  }, []);
+    return true;
+  }, [reportWriteFailure]);
 
   // ---- Board-level meta patch ----
   const patchMeta = useCallback((patch, opts) => {
+    if (!storage.setMeta(patch, opts)) { reportWriteFailure(); return false; }
     setBoard((prev) => ({ ...prev, ...patch }));
-    storage.setMeta(patch, opts);
-  }, []);
+    return true;
+  }, [reportWriteFailure]);
 
   const {
     isAdmin, canClaim, pinPromptCfg, requireAdminPin, adminClaim, adminTransfer,
@@ -1642,9 +2172,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
 
   // ---- Full board replace (import / clear) ----
   const replaceBoardLocal = useCallback((nextBoard, opts) => {
+    if (!storage.replaceBoard(nextBoard, opts)) { reportWriteFailure(); return false; }
     setBoard(nextBoard);
-    storage.replaceBoard(nextBoard, opts);
-  }, []);
+    return true;
+  }, [reportWriteFailure]);
 
   /* ----- Throttled geometry writer for drag / resize -----
      Optimistic setBoard runs every frame for a live local feel; the granular
@@ -1653,9 +2184,14 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
      against React's commit cycle is irrelevant. */
   const flushPendingGeom = useCallback(() => {
     const entries = pendingGeomRef.current;
-    if (entries && entries.length) storage.updateItems(entries);
+    if (entries && entries.length && !storage.updateItems(entries)) {
+      reportWriteFailure();
+      storage.get('boardState', true).then((record) => {
+        if (record?.value) setBoard({ ...DEFAULT_BOARD, ...record.value });
+      });
+    }
     lastFlushRef.current = Date.now();
-  }, []);
+  }, [reportWriteFailure]);
 
   const commitGeometry = useCallback((entries) => {
     // Single enforcement point for "locked zones don't move" — every drag/
@@ -1693,6 +2229,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     };
     const filtered = entries.filter((e) => isAllowed(e.id));
     if (!filtered.length) return;
+    if (filtered.some((e) => {
+      const current = itemById.get(e.id);
+      return !current || geometryErrorForPatch(current, e.patch);
+    })) { reportWriteFailure(); return; }
     const byId = new Map(filtered.map((e) => [e.id, e.patch]));
     setBoard((prev) => ({
       ...prev,
@@ -1702,7 +2242,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     if (Date.now() - lastFlushRef.current >= DRAG_FLUSH_MS) flushPendingGeom();
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(flushPendingGeom, DRAG_TRAILING_MS);
-  }, [flushPendingGeom]);
+  }, [flushPendingGeom, reportWriteFailure]);
 
   const endGeometry = useCallback(() => {
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
@@ -1746,17 +2286,14 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     }
     setBoard((prev) => {
       const next = { ...DEFAULT_BOARD, ...remote };
-      const fid = focusedTextIdRef.current;
       const dragIds = dragItemsRef.current; // Set<id> or null
-      const focusedItemId = fid ? fid.split(':')[0] : null;
-      const focusedField = fid ? fid.split(':')[1] : null;
       const remoteIds = new Set(next.items.map((i) => i.id));
       // Prune expired entries so a stale grace-period record can't outlive
       // its window and mask a genuine later remote change to the same item.
       const recentlyMoved = recentlyMovedRef.current;
       const nowMs = Date.now();
       recentlyMoved.forEach((v, id) => { if (v.until <= nowMs) recentlyMoved.delete(id); });
-      if (focusedItemId || (dragIds && dragIds.size > 0) || recentlyMoved.size > 0) {
+      if ((dragIds && dragIds.size > 0) || recentlyMoved.size > 0) {
         // Index prev items by id once (O(N)) so the merge below is O(N), not the
         // O(N²) a per-item find() would cost during live collaboration.
         const prevById = new Map(prev.items.map((p) => [p.id, p]));
@@ -1764,9 +2301,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           const localItem = prevById.get(i.id);
           if (!localItem) return i;
           let patched = i;
-          if (focusedItemId === i.id && focusedField) {
-            patched = { ...patched, [focusedField]: localItem[focusedField] };
-          }
           if (dragIds && dragIds.has(i.id)) {
             // preserve local geometry mid-drag
             patched = { ...patched, x: localItem.x, y: localItem.y };
@@ -1810,12 +2344,12 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     const handler = (e) => {
       const { scope, key, value, isUndoRedo } = e.detail || {};
       if (scope !== 's') return;
-      // applyRemoteBoard preserves geometry for items in dragItemsRef and
-      // text fields for the currently focused textarea, so we can apply
-      // remote updates live even while the user drags.
+      // applyRemoteBoard preserves geometry for items in dragItemsRef, while
+      // collaborative Y.Text snapshots are always applied so simultaneous
+      // editors see the merged text on every remote keystroke.
       if (key === 'boardState') applyRemoteBoard(value, isUndoRedo);
       else if (key === 'presence') setPresence(value || {});
-      else if (key === 'customTemplates') setCustomTemplates(value || []);
+      else if (key === 'customTemplates') setCustomTemplates(safeCustomTemplates(value));
     };
     if (typeof storage.on === 'function') storage.on(handler);
     // If Yjs sync completed BETWEEN the initial bRec read above and this
@@ -1844,7 +2378,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       // Custom templates can flicker to empty if the initial cold read landed
       // before Yjs sync and the change handler wasn't subscribed yet.
       storage.get('customTemplates', true).then((r) => {
-        if (Array.isArray(r?.value)) setCustomTemplates(r.value);
+        if (Array.isArray(r?.value)) setCustomTemplates(safeCustomTemplates(r.value));
       });
       voteHandler();
       commentHandler();
@@ -1887,7 +2421,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
      ------------------------------------------------------------
      Tick at 1s while a vote session with a deadline is running so the
      countdown stays smooth, but fall back to 5s when the board is idle —
-     `now` also gates online-presence freshness, and heartbeats fire every
+     `now` also gates cursor freshness, and heartbeats fire every
      5s anyway. Cuts idle parent re-renders 5x.
      ============================================================ */
   const tickInterval = board.items.some((i) => i.type === 'zone' && i.voteTimer?.endsAt) ? 1000 : 5000;
@@ -1896,108 +2430,39 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     return () => clearInterval(id);
   }, [tickInterval]);
 
-  // Sort sticky notes within their innermost containing zone by vote count
-  // (desc), reposition, and end the session. Shared by both ways a voting
-  // session can end: the deadline auto-expiring (below) and an admin
-  // stopping it early (adminStopTimer) — both must produce the same result.
+  // Reposition sticky notes within their innermost containing zone, preserving
+  // category membership while ordering each layout by vote count. Medal ranks
+  // are computed once across the largest session zone by topVotedRanks above.
+  // Shared by both ways a voting session can end: deadline or admin stop.
   const finalizeVotingSession = useCallback((zoneId) => {
-    if (!isAdmin) return;
     const b = boardRef.current;
     const rootZone = b.items.find((i) => i.id === zoneId && i.type === 'zone');
     if (!rootZone?.voteTimer) return;
-    // If zones overlap (e.g. Retro Loop's wrapper around Good/Bad/Try
-    // columns), the smallest enclosing zone wins — otherwise the wrapper
-    // would scoop up every sticky and pile them at its corner.
-    const zones = [...zoneGroupIds(rootZone, b.items)]
-      .map((id) => b.items.find((i) => i.id === id))
-      // A descendant with its own live voteTimer runs an independent
-      // session mutual exclusion should have prevented — never let this
-      // root's widened finalize trample it (legacy cascaded boards in
-      // flight across a deploy, or a same-instant start race).
-      .filter((zone) => zone && zone.type === 'zone' && (zone.id === zoneId || !zone.voteTimer));
-    const groupZoneIdSet = new Set(zones.map((zone) => zone.id));
-    const stickies = b.items.filter((i) => i.type === 'sticky');
-    const ownerByStickyId = new Map();
-    stickies.forEach((s) => {
-      const owner = effectiveOwnerZone(s, b.items);
-      if (owner) ownerByStickyId.set(s.id, owner.id);
-    });
-    const newItems = [...b.items];
-    // Derived geometry and z-order deltas to persist silently below.
-    const geomEntries = [];
-    let nextZIndex = Math.max(...b.items.map(effectiveZIndex)) + 1;
-    const GAP = 24;       // gap between cards
-    const PAD = 16;       // inner padding from zone edges
-    zones.forEach((z) => {
-      const children = stickies
-        .filter((s) => ownerByStickyId.get(s.id) === z.id)
-        .sort((a, c) => voteCountOf(c.id) - voteCountOf(a.id));
-      if (children.length === 0) return;
-      // Use the WIDEST sticky in this zone for column sizing so the grid
-      // never overlaps when zones host different-sized stickies. Same for
-      // row height. (Previously this used the global STICKY_W/H constants
-      // which became too small after we scaled stickies to ~2.5% of zone
-      // area, producing overlapping rows.)
-      const colW = Math.max(...children.map((c) => c.w || STICKY_W));
-      const rowH = Math.max(...children.map((c) => c.h || STICKY_H));
-      const cols = Math.max(1, Math.floor((z.w - PAD * 2 + GAP) / (colW + GAP)));
-      const rowsNeeded = Math.ceil(children.length / cols);
-      const availH = Math.max(0, z.h - ZONE_TITLE_H - PAD * 2);
-      // When the natural grid would spill below the zone, compress the
-      // vertical step so rows overlap like a stacked deck of cards instead
-      // of escaping the zone. Top-voted card stays at row 0; later rows
-      // shingle downward.
-      let rowStep = rowH + GAP;
-      if (rowsNeeded > 1) {
-        const fitStep = (availH - rowH) / (rowsNeeded - 1);
-        if (fitStep < rowStep) rowStep = Math.max(1, fitStep);
-      }
-      children.forEach((s, idx) => {
-        const col = idx % cols;
-        const row = Math.floor(idx / cols);
-        const targetX = z.x + PAD + col * (colW + GAP);
-        const targetY = z.y + ZONE_TITLE_H + PAD + row * rowStep;
-        const targetZIndex = nextZIndex + children.length - idx - 1;
-        const k = newItems.findIndex((i) => i.id === s.id);
-        if (k >= 0) {
-          newItems[k] = {
-            ...newItems[k],
-            x: targetX,
-            y: targetY,
-            zIndex: targetZIndex,
-          };
-        }
-        geomEntries.push({
-          id: s.id,
-          patch: { x: targetX, y: targetY, zIndex: targetZIndex },
-        });
-      });
-      nextZIndex += children.length;
-    });
-    const finalizedAt = Date.now();
-    // Optimistic local update (incl. z-order); persist geometry + meta silently
-    // (derived change — propagates to peers but stays off the undo stack).
-    setBoard((prev) => ({
-      ...prev,
-      items: newItems.map((it) => (it.id === zoneId ? { ...it, voteTimer: null, lastResultsAt: finalizedAt } : it)),
-    }));
-    if (geomEntries.length) {
+    const plan = planVoteFinalization(b.items, votesByItem, zoneId, Date.now());
+    if (!plan) return;
+    if (plan.entries.length > 1) {
       // The sort is an authoritative reposition — it must win over any
       // grace-period protection a prior drag left on these same ids,
       // otherwise the self-echoed 'system' write below gets reverted back
       // to the pre-sort dragged position by the recentlyMoved guard.
-      geomEntries.forEach((e) => recentlyMovedRef.current.delete(e.id));
+      plan.entries.forEach((e) => recentlyMovedRef.current.delete(e.id));
     }
-    const allEntries = [
-      ...geomEntries,
-      { id: zoneId, patch: { voteTimer: null, lastResultsAt: finalizedAt } },
-    ];
-    if (allEntries.length) storage.updateItems(allEntries, { silent: true });
+    if (!storage.updateItems(plan.entries, { silent: true })) {
+      reportWriteFailure();
+      return;
+    }
+    const patchById = new Map(plan.entries.map((entry) => [entry.id, entry.patch]));
+    setBoard((prev) => ({
+      ...prev,
+      items: prev.items.map((item) => (
+        patchById.has(item.id) ? { ...item, ...patchById.get(item.id) } : item
+      )),
+    }));
     let totalVotes = 0;
     const voters = new Set();
     const votesByUser = new Map();
-    stickies
-      .filter((s) => groupZoneIdSet.has(ownerByStickyId.get(s.id)))
+    plan.stickies
+      .filter((s) => plan.zoneIds.has(plan.ownerByStickyId.get(s.id)))
       .forEach((s) => {
         const set = votesByItem.get(s.id);
         if (!set) return;
@@ -2024,18 +2489,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     // Sticky: this can list every non-voter by name — the normal 3.2s
     // auto-dismiss isn't enough time to read it during a live meeting.
     setToast({ msg, type: 'info', sticky: true });
-  }, [isAdmin, votesByItem, voteCountOf, onlineUsers, t]);
-
-  useEffect(() => {
-    if (!isAdmin) return;
-    const expiredZone = board.items.find((i) => (
-      i.type === 'zone' && i.voteTimer?.endsAt && i.voteTimer.endsAt <= now
-    ));
-    if (!expiredZone) return;
-    const liveZone = boardRef.current.items.find((i) => i.id === expiredZone.id && i.type === 'zone');
-    if (!liveZone?.voteTimer?.endsAt || liveZone.voteTimer.endsAt > Date.now()) return;
-    finalizeVotingSession(expiredZone.id);
-  }, [now, isAdmin, board.items, votesByItem, finalizeVotingSession]);
+  }, [votesByItem, onlineUsers, t, reportWriteFailure]);
 
   /* ============================================================
      Persist viewport (per-user) — debounced lightly
@@ -2354,7 +2808,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
 
   const importImageFromBlob = useCallback(async (blob, worldX, worldY) => {
     if (!blob || !blob.type || !blob.type.startsWith('image/')) return;
-    if (!UPLOADABLE_IMAGE_TYPES.has(blob.type)) {
+    if (!isSafeImageMime(blob.type)) {
       setToast({ msg: t('image.unsupportedFormat') || 'Unsupported image format (PNG, JPEG, WEBP, or GIF only)', type: 'warn' });
       return;
     }
@@ -2366,7 +2820,12 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       });
       return;
     }
-    const prepared = await prepareImageBlob(blob);
+    let prepared;
+    try {
+      prepared = await prepareImageBlob(blob);
+    } catch {
+      prepared = null;
+    }
     if (!prepared) {
       setToast({
         msg: t('image.tooLarge', { mb: (IMAGE_MAX_BYTES / 1024 / 1024).toFixed(0) })
@@ -2418,7 +2877,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   }, [userId, userName, addItemsLocal, screenToWorld, customTemplates]);
 
   const saveCurrentAsTemplate = useCallback((rawName) => {
-    const name = (rawName || '').trim();
+    const name = (rawName || '').trim().slice(0, TEMPLATE_NAME_MAX_LENGTH);
     if (!name) return;
     const zones = boardRef.current.items.filter((i) => i.type === 'zone');
     if (zones.length === 0) {
@@ -2431,7 +2890,16 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       title: z.title, color: z.color,
       x: z.x - minX, y: z.y - minY, w: z.w, h: z.h,
     }));
-    const next = [...customTemplates, { id: uid(), name, zones: normalized, createdAt: Date.now() }];
+    let next;
+    try {
+      next = normalizeCustomTemplates([
+        ...customTemplates,
+        { id: uid(), name, zones: normalized, createdAt: Date.now() },
+      ]);
+    } catch (err) {
+      setToast({ msg: err.message, type: 'warn' });
+      return;
+    }
     setCustomTemplates(next);
     storage.set('customTemplates', next, true);
     setSaveTemplateOpen(false);
@@ -2481,6 +2949,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       .join('|');
   }, [board.items]);
 
+  const votingTimerPhase = useMemo(
+    () => voteTimerPhaseSignature(board.items, now),
+    [board.items, now],
+  );
+
   const stickyVotingContext = useMemo(() => {
     const map = new Map();
     const stickies = board.items.filter((i) => i.type === 'sticky');
@@ -2498,9 +2971,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       });
     });
     return map;
-    // Deliberately excludes now so active timers do not rebuild every sticky once per second.
+    // The compact phase signature changes only when a timer crosses its
+    // deadline, so active timers do not rebuild every sticky once per second.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [zoneVotingSignature, board.allRevealed]);
+  }, [zoneVotingSignature, votingTimerPhase, board.allRevealed]);
 
   const requireEdit = useCallback(() => {
     if (!editingAllowed) {
@@ -2509,6 +2983,24 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     }
     return true;
   }, [editingAllowed]);
+
+  const unlockSelectedItems = useCallback(() => {
+    if (!editingAllowed) {
+      setToast({ msg: t('common.warnLockEdit'), type: 'warn' });
+      return;
+    }
+    const entries = unlockEntriesForSelection(boardRef.current.items, selectedIdsRef.current);
+    if (!entries.length) return;
+    if (!storage.updateItems(entries)) { reportWriteFailure(); return; }
+    const unlockedIds = new Set(entries.map((entry) => entry.id));
+    setBoard((prev) => ({
+      ...prev,
+      items: prev.items.map((item) => (
+        unlockedIds.has(item.id) ? { ...item, locked: false } : item
+      )),
+    }));
+    setToast({ msg: t('selection.unlockAll.done', { n: entries.length }), type: 'info' });
+  }, [editingAllowed, t, reportWriteFailure]);
 
   const requireMove = useCallback((candidateIds) => {
     if (!editingAllowed) {
@@ -2617,6 +3109,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   // a board with hundreds of cards doesn't run the React commit phase on every
   // mousemove — pan becomes a single GPU-composited transform.
   const applyViewportToDom = useCallback((v) => {
+    revealMinimap();
     if (worldRef.current) {
       worldRef.current.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.zoom})`;
     }
@@ -2625,7 +3118,23 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       gridRef.current.style.backgroundSize = `${s}px ${s}px`;
       gridRef.current.style.backgroundPosition = `${v.x}px ${v.y}px`;
     }
-  }, []);
+    if (cursorLayerRef.current) {
+      Array.from(cursorLayerRef.current.children).forEach((node) => {
+        const point = cursorScreenPosition({
+          x: Number(node.dataset.cursorX),
+          y: Number(node.dataset.cursorY),
+        }, v);
+        node.style.transform = `translate3d(${point.x}px, ${point.y}px, 0)`;
+      });
+    }
+    if (minimapViewportRef.current && minimapModelRef.current) {
+      const model = minimapModelRef.current;
+      const miniView = minimapViewportRect(v, model.viewportSize, model);
+      minimapViewportRef.current.style.transform = `translate3d(${miniView.x}px, ${miniView.y}px, 0)`;
+      minimapViewportRef.current.style.width = `${miniView.w}px`;
+      minimapViewportRef.current.style.height = `${miniView.h}px`;
+    }
+  }, [revealMinimap]);
 
   // Keep the DOM in sync with React state for non-live changes (fit, reset,
   // initial load). Continuous wheel/pan input applies directly to the DOM,
@@ -2634,10 +3143,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     if (interactionRef.current === null) applyViewportToDom(viewport);
   }, [viewport, applyViewportToDom]);
 
-  const liveApplyViewport = useCallback((next) => {
+  const liveApplyViewport = useCallback((next, { broadcastView = true } = {}) => {
     viewportRef.current = next;
     applyViewportToDom(next);
-  }, [applyViewportToDom]);
+    if (broadcastView) publishLocalView(next);
+  }, [applyViewportToDom, publishLocalView]);
 
   // Wheel input is the noisiest input on the page — trackpads / Magic Mice
   // can fire 120+ events/sec. Each event used to force a layout via
@@ -2667,6 +3177,126 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     setViewport(next);
   }, [applyViewportToDom, cancelPendingWheel]);
 
+  const stopFollowing = useCallback(() => {
+    if (!followedUserIdRef.current) return;
+    followedUserIdRef.current = null;
+    followMotionPlayerRef.current = null;
+    followMotionSignatureRef.current = '';
+    setFollowedUserId(null);
+    if (followViewportCommitRef.current != null) {
+      clearTimeout(followViewportCommitRef.current);
+      followViewportCommitRef.current = null;
+    }
+    setViewport(viewportRef.current);
+  }, []);
+
+  const startFollowing = useCallback((targetUserId) => {
+    if (!targetUserId || targetUserId === userIdRef.current) return;
+    if (followViewportCommitRef.current != null) {
+      clearTimeout(followViewportCommitRef.current);
+      followViewportCommitRef.current = null;
+    }
+    followedUserIdRef.current = targetUserId;
+    followMotionSignatureRef.current = '';
+    followLastCommitAtRef.current = 0;
+    setFollowedUserId(targetUserId);
+    setPlayerListOpen(false);
+  }, []);
+
+  useEffect(() => {
+    if (!followedUserId) return;
+    if (!followedPlayer) {
+      stopFollowing();
+      setToast({ msg: t('follow.ended'), type: 'info' });
+      return;
+    }
+    const targetPoint = followedView || followedCursor?.cursor;
+    if (!targetPoint) return;
+
+    const next = centerViewportOnWorld(
+      {
+        ...viewportRef.current,
+        zoom: followedPlayer.view?.zoom || viewportRef.current.zoom,
+      },
+      viewportSize,
+      targetPoint,
+    );
+    liveApplyViewport(next, { broadcastView: false });
+
+    const timestamp = performance.now();
+    const elapsed = timestamp - followLastCommitAtRef.current;
+    const commit = () => {
+      followViewportCommitRef.current = null;
+      followLastCommitAtRef.current = performance.now();
+      setViewport(viewportRef.current);
+    };
+    if (elapsed >= FOLLOW_VIEWPORT_COMMIT_MS) {
+      if (followViewportCommitRef.current != null) clearTimeout(followViewportCommitRef.current);
+      commit();
+    } else if (followViewportCommitRef.current == null) {
+      followViewportCommitRef.current = setTimeout(
+        commit,
+        FOLLOW_VIEWPORT_COMMIT_MS - elapsed,
+      );
+    }
+  }, [
+    followedUserId, followedPlayer, followedCursor, followedView, viewportSize,
+    liveApplyViewport, stopFollowing, setToast,
+  ]);
+
+  // Awareness motion reaches this listener before the React presence update.
+  // Apply the newest target viewport center/zoom directly on the next paint so
+  // a busy board cannot make Follow wait for a full component render. Cursor
+  // is only a compatibility fallback for clients that have not refreshed yet.
+  useEffect(() => {
+    if (!followedUserId) return undefined;
+    const applyLatest = () => {
+      followMotionFrameRef.current = null;
+      const player = followMotionPlayerRef.current;
+      followMotionPlayerRef.current = null;
+      if (!followedUserIdRef.current || !player) return;
+      const hasViewCenter = Number.isFinite(player.view?.x) && Number.isFinite(player.view?.y);
+      const targetPoint = hasViewCenter ? player.view : player.cursor;
+      if (!targetPoint) return;
+      if (!hasViewCenter
+        && Date.now() - Number(player.cursor?.updatedAt || 0) >= PLAYER_CURSOR_STALE_MS) return;
+      const next = centerViewportOnWorld(
+        {
+          ...viewportRef.current,
+          zoom: player.view?.zoom || viewportRef.current.zoom,
+        },
+        viewportSize,
+        targetPoint,
+      );
+      liveApplyViewport(next, { broadcastView: false });
+    };
+    const onPresenceChange = (event) => {
+      const targetId = followedUserIdRef.current;
+      const player = targetId ? event?.detail?.[targetId] : null;
+      const hasViewCenter = Number.isFinite(player?.view?.x) && Number.isFinite(player?.view?.y);
+      if (!hasViewCenter && !player?.cursor) return;
+      const signature = hasViewCenter
+        ? `${targetId}:view:${player.view.updatedAt || 0}`
+        : `${targetId}:cursor:${player.cursor.updatedAt || 0}`;
+      if (signature === followMotionSignatureRef.current) return;
+      followMotionSignatureRef.current = signature;
+      followMotionPlayerRef.current = player;
+      if (followMotionFrameRef.current == null) {
+        followMotionFrameRef.current = requestAnimationFrame(applyLatest);
+      }
+    };
+    const unsubscribe = storage.onPresenceChange(onPresenceChange);
+    onPresenceChange({ detail: storage.getPresenceSnapshot() });
+    return () => {
+      unsubscribe?.();
+      followMotionPlayerRef.current = null;
+      if (followMotionFrameRef.current != null) {
+        cancelAnimationFrame(followMotionFrameRef.current);
+        followMotionFrameRef.current = null;
+      }
+    };
+  }, [followedUserId, viewportSize, liveApplyViewport]);
+
   // A gesture starting after a live wheel frame must preserve that frame while
   // discarding any not-yet-applied wheel events. This prevents a later React
   // render from restoring the viewport that preceded the gesture.
@@ -2685,6 +3315,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
 
   const onCanvasWheel = useCallback((e) => {
     e.preventDefault();
+    stopFollowing();
     if (interactionRef.current !== null) {
       cancelPendingWheel();
       return;
@@ -2734,7 +3365,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         setViewport(viewportRef.current);
       }, 120);
     });
-  }, [cancelPendingWheel, liveApplyViewport]);
+  }, [cancelPendingWheel, liveApplyViewport, stopFollowing]);
 
   useEffect(() => {
     const el = canvasRef.current;
@@ -2803,11 +3434,12 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   }, [liveApplyViewport, settleWheelBeforeInteraction]);
 
   const onCanvasMouseDownCapture = useCallback((e) => {
+    stopFollowing();
     if (!spaceHeldRef.current && e.button !== 1) return;
     e.preventDefault();
     e.stopPropagation();
     startPan(e);
-  }, [startPan]);
+  }, [startPan, stopFollowing]);
 
   const onCanvasMouseDown = useCallback((e) => {
     // Only start pan/marquee if mousedown is on the canvas (not on an item) —
@@ -2930,38 +3562,134 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
 
   const fitToContent = useCallback(() => {
     if (interactionRef.current !== null || !canvasRef.current) return;
+    stopFollowing();
     const rect = canvasRef.current.getBoundingClientRect();
     commitViewportImmediately(fitViewportToItems(boardRef.current.items, rect.width, rect.height));
-  }, [commitViewportImmediately]);
+  }, [commitViewportImmediately, stopFollowing]);
 
   const fitToSelection = useCallback(() => {
     if (interactionRef.current !== null || !canvasRef.current) return;
+    stopFollowing();
     const ids = selectedIdsRef.current;
     if (ids.size === 0) return;
     const items = boardRef.current.items.filter((it) => ids.has(it.id));
     if (items.length === 0) return;
     const rect = canvasRef.current.getBoundingClientRect();
     commitViewportImmediately(fitViewportToItems(items, rect.width, rect.height));
-  }, [commitViewportImmediately]);
+  }, [commitViewportImmediately, stopFollowing]);
 
   const zoomBy = useCallback((factor) => {
     if (interactionRef.current !== null || !canvasRef.current) return;
+    stopFollowing();
     const rect = canvasRef.current.getBoundingClientRect();
     const center = { x: rect.width / 2, y: rect.height / 2 };
     const current = viewportRef.current;
     commitViewportImmediately(zoomViewportAt(current, current.zoom * factor, center));
-  }, [commitViewportImmediately]);
+  }, [commitViewportImmediately, stopFollowing]);
 
   const resetZoom = useCallback(() => {
     if (interactionRef.current !== null || !canvasRef.current) return;
+    stopFollowing();
     const rect = canvasRef.current.getBoundingClientRect();
     commitViewportImmediately(zoomViewportAt(viewportRef.current, 1, {
       x: rect.width / 2,
       y: rect.height / 2,
     }));
+  }, [commitViewportImmediately, stopFollowing]);
+
+  const startMinimapNavigation = useCallback((e) => {
+    if (e.button !== 0 || interactionRef.current !== null || !minimapModelRef.current) return;
+    stopFollowing();
+    e.preventDefault();
+    e.stopPropagation();
+    settleWheelBeforeInteraction();
+    const surface = e.currentTarget;
+    const surfaceRect = surface.getBoundingClientRect();
+    const pointerId = e.pointerId;
+    const startZoom = viewportRef.current.zoom;
+    let pendingPoint = null;
+    let frame = null;
+    let finished = false;
+
+    const navigate = (clientX, clientY) => {
+      const model = minimapModelRef.current;
+      if (!model) return;
+      const worldPoint = minimapPointToWorld({ clientX, clientY }, surfaceRect, model);
+      liveApplyViewport(centerViewportOnWorld(
+        { ...viewportRef.current, zoom: startZoom },
+        model.viewportSize,
+        worldPoint,
+      ));
+    };
+    const flush = () => {
+      frame = null;
+      if (!pendingPoint) return;
+      const point = pendingPoint;
+      pendingPoint = null;
+      navigate(point.x, point.y);
+    };
+    const queue = (clientX, clientY) => {
+      pendingPoint = { x: clientX, y: clientY };
+      if (frame == null) frame = requestAnimationFrame(flush);
+    };
+    const onMove = (ev) => {
+      if (ev.pointerId !== pointerId) return;
+      queue(ev.clientX, ev.clientY);
+    };
+    const removeListeners = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+      window.removeEventListener('blur', onBlur);
+    };
+    const finalize = () => {
+      if (finished) return;
+      finished = true;
+      if (frame != null) { cancelAnimationFrame(frame); frame = null; }
+      if (pendingPoint) {
+        const point = pendingPoint;
+        pendingPoint = null;
+        navigate(point.x, point.y);
+      }
+      interactionRef.current = null;
+      surface.style.cursor = 'crosshair';
+      removeListeners();
+      if (activeViewportFinalizerRef.current === onBlur) activeViewportFinalizerRef.current = null;
+      setViewport(viewportRef.current);
+    };
+    const onUp = (ev) => { if (ev.pointerId === pointerId) finalize(); };
+    const onCancel = (ev) => { if (ev.pointerId === pointerId) finalize(); };
+    const onBlur = () => finalize();
+
+    interactionRef.current = { kind: 'minimap' };
+    surface.style.cursor = 'grabbing';
+    navigate(e.clientX, e.clientY);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+    window.addEventListener('blur', onBlur);
+    activeViewportFinalizerRef.current = onBlur;
+  }, [liveApplyViewport, settleWheelBeforeInteraction, stopFollowing]);
+
+  const onMinimapKeyDown = useCallback((e) => {
+    const model = minimapModelRef.current;
+    if (!model || interactionRef.current !== null) return;
+    const current = viewportRef.current;
+    const stepX = model.viewportSize.w * 0.2;
+    const stepY = model.viewportSize.h * 0.2;
+    let next = null;
+    if (e.key === 'ArrowLeft') next = { ...current, x: current.x + stepX };
+    if (e.key === 'ArrowRight') next = { ...current, x: current.x - stepX };
+    if (e.key === 'ArrowUp') next = { ...current, y: current.y + stepY };
+    if (e.key === 'ArrowDown') next = { ...current, y: current.y - stepY };
+    if (!next) return;
+    e.preventDefault();
+    e.stopPropagation();
+    commitViewportImmediately(next);
   }, [commitViewportImmediately]);
 
   const updateZIndexes = useCallback((entries) => {
+    if (!storage.updateItems(entries)) { reportWriteFailure(); return false; }
     const byId = new Map(entries.map((entry) => [entry.id, entry.patch.zIndex]));
     setBoard((prev) => ({
       ...prev,
@@ -2969,8 +3697,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         byId.has(it.id) ? { ...it, zIndex: byId.get(it.id) } : it
       )),
     }));
-    storage.updateItems(entries);
-  }, []);
+    return true;
+  }, [reportWriteFailure]);
 
   const bringToFront = useCallback((ids) => {
     if (!ids?.size || interactionRef.current !== null) return;
@@ -3678,6 +4406,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         'input, textarea, select, [contenteditable="true"], '
         + '[role="dialog"], [data-board-shortcuts="off"]',
       )) return;
+      if (e.key === 'Escape' && followedUserIdRef.current) {
+        e.preventDefault();
+        stopFollowing();
+        return;
+      }
       const meta = e.ctrlKey || e.metaKey;
       if (!meta && e.shiftKey && !e.altKey && e.code === 'Digit1') {
         if (interactionRef.current === null) {
@@ -3757,6 +4490,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     nameModalOpen, commentsOpenReadable, selectedIds, deleteItemsIfAllowed, duplicateItems, doUndo, doRedo,
     fitToContent, fitToSelection, zoomBy, resetZoom,
     bringToFront, sendToBack, bringForward, sendBackward,
+    stopFollowing,
   ]);
 
   /* ============================================================
@@ -3785,22 +4519,30 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   }, [commentsOpenReadable, importImageFromBlob, screenToWorld, requireEdit]);
 
   const onCanvasDragOver = useCallback((e) => {
-    if (e.dataTransfer?.types?.includes('Files')) e.preventDefault();
+    allowCanvasFileDrop(e);
+    const point = dragClientPoint(e);
+    if (point && (point.x !== 0 || point.y !== 0)) fileDragPointRef.current = point;
   }, []);
 
   const onCanvasDrop = useCallback(async (e) => {
-    if (!e.dataTransfer?.files?.length) return;
+    const imageBlobs = droppedImageBlobs(e.dataTransfer);
+    if (!imageBlobs.length) return;
     e.preventDefault();
     if (!requireEdit()) return;
-    const rect = canvasRef.current.getBoundingClientRect();
-    const w = screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
-    for (const f of e.dataTransfer.files) {
-      if (f.type.startsWith('image/')) {
-        // eslint-disable-next-line no-await-in-loop
-        await importImageFromBlob(f, w.x, w.y);
-      }
+    const clientPoint = resolveDropClientPoint(e, fileDragPointRef.current);
+    fileDragPointRef.current = null;
+    if (!clientPoint) return;
+    const w = clientPointToWorld(
+      clientPoint.x,
+      clientPoint.y,
+      worldMeasureRef.current,
+    );
+    if (!w) return;
+    for (const blob of imageBlobs) {
+      // eslint-disable-next-line no-await-in-loop
+      await importImageFromBlob(blob, w.x, w.y);
     }
-  }, [importImageFromBlob, requireEdit, screenToWorld]);
+  }, [importImageFromBlob, requireEdit]);
 
   const pickImageFile = useCallback(() => {
     if (!requireEdit()) return;
@@ -3818,7 +4560,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   }, [importImageFromBlob, requireEdit, screenToWorld]);
 
   /* ============================================================
-     Live editing: focus textarea, save every keystroke (debounced).
+     Live editing: focus the field and merge every keystroke through Y.Text.
      ============================================================ */
   const canEditItem = useCallback((it) => {
     return !!it && editingAllowed;
@@ -3841,8 +4583,15 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     }, 10);
   }, [canEditItem, setSelectedId, updateFocusedText]);
 
-  const onTextChange = useCallback((id, patch) => {
-    updateItem(id, patch);
+  const onTextChange = useCallback((id, patch, opts) => {
+    const boundedPatch = { ...patch };
+    if (typeof boundedPatch.text === 'string') {
+      boundedPatch.text = boundedPatch.text.slice(0, BOARD_TEXT_MAX_LENGTH);
+    }
+    if (typeof boundedPatch.title === 'string') {
+      boundedPatch.title = boundedPatch.title.slice(0, ZONE_TITLE_MAX_LENGTH);
+    }
+    updateItem(id, boundedPatch, opts);
   }, [updateItem]);
 
   const onTextBlur = useCallback((id) => {
@@ -3925,7 +4674,15 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     const staleResultZoneIds = descendantZones
       .filter((zone) => zone.lastResultsAt)
       .map((zone) => zone.id);
-    window.storage.startVoteSession(zoneId, timerPatch, staleResultZoneIds, capturedIds);
+    try {
+      if (window.storage.startVoteSession(zoneId, timerPatch, staleResultZoneIds, capturedIds) !== true) {
+        reportWriteFailure();
+        return;
+      }
+    } catch {
+      reportWriteFailure();
+      return;
+    }
     setBoard((prev) => ({
       ...prev,
       items: prev.items.map((it) => {
@@ -3942,7 +4699,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       }),
       type: 'info',
     });
-  }, [isAdmin, t]);
+  }, [isAdmin, t, reportWriteFailure]);
 
   const adminExtendTimer = useCallback((zoneId, minutes) => {
     if (!isAdmin) return;
@@ -3965,7 +4722,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     window.storage?.clearAllVotes?.();
     window.storage?.clearAllComments?.();
     // Full replace: drop every item, reset session meta, preserve admin identity.
-    replaceBoardLocal({
+    if (!replaceBoardLocal({
       ...boardRef.current,
       items: [],
       timer: null,
@@ -3973,7 +4730,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       allRevealed: false,
       votingLocked: false,
       editingLocked: false,
-    });
+    })) return;
     setConfirmClear(false);
     setTemplatesOpen(true);
   }, [isAdmin, replaceBoardLocal]);
@@ -3986,6 +4743,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       .filter((i) => i.type === 'zone' && (i.voteTimer || i.lastResultsAt))
       .map((z) => ({ id: z.id, patch: { voteTimer: null, lastResultsAt: null } }));
     if (zoneEntries.length) {
+      if (!storage.updateItems(zoneEntries)) { reportWriteFailure(); return; }
       const patchById = new Map(zoneEntries.map((entry) => [entry.id, entry.patch]));
       setBoard((prev) => ({
         ...prev,
@@ -3993,12 +4751,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           patchById.has(it.id) ? { ...it, ...patchById.get(it.id) } : it
         )),
       }));
-      storage.updateItems(zoneEntries);
     }
     patchMeta({ lastResultsAt: null });
     setConfirmResetVotes(false);
     setToast({ msg: t('reset.done'), type: 'info' });
-  }, [isAdmin, patchMeta]);
+  }, [isAdmin, patchMeta, reportWriteFailure]);
 
   // Clears every protective flag on the board in one go: per-zone locks,
   // per-sticky privacy, and the board-wide edit lock. A durable reset (not a
@@ -4010,6 +4767,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       .filter((i) => (i.type === 'zone' && i.locked) || (i.type === 'sticky' && i.private))
       .map((i) => ({ id: i.id, patch: i.type === 'zone' ? { locked: false } : { private: false } }));
     if (entries.length) {
+      if (!storage.updateItems(entries)) { reportWriteFailure(); return; }
       const patchById = new Map(entries.map((entry) => [entry.id, entry.patch]));
       setBoard((prev) => ({
         ...prev,
@@ -4017,12 +4775,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           patchById.has(it.id) ? { ...it, ...patchById.get(it.id) } : it
         )),
       }));
-      storage.updateItems(entries);
     }
     patchMeta({ editingLocked: false });
     setConfirmUnlockAll(false);
     setToast({ msg: t('unlockAll.done'), type: 'info' });
-  }, [isAdmin, patchMeta]);
+  }, [isAdmin, patchMeta, reportWriteFailure]);
 
   /* ----- Export / Import ----- */
   const exportBoard = useCallback(() => {
@@ -4033,42 +4790,55 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     // at that URL.
     const b = boardRef.current;
     const voteSnap = window.storage?.snapshotVotes?.() || new Map();
-    const votes = {};
+    const votes = Object.create(null);
     voteSnap.forEach((set, itemId) => { votes[itemId] = Array.from(set); });
     const commentSnap = window.storage?.snapshotComments?.() || new Map();
-    const comments = {};
+    const comments = Object.create(null);
     commentSnap.forEach((entries, itemId) => { comments[itemId] = entries; });
-    const payload = {
-      version: 1,
-      exportedAt: Date.now(),
-      boardCode: boardCode || null,
-      board: {
-        items: b.items,
-        timer: b.timer,
-        editingLocked: b.editingLocked,
-        votingLocked: b.votingLocked,
-        allRevealed: b.allRevealed,
-        lastResultsAt: b.lastResultsAt,
-      },
-      votes,
+    const redacted = redactBoardExportForViewer(
+      b.items,
       comments,
-      customTemplates,
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      (sticky) => isStickyHiddenForUser(sticky, b.items, b.allRevealed, userId),
+    );
+    let artifact;
+    try {
+      artifact = createJsonBackupArtifact({
+        fallbackBoardCode: boardCode,
+        board: {
+          items: redacted.items,
+          timer: b.timer,
+          editingLocked: b.editingLocked,
+          votingLocked: b.votingLocked,
+          allRevealed: b.allRevealed,
+          lastResultsAt: b.lastResultsAt,
+        },
+        votes,
+        comments: redacted.comments,
+        customTemplates,
+      });
+    } catch (err) {
+      setToast({ msg: t('export.fail', { err: err.message }), type: 'warn' });
+      return;
+    }
+    const blob = new Blob([artifact.contents], { type: artifact.mimeType });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-    const file = `retro-${boardCode || 'board'}-${ts}.json`;
     a.href = url;
-    a.download = file;
+    a.download = artifact.fileName;
     a.click();
     // Some browsers (Firefox/Safari) start the download asynchronously after
     // `a.click()` returns. Revoking on the same tick can leave the request
     // pointing at a freed blob → empty file. Defer past the current task so
     // the download has time to grab the blob first.
     setTimeout(() => URL.revokeObjectURL(url), 0);
-    setToast({ msg: t('export.done', { file }), type: 'info' });
-  }, [boardCode, customTemplates]);
+    const { positions, zoneDimensions } = artifact.geometryRepairs;
+    setToast({
+      msg: positions || zoneDimensions
+        ? t('export.repaired', { file: artifact.fileName, positions, zones: zoneDimensions })
+        : t('export.done', { file: artifact.fileName }),
+      type: 'info',
+    });
+  }, [boardCode, customTemplates, userId]);
 
   // Export only the sticky cards inside one zone as CSV. The all-zones version
   // got swapped out for this per-zone flow — users wanted to grab a single
@@ -4099,18 +4869,20 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       ].map(csvEsc).join(','));
     });
     const csv = '﻿' + lines.join('\r\n'); // UTF-8 BOM for Excel
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const artifact = createCsvExportArtifact({
+      csv,
+      fallbackBoardCode: boardCode,
+      zoneTitle: zone.title,
+    });
+    const blob = new Blob([artifact.contents], { type: artifact.mimeType });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    const ts = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
-    const slug = (zone.title || 'zone').replace(/[^\w฀-๿-]+/g, '_').slice(0, 40) || 'zone';
-    const file = `retro-${slug}-${ts}.csv`;
     a.href = url;
-    a.download = file;
+    a.download = artifact.fileName;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 0);
-    setToast({ msg: t('export.done', { file }), type: 'info' });
-  }, [userId]);
+    setToast({ msg: t('export.done', { file: artifact.fileName }), type: 'info' });
+  }, [boardCode, userId]);
 
   // Whole-room CSV: every sticky, grouped by zone. Overlapping zones (e.g.
   // Retro Loop's wrapper around Good/Bad/Try) resolve to the smallest
@@ -4163,20 +4935,19 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       .sort(byVotesDesc)
       .forEach((sticky) => pushRow(noZoneLabel, sticky));
     const csv = '﻿' + lines.join('\r\n'); // UTF-8 BOM for Excel
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const artifact = createCsvExportArtifact({ csv, fallbackBoardCode: boardCode });
+    const blob = new Blob([artifact.contents], { type: artifact.mimeType });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    const ts = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
-    const file = `retro-${boardCode || 'board'}-${ts}.csv`;
     a.href = url;
-    a.download = file;
+    a.download = artifact.fileName;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 0);
-    setToast({ msg: t('export.done', { file }), type: 'info' });
+    setToast({ msg: t('export.done', { file: artifact.fileName }), type: 'info' });
   }, [boardCode, userId]);
 
   const fileInputRef = useRef(null);
-  const [pendingImport, setPendingImport] = useState(null); // { file, parsed }
+  const [pendingImport, setPendingImport] = useState(null); // normalized manifest awaiting confirmation
   const [importBusy, setImportBusy] = useState(false); // sanitizing legacy images before write
   const [helpOpen, setHelpOpen] = useState(false);
 
@@ -4193,11 +4964,18 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       if (file.size > IMPORT_MAX_FILE_BYTES) {
         throw new Error(`file exceeds ${(IMPORT_MAX_FILE_BYTES / 1024 / 1024).toFixed(0)} MB`);
       }
-      const text = await file.text();
-      const parsed = JSON.parse(text);
       const importedAt = Date.now();
+      const text = await file.text();
+      const isCsv = file.name.toLowerCase().endsWith('.csv') || /text\/csv/i.test(file.type);
+      const csvImport = isCsv ? parseBoardCsv(text, importedAt) : null;
+      const parsed = csvImport ? csvImport.payload : JSON.parse(text);
       const manifest = normalizeImportManifest(parsed, importedAt);
-      setPendingImport({ name: file.name, parsed, ...manifest });
+      setPendingImport({
+        name: file.name,
+        ...manifest,
+        sourceFormat: isCsv ? 'csv' : 'json',
+        csvSummary: csvImport?.summary ?? null,
+      });
     } catch (err) {
       setToast({ msg: t('import.fail', { err: err.message }), type: 'warn' });
     }
@@ -4206,7 +4984,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const confirmImport = useCallback(async () => {
     if (!pendingImport || !isAdmin || importBusy) return;
     const {
-      parsed, items, voteEntries, commentEntries, customTemplates: importedTemplates,
+      items, voteEntries, commentEntries, customTemplates: importedTemplates, boardMeta,
     } = pendingImport;
     const rawItems = items.map((item) => (
       item.type === 'zone'
@@ -4228,12 +5006,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     const nextBoard = {
       ...DEFAULT_BOARD,
       items: importedItems,
-      timer: parsed.board.timer || null,
-      editingLocked: !!parsed.board.editingLocked,
-      // Older exports predate votingLocked; default to unlocked when absent.
-      votingLocked: parsed.board.votingLocked ?? false,
-      allRevealed: !!parsed.board.allRevealed,
-      lastResultsAt: parsed.board.lastResultsAt || null,
+      timer: boardMeta.timer,
+      editingLocked: boardMeta.editingLocked,
+      votingLocked: boardMeta.votingLocked,
+      allRevealed: boardMeta.allRevealed,
+      lastResultsAt: boardMeta.lastResultsAt,
       // Preserve identity-of-the-room across import: who's admin, what their
       // display name is, and the PIN gate. Otherwise an admin importing a
       // backup would silently wipe their own PIN and re-prompt to set a new
@@ -4302,7 +5079,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     <TextCard
       key={it.id}
       item={it}
-      selected={selectedIds.has(it.id)}
+      selected={selectedIds.has(it.id) && !remoteSelectorsByItem.has(it.id)}
+      remoteSelected={remoteSelectorsByItem.has(it.id)}
+      remoteSelectionHue={hueFromId(remoteSelectorsByItem.get(it.id)?.userId || '')}
       isEditing={focusedTextId === `${it.id}:text`}
       lang={lang}
       onStartDrag={startItemDrag}
@@ -4318,7 +5097,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     <StickyCard
       key={it.id}
       item={it}
-      selected={selectedIds.has(it.id)}
+      selected={selectedIds.has(it.id) && !remoteSelectorsByItem.has(it.id)}
+      remoteSelected={remoteSelectorsByItem.has(it.id)}
+      remoteSelectionHue={hueFromId(remoteSelectorsByItem.get(it.id)?.userId || '')}
       isEditing={focusedTextId === `${it.id}:text`}
       isOwner={it.authorId === userId}
       allRevealed={stickyVotingContext.get(it.id)?.revealed ?? board.allRevealed}
@@ -4374,7 +5155,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     <ImageCard
       key={it.id}
       item={it}
-      selected={selectedIds.has(it.id)}
+      selected={selectedIds.has(it.id) && !remoteSelectorsByItem.has(it.id)}
+      remoteSelected={remoteSelectorsByItem.has(it.id)}
+      remoteSelectionHue={hueFromId(remoteSelectorsByItem.get(it.id)?.userId || '')}
       dense={denseRender}
       onStartDrag={startItemDrag}
     />
@@ -4395,6 +5178,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     [
       visibleItems,
       selectedIds,
+      remoteSelectorsByItem,
       focusedTextId,
       votesByItem,
       commentsByItem,
@@ -4418,9 +5202,45 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   );
 
   const renderActionToolbar = () => {
-    if (!selectedItem || focusedTextId) return null;
-    if (selectedIds.size > 1) return null;
+    if (focusedTextId) return null;
     const v = viewportRef.current;
+    if (groupBBox && selectedIds.size > 1) {
+      const lockedCount = board.items.reduce((count, item) => (
+        selectedIds.has(item.id) && item.locked ? count + 1 : count
+      ), 0);
+      const canUnlock = editingAllowed && lockedCount > 0;
+      const sx = (groupBBox.x + groupBBox.w / 2) * v.zoom + v.x;
+      const sy = Math.max(groupBBox.y * v.zoom + v.y - 14, 112);
+      return (
+        <div
+          style={{
+            position: 'fixed', left: sx, top: sy,
+            transform: 'translate(-50%, -100%)',
+            background: 'var(--bg-panel)', borderRadius: 10,
+            boxShadow: '0 8px 20px rgba(0,0,0,0.18)',
+            padding: '6px 8px', display: 'flex', alignItems: 'center',
+            zIndex: 30, pointerEvents: 'auto', animation: 'rb-pop 0.18s ease-out',
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            onClick={unlockSelectedItems}
+            disabled={!canUnlock}
+            title={lockedCount > 0
+              ? t('selection.unlockAll', { n: lockedCount })
+              : t('selection.nothingLocked')}
+            style={{ ...iconBtn(canUnlock), gap: 5, padding: '5px 8px' }}
+          >
+            <Unlock size={15} />
+            <span style={{ fontSize: 12, fontWeight: 600 }}>
+              {t('selection.unlockAll', { n: lockedCount })}
+            </span>
+          </button>
+        </div>
+      );
+    }
+    if (!selectedItem) return null;
     let sx;
     let sy;
     if (selectedItem.type === 'zone') {
@@ -4618,17 +5438,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         {selectedItem.type === 'zone' && isAdmin && (
           <button
             type="button"
-            onClick={() => updateItem(selectedItem.id, { votingLocked: !selectedItem.votingLocked })}
-            disabled={!selectedItem.voteTimer}
-            title={selectedItem.votingLocked ? t('zone.unlockVote') : t('zone.lockVote')}
-            style={iconBtn(!!selectedItem.voteTimer)}
-          >
-            {selectedItem.votingLocked ? <Ban size={15} /> : <ThumbsUp size={15} />}
-          </button>
-        )}
-        {selectedItem.type === 'zone' && isAdmin && (
-          <button
-            type="button"
             onClick={() => updateItem(selectedItem.id, { revealed: !selectedZoneRevealed })}
             title={selectedZoneRevealed ? t('zone.hideCards') : t('zone.revealCards')}
             aria-label={selectedZoneRevealed ? t('zone.hideCards') : t('zone.revealCards')}
@@ -4648,7 +5457,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
               title={selectedItem.voteTimer ? t('topbar.stopVote') : t('zone.startVote')}
               style={iconBtn(true)}
             >
-              {selectedItem.voteTimer ? <Square size={15} /> : <Play size={15} />}
+              {selectedItem.voteTimer ? <Square size={15} /> : <ThumbsUp size={15} />}
             </button>
             {timerSetupOpen && (
               <TimerSetup
@@ -4803,16 +5612,16 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       {boardCode && (
         <button
           type="button"
-          onClick={() => {
+          onClick={async () => {
             // Share URL must include the token in the #fragment so joiners
             // land on the same yjs doc. Without it they'd get a sibling
             // tokenless board with the same code prefix.
             const shareUrl = `${window.location.origin}/b/${boardCode}${boardToken ? `#${boardToken}` : ''}`;
-            try {
-              navigator.clipboard.writeText(shareUrl);
+            if (await copyTextToClipboard(navigator.clipboard, shareUrl)) {
               setToast({ msg: t('topbar.copied'), type: 'info' });
-            } catch {
-              setToast({ msg: t('topbar.shareLink', { code: boardCode }), type: 'info' });
+            } else {
+              const manualCode = `${boardCode}${boardToken ? `#${boardToken}` : ''}`;
+              setToast({ msg: t('topbar.shareLink', { code: manualCode }), type: 'info', sticky: true });
             }
           }}
           title={t('topbar.copyLink')}
@@ -4861,7 +5670,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         <input
           ref={fileInputRef}
           type="file"
-          accept="application/json,.json"
+          accept="application/json,.json,text/csv,.csv"
           onChange={onImportFileChange}
           style={{ display: 'none' }}
         />
@@ -5100,7 +5909,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                 position: 'absolute', top: '110%', right: 0,
                 background: 'var(--bg-elev)', borderRadius: 10,
                 boxShadow: 'var(--shadow-pop)',
-                padding: 8, marginTop: 6, minWidth: 220, zIndex: 60,
+                padding: 8, marginTop: 6, minWidth: 300, zIndex: 60,
                 animation: 'rb-pop 0.18s ease-out',
               }}
             >
@@ -5110,6 +5919,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
               {onlineUsers.map((u) => {
                 const isMe = u.userId === userId;
                 const isUserAdmin = u.userId === board.adminUserId;
+                const isFollowing = u.userId === followedUserId;
                 const used = votesUsedByUser.get(u.userId) || 0;
                 // Concurrent zone sessions can carry different vote limits — use
                 // the strictest active one so "full" doesn't under-warn.
@@ -5121,6 +5931,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                     style={{
                       display: 'flex', alignItems: 'center', gap: 8,
                       padding: '6px 8px', borderRadius: 6,
+                      background: isFollowing ? 'var(--accent-bg)' : 'transparent',
                     }}
                   >
                     <Avatar id={u.userId} name={u.name} crown={isUserAdmin} />
@@ -5146,6 +5957,30 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                       }}
                       >{t('common.admin')}
                       </span>
+                    )}
+                    {!isMe && (
+                      <button
+                        type="button"
+                        aria-pressed={isFollowing}
+                        title={isFollowing ? t('follow.stop') : t('follow.start', { name: u.name })}
+                        onClick={() => {
+                          if (isFollowing) {
+                            stopFollowing();
+                            setPlayerListOpen(false);
+                          } else {
+                            startFollowing(u.userId);
+                          }
+                        }}
+                        style={{
+                          width: 30, height: 30, display: 'grid', placeItems: 'center',
+                          flex: '0 0 auto', borderRadius: 8, cursor: 'pointer',
+                          border: `1px solid ${isFollowing ? 'var(--accent)' : 'var(--border)'}`,
+                          background: isFollowing ? 'var(--accent)' : 'var(--bg-panel)',
+                          color: isFollowing ? '#ffffff' : 'var(--text-mid)',
+                        }}
+                      >
+                        <LocateFixed size={15} />
+                      </button>
                     )}
                   </div>
                 );
@@ -5314,6 +6149,110 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     );
   };
 
+  const renderMinimap = () => {
+    const orderedItems = [
+      ...minimapModel.items.filter((item) => item.type === 'zone'),
+      ...minimapModel.items.filter((item) => item.type !== 'zone'),
+    ];
+    return (
+      <aside
+        ref={minimapPanelRef}
+        className="rb-minimap"
+        aria-label={t('minimap.title')}
+        onPointerEnter={revealMinimap}
+        onPointerLeave={revealMinimap}
+        onFocusCapture={revealMinimap}
+        onBlurCapture={revealMinimap}
+        style={{
+          position: 'fixed', right: 16, bottom: 60, zIndex: 40,
+          width: MINIMAP_W + 16,
+          padding: '8px 8px 9px', boxSizing: 'border-box',
+          background: 'var(--bg-overlay)',
+          border: '1px solid var(--border-soft)', borderRadius: 14,
+          boxShadow: '0 12px 30px rgba(0,0,0,0.14)',
+          backdropFilter: 'blur(12px)',
+          opacity: 0, pointerEvents: 'none',
+          transition: 'opacity 220ms ease',
+        }}
+      >
+        <div style={{
+          height: 25, display: 'flex', alignItems: 'center', gap: 7,
+          padding: '0 3px 6px', color: 'var(--text-mid)',
+        }}
+        >
+          <MapIcon size={15} aria-hidden="true" />
+          <span style={{ fontSize: 14, lineHeight: 1, fontWeight: 700, flex: 1 }}>
+            {t('minimap.title')}
+          </span>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
+            {Math.round(viewport.zoom * 100)}%
+          </span>
+        </div>
+        <div
+          className="rb-minimap-surface"
+          role="button"
+          tabIndex={0}
+          aria-label={t('minimap.navigate')}
+          title={t('minimap.navigate')}
+          onPointerDown={startMinimapNavigation}
+          onKeyDown={onMinimapKeyDown}
+          style={{
+            position: 'relative', width: MINIMAP_W, height: MINIMAP_H,
+            overflow: 'hidden', cursor: 'crosshair', touchAction: 'none',
+            border: '1px solid var(--border)', borderRadius: 9,
+            backgroundColor: 'var(--bg)',
+            backgroundImage: 'radial-gradient(circle, var(--grid-dot) 1px, transparent 1px)',
+            backgroundSize: '10px 10px', boxSizing: 'border-box',
+            outline: 'none',
+          }}
+        >
+          {orderedItems.map((item) => {
+            const palette = COLORS[item.color] || COLORS[3];
+            const isZone = item.type === 'zone';
+            const background = isZone
+              ? palette.zoneBg
+              : item.type === 'sticky'
+                ? palette.bg
+                : item.type === 'image'
+                  ? '#a78bfa'
+                  : 'var(--text-muted)';
+            return (
+              <div
+                key={item.id}
+                aria-hidden="true"
+                style={{
+                  position: 'absolute', left: item.x, top: item.y,
+                  width: Math.max(item.w, isZone ? 2 : 3),
+                  height: Math.max(item.h, isZone ? 2 : 3),
+                  boxSizing: 'border-box', borderRadius: isZone ? 2 : 1.5,
+                  background,
+                  border: isZone ? `1px solid ${palette.border}` : 'none',
+                  opacity: item.type === 'text' ? 0.72 : 0.9,
+                  pointerEvents: 'none',
+                }}
+              />
+            );
+          })}
+          <div
+            ref={minimapViewportRef}
+            aria-hidden="true"
+            style={{
+              position: 'absolute', left: 0, top: 0,
+              width: minimapModel.viewport.w,
+              height: minimapModel.viewport.h,
+              minWidth: 6, minHeight: 6,
+              transform: `translate3d(${minimapModel.viewport.x}px, ${minimapModel.viewport.y}px, 0)`,
+              boxSizing: 'border-box', border: '2px solid var(--accent)',
+              borderRadius: 4, background: 'rgba(14,165,233,0.13)',
+              boxShadow: '0 0 0 1px rgba(255,255,255,0.5) inset',
+              pointerEvents: 'none', willChange: 'transform, width, height',
+            }}
+          />
+        </div>
+      </aside>
+    );
+  };
+
   const renderBottomBar = () => (
     <>
       {/* Templates (bottom-left) */}
@@ -5471,6 +6410,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         </button>
       </div>
 
+      {renderMinimap()}
+
       {/* Zoom (bottom-right) */}
       <div
         style={{
@@ -5549,6 +6490,24 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           40%  { transform: scale(1.28); }
           100% { transform: scale(1); }
         }
+        @keyframes rb-editing-pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.35; }
+        }
+        @keyframes rb-selection-aura {
+          0%, 100% {
+            box-shadow:
+              0 0 0 2px hsl(var(--rb-selector-hue) 78% 52% / 0.72),
+              0 0 12px 3px hsl(var(--rb-selector-hue) 82% 55% / 0.42),
+              0 0 24px 7px hsl(var(--rb-selector-hue) 86% 60% / 0.18);
+          }
+          50% {
+            box-shadow:
+              0 0 0 3px hsl(var(--rb-selector-hue) 82% 50% / 0.90),
+              0 0 20px 6px hsl(var(--rb-selector-hue) 86% 55% / 0.58),
+              0 0 34px 12px hsl(var(--rb-selector-hue) 90% 62% / 0.28);
+          }
+        }
         @keyframes rb-vote-float {
           0%   { opacity: 0; transform: translate(-50%, 0) scale(0.6); }
           20%  { opacity: 1; transform: translate(-50%, -10px) scale(1.1); }
@@ -5579,8 +6538,33 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         .rb-comment-slide {
           animation: rb-comment-slide ${COMMENT_CAROUSEL_MS}ms ease-in-out both;
         }
+        .rb-editing-dot {
+          animation: rb-editing-pulse 1.1s ease-in-out infinite;
+        }
+        .rb-remote-selected-card {
+          --rb-selector-hue: 200;
+          box-shadow:
+            0 0 0 2px hsl(var(--rb-selector-hue) 78% 52% / 0.72),
+            0 0 12px 3px hsl(var(--rb-selector-hue) 82% 55% / 0.42),
+            0 0 24px 7px hsl(var(--rb-selector-hue) 86% 60% / 0.18);
+          animation: rb-selection-aura 1.8s ease-in-out infinite;
+        }
+        .rb-minimap-surface:focus-visible {
+          outline: 3px solid var(--accent) !important;
+          outline-offset: 2px;
+        }
+        @media (max-width: 700px) {
+          .rb-minimap {
+            transform: scale(0.82);
+            transform-origin: bottom right;
+          }
+        }
         @media (prefers-reduced-motion: reduce) {
           .rb-comment-slide { animation: none !important; }
+          .rb-minimap { transition: none !important; }
+          .rb-player-cursor { transition: none !important; }
+          .rb-editing-dot { animation: none !important; }
+          .rb-remote-selected-card { animation: none !important; }
         }
         .rb-no-select * { user-select: none; }
       `}</style>
@@ -5603,6 +6587,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         onMouseDownCapture={onCanvasMouseDownCapture}
         onMouseDown={onCanvasMouseDown}
         onDoubleClick={onCanvasDoubleClick}
+        onPointerMove={onCanvasPointerActivity}
+        onPointerLeave={clearLocalCursor}
+        onPointerCancel={clearLocalCursor}
         onDragOver={onCanvasDragOver}
         onDrop={onCanvasDrop}
         className="rb-no-select"
@@ -5624,7 +6611,116 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
             transformOrigin: '0 0',
           }}
         >
+          {/* A fixed-size, invisible world-space ruler. Its rendered rect lets
+              external file drops invert the browser's fully-composed transform
+              without guessing how CSS/browser zoom affected the canvas. */}
+          <div
+            ref={worldMeasureRef}
+            aria-hidden="true"
+            style={{
+              position: 'absolute', left: 0, top: 0,
+              width: 100, height: 100,
+              opacity: 0, pointerEvents: 'none',
+            }}
+          />
           {renderedItems}
+
+          {/* Remote card selection label. The glow itself is applied directly
+              to each selected card instead of drawing a second card-sized
+              layer over it. */}
+          {selectionIndicators.map(({ item, selector }) => {
+            const zoom = Math.max(viewport.zoom, 0.01);
+            const selectorHue = hueFromId(selector.userId);
+            const color = `hsl(${selectorHue} 72% 46%)`;
+            const label = selector.extraCount > 0
+              ? t('selection.byMany', { name: selector.name, n: selector.extraCount })
+              : t('selection.by', { name: selector.name });
+            return (
+              <React.Fragment key={`selection:${item.id}`}>
+                <div
+                  role="status"
+                  aria-label={label}
+                  style={{
+                    position: 'absolute', left: item.x,
+                    top: item.y - (34 / zoom),
+                    transform: `scale(${1 / zoom})`, transformOrigin: 'top left',
+                    display: 'inline-flex', alignItems: 'center', gap: 7,
+                    maxWidth: 240, padding: '5px 9px 5px 7px',
+                    borderRadius: 999, background: color, color: '#ffffff',
+                    boxShadow: '0 3px 10px rgba(0,0,0,0.22)',
+                    fontFamily: '"Sarabun", "Plus Jakarta Sans", sans-serif',
+                    fontSize: 13, lineHeight: 1.2, fontWeight: 700,
+                    whiteSpace: 'nowrap', pointerEvents: 'none',
+                    zIndex: 2147483644,
+                  }}
+                >
+                  <MousePointer2 size={13} style={{ flex: '0 0 auto' }} />
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
+                </div>
+              </React.Fragment>
+            );
+          })}
+
+          {/* Collaboration editing presence. Kept outside each card so the
+              badge is never clipped by card paint-containment, and counter-
+              scaled so names stay readable at every board zoom level. */}
+          {editingIndicators.map(({ item, editor }) => {
+            const zoom = Math.max(viewport.zoom, 0.01);
+            const width = item.w || (item.type === 'sticky' ? STICKY_W : item.type === 'text' ? TEXT_W : 200);
+            const height = item.h || (item.type === 'sticky' ? STICKY_H : item.type === 'text' ? TEXT_H : 200);
+            const titleHeight = item.type === 'zone'
+              ? Math.max(ZONE_TITLE_H, (item.fontSize || 16) + 18)
+              : 0;
+            const boxTop = item.y - titleHeight;
+            const boxHeight = height + titleHeight;
+            const editorHue = hueFromId(editor.userId);
+            const color = `hsl(${editorHue} 72% 46%)`;
+            const glow = `hsl(${editorHue} 72% 46% / 0.18)`;
+            const label = editor.extraCount > 0
+              ? t('editing.byMany', { name: editor.name, n: editor.extraCount })
+              : t('editing.by', { name: editor.name });
+            return (
+              <React.Fragment key={`editing:${item.id}`}>
+                <div
+                  aria-hidden="true"
+                  style={{
+                    position: 'absolute', left: item.x, top: boxTop,
+                    width, height: boxHeight, boxSizing: 'border-box',
+                    border: `${2 / zoom}px solid ${color}`,
+                    borderRadius: `${7 / zoom}px`,
+                    boxShadow: `0 0 0 ${3 / zoom}px ${glow}`,
+                    pointerEvents: 'none', zIndex: 2147483645,
+                  }}
+                />
+                <div
+                  role="status"
+                  aria-label={label}
+                  style={{
+                    position: 'absolute', left: item.x,
+                    top: boxTop + boxHeight + (8 / zoom),
+                    transform: `scale(${1 / zoom})`, transformOrigin: 'top left',
+                    display: 'inline-flex', alignItems: 'center', gap: 7,
+                    maxWidth: 240, padding: '5px 9px 5px 7px',
+                    borderRadius: 999, background: color, color: '#ffffff',
+                    boxShadow: '0 3px 10px rgba(0,0,0,0.24)',
+                    fontFamily: '"Sarabun", "Plus Jakarta Sans", sans-serif',
+                    fontSize: 13, lineHeight: 1.2, fontWeight: 700,
+                    whiteSpace: 'nowrap', pointerEvents: 'none',
+                    zIndex: 2147483646,
+                  }}
+                >
+                  <span
+                    className="rb-editing-dot"
+                    style={{
+                      width: 7, height: 7, borderRadius: '50%',
+                      background: '#ffffff', flex: '0 0 auto',
+                    }}
+                  />
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
+                </div>
+              </React.Fragment>
+            );
+          })}
 
           {/* Zone-creation preview */}
           {zonePreview && (
@@ -5660,8 +6756,107 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         )}
       </div>
 
+      {/* Remote player cursors use world coordinates from Yjs Awareness, then
+          map through this client's viewport. The layer is screen-space so the
+          pointer and name stay readable at every board zoom level. */}
+      <div
+        ref={cursorLayerRef}
+        aria-hidden="true"
+        style={{
+          position: 'fixed', inset: 0, zIndex: 36,
+          overflow: 'hidden', pointerEvents: 'none',
+        }}
+      >
+        {playerCursors.map((player) => {
+          const screen = cursorScreenPosition(player.cursor, viewportRef.current);
+          const color = `hsl(${hueFromId(player.userId)} 72% 46%)`;
+          return (
+            <div
+              key={player.userId}
+              className="rb-player-cursor"
+              data-cursor-x={player.cursor.x}
+              data-cursor-y={player.cursor.y}
+              style={{
+                position: 'absolute', left: 0, top: 0,
+                transform: `translate3d(${screen.x}px, ${screen.y}px, 0)`,
+                transition: 'transform 18ms linear',
+                willChange: 'transform',
+                display: 'flex', alignItems: 'flex-start',
+              }}
+            >
+              <MousePointer2
+                size={23}
+                color="#ffffff"
+                fill={color}
+                strokeWidth={2.6}
+                style={{ filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.38))', flex: '0 0 auto' }}
+              />
+              <span
+                style={{
+                  marginLeft: -2, marginTop: 17,
+                  maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  padding: '4px 8px', borderRadius: '4px 9px 9px 9px',
+                  background: color, color: '#ffffff',
+                  fontSize: 13, lineHeight: 1.15, fontWeight: 700,
+                  boxShadow: '0 2px 7px rgba(0,0,0,0.2)',
+                }}
+              >
+                {player.name}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
       {/* Floating UI */}
       {renderTopBar()}
+      {followedUserId && (
+        <div
+          role="status"
+          style={{
+            position: 'fixed', top: 72, left: '50%', zIndex: 49,
+            transform: 'translateX(-50%)',
+            display: 'flex', alignItems: 'center', gap: 9,
+            maxWidth: 'calc(100vw - 32px)', padding: '7px 8px 7px 11px',
+            background: 'var(--bg-overlay)', color: 'var(--text)',
+            border: '1px solid var(--border-strong)', borderRadius: 999,
+            boxShadow: '0 8px 24px rgba(0,0,0,0.16)',
+            backdropFilter: 'blur(10px)', animation: 'rb-banner-in 0.2s ease-out',
+          }}
+        >
+          <LocateFixed
+            size={16}
+            color={`hsl(${hueFromId(followedUserId)} 72% 46%)`}
+            style={{ flex: '0 0 auto' }}
+          />
+          <span style={{ fontSize: 14, fontWeight: 700, whiteSpace: 'nowrap' }}>
+            {t('follow.active', {
+              name: followedPlayer?.name || presence[followedUserId]?.name || 'Guest',
+            })}
+          </span>
+          {!followedView && !followedCursor && (
+            <span style={{
+              minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              fontSize: 12, color: 'var(--text-muted)',
+            }}
+            >{t('follow.waiting')}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={stopFollowing}
+            title={t('follow.stop')}
+            aria-label={t('follow.stop')}
+            style={{
+              width: 28, height: 28, display: 'grid', placeItems: 'center',
+              flex: '0 0 auto', border: 'none', borderRadius: '50%',
+              background: 'var(--bg-panel-2)', color: 'var(--text-mid)', cursor: 'pointer',
+            }}
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
       {renderBottomBar()}
       {renderTimerDocks()}
       {renderActionToolbar()}
@@ -5715,6 +6910,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
             <input
               autoFocus
               value={nameDraft}
+              maxLength={DISPLAY_NAME_MAX_LENGTH}
               onChange={(e) => setNameDraft(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') saveName(); }}
               placeholder={t('name.placeholder')}
@@ -5870,10 +7066,31 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
             </div>
             <div style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 18 }}>
               {importBusy ? t('import.processing') : t('import.confirm.body', {
-                n: pendingImport.parsed?.board?.items?.length ?? 0,
+                n: pendingImport.items.length,
                 file: pendingImport.name,
               })}
             </div>
+            {pendingImport.sourceFormat === 'csv' && (
+              <div
+                role="note"
+                style={{ fontSize: 13, color: 'var(--warn-text)', marginTop: -8, marginBottom: 18 }}
+              >{t('import.csv.warning', {
+                votes: pendingImport.csvSummary?.voteCountLost ?? 0,
+                skipped: pendingImport.csvSummary?.skippedRows ?? 0,
+              })}
+              </div>
+            )}
+            {(pendingImport.geometryRepairs?.positions > 0
+              || pendingImport.geometryRepairs?.zoneDimensions > 0) && (
+              <div
+                role="note"
+                style={{ fontSize: 13, color: 'var(--warn-text)', marginTop: -8, marginBottom: 18 }}
+              >{t('import.geometry.warning', {
+                positions: pendingImport.geometryRepairs.positions,
+                zones: pendingImport.geometryRepairs.zoneDimensions,
+              })}
+              </div>
+            )}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <button
                 type="button"
@@ -6660,6 +7877,7 @@ function SaveTemplateModal({ onClose, onSave, zoneCount }) {
         <input
           autoFocus
           value={name}
+          maxLength={TEMPLATE_NAME_MAX_LENGTH}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) onSave(name); if (e.key === 'Escape') onClose(); }}
           placeholder={t('tmpl.saveDialog.placeholder')}
