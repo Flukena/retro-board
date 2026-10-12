@@ -49,7 +49,7 @@ function RoomBootstrapScreen({ status, retryAfterSeconds, onRetry }) {
       style={{
         position: 'fixed', inset: 0, display: 'grid', placeItems: 'center',
         padding: 24, boxSizing: 'border-box', background: 'var(--bg)', color: 'var(--text)',
-        fontFamily: '"Plus Jakarta Sans", "Sarabun", sans-serif',
+        fontFamily: 'var(--font-ui)',
       }}
     >
       <section
@@ -79,7 +79,7 @@ function RoomBootstrapScreen({ status, retryAfterSeconds, onRetry }) {
               onClick={onRetry}
               style={{
                 padding: '9px 15px', border: 'none', borderRadius: 9,
-                background: 'var(--accent)', color: '#fff', cursor: 'pointer', fontWeight: 700,
+                background: 'var(--accent)', color: 'var(--accent-fg)', cursor: 'pointer', fontWeight: 700,
               }}
             >
               {t('room.bootstrap.retry')}

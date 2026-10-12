@@ -853,7 +853,7 @@ const StickyCard = React.memo(function StickyCard({
           padding: 12, boxSizing: 'border-box', contain: 'layout paint style',
           transform: `rotate(${it.rotation || 0}deg)`, cursor: 'grab',
           color: it.fontColor || STICKY_AUTO_TEXT, fontSize: it.fontSize || 15,
-          fontFamily: 'Sarabun, Inter, system-ui, sans-serif',
+          fontFamily: 'var(--font-ui)',
           overflow: 'hidden', userSelect: 'none',
         }}
       >
@@ -915,7 +915,7 @@ const StickyCard = React.memo(function StickyCard({
         // Sarabun (Thai) leads so a Thai cluster's consonant + สระ + วรรณยุกต์
         // are shaped by one font — otherwise marks split to a fallback font and
         // detach. Sarabun also covers Latin, so mixed text stays consistent.
-        fontFamily: '"Sarabun", "Plus Jakarta Sans", sans-serif',
+        fontFamily: 'var(--font-ui)',
         fontSize: it.fontSize || 15,
         lineHeight: 1.5,
         color: 'var(--text)',
@@ -5589,7 +5589,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           background: 'transparent', border: 'none', cursor: 'pointer',
           padding: '4px 8px', borderRadius: 8, color: 'var(--text)',
           display: 'flex', alignItems: 'center', gap: 6,
-          fontWeight: 800, fontSize: 18,
+          fontWeight: 500, fontSize: 18, fontFamily: 'var(--font-display)',
         }}
       >
         <Sparkles size={18} color="var(--accent)" /> {t('app.title')}
@@ -5614,7 +5614,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
             display: 'inline-flex', alignItems: 'center', gap: 6,
             background: 'var(--bg-panel-2)', border: '1px solid #e5e7eb',
             borderRadius: 999, padding: '4px 10px',
-            fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
+            fontFamily: 'var(--font-mono)',
             fontSize: 12, fontWeight: 700, color: 'var(--accent)',
             cursor: 'pointer',
           }}
@@ -5848,7 +5848,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           style={{
             display: 'inline-flex', alignItems: 'center', gap: 6,
             padding: '4px 10px', borderRadius: 999,
-            background: 'var(--accent)', color: '#fff',
+            background: 'var(--accent)', color: 'var(--accent-fg)',
             fontSize: 12, fontWeight: 700,
             border: 'none', cursor: 'pointer',
             marginLeft: 4,
@@ -5928,8 +5928,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                       title={t('players.votesTooltip')}
                       style={{
                         fontSize: 11, fontVariantNumeric: 'tabular-nums',
-                        color: isFull ? 'var(--ok-text, #047857)' : 'var(--text-muted)',
-                        background: isFull ? 'var(--ok-bg, #d1fae5)' : 'var(--bg-panel-2)',
+                        color: isFull ? 'var(--ok-text)' : 'var(--text-muted)',
+                        background: isFull ? 'var(--ok-bg)' : 'var(--bg-panel-2)',
                         padding: '2px 6px', borderRadius: 999, fontWeight: 600,
                       }}
                     >
@@ -5961,7 +5961,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                           flex: '0 0 auto', borderRadius: 8, cursor: 'pointer',
                           border: `1px solid ${isFollowing ? 'var(--accent)' : 'var(--border)'}`,
                           background: isFollowing ? 'var(--accent)' : 'var(--bg-panel)',
-                          color: isFollowing ? '#ffffff' : 'var(--text-mid)',
+                          color: isFollowing ? 'var(--accent-fg)' : 'var(--text-mid)',
                         }}
                       >
                         <LocateFixed size={15} />
@@ -6318,7 +6318,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           style={{
             ...floatBtn,
             background: creationMode === 'select' ? 'var(--accent)' : 'var(--bg-panel)',
-            color: creationMode === 'select' ? '#fff' : 'var(--text)',
+            color: creationMode === 'select' ? 'var(--accent-fg)' : 'var(--text)',
           }}
           title={creationMode === 'select' ? t('tool.select.active') : t('tool.select.title')}
         >
@@ -6348,7 +6348,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           style={{
             ...floatBtn,
             background: creationMode === 'zone' ? 'var(--accent)' : 'var(--bg-panel)',
-            color: creationMode === 'zone' ? '#fff' : 'var(--text)',
+            color: creationMode === 'zone' ? 'var(--accent-fg)' : 'var(--text)',
           }}
           title={creationMode === 'zone' ? t('tool.zone.active') : t('tool.zone.title')}
         >
@@ -6405,7 +6405,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         position: 'fixed', inset: 0, display: 'flex',
         alignItems: 'center', justifyContent: 'center',
         background: 'var(--bg)', color: 'var(--text-muted)',
-        fontFamily: '"Plus Jakarta Sans", "Sarabun", sans-serif',
+        fontFamily: 'var(--font-ui)',
       }}
       >{t('loading') || 'Loading…'}
       </div>
@@ -6415,16 +6415,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   return (
     <div
       onContextMenu={(e) => e.preventDefault()}
-      style={{ position: 'fixed', inset: 0, overflow: 'hidden', fontFamily: '"Plus Jakarta Sans", "Sarabun", sans-serif' }}
+      style={{ position: 'fixed', inset: 0, overflow: 'hidden', fontFamily: 'var(--font-ui)' }}
     >
-      {/* Google fonts */}
-      <link rel="preconnect" href="https://fonts.googleapis.com" />
-      <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
-      <link
-        href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&family=Sarabun:wght@400;600;700&family=Caveat:wght@400;700&display=swap"
-        rel="stylesheet"
-      />
-
       <style>{`
         @keyframes rb-pulse {
           0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(220,38,38,0.5); }
@@ -6603,7 +6595,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                     maxWidth: 240, padding: '5px 9px 5px 7px',
                     borderRadius: 999, background: color, color: '#ffffff',
                     boxShadow: '0 3px 10px rgba(0,0,0,0.22)',
-                    fontFamily: '"Sarabun", "Plus Jakarta Sans", sans-serif',
+                    fontFamily: 'var(--font-ui)',
                     fontSize: 13, lineHeight: 1.2, fontWeight: 700,
                     whiteSpace: 'nowrap', pointerEvents: 'none',
                     zIndex: Z.REMOTE_SELECTION_LABEL,
@@ -6658,7 +6650,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                     maxWidth: 240, padding: '5px 9px 5px 7px',
                     borderRadius: 999, background: color, color: '#ffffff',
                     boxShadow: '0 3px 10px rgba(0,0,0,0.24)',
-                    fontFamily: '"Sarabun", "Plus Jakarta Sans", sans-serif',
+                    fontFamily: 'var(--font-ui)',
                     fontSize: 13, lineHeight: 1.2, fontWeight: 700,
                     whiteSpace: 'nowrap', pointerEvents: 'none',
                     zIndex: Z.REMOTE_EDITOR_LABEL,
@@ -6881,7 +6873,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                 type="button"
                 onClick={saveName}
                 style={{
-                  background: 'var(--accent)', color: '#fff', border: 'none',
+                  background: 'var(--accent)', color: 'var(--accent-fg)', border: 'none',
                   padding: '8px 16px', borderRadius: 8, fontWeight: 600,
                   cursor: 'pointer', fontSize: 14,
                 }}
@@ -6933,7 +6925,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                 type="button"
                 onClick={() => requireAdminPin(adminUnlockAll)}
                 style={{
-                  background: 'var(--accent)', color: '#fff', border: 'none',
+                  background: 'var(--accent)', color: 'var(--accent-fg)', border: 'none',
                   padding: '8px 16px', borderRadius: 8, fontWeight: 600,
                   cursor: 'pointer', fontSize: 14,
                 }}
@@ -6986,7 +6978,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                 type="button"
                 onClick={() => requireAdminPin(adminResetVotes)}
                 style={{
-                  background: 'var(--accent)', color: '#fff', border: 'none',
+                  background: 'var(--accent)', color: 'var(--accent-fg)', border: 'none',
                   padding: '8px 16px', borderRadius: 8, fontWeight: 600,
                   cursor: 'pointer', fontSize: 14,
                 }}
@@ -7065,7 +7057,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                 onClick={confirmImport}
                 disabled={importBusy}
                 style={{
-                  background: 'var(--accent)', color: '#fff', border: 'none',
+                  background: 'var(--accent)', color: 'var(--accent-fg)', border: 'none',
                   padding: '8px 16px', borderRadius: 8, fontWeight: 600,
                   cursor: importBusy ? 'not-allowed' : 'pointer', fontSize: 14,
                   opacity: importBusy ? 0.6 : 1,
@@ -7200,7 +7192,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                 type="button"
                 onClick={() => requireAdminPin(adminClearBoard)}
                 style={{
-                  background: 'var(--danger)', color: '#fff', border: 'none',
+                  background: 'var(--danger)', color: 'var(--danger-fg)', border: 'none',
                   padding: '8px 16px', borderRadius: 8, fontWeight: 600,
                   cursor: 'pointer', fontSize: 14,
                 }}
@@ -7218,7 +7210,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           style={{
             position: 'fixed', bottom: 80, left: '50%', transform: 'translateX(-50%)',
             background: toast.type === 'warn' ? 'var(--toast-warn-bg)' : 'var(--toast-bg)',
-            color: '#fff', padding: '10px 16px', borderRadius: 10,
+            color: 'var(--toast-text)', padding: '10px 16px', borderRadius: 10,
             fontSize: 14, fontWeight: 500, zIndex: Z.TOAST,
             boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
             animation: 'rb-toast-in 0.28s ease-out',
@@ -7232,7 +7224,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
               onClick={() => setToast(null)}
               aria-label={t('common.close')}
               style={{
-                background: 'transparent', border: 'none', color: '#fff',
+                background: 'transparent', border: 'none', color: 'var(--toast-text)',
                 opacity: 0.8, cursor: 'pointer', padding: 2, display: 'inline-flex',
               }}
             ><X size={14} />
@@ -7415,7 +7407,7 @@ function CommentsModal({ item, comments, editingAllowed, onAdd, onDelete, onClos
               onClick={submit}
               disabled={!editingAllowed || !draft.trim()}
               style={{
-                background: 'var(--accent)', color: '#fff', border: 'none',
+                background: 'var(--accent)', color: 'var(--accent-fg)', border: 'none',
                 padding: '8px 16px', borderRadius: 8, fontWeight: 600, fontSize: 14,
                 cursor: (!editingAllowed || !draft.trim()) ? 'not-allowed' : 'pointer',
                 opacity: (!editingAllowed || !draft.trim()) ? 0.5 : 1,
@@ -7490,7 +7482,7 @@ function AdminPinModal({ cfg, onCancel, onSubmit }) {
             letterSpacing: 6, textAlign: 'center',
             border: '1px solid var(--border)', borderRadius: 8, outline: 'none',
             background: 'var(--bg-panel)', color: 'var(--text)',
-            boxSizing: 'border-box', fontFamily: 'ui-monospace, monospace',
+            boxSizing: 'border-box', fontFamily: 'var(--font-mono)',
           }}
         />
         {isSetting && (
@@ -7507,7 +7499,7 @@ function AdminPinModal({ cfg, onCancel, onSubmit }) {
               letterSpacing: 6, textAlign: 'center',
               border: '1px solid var(--border)', borderRadius: 8, outline: 'none',
               background: 'var(--bg-panel)', color: 'var(--text)',
-              boxSizing: 'border-box', fontFamily: 'ui-monospace, monospace',
+              boxSizing: 'border-box', fontFamily: 'var(--font-mono)',
             }}
           />
         )}
@@ -7543,7 +7535,7 @@ function AdminPinModal({ cfg, onCancel, onSubmit }) {
             onClick={submit}
             disabled={!valid || !matches || busy}
             style={{
-              background: 'var(--accent)', color: '#fff', border: 'none',
+              background: 'var(--accent)', color: 'var(--accent-fg)', border: 'none',
               padding: '8px 16px', borderRadius: 8, fontWeight: 600,
               cursor: (!valid || !matches || busy) ? 'not-allowed' : 'pointer',
               opacity: (!valid || !matches || busy) ? 0.5 : 1,
@@ -7797,7 +7789,7 @@ function TimerSetup({ onClose, onStart, nestedZoneCount }) {
         onClick={submit}
         style={{
           width: '100%', padding: '10px 0',
-          background: 'var(--accent)', color: '#fff', border: 'none',
+          background: 'var(--accent)', color: 'var(--accent-fg)', border: 'none',
           borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: 'pointer',
           boxShadow: '0 4px 12px rgba(14,165,233,0.35)',
         }}
@@ -7860,7 +7852,7 @@ function SaveTemplateModal({ onClose, onSave, zoneCount }) {
             onClick={() => onSave(name)}
             style={{
               background: name.trim() && zoneCount > 0 ? 'var(--accent)' : 'var(--text-faint)',
-              color: '#fff', border: 'none',
+              color: 'var(--accent-fg)', border: 'none',
               padding: '8px 16px', borderRadius: 8, fontWeight: 600,
               cursor: name.trim() && zoneCount > 0 ? 'pointer' : 'not-allowed',
               fontSize: 14,

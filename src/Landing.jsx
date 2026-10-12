@@ -139,19 +139,12 @@ export default function Landing() {
         background: 'var(--bg)',
         backgroundImage: 'radial-gradient(circle, var(--grid-dot) 1px, transparent 1px)',
         backgroundSize: '24px 24px',
-        fontFamily: '"Plus Jakarta Sans", "Sarabun", sans-serif',
+        fontFamily: 'var(--font-ui)',
         color: 'var(--text)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         padding: '40px 20px', boxSizing: 'border-box',
       }}
     >
-      <link rel="preconnect" href="https://fonts.googleapis.com" />
-      <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
-      <link
-        href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&family=Sarabun:wght@400;600;700&family=Caveat:wght@400;700&display=swap"
-        rel="stylesheet"
-      />
-
       {/* Top-right corner: lang + theme toggle */}
       <div style={{
         position: 'fixed', top: 16, right: 16, display: 'flex', gap: 8, zIndex: 10,
@@ -180,7 +173,7 @@ export default function Landing() {
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 24 }}>
           <div style={{
-            background: 'var(--accent)', color: '#fff', borderRadius: 12,
+            background: 'var(--accent)', color: 'var(--accent-fg)', borderRadius: 12,
             width: 44, height: 44, display: 'flex',
             alignItems: 'center', justifyContent: 'center',
           }}
@@ -188,7 +181,7 @@ export default function Landing() {
             <Sparkles size={22} />
           </div>
           <div>
-            <div style={{ fontSize: 22, fontWeight: 800 }}>{t('app.title')}</div>
+            <div style={{ fontSize: 22, fontWeight: 500, fontFamily: 'var(--font-display)' }}>{t('app.title')}</div>
             <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
               {t('app.tagline')}
             </div>
@@ -289,7 +282,7 @@ export default function Landing() {
                     }}
                   >
                     <span style={{
-                      fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
+                      fontFamily: 'var(--font-mono)',
                       fontSize: 13, fontWeight: 700, color: 'var(--accent)',
                     }}
                     >
@@ -356,7 +349,7 @@ const primaryBtn = {
   alignItems: 'center',
   gap: 6,
   background: 'var(--accent)',
-  color: '#fff',
+  color: 'var(--accent-fg)',
   border: 'none',
   borderRadius: 10,
   padding: '10px 16px',
