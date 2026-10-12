@@ -24,3 +24,12 @@ test('timer phase remains stable between ticks before the deadline', () => {
     voteTimerPhaseSignature(items, 9_999),
   );
 });
+
+test('setup inputs clamp at contract boundaries and invalid numeric input uses the minimum', async () => {
+  const { clampTimerMinutes, clampVoteLimit } = await import('./vote-timing.js');
+  for (const [clamp, maximum] of [[clampTimerMinutes, 120], [clampVoteLimit, 50]]) {
+    for (const [input, expected] of [[0, 1], [1, 1], [3, 3], [maximum, maximum], [maximum + 1, maximum], [NaN, 1]]) {
+      assert.equal(clamp(input), expected);
+    }
+  }
+});

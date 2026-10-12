@@ -39,3 +39,26 @@ export function timerDockModel(zone, now) {
     label: remainingMs == null ? null : timerLabel(remainingMs),
   };
 }
+
+export const TIMER_PRESETS = Object.freeze([1, 3, 5, 10]);
+export const VOTE_LIMIT_PRESETS = Object.freeze([1, 3, 5, 10]);
+export const TIMER_MIN_MINUTES = 1;
+export const TIMER_MAX_MINUTES = 120;
+export const VOTE_LIMIT_MIN_VOTES = 1;
+export const VOTE_LIMIT_MAX_VOTES = 50;
+export const TIMER_DEFAULT_MINUTES = 3;
+export const VOTE_LIMIT_DEFAULT_VOTES = 3;
+
+function clampSetupNumber(value, minimum, maximum) {
+  return Math.max(minimum, Math.min(maximum, Number(value) || minimum));
+}
+
+export function clampTimerMinutes(value) {
+  return clampSetupNumber(value, TIMER_MIN_MINUTES, TIMER_MAX_MINUTES);
+}
+export function clampVoteLimit(value) {
+  return clampSetupNumber(value, VOTE_LIMIT_MIN_VOTES, VOTE_LIMIT_MAX_VOTES);
+}
+export function timerSetupArguments({ minutes, votes, noTimeLimit, unlimitedVotes, hideResults, showNonVoters }) {
+  return [noTimeLimit ? 0 : minutes, unlimitedVotes ? null : votes, hideResults, showNonVoters];
+}

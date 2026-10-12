@@ -130,3 +130,9 @@ test('idle vote text meets AA contrast on its composited background over each pa
     }
   }
 });
+
+test('toast shadow resolves in both modes', () => {
+  for (const tokens of Object.values(TOKENS)) {
+    for (const name of ['--shadow-toast', '--minimap-viewport-bg', '--zone-preview-bg']) assert.ok(tokens[name]);
+  }
+});

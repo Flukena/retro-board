@@ -5,11 +5,10 @@ import React, {
   useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, startTransition,
 } from 'react';
 import {
-  Trash2, Lock, Unlock, Eye, EyeOff,
-  ThumbsUp, Square,
-  X, AlertCircle, Type,
+  Trash2, Lock, Unlock, ThumbsUp,
+  X, AlertCircle,
   MousePointer2, RotateCcw,
-  Download, Upload, BringToFront, SendToBack, HelpCircle,
+  Upload, HelpCircle,
   MessageSquare, Map as MapIcon,
 } from 'lucide-react';
 import { COMMENT_MAX_LEN } from './src/comment-schema.js';
@@ -44,18 +43,20 @@ import { ToolDock, TOOL_ID } from './src/ToolDock.jsx';
 import { ZoomControls } from './src/ZoomControls.jsx';
 import { TopCenterStack } from './src/TopCenterStack.jsx';
 import { templateRows, followBannerModel } from './src/chrome-model.js';
+import { SelectionToolbar, GroupSelectionToolbar } from './src/SelectionToolbar.jsx';
+import { selectionToolbarAnchor, groupSelectionToolbarAnchor } from './src/selection-toolbar-model.js';
+import { Toast } from './src/Toast.jsx';
 import { TopBar } from './src/TopBar.jsx';
 import { adminPillModel, playerRows, shareLinkModel } from './src/topbar-model.js';
 import { hueFromId, playerAccentColor } from './src/player-colors.js';
 import { t, useLang } from './src/i18n.js';
 import { getActiveRoomSession, roomFetch } from './src/room-session.js';
 import { useTheme, nextThemePref } from './src/theme.js';
-import { PALETTE, FONT_COLORS, STICKY_AUTO_TEXT } from './src/palette.js';
+import { PALETTE, STICKY_AUTO_TEXT } from './src/palette.js';
 import { stickyClassName, stickyCardVars, zoneCardVars, medalLook } from './src/card-look.js';
 import './src/board-cards.css';
 import {
-  MINIMAP_BOTTOM_PX, TOAST_BOTTOM_PX,
-  SELECTION_TOOLBAR_GAP_PX, GRID_PITCH_PX, toolbarAnchorY, topStackHeightPx, Z,
+  MINIMAP_BOTTOM_PX, GRID_PITCH_PX, topStackHeightPx, Z,
 } from './src/chrome-layout.js';
 import { useUserIdentity } from './src/useUserIdentity.js';
 import { useAdminRole } from './src/useAdminRole.js';
@@ -209,7 +210,6 @@ const getTemplates = () => ({
   },
 });
 
-const TIMER_PRESETS = [1, 3, 5, 10];
 
 // Help modal sections, in display order. `color` indexes PALETTE so each
 // section's accent dot matches a real sticky-note color from the palette.
@@ -1421,7 +1421,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [timerSetupOpen, setTimerSetupOpen] = useState(false);
   const [followedUserId, setFollowedUserId] = useState(null);
-  const [fontColorOpen, setFontColorOpen] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
   const [commentsOpenFor, setCommentsOpenFor] = useState(null);
@@ -5055,63 +5054,25 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     ],
   );
 
+  const renderGroupSelectionToolbar = (viewport) => {
+    const lockedCount = board.items.reduce((count, item) => (
+      selectedIds.has(item.id) && item.locked ? count + 1 : count
+    ), 0);
+    return (
+      <GroupSelectionToolbar
+        anchor={groupSelectionToolbarAnchor(groupBBox, viewport, stackHeightPx)}
+        lockedCount={lockedCount}
+        canUnlock={editingAllowed && lockedCount > 0}
+        onUnlockAll={unlockSelectedItems}
+      />
+    );
+  };
+
   const renderActionToolbar = () => {
     if (focusedTextId) return null;
-    const v = viewportRef.current;
-    if (groupBBox && selectedIds.size > 1) {
-      const lockedCount = board.items.reduce((count, item) => (
-        selectedIds.has(item.id) && item.locked ? count + 1 : count
-      ), 0);
-      const canUnlock = editingAllowed && lockedCount > 0;
-      const sx = (groupBBox.x + groupBBox.w / 2) * v.zoom + v.x;
-      const sy = toolbarAnchorY(groupBBox.y * v.zoom + v.y - SELECTION_TOOLBAR_GAP_PX, stackHeightPx);
-      return (
-        <div
-          style={{
-            position: 'fixed', left: sx, top: sy,
-            transform: 'translate(-50%, -100%)',
-            background: 'var(--bg-panel)', borderRadius: 10,
-            boxShadow: '0 8px 20px rgba(0,0,0,0.18)',
-            padding: '6px 8px', display: 'flex', alignItems: 'center',
-            zIndex: Z.SELECTION_TOOLBAR, pointerEvents: 'auto', animation: 'rb-pop 0.18s ease-out',
-          }}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <button
-            type="button"
-            onClick={unlockSelectedItems}
-            disabled={!canUnlock}
-            title={lockedCount > 0
-              ? t('selection.unlockAll', { n: lockedCount })
-              : t('selection.nothingLocked')}
-            style={{ ...iconBtn(canUnlock), gap: 5, padding: '5px 8px' }}
-          >
-            <Unlock size={15} />
-            <span style={{ fontSize: 12, fontWeight: 600 }}>
-              {t('selection.unlockAll', { n: lockedCount })}
-            </span>
-          </button>
-        </div>
-      );
-    }
+    const viewport = viewportRef.current;
+    if (groupBBox && selectedIds.size > 1) return renderGroupSelectionToolbar(viewport);
     if (!selectedItem) return null;
-    let sx;
-    let sy;
-    if (selectedItem.type === 'zone') {
-      sx = selectedItem.x * v.zoom + v.x + (selectedItem.w * v.zoom) / 2;
-      sy = selectedItem.y * v.zoom + v.y - ZONE_TITLE_H * v.zoom - SELECTION_TOOLBAR_GAP_PX;
-    } else if (selectedItem.type === 'sticky' || selectedItem.type === 'image') {
-      const iw = selectedItem.w || (selectedItem.type === 'sticky' ? STICKY_W : 200);
-      sx = selectedItem.x * v.zoom + v.x + (iw * v.zoom) / 2;
-      sy = selectedItem.y * v.zoom + v.y - SELECTION_TOOLBAR_GAP_PX;
-    } else {
-      sx = selectedItem.x * v.zoom + v.x + 60;
-      sy = selectedItem.y * v.zoom + v.y - SELECTION_TOOLBAR_GAP_PX;
-    }
-    // The toolbar is translated upward by its own height. Keep its bottom
-    // anchor far enough below the inset top bar that admin controls cannot sit
-    // above it and intercept clicks (most visible on fitted/zoomed-out zones).
-    sy = toolbarAnchorY(sy, stackHeightPx);
     const can = canModifyOwnedItem(selectedItem);
     const canDelete = canDeleteItem(selectedItem);
     // A zone with no explicit override inherits visibility from its nearest
@@ -5128,228 +5089,36 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         )).length
       : 0;
     return (
-      <div
-        style={{
-          position: 'fixed',
-          left: sx,
-          top: sy,
-          transform: 'translate(-50%, -100%)',
-          background: 'var(--bg-panel)',
-          borderRadius: 10,
-          boxShadow: '0 8px 20px rgba(0,0,0,0.18)',
-          padding: '6px 8px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          zIndex: Z.SELECTION_TOOLBAR,
-          pointerEvents: 'auto',
-          animation: 'rb-pop 0.18s ease-out',
+      <SelectionToolbar
+        anchor={selectionToolbarAnchor(selectedItem, viewport, stackHeightPx)}
+        item={{
+          type: selectedItem.type, colorIndex: selectedItem.color,
+          fontSize: selectedItem.fontSize, fontColor: selectedItem.fontColor,
+          private: selectedItem.private, locked: selectedItem.locked,
+          revealed: selectedZoneRevealed, hasVoteTimer: !!selectedItem.voteTimer,
         }}
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        {(selectedItem.type === 'sticky' || selectedItem.type === 'zone') && (
-          <div style={{ display: 'flex', gap: 4 }}>
-            {PALETTE.map((c, i) => (
-              <button
-                key={i}
-                type="button"
-                onClick={() => can && updateItem(selectedItem.id, { color: i })}
-                disabled={!can}
-                aria-label={`color-${i}`}
-                style={{
-                  width: 18, height: 18, borderRadius: '50%',
-                  background: c.bg, border: `2px solid ${selectedItem.color === i ? '#1f2937' : c.border}`,
-                  cursor: can ? 'pointer' : 'not-allowed', padding: 0,
-                }}
-              />
-            ))}
-          </div>
-        )}
-        {(selectedItem.type === 'sticky' || selectedItem.type === 'zone' || selectedItem.type === 'text') && (
-          (() => {
-            const defaultFs = selectedItem.type === 'text' ? 40 : selectedItem.type === 'zone' ? 14 : 15;
-            const fs = selectedItem.fontSize || defaultFs;
-            const setFs = (next) => can && updateItem(selectedItem.id, { fontSize: Math.max(10, Math.min(96, next)) });
-            return (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 2, borderLeft: '1px solid var(--border-soft)', paddingLeft: 6, marginLeft: 2 }}>
-                <button
-                  type="button"
-                  onClick={() => setFs(fs - 2)}
-                  disabled={!can || fs <= 10}
-                  title={t('font.decrease')}
-                  style={{ ...iconBtn(can && fs > 10), fontWeight: 700, fontSize: 12 }}
-                >A−</button>
-                <span style={{
-                  minWidth: 24, textAlign: 'center', fontSize: 11,
-                  color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums',
-                }}
-                >{fs}</span>
-                <button
-                  type="button"
-                  onClick={() => setFs(fs + 2)}
-                  disabled={!can || fs >= 96}
-                  title={t('font.increase')}
-                  style={{ ...iconBtn(can && fs < 96), fontWeight: 700, fontSize: 15 }}
-                >A+</button>
-              </div>
-            );
-          })()
-        )}
-        {(selectedItem.type === 'sticky' || selectedItem.type === 'text') && (
-          <div style={{ position: 'relative' }}>
-            <button
-              type="button"
-              onClick={() => can && setFontColorOpen((o) => !o)}
-              disabled={!can}
-              title={t('font.color')}
-              style={iconBtn(can)}
-            >
-              <Type size={15} style={{
-                color: selectedItem.fontColor || 'currentColor',
-                // Outline so white/light swatches stay visible against the toolbar.
-                filter: selectedItem.fontColor === '#ffffff'
-                  ? 'drop-shadow(0 0 1px var(--text-mid))' : 'none',
-              }}
-              />
-            </button>
-            {fontColorOpen && (
-              <>
-                <div
-                  onMouseDown={() => setFontColorOpen(false)}
-                  style={{ position: 'fixed', inset: 0, zIndex: Z.TOOLBAR_POPOVER_BACKDROP }}
-                />
-                <div
-                  onMouseDown={(e) => e.stopPropagation()}
-                  style={{
-                    position: 'absolute', top: '100%', left: '50%',
-                    transform: 'translateX(-50%)', marginTop: 6,
-                    background: 'var(--bg-panel)', borderRadius: 10,
-                    boxShadow: '0 8px 20px rgba(0,0,0,0.18)',
-                    padding: 8, display: 'grid',
-                    gridTemplateColumns: 'repeat(5, 22px)',
-                    gap: 6, zIndex: Z.TOOLBAR_POPOVER,
-                  }}
-                >
-                  {FONT_COLORS.map((fc) => {
-                    const active = (selectedItem.fontColor ?? null) === fc.value;
-                    return (
-                      <button
-                        key={fc.label}
-                        type="button"
-                        onClick={() => {
-                          updateItem(selectedItem.id, { fontColor: fc.value });
-                          setFontColorOpen(false);
-                        }}
-                        title={fc.label}
-                        style={{
-                          width: 22, height: 22, borderRadius: '50%',
-                          background: fc.swatch,
-                          border: active
-                            ? '2px solid var(--accent)'
-                            : '1px solid var(--border)',
-                          cursor: 'pointer', padding: 0,
-                        }}
-                      />
-                    );
-                  })}
-                </div>
-              </>
-            )}
-          </div>
-        )}
-        {selectedItem.type === 'sticky' && (
-          <button
-            type="button"
-            onClick={() => can && updateItem(selectedItem.id, { private: !selectedItem.private })}
-            disabled={!can}
-            title={selectedItem.private ? t('sticky.privacyToggle.off') : t('sticky.privacyToggle.on')}
-            style={iconBtn(can)}
-          >
-            {selectedItem.private ? <Lock size={15} /> : <Unlock size={15} />}
-          </button>
-        )}
-        {selectedItem.type === 'zone' && (
-          <button
-            type="button"
-            onClick={() => can && updateItem(selectedItem.id, { locked: !selectedItem.locked })}
-            disabled={!can}
-            title={selectedItem.locked ? t('zone.lockToggle.off') : t('zone.lockToggle.on')}
-            style={iconBtn(can)}
-          >
-            {selectedItem.locked ? <Lock size={15} /> : <Unlock size={15} />}
-          </button>
-        )}
-        {selectedItem.type === 'zone' && (
-          <button
-            type="button"
-            onClick={() => exportZoneCsv(selectedItem)}
-            title={t('zone.exportCsvTitle')}
-            style={iconBtn(true)}
-          >
-            <Download size={15} />
-          </button>
-        )}
-        {selectedItem.type === 'zone' && isAdmin && (
-          <button
-            type="button"
-            onClick={() => updateItem(selectedItem.id, { revealed: !selectedZoneRevealed })}
-            title={selectedZoneRevealed ? t('zone.hideCards') : t('zone.revealCards')}
-            aria-label={selectedZoneRevealed ? t('zone.hideCards') : t('zone.revealCards')}
-            style={iconBtn(true)}
-          >
-            {selectedZoneRevealed ? <EyeOff size={15} /> : <Eye size={15} />}
-          </button>
-        )}
-        {selectedItem.type === 'zone' && isAdmin && (
-          <div style={{ position: 'relative' }}>
-            <button
-              type="button"
-              onClick={() => {
-                if (selectedItem.voteTimer) { adminStopTimer(selectedItem.id); }
-                else { setTimerSetupOpen((v) => !v); }
-              }}
-              title={selectedItem.voteTimer ? t('topbar.stopVote') : t('zone.startVote')}
-              style={iconBtn(true)}
-            >
-              {selectedItem.voteTimer ? <Square size={15} /> : <ThumbsUp size={15} />}
-            </button>
-            {timerSetupOpen && (
-              <TimerSetup
-                onClose={() => setTimerSetupOpen(false)}
-                onStart={(m, v, h, s) => adminStartTimer(selectedItem.id, m, v, h, s)}
-                nestedZoneCount={nestedZoneCount}
-              />
-            )}
-          </div>
-        )}
-        <button
-          type="button"
-          onClick={() => can && bringToFront(new Set([selectedItem.id]))}
-          disabled={!can}
-          title="Bring to front"
-          style={iconBtn(can)}
-        >
-          <BringToFront size={15} />
-        </button>
-        <button
-          type="button"
-          onClick={() => can && sendToBack(new Set([selectedItem.id]))}
-          disabled={!can}
-          title="Send to back"
-          style={iconBtn(can)}
-        >
-          <SendToBack size={15} />
-        </button>
-        <button
-          type="button"
-          onClick={() => deleteItemsIfAllowed([selectedItem.id])}
-          disabled={!canDelete}
-          title={selectedItem.locked ? t('zone.lockedDeleteTitle') : t('common.delete')}
-          style={{ ...iconBtn(canDelete), color: canDelete ? '#ef4444' : 'var(--border)' }}
-        >
-          <Trash2 size={15} />
-        </button>
-      </div>
+        can={can}
+        canDelete={canDelete}
+        isAdmin={isAdmin}
+        nestedZoneCount={nestedZoneCount}
+        timerSetupOpen={timerSetupOpen}
+        onColor={(index) => can && updateItem(selectedItem.id, { color: index })}
+        onFontSize={(fontSize) => can && updateItem(selectedItem.id, { fontSize })}
+        onFontColor={(fontColor) => updateItem(selectedItem.id, { fontColor })}
+        onTogglePrivate={() => can && updateItem(selectedItem.id, { private: !selectedItem.private })}
+        onToggleLock={() => can && updateItem(selectedItem.id, { locked: !selectedItem.locked })}
+        onExportCsv={() => exportZoneCsv(selectedItem)}
+        onToggleReveal={() => updateItem(selectedItem.id, { revealed: !selectedZoneRevealed })}
+        onVoteButton={() => {
+          if (selectedItem.voteTimer) adminStopTimer(selectedItem.id);
+          else setTimerSetupOpen((open) => !open);
+        }}
+        onTimerSetupOpenChange={setTimerSetupOpen}
+        onStartTimer={(m, v, h, s) => adminStartTimer(selectedItem.id, m, v, h, s)}
+        onBringToFront={() => can && bringToFront(new Set([selectedItem.id]))}
+        onSendToBack={() => can && sendToBack(new Set([selectedItem.id]))}
+        onDelete={() => deleteItemsIfAllowed([selectedItem.id])}
+      />
     );
   };
 
@@ -5566,7 +5335,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
               minWidth: 6, minHeight: 6,
               transform: `translate3d(${minimapModel.viewport.x}px, ${minimapModel.viewport.y}px, 0)`,
               boxSizing: 'border-box', border: '2px solid var(--accent)',
-              borderRadius: 4, background: 'rgba(14,165,233,0.13)',
+              borderRadius: 4, background: 'var(--minimap-viewport-bg)',
               boxShadow: '0 0 0 1px rgba(255,255,255,0.5) inset',
               pointerEvents: 'none', willChange: 'transform, width, height',
             }}
@@ -5870,7 +5639,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                 top: zonePreview.y,
                 width: zonePreview.w,
                 height: zonePreview.h,
-                background: 'rgba(14,165,233,0.10)',
+                background: 'var(--zone-preview-bg)',
                 border: '2px dashed #0ea5e9',
                 borderRadius: 12,
                 pointerEvents: 'none',
@@ -6375,35 +6144,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         </div>
       )}
 
-      {/* Toast */}
-      {toast && (
-        <div
-          key={toast.t || toast.msg}
-          style={{
-            position: 'fixed', bottom: TOAST_BOTTOM_PX, left: '50%', transform: 'translateX(-50%)',
-            background: toast.type === 'warn' ? 'var(--toast-warn-bg)' : 'var(--toast-bg)',
-            color: 'var(--toast-text)', padding: '10px 16px', borderRadius: 10,
-            fontSize: 14, fontWeight: 500, zIndex: Z.TOAST,
-            boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
-            animation: 'rb-toast-in 0.28s ease-out',
-            display: 'flex', alignItems: 'center', gap: 10,
-          }}
-        >
-          <span>{toast.msg}</span>
-          {toast.sticky && (
-            <button
-              type="button"
-              onClick={() => setToast(null)}
-              aria-label={t('common.close')}
-              style={{
-                background: 'transparent', border: 'none', color: 'var(--toast-text)',
-                opacity: 0.8, cursor: 'pointer', padding: 2, display: 'inline-flex',
-              }}
-            ><X size={14} />
-            </button>
-          )}
-        </div>
-      )}
+      <Toast toast={toast} onClose={() => setToast(null)} />
     </div>
   );
 }
@@ -6411,17 +6152,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
 /* ============================================================
    Small subcomponents & style helpers
    ============================================================ */
-
-const iconBtn = (enabled) => ({
-  background: 'transparent',
-  border: 'none',
-  padding: 4,
-  borderRadius: 6,
-  cursor: enabled ? 'pointer' : 'not-allowed',
-  color: enabled ? 'var(--text-mid)' : 'var(--text-faint)',
-  display: 'inline-flex',
-  alignItems: 'center',
-});
 
 function CommentsModal({ item, comments, editingAllowed, onAdd, onDelete, onClose }) {
   const [draft, setDraft] = useState('');
@@ -6685,147 +6415,6 @@ function AdminPinModal({ cfg, onCancel, onSubmit }) {
           </button>
         </div>
       </div>
-    </div>
-  );
-}
-
-function TimerSetup({ onClose, onStart, nestedZoneCount }) {
-  const [minutes, setMinutes] = useState(3);
-  const [noTimeLimit, setNoTimeLimit] = useState(false);
-  const [votes, setVotes] = useState(3);
-  const [unlimitedVotes, setUnlimitedVotes] = useState(false);
-  const [hideResults, setHideResults] = useState(true);
-  const [showNonVoters, setShowNonVoters] = useState(false);
-  const submit = () => onStart(noTimeLimit ? 0 : minutes, unlimitedVotes ? null : votes, hideResults, showNonVoters);
-  return (
-    <div
-      data-board-shortcuts="off"
-      onMouseDown={(e) => e.stopPropagation()}
-      style={{
-        position: 'absolute', top: '110%', right: 0, marginTop: 6,
-        background: 'var(--bg-elev)', borderRadius: 14, padding: 16,
-        boxShadow: 'var(--shadow-pop)',
-        minWidth: 320, zIndex: Z.POPOVER,
-        animation: 'rb-pop 0.18s ease-out',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-        <ThumbsUp size={16} color="var(--accent)" />
-        <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text)' }}>{t('vote.setup.head')}</div>
-        <div style={{ flex: 1 }} />
-        <button type="button" onClick={onClose} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
-          <X size={16} />
-        </button>
-      </div>
-
-      {nestedZoneCount > 0 && (
-        <div style={{ marginBottom: 12, fontSize: 12, color: 'var(--text-muted)' }}>
-          {t('vote.session.coversNested', { n: nestedZoneCount })}
-        </div>
-      )}
-
-      {/* Duration */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-        <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>{t('vote.setup.duration')}</span>
-        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>
-          <input type="checkbox" checked={noTimeLimit} onChange={(e) => setNoTimeLimit(e.target.checked)} />
-          {t('vote.setup.unlimitedTime')}
-        </label>
-      </div>
-      <div style={{ display: 'flex', gap: 6, marginBottom: 12, opacity: noTimeLimit ? 0.4 : 1, pointerEvents: noTimeLimit ? 'none' : 'auto' }}>
-        {TIMER_PRESETS.map((m) => (
-          <button
-            key={m}
-            type="button"
-            onClick={() => setMinutes(m)}
-            style={{
-              flex: 1, padding: '6px 0', borderRadius: 8,
-              border: '1px solid',
-              borderColor: minutes === m ? 'var(--accent)' : 'var(--border)',
-              background: minutes === m ? 'var(--accent-bg)' : 'var(--bg-panel)',
-              color: minutes === m ? 'var(--accent-text)' : 'var(--text-mid)',
-              cursor: 'pointer', fontWeight: 600, fontSize: 13,
-            }}
-          >{m}m
-          </button>
-        ))}
-        <input
-          type="number"
-          min={1}
-          max={120}
-          value={minutes}
-          onChange={(e) => setMinutes(Math.max(1, Math.min(120, Number(e.target.value) || 1)))}
-          style={{
-            width: 64, padding: '6px 8px',
-            border: '1px solid var(--border)', borderRadius: 8,
-            background: 'var(--bg-panel)', color: 'var(--text)',
-            fontSize: 13, textAlign: 'center',
-          }}
-        />
-      </div>
-
-      {/* Vote limit */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-        <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>{t('vote.setup.voteLimit')}</span>
-        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>
-          <input type="checkbox" checked={unlimitedVotes} onChange={(e) => setUnlimitedVotes(e.target.checked)} />
-          {t('vote.setup.unlimitedVotes')}
-        </label>
-      </div>
-      <div style={{ display: 'flex', gap: 6, marginBottom: 14, opacity: unlimitedVotes ? 0.4 : 1, pointerEvents: unlimitedVotes ? 'none' : 'auto' }}>
-        {[1, 3, 5, 10].map((v) => (
-          <button
-            key={v}
-            type="button"
-            onClick={() => setVotes(v)}
-            style={{
-              flex: 1, padding: '6px 0', borderRadius: 8,
-              border: '1px solid',
-              borderColor: votes === v ? 'var(--accent)' : 'var(--border)',
-              background: votes === v ? 'var(--accent-bg)' : 'var(--bg-panel)',
-              color: votes === v ? 'var(--accent-text)' : 'var(--text-mid)',
-              cursor: 'pointer', fontWeight: 600, fontSize: 13,
-            }}
-          >{v}
-          </button>
-        ))}
-        <input
-          type="number"
-          min={1}
-          max={50}
-          value={votes}
-          onChange={(e) => setVotes(Math.max(1, Math.min(50, Number(e.target.value) || 1)))}
-          style={{
-            width: 64, padding: '6px 8px',
-            border: '1px solid var(--border)', borderRadius: 8,
-            background: 'var(--bg-panel)', color: 'var(--text)',
-            fontSize: 13, textAlign: 'center',
-          }}
-        />
-      </div>
-
-      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginBottom: 14, fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>
-        <input type="checkbox" checked={hideResults} onChange={(e) => setHideResults(e.target.checked)} />
-        {t('vote.setup.hideResults')}
-      </label>
-
-      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginBottom: 14, fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>
-        <input type="checkbox" checked={showNonVoters} onChange={(e) => setShowNonVoters(e.target.checked)} />
-        {t('vote.setup.showNonVoters')}
-      </label>
-
-      <button
-        type="button"
-        onClick={submit}
-        style={{
-          width: '100%', padding: '10px 0',
-          background: 'var(--accent)', color: 'var(--accent-fg)', border: 'none',
-          borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: 'pointer',
-          boxShadow: '0 4px 12px rgba(14,165,233,0.35)',
-        }}
-      >
-        {t('vote.setup.start')}
-      </button>
     </div>
   );
 }

@@ -15,7 +15,7 @@ test('UI primitives preserve native button and accessibility contracts', async (
     appType: 'custom',
   });
   try {
-    const { Button, MenuItem, Divider, Surface } = await server.ssrLoadModule('/src/UiPrimitives.jsx');
+    const { Button, MenuItem, Divider, Surface, IconButton, ChoiceChip } = await server.ssrLoadModule('/src/UiPrimitives.jsx');
     await context.test('disabled-look buttons keep the click handler and omit native disabled', () => {
       let clicks = 0;
       const onClick = () => { clicks += 1; };
@@ -29,6 +29,17 @@ test('UI primitives preserve native button and accessibility contracts', async (
       button.props.onClick();
       assert.equal(clicks, 1);
       assert.equal(Button({}).props['aria-disabled'], undefined);
+    });
+    await context.test('icon buttons retain real disabled and choice chips report selection', () => {
+      const handler = () => {};
+      const icon = IconButton({ disabled: true, onClick: handler, title: TEST_LABEL });
+      assert.equal(icon.props.disabled, true);
+      assert.equal(icon.props.onClick, handler);
+      assert.equal(icon.props.title, TEST_LABEL);
+      assert.equal(icon.props.type, 'button');
+      assert.throws(() => IconButton({ variant: 'unknown' }), /Unknown/);
+      assert.equal(ChoiceChip({ selected: true }).props['aria-pressed'], true);
+      assert.equal(ChoiceChip({ selected: false }).props['aria-pressed'], false);
     });
     await context.test('button variants retain caller classes', () => {
       const button = Button({ variant: BUTTON_VARIANT.ACTIVE, className: TEST_EXTRA_CLASS });

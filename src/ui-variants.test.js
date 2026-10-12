@@ -4,9 +4,12 @@ import { readFileSync } from 'node:fs';
 import {
   BUTTON_VARIANT, MENU_ITEM_VARIANT, DIVIDER_ORIENTATION, SURFACE_KIND,
   buttonClass, menuItemClass, dividerClass, topBarButtonVariant, surfaceClass,
+  ICON_BUTTON_VARIANT, CHOICE_CHIP_STATE, iconButtonClass, choiceChipClass, choiceChipState, toastSurfaceKind,
 } from './ui-variants.js';
 
 const CONTRACTS = [
+  ['icon button', ICON_BUTTON_VARIANT, iconButtonClass],
+  ['choice chip', CHOICE_CHIP_STATE, choiceChipClass],
   ['surface', SURFACE_KIND, surfaceClass],
   ['button', BUTTON_VARIANT, buttonClass],
   ['menu item', MENU_ITEM_VARIANT, menuItemClass],
@@ -40,4 +43,11 @@ test('top-bar activity selects the active variant only when active', () => {
   assert.equal(topBarButtonVariant({ active: true }), BUTTON_VARIANT.ACTIVE);
   assert.equal(topBarButtonVariant({ active: false }), BUTTON_VARIANT.DEFAULT);
   assert.equal(topBarButtonVariant({}), BUTTON_VARIANT.DEFAULT);
+});
+
+test('choice selection and toast severity choose exclusive appearances', () => {
+  assert.equal(choiceChipState(true), CHOICE_CHIP_STATE.SELECTED);
+  assert.equal(choiceChipState(false), CHOICE_CHIP_STATE.DEFAULT);
+  assert.equal(toastSurfaceKind('warn'), SURFACE_KIND.TOAST_WARN);
+  for (const type of [undefined, 'info', 'success']) assert.equal(toastSurfaceKind(type), SURFACE_KIND.TOAST);
 });

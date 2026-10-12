@@ -2,6 +2,7 @@ import React from 'react';
 import {
   BUTTON_VARIANT, MENU_ITEM_VARIANT, SURFACE_KIND,
   buttonClass, menuItemClass, dividerClass, surfaceClass,
+  ICON_BUTTON_VARIANT, iconButtonClass, choiceChipClass, choiceChipState,
 } from './ui-variants.js';
 import './ui.css';
 
@@ -40,4 +41,29 @@ export function Divider({ orientation }) {
 
 export function Surface({ kind = SURFACE_KIND.POPOVER, className, children, ...rest }) {
   return <div className={[surfaceClass(kind), className].filter(Boolean).join(' ')} {...rest}>{children}</div>;
+}
+
+export function IconButton({ variant = ICON_BUTTON_VARIANT.DEFAULT, className, children, ...rest }) {
+  return (
+    <button
+      type="button"
+      className={[iconButtonClass(variant), className].filter(Boolean).join(' ')}
+      {...rest}
+    >
+      {children}
+    </button>
+  );
+}
+
+export function ChoiceChip({ selected, children, ...rest }) {
+  return (
+    <button
+      type="button"
+      className={choiceChipClass(choiceChipState(selected))}
+      aria-pressed={selected}
+      {...rest}
+    >
+      {children}
+    </button>
+  );
 }
