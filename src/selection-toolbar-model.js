@@ -44,10 +44,9 @@ export function canIncreaseFontSize(size, can) { return can && size < FONT_SIZE_
 
 export function selectionToolbarSections(type) {
   return {
-    palette: type === 'sticky' || type === 'zone',
-    fontSize: type === 'sticky' || type === 'zone' || type === 'text',
+    palette: type === 'sticky',
+    fontSize: type === 'sticky' || type === 'text',
     fontColor: type === 'sticky' || type === 'text',
     privacy: type === 'sticky',
-    zone: type === 'zone',
   };
 }

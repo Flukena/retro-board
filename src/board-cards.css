@@ -242,8 +242,8 @@
   transform-origin: top left;
   z-index: var(--z-zone-header);
   container-type: inline-size;
-  overflow-x: clip;
   container-name: rb-zone-header;
+  flex-wrap: wrap;
   font-size: var(--zone-title-font-size);
   background: transparent;
   display: flex;
@@ -327,7 +327,12 @@
 }
 
 .rb-zone__actions {
+  margin-left: auto;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  min-width: 0;
+  max-width: 100%;
   flex-shrink: 0;
   gap: var(--zone-icon-gap);
 }
@@ -358,8 +363,48 @@
 
 /* ZONE_HEADER_ICONS_BREAKPOINT_PX; paired contract checks zone-title.js. */
 @container rb-zone-header (max-width: 180px) {
-  .rb-zone__actions { display: none; }
+  .rb-zone__admin-action, .rb-zone__popover-anchor { display: none; }
 }
+
+/* ZONE_HEADER_MENU_BREAKPOINT_PX; paired contract checks zone-title.js. */
+@container rb-zone-header (max-width: 72px) {
+  .rb-zone__menu { display: none; }
+}
+
+.rb-zone__menu { flex-shrink: 0; }
+.rb-zone__menu[aria-expanded="true"] { background: var(--zone-icon-hover-bg); color: var(--text); }
+.rb-zone__admin-action { display: flex; }
+.rb-zone__popover-anchor { position: relative; pointer-events: auto; }
+.rb-zone__tool-strip {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: var(--zone-strip-padding);
+  gap: var(--zone-icon-gap);
+  border: var(--zone-strip-border-width) solid var(--border-soft);
+  border-radius: var(--radius-zone-icon);
+  background: var(--bg-panel);
+  box-shadow: var(--shadow-pop);
+  pointer-events: auto;
+}
+.rb-zone__tool-strip .rb-selection-toolbar__swatches { flex-wrap: wrap; gap: var(--zone-strip-swatch-gap); }
+.rb-zone__tool-strip .rb-color-swatch { width: var(--zone-strip-swatch-size); height: var(--zone-strip-swatch-size); }
+.rb-zone__tool-strip .rb-selection-toolbar__font-size {
+  flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.rb-zone__tool-strip .rb-icon-btn {
+  width: var(--zone-icon-button-size);
+  height: var(--zone-icon-button-size);
+  border-radius: var(--radius-zone-icon);
+}
+.rb-zone__icon:disabled { opacity: var(--zone-tool-disabled-opacity); cursor: not-allowed; }
 
 .rb-sticky--selected,
 .rb-zone--selected { outline: 2px solid var(--selection); }

@@ -5,14 +5,17 @@ import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { withChromeModule } from './chrome-test-helper.js';
 import { TOKENS } from './theme.js';
-import { ZONE_HEADER_ICONS_BREAKPOINT_PX } from './zone-title.js';
+import { ZONE_HEADER_ICONS_BREAKPOINT_PX, ZONE_HEADER_MENU_BREAKPOINT_PX } from './zone-title.js';
 
-const ITEM = { id: 'zone-a', title: 'Ideas', x: 10, y: 20, w: 300, h: 200, color: 0 };
+const ITEM = { id: 'zone-a', type: 'zone', title: 'Ideas', x: 10, y: 20, w: 300, h: 200, color: 0 };
 function Editor({ value, className }) {
   return React.createElement('input', { value, className, readOnly: true });
 }
 function cardTree(ZoneCard, props = {}) {
-  return ZoneCard.type({ item: ITEM, childCount: 3, TextEditor: Editor, ...props });
+  let tree;
+  function InspectCard() { tree = ZoneCard.type({ item: ITEM, childCount: 3, TextEditor: Editor, ...props }); return tree; }
+  renderToStaticMarkup(React.createElement(InspectCard));
+  return tree;
 }
 function header(tree) { return tree.props.children[0]; }
 function chip(tree) { return header(tree).props.children[0]; }
@@ -162,39 +165,29 @@ test('tab appearance uses tokens, an auto-width chip and a fully rounded body', 
   }
 });
 
-function assertAdminIcons(ZoneCard, language, revealed) {
-  const calls = [];
-  const tree = cardTree(ZoneCard, { isAdmin: true, revealed, hasVoteTimer: true,
-    onStartZoneDrag: () => calls.push('drag'), onBeginFocus: () => calls.push('focus'),
-    onToggleReveal: (id) => calls.push(id), onVote: (id) => calls.push(id), onOptions: (id) => calls.push(id) });
-  const buttons = header(tree).props.children[1].props.children.filter(Boolean);
-  assert.equal(buttons.length, 3);
-  const html = renderToStaticMarkup(tree);
-  assert.match(html, /lucide-square/);
-  const optionsLabel = language === 'th' ? 'ตัวเลือกโซน' : 'Zone options';
-  const revealLabels = language === 'th' ? ['เปิดการ์ด', 'ซ่อนการ์ด'] : ['Reveal cards', 'Hide cards'];
-  assert.ok(html.includes(optionsLabel));
-  assert.ok(html.includes(revealLabels[Number(revealed)]));
-  for (const button of buttons) {
-    const event = { stopPropagation: () => calls.push('stop') };
-    button.props.onMouseDown(event);
-    button.props.onDoubleClick(event);
-    button.props.onClick(event);
-  }
-  assert.deepEqual(calls, Array.from({ length: 3 }, () => ['stop', 'stop', 'stop', ITEM.id]).flat());
-}
-
-test('admin icons have localized labels, own timer state and isolated events', async () => {
-  await withChromeModule('/src/ZoneCard.jsx', ({ ZoneCard }, { getLang, setLang }) => {
-    const previous = getLang();
-    try {
-      for (const language of ['th', 'en']) {
-        setLang(language);
-        for (const revealed of [false, true]) assertAdminIcons(ZoneCard, language, revealed);
+test('zone header owns its local menu, admin icons and timer setup in th/en', async () => {
+  await withChromeModule('/src/ZoneCard.jsx', ({ ZoneHeader }, { setLang, t }) => {
+    for (const language of ['th', 'en']) {
+      setLang(language);
+      for (const menuOpen of [false, true]) {
+        const html = renderToStaticMarkup(React.createElement(ZoneHeader, {
+          item: ITEM, menuOpen, isAdmin: false, canEdit: false, canDelete: false, actions: {},
+        }));
+        assert.ok(html.includes(`aria-expanded="${menuOpen}"`));
+        assert.equal(html.includes('rb-zone__tool-strip'), menuOpen);
+        assert.ok(html.includes(t('zone.options')));
+        assert.doesNotMatch(html, /lucide-eye|lucide-thumbs-up|rb-timer-setup/);
       }
-      const html = renderToStaticMarkup(cardTree(ZoneCard, { isAdmin: true }));
-      assert.match(html, /lucide-thumbs-up/);
-    } finally { setLang(previous); }
+      for (const timerSetupOpen of [false, true]) {
+        const html = renderToStaticMarkup(React.createElement(ZoneHeader, {
+          item: ITEM, isAdmin: true, timerSetupOpen, nestedZoneCount: 2, actions: {},
+        }));
+        assert.match(html, /lucide-eye-off/);
+        assert.match(html, /lucide-thumbs-up/);
+        assert.equal(html.includes('rb-timer-setup__header'), timerSetupOpen);
+        assert.equal(html.includes('data-board-shortcuts="off"'), timerSetupOpen);
+      }
+    }
   });
 });
 
@@ -205,7 +198,9 @@ test('header width, inset, icon sizing and narrow breakpoint use screen coordina
   assert.equal(row.top, 'calc(var(--zone-header-inset) / var(--rb-zoom) - var(--rb-zone-border-w))');
   assert.equal(row.width, 'max(0px, calc(var(--rb-zone-width) * var(--rb-zoom) - 2 * var(--zone-header-inset)))');
   assert.equal(row['container-type'], 'inline-size');
-  assert.equal(row['overflow-x'], 'clip');
+  assert.equal(row['overflow-x'], undefined);
+  assert.ok(css.includes(`@container rb-zone-header (max-width: ${ZONE_HEADER_MENU_BREAKPOINT_PX}px)`));
+  assert.match(css, /\.rb-zone__actions\s*\{[^}]*flex-wrap: wrap;[^}]*justify-content: flex-end;/);
   assert.ok(css.includes(`@container rb-zone-header (max-width: ${ZONE_HEADER_ICONS_BREAKPOINT_PX}px)`));
   const button = declarations(css, '.rb-zone__icon');
   assert.equal(button['pointer-events'], 'auto');
@@ -215,4 +210,40 @@ test('header width, inset, icon sizing and narrow breakpoint use screen coordina
       '--zone-icon-button-size': '26px', '--zone-icon-size': '14px', '--zone-icon-gap': '2px',
       '--radius-zone-icon': '10px', '--z-zone-header': '4' })) assert.equal(tokens[key], value);
   }
+});
+
+test('zone header strip wraps within its width using theme tokens; narrow queries preserve menu access', () => {
+  const css = readFileSync(new URL('./board-cards.css', import.meta.url), 'utf8');
+  const strip = declarations(css, '.rb-zone__tool-strip');
+  assert.equal(strip['flex-wrap'], 'wrap');
+  assert.equal(strip['max-width'], '100%');
+  assert.equal(strip['box-sizing'], 'border-box');
+  for (const field of ['padding', 'gap', 'border', 'border-radius', 'background', 'box-shadow']) {
+    assert.match(strip[field], /^var\(--/);
+  }
+  const icons = css.match(/@container rb-zone-header \(max-width: 180px\)\s*\{([^}]+)\}/)[1];
+  assert.match(icons, /\.rb-zone__admin-action, \.rb-zone__popover-anchor/);
+  assert.doesNotMatch(icons, /rb-zone__menu|rb-zone__actions/);
+  const menu = css.match(/@container rb-zone-header \(max-width: 72px\)\s*\{([^}]+)\}/)[1];
+  assert.match(menu, /\.rb-zone__menu/);
+});
+
+test('header menu and vote events stay isolated and timer callbacks target the zone', async () => {
+  await withChromeModule('/src/ZoneCard.jsx', ({ ZoneHeader }) => {
+    const calls = [];
+    const tree = ZoneHeader({ item: ITEM, isAdmin: true, menuOpen: false, timerSetupOpen: true,
+      actions: { toggleReveal: (id) => calls.push(['reveal', id]), vote: (id) => calls.push(['vote', id]),
+        closeTimerSetup: () => calls.push(['close']), startTimer: (...args) => calls.push(['start', ...args]) },
+      onToggleMenu: () => calls.push(['menu']) });
+    const event = { stopPropagation: () => calls.push(['stop']) };
+    const children = tree.props.children;
+    children[1].props.children.props.onClick(event);
+    const anchor = children[2];
+    anchor.props.children[0].props.onClick(event);
+    anchor.props.children[1].props.onClose();
+    anchor.props.children[1].props.onStart(5, 3, true, false);
+    children[3].props.onClick(event);
+    assert.deepEqual(calls, [['stop'], ['reveal', ITEM.id], ['stop'], ['vote', ITEM.id],
+      ['close'], ['start', ITEM.id, 5, 3, true, false], ['stop'], ['menu']]);
+  });
 });

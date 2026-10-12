@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { effectiveRevealed, zoneEffectiveRevealed, zoneGroupIds } from './zone-actions.js';
+import { effectiveRevealed, zoneEffectiveRevealed, zoneGroupIds, nestedZoneCount } from './zone-actions.js';
 const root = { id: 'root', type: 'zone', x: 0, y: 0, w: 1000, h: 1000, revealed: true };
 const child = { id: 'child', type: 'zone', x: 50, y: 50, w: 400, h: 400, parentZoneId: 'root' };
 const note = { id: 'note', type: 'sticky', x: 80, y: 80, parentZoneId: 'child' };
@@ -17,4 +17,13 @@ test('zone groups retain nested owned cards and exclude explicitly unzoned items
   const outside = { ...note, id: 'outside', parentZoneId: null };
   assert.deepEqual([...zoneGroupIds(root, [root, child, note, outside])], ['root', 'child', 'note']);
   assert.deepEqual([...zoneGroupIds(child, [root, child, note])], ['child', 'note']);
+});
+
+test('nested zone count excludes the root, cards and unrelated zones', () => {
+  const unrelated = { ...child, id: 'unrelated', parentZoneId: null };
+  const grandchild = { ...child, id: 'grandchild', parentZoneId: child.id };
+  const items = [root, child, grandchild, note, unrelated];
+  assert.equal(nestedZoneCount(root, items), 2);
+  assert.equal(nestedZoneCount(child, items), 1);
+  assert.equal(nestedZoneCount(grandchild, items), 0);
 });

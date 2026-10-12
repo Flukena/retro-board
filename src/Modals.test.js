@@ -108,7 +108,7 @@ test('every scoped component class has a compatible stylesheet selector targetin
     ['Modals.jsx', 'modals.css'], ['TimerSetup.jsx', 'timer-setup.css'],
     ['SelectionToolbar.jsx', 'selection-toolbar.css'], ['Landing.jsx', 'landing.css'],
     ['MinimapPanel.jsx', 'minimap.css'], ['ToolDock.jsx', 'tool-dock.css'],
-    ['ZoneCard.jsx', 'board-cards.css'], ['StickyCard.jsx', 'board-cards.css'], ['TemplateThumbnail.jsx', 'template-thumbnail.css'],
+    ['ZoneCard.jsx', 'board-cards.css'], ['ZoneToolStrip.jsx', 'board-cards.css'], ['StickyCard.jsx', 'board-cards.css'], ['TemplateThumbnail.jsx', 'template-thumbnail.css'],
   ]) {
     const source = readFileSync(new URL(component, import.meta.url), 'utf8');
     const css = readFileSync(new URL(stylesheet, import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');

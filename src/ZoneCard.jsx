@@ -1,10 +1,13 @@
-import React from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { Lock, Eye, EyeOff, ThumbsUp, Square, Ellipsis } from 'lucide-react';
 import { t } from './i18n.js';
 import { PALETTE } from './palette.js';
 import { zoneCardVars } from './card-look.js';
 import { ZONE_TITLE_MAX_LENGTH } from './security-boundaries.js';
 import { zoneTitleFontSize } from './zone-title.js';
+import { ZoneToolStrip } from './ZoneToolStrip.jsx';
+import { TimerSetup } from './TimerSetup.jsx';
+import { useDismiss } from './useDismiss.js';
 import './board-cards.css';
 
 const SINGLE_CARD_COUNT = 1;
@@ -20,23 +23,39 @@ function headerButton(label, Icon, action, id) {
   );
 }
 
-function headerActions(isAdmin, revealed, hasVoteTimer, onToggleReveal, onVote, onOptions, id) {
+export function ZoneHeader({ item, isAdmin, revealed, hasVoteTimer, actions,
+  menuOpen, onToggleMenu, canEdit, canDelete, timerSetupOpen, nestedZoneCount }) {
   return (
-    <div className="rb-zone__actions">
-      {isAdmin && headerButton(revealed ? 'zone.hideCards' : 'zone.revealCards', revealed ? Eye : EyeOff, onToggleReveal, id)}
-      {isAdmin && headerButton(hasVoteTimer ? 'topbar.stopVote' : 'zone.startVote', hasVoteTimer ? Square : ThumbsUp, onVote, id)}
-      {headerButton('zone.options', Ellipsis, onOptions, id)}
+    <div className="rb-zone__actions" onMouseDown={stopHeaderEvent} onDoubleClick={stopHeaderEvent} onClick={stopHeaderEvent}>
+      {menuOpen && <ZoneToolStrip item={item} canEdit={canEdit} canDelete={canDelete} actions={actions} />}
+      {isAdmin && <div className="rb-zone__admin-action">
+        {headerButton(revealed ? 'zone.hideCards' : 'zone.revealCards', revealed ? Eye : EyeOff, actions.toggleReveal, item.id)}
+      </div>}
+      {isAdmin && <div className="rb-zone__popover-anchor">
+        {headerButton(hasVoteTimer ? 'topbar.stopVote' : 'zone.startVote', hasVoteTimer ? Square : ThumbsUp, actions.vote, item.id)}
+        {timerSetupOpen && <TimerSetup onClose={actions.closeTimerSetup}
+          onStart={(...args) => actions.startTimer(item.id, ...args)} nestedZoneCount={nestedZoneCount} />}
+      </div>}
+      <button type="button" className="rb-zone__icon rb-zone__menu" aria-label={t('zone.options')}
+        aria-expanded={!!menuOpen} onMouseDown={stopHeaderEvent} onDoubleClick={stopHeaderEvent}
+        onClick={(event) => { event.stopPropagation(); onToggleMenu(); }}>
+        <Ellipsis aria-hidden="true" />
+      </button>
     </div>
   );
 }
 
 export const ZoneCard = React.memo(function ZoneCard({
   item, selected, isEditingTitle, childCount, lang, isAdmin, revealed, hasVoteTimer,
-  onToggleReveal, onVote, onOptions,
+  actions, canEdit, canDelete, timerSetupOpen, nestedZoneCount,
   onStartZoneDrag, onBeginFocus, onTextChange, onTextKeyDown, onTextBlur,
   editAreaRef, TextEditor,
 }) {
-  void lang;
+  void lang; // Language changes must invalidate React.memo for localized labels.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const headerRef = useRef(null);
+  const closeMenu = useCallback(() => setMenuOpen(false), []);
+  useDismiss(menuOpen, headerRef, closeMenu);
   const it = item;
   const c = PALETTE[it.color] || PALETTE[0];
   const titleFs = zoneTitleFontSize(it);
@@ -52,7 +71,7 @@ export const ZoneCard = React.memo(function ZoneCard({
         ...zoneCardVars(c),
       }}
     >
-      <div className="rb-zone__title" style={{ fontSize: titleFs }}>
+      <div ref={headerRef} className="rb-zone__title" style={{ fontSize: titleFs }}>
         <div className={isEditingTitle ? 'rb-zone__chip rb-zone__chip--editing' : 'rb-zone__chip'}
           onMouseDown={(e) => { if (!isEditingTitle) onStartZoneDrag(e, it); }}
           onDoubleClick={(e) => { e.stopPropagation(); onBeginFocus(it, 'title'); }}
@@ -84,7 +103,10 @@ export const ZoneCard = React.memo(function ZoneCard({
             </>
           )}
         </div>
-        {headerActions(isAdmin, revealed, hasVoteTimer, onToggleReveal, onVote, onOptions, it.id)}
+        <ZoneHeader item={it} isAdmin={isAdmin} revealed={revealed} hasVoteTimer={hasVoteTimer}
+          actions={actions} canEdit={canEdit} canDelete={canDelete} menuOpen={menuOpen}
+          onToggleMenu={() => setMenuOpen((open) => !open)}
+          timerSetupOpen={timerSetupOpen} nestedZoneCount={nestedZoneCount} />
       </div>
       <div data-surface="1" className="rb-zone__surface" />
     </div>

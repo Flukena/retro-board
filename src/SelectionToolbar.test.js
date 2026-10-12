@@ -11,13 +11,6 @@ test('selection toolbar exposes only the controls allowed for its type and role'
       const render = (type, isAdmin = false) => renderToStaticMarkup(React.createElement(SelectionToolbar, {
         anchor: { x: 100, y: 200 }, item: { type }, can: true, canDelete: false, isAdmin,
       }));
-      const zone = render('zone');
-      assert.match(zone, new RegExp(t('zone.exportCsvTitle')));
-      assert.ok(!zone.includes(t('zone.startVote')));
-      assert.ok(!zone.includes(t('zone.revealCards')));
-      const admin = render('zone', true);
-      assert.ok(admin.includes(t('zone.startVote')));
-      assert.ok(admin.includes(t('zone.revealCards')));
       for (const type of ['sticky', 'text', 'image']) {
         const markup = render(type, true);
         assert.ok(!markup.includes(t('zone.exportCsvTitle')));
@@ -28,7 +21,7 @@ test('selection toolbar exposes only the controls allowed for its type and role'
         assert.match(markup, /class="rb-icon-btn rb-icon-btn--danger"[^>]*disabled=""/);
       }
       for (const name of ['yellow', 'red', 'green', 'blue', 'purple', 'orange']) {
-        assert.ok(zone.includes(`aria-label="${t(`color.${name}`)}"`));
+        assert.ok(render('sticky').includes(`aria-label="${t(`color.${name}`)}"`));
         assert.notEqual(t(`color.${name}`), `color.${name}`);
       }
     }
@@ -37,7 +30,7 @@ test('selection toolbar exposes only the controls allowed for its type and role'
 
 test('toolbar event contracts preserve native disabled, permission guards and popover callbacks', async () => {
   await withChromeModule('/src/SelectionToolbar.jsx', ({ SelectionToolbar, GroupSelectionToolbar,
-    ColorSwatches, FontSizeControl, FontColorSwatches, VoteControl }, { t, setLang }) => {
+    ColorSwatches, FontSizeControl, FontColorSwatches }, { t, setLang }) => {
     const received = [];
     const record = (value) => received.push(value);
     for (const can of [false, true]) {
@@ -57,12 +50,6 @@ test('toolbar event contracts preserve native disabled, permission guards and po
     let stopped = false;
     group.type(group.props).props.onMouseDown({ stopPropagation: () => { stopped = true; } });
     assert.equal(stopped, true);
-    const vote = VoteControl({ timerSetupOpen: true, hasVoteTimer: true,
-      onVoteButton: () => record('stop'), onTimerSetupOpenChange: record, onStartTimer: record });
-    vote.props.children[0].props.onClick();
-    vote.props.children[1].props.onClose();
-    vote.props.children[1].props.onStart(5);
-    assert.deepEqual(received.slice(-3), ['stop', false, 5]);
     for (const lang of ['th', 'en']) {
       setLang(lang);
       const colors = FontColorSwatches({ fontColor: null, onFontColor: record, onClose: () => record('close') });
@@ -84,7 +71,7 @@ test('toolbar event contracts preserve native disabled, permission guards and po
   });
 });
 
-test('save template is accessible for a zone or group containing zones and emits the callback', async () => {
+test('save template is accessible for a group containing zones and emits the callback', async () => {
   await withChromeModule('/src/SelectionToolbar.jsx', ({ SelectionToolbar, GroupSelectionToolbar }, { t, setLang }) => {
     let saves = 0;
     for (const lang of ['th', 'en']) {
@@ -92,9 +79,6 @@ test('save template is accessible for a zone or group containing zones and emits
       const label = t('selection.saveTemplate');
       assert.notEqual(label, 'selection.saveTemplate');
       const props = { anchor: { x: 0, y: 0 }, onSaveTemplate: () => { saves += 1; } };
-      const single = SelectionToolbar({ ...props, item: { type: 'zone' } });
-      const button = single.props.children.find((child) => child?.props?.onSaveTemplate);
-      button.type(button.props).props.onClick();
       for (const zoneCount of [0, 1, 2]) {
         const group = GroupSelectionToolbar({ ...props, zoneCount, lockedCount: 0 });
         const markup = renderToStaticMarkup(group);
@@ -104,13 +88,10 @@ test('save template is accessible for a zone or group containing zones and emits
           save.type(save.props).props.onClick();
         }
       }
-      const markup = renderToStaticMarkup(single);
-      assert.ok(markup.includes(`title="${label}"`));
-      assert.ok(markup.includes(`aria-label="${label}"`));
       for (const type of ['sticky', 'text', 'image']) {
         assert.ok(!renderToStaticMarkup(SelectionToolbar({ ...props, item: { type } })).includes(label));
       }
     }
-    assert.equal(saves, 6);
+    assert.equal(saves, 4);
   });
 });

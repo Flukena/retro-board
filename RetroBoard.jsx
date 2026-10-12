@@ -45,7 +45,7 @@ import { templateRows, followBannerModel } from './src/chrome-model.js';
 import { SelectionToolbar, GroupSelectionToolbar } from './src/SelectionToolbar.jsx';
 import { selectionToolbarAnchor, groupSelectionToolbarAnchor } from './src/selection-toolbar-model.js';
 import { ZoneCard } from './src/ZoneCard.jsx';
-import { effectiveRevealed, zoneEffectiveRevealed, zoneGroupIds, isNestedIn } from './src/zone-actions.js';
+import { effectiveRevealed, zoneEffectiveRevealed, zoneGroupIds, isNestedIn, nestedZoneCount } from './src/zone-actions.js';
 import { useZoneHeaderActions } from './src/useZoneHeaderActions.js';
 import { Toast } from './src/Toast.jsx';
 import { TopBar } from './src/TopBar.jsx';
@@ -927,7 +927,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const creationModeRef = useRef(null);
   useEffect(() => { creationModeRef.current = creationMode; }, [creationMode]);
   const [templatesOpen, setTemplatesOpen] = useState(false);
-  const [timerSetupOpen, setTimerSetupOpen] = useState(false);
+  const [timerSetupZoneId, setTimerSetupZoneId] = useState(null);
   const [followedUserId, setFollowedUserId] = useState(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
@@ -3236,9 +3236,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     // instead of dragging the zone underneath the cursor.
     if (spaceHeldRef.current) return;
     e.stopPropagation();
-    // Locked zone's own title bar: select it (so the toolbar with the unlock
-    // button appears) but don't enter a drag gesture. commitGeometry also
-    // filters locked-zone patches, but bailing here avoids a dead drag state.
+    // Locked zone's own title bar: select without dragging; unlock via ⋯ → lock.
+    // commitGeometry filters locked-zone patches; bailing here avoids a dead drag state.
     if (zone.locked) { setSelectedId(zone.id); return; }
     // If this zone is part of a multi-selection, drag every selected item as a
     // group — matches the marquee/shift-select expectation. Otherwise fall back
@@ -3992,7 +3991,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         return it;
       }),
     }));
-    setTimerSetupOpen(false);
+    setTimerSetupZoneId(null);
     setToast({
       msg: t('vote.session.started', {
         limit: limit ? t('vote.session.votesLimit', { n: limit }) : t('vote.session.unlimited'),
@@ -4357,8 +4356,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
      Rendering helpers
      ============================================================ */
 
-  const zoneHeaderActions = useZoneHeaderActions({ isAdmin, boardRef, setSelectedId,
-    updateFocusedText, setTimerSetupOpen, adminStopTimer, updateItem });
+  const zoneHeaderActions = useZoneHeaderActions({ isAdmin, boardRef, canModifyOwnedItem, canDeleteItem,
+    updateFocusedText, setTimerSetupZoneId, adminStopTimer, adminStartTimer, updateItem,
+    exportZoneCsv, openSaveTemplate, bringToFront, sendToBack, deleteItemsIfAllowed });
   const renderZone = (it) => (
     <ZoneCard
       key={it.id}
@@ -4370,9 +4370,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       isAdmin={isAdmin}
       revealed={zoneEffectiveRevealed(it, board.items, board.allRevealed)}
       hasVoteTimer={!!it.voteTimer}
-      onToggleReveal={zoneHeaderActions.toggleReveal}
-      onVote={zoneHeaderActions.vote}
-      onOptions={zoneHeaderActions.options}
+      actions={zoneHeaderActions}
+      canEdit={canModifyOwnedItem(it)} canDelete={canDeleteItem(it)}
+      timerSetupOpen={timerSetupZoneId === it.id}
+      nestedZoneCount={timerSetupZoneId === it.id ? nestedZoneCount(it, board.items) : 0}
       lang={lang}
       onStartZoneDrag={startZoneDrag}
       onBeginFocus={beginFocus}
@@ -4501,6 +4502,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       compactRender,
       lang,
       zoneChildCount, isAdmin, board.items, board.allRevealed, zoneHeaderActions,
+      canModifyOwnedItem, canDeleteItem, timerSetupZoneId,
       startItemDrag,
       startZoneDrag,
       beginFocus,
@@ -4532,47 +4534,23 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     if (focusedTextId) return null;
     const viewport = viewportRef.current;
     if (groupBBox && selectedIds.size > 1) return renderGroupSelectionToolbar(viewport);
-    if (!selectedItem) return null;
+    if (!selectedItem || selectedItem.type === 'zone') return null;
     const can = canModifyOwnedItem(selectedItem);
     const canDelete = canDeleteItem(selectedItem);
-    // A zone with no explicit override inherits visibility from its nearest
-    // ancestor (or the legacy board-wide value). The eye action must toggle
-    // that effective state; toggling the raw undefined value would write true
-    // again when an inherited-visible zone is clicked, making "hide" a no-op.
-    const selectedZoneRevealed = selectedItem.type === 'zone'
-      ? zoneEffectiveRevealed(selectedItem, board.items, board.allRevealed)
-      : false;
-    const nestedZoneCount = selectedItem.type === 'zone'
-      ? [...zoneGroupIds(selectedItem, board.items)].filter((id) => (
-          id !== selectedItem.id
-          && board.items.find((item) => item.id === id)?.type === 'zone'
-        )).length
-      : 0;
     return (
       <SelectionToolbar
-        onSaveTemplate={saveSelectedTemplate}
         anchor={selectionToolbarAnchor(selectedItem, viewport, stackHeightPx)}
         item={{
           type: selectedItem.type, colorIndex: selectedItem.color,
           fontSize: selectedItem.fontSize, fontColor: selectedItem.fontColor,
           private: selectedItem.private, locked: selectedItem.locked,
-          revealed: selectedZoneRevealed, hasVoteTimer: !!selectedItem.voteTimer,
         }}
         can={can}
         canDelete={canDelete}
-        isAdmin={isAdmin}
-        nestedZoneCount={nestedZoneCount}
-        timerSetupOpen={timerSetupOpen}
         onColor={(index) => can && updateItem(selectedItem.id, { color: index })}
         onFontSize={(fontSize) => can && updateItem(selectedItem.id, { fontSize })}
         onFontColor={(fontColor) => updateItem(selectedItem.id, { fontColor })}
         onTogglePrivate={() => can && updateItem(selectedItem.id, { private: !selectedItem.private })}
-        onToggleLock={() => can && updateItem(selectedItem.id, { locked: !selectedItem.locked })}
-        onExportCsv={() => exportZoneCsv(selectedItem)}
-        onToggleReveal={() => zoneHeaderActions.toggleReveal(selectedItem.id)}
-        onVoteButton={() => zoneHeaderActions.vote(selectedItem.id)}
-        onTimerSetupOpenChange={setTimerSetupOpen}
-        onStartTimer={(m, v, h, s) => adminStartTimer(selectedItem.id, m, v, h, s)}
         onBringToFront={() => can && bringToFront(new Set([selectedItem.id]))}
         onSendToBack={() => can && sendToBack(new Set([selectedItem.id]))}
         onDelete={() => deleteItemsIfAllowed([selectedItem.id])}

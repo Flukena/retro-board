@@ -9,9 +9,13 @@ export function useZoneHeaderActions(context) {
     actions.current = createZoneHeaderActions(() => {
       const current = latest.current;
       return { isAdmin: current.isAdmin, board: current.boardRef.current,
-        selectZone: current.setSelectedId, clearEditing: current.updateFocusedText,
-        openTimerSetup: current.setTimerSetupOpen, stopTimer: current.adminStopTimer,
-        updateZone: current.updateItem };
+        canModify: current.canModifyOwnedItem, canDelete: current.canDeleteItem,
+        clearEditing: current.updateFocusedText,
+        openTimerSetup: current.setTimerSetupZoneId, stopTimer: current.adminStopTimer,
+        updateZone: current.updateItem, startTimer: current.adminStartTimer,
+        exportCsv: current.exportZoneCsv, openSaveTemplate: current.openSaveTemplate,
+        bringToFront: current.bringToFront, sendToBack: current.sendToBack,
+        deleteItemsIfAllowed: current.deleteItemsIfAllowed };
     });
   }
   return actions.current;

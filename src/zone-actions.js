@@ -30,6 +30,11 @@ export const zoneGroupIds = (zone, allItems) => {
   return ids;
 };
 
+export function nestedZoneCount(zone, items) {
+  const ids = zoneGroupIds(zone, items);
+  return items.filter((item) => item.type === 'zone' && item.id !== zone.id && ids.has(item.id)).length;
+}
+
 // A card's owner zone can hide/reveal its own private cards independently of
 // the board-wide (now-legacy) allRevealed flag. A zone that has never had its
 // own toggle clicked (revealed == null) inherits from the nearest ancestor

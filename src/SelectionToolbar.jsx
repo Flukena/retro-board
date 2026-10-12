@@ -1,12 +1,11 @@
 import React, { useState } from 'react';
 import {
-  LayoutTemplate, Trash2, Lock, Unlock, Eye, EyeOff, Download, ThumbsUp, Square, Type, BringToFront, SendToBack,
+  LayoutTemplate, Trash2, Lock, Unlock, Type, BringToFront, SendToBack,
 } from 'lucide-react';
 import { IconButton, Surface } from './UiPrimitives.jsx';
 import { ICON_BUTTON_VARIANT, SURFACE_KIND } from './ui-variants.js';
 import { Z } from './chrome-layout.js';
 import { PALETTE, FONT_COLORS } from './palette.js';
-import { TimerSetup } from './TimerSetup.jsx';
 import {
   fontSizeForItem, clampFontSize, canDecreaseFontSize, canIncreaseFontSize,
   FONT_SIZE_STEP_PX, selectionToolbarSections,
@@ -83,7 +82,7 @@ export function FontSizeControl({ item, can, onFontSize }) {
       <IconButton
         onClick={() => can && onFontSize(clampFontSize(size - FONT_SIZE_STEP_PX))}
         disabled={!canDecreaseFontSize(size, can)}
-        title={t('font.decrease')}
+        title={t('font.decrease')} aria-label={t('font.decrease')}
       >
         {t('font.decreaseGlyph')}
       </IconButton>
@@ -91,7 +90,7 @@ export function FontSizeControl({ item, can, onFontSize }) {
       <IconButton
         onClick={() => can && onFontSize(clampFontSize(size + FONT_SIZE_STEP_PX))}
         disabled={!canIncreaseFontSize(size, can)}
-        title={t('font.increase')}
+        title={t('font.increase')} aria-label={t('font.increase')}
       >
         {t('font.increaseGlyph')}
       </IconButton>
@@ -153,53 +152,8 @@ export function FontColorPicker({ fontColor, can, onFontColor }) {
   );
 }
 
-export function VoteControl({ hasVoteTimer, timerSetupOpen, nestedZoneCount,
-  onVoteButton, onTimerSetupOpenChange, onStartTimer }) {
-  return (
-    <div className="rb-selection-toolbar__popover-anchor">
-      <IconButton onClick={onVoteButton} title={hasVoteTimer ? t('topbar.stopVote') : t('zone.startVote')}>
-        {hasVoteTimer ? <Square size={TOOLBAR_ICON_SIZE_PX} /> : <ThumbsUp size={TOOLBAR_ICON_SIZE_PX} />}
-      </IconButton>
-      {timerSetupOpen && (
-        <TimerSetup
-          onClose={() => onTimerSetupOpenChange(false)}
-          onStart={onStartTimer}
-          nestedZoneCount={nestedZoneCount}
-        />
-      )}
-    </div>
-  );
-}
-
-function ZoneControls({ item, can, isAdmin, onToggleLock, onExportCsv, onToggleReveal, ...voteProps }) {
-  const revealTitle = item.revealed ? t('zone.hideCards') : t('zone.revealCards');
-  return (
-    <>
-      <IconButton
-        onClick={() => can && onToggleLock()}
-        disabled={!can}
-        title={item.locked ? t('zone.lockToggle.off') : t('zone.lockToggle.on')}
-      >
-        {item.locked ? <Lock size={TOOLBAR_ICON_SIZE_PX} /> : <Unlock size={TOOLBAR_ICON_SIZE_PX} />}
-      </IconButton>
-      <IconButton onClick={onExportCsv} title={t('zone.exportCsvTitle')}>
-        <Download size={TOOLBAR_ICON_SIZE_PX} />
-      </IconButton>
-      {isAdmin && (
-        <>
-          <IconButton onClick={onToggleReveal} title={revealTitle} aria-label={revealTitle}>
-            {item.revealed ? <EyeOff size={TOOLBAR_ICON_SIZE_PX} /> : <Eye size={TOOLBAR_ICON_SIZE_PX} />}
-          </IconButton>
-          <VoteControl hasVoteTimer={item.hasVoteTimer} {...voteProps} />
-        </>
-      )}
-    </>
-  );
-}
-
-export function SelectionToolbar({ anchor, item, can, canDelete, isAdmin, nestedZoneCount, timerSetupOpen,
-  onColor, onFontSize, onFontColor, onTogglePrivate, onToggleLock, onExportCsv, onToggleReveal,
-  onVoteButton, onTimerSetupOpenChange, onStartTimer, onBringToFront, onSendToBack, onDelete, onSaveTemplate }) {
+export function SelectionToolbar({ anchor, item, can, canDelete,
+  onColor, onFontSize, onFontColor, onTogglePrivate, onBringToFront, onSendToBack, onDelete }) {
   const sections = selectionToolbarSections(item.type);
   return (
     <ToolbarSurface anchor={anchor}>
@@ -215,22 +169,6 @@ export function SelectionToolbar({ anchor, item, can, canDelete, isAdmin, nested
           {item.private ? <Lock size={TOOLBAR_ICON_SIZE_PX} /> : <Unlock size={TOOLBAR_ICON_SIZE_PX} />}
         </IconButton>
       )}
-      {sections.zone && (
-        <ZoneControls
-          item={item}
-          can={can}
-          isAdmin={isAdmin}
-          onToggleLock={onToggleLock}
-          onExportCsv={onExportCsv}
-          onToggleReveal={onToggleReveal}
-          timerSetupOpen={timerSetupOpen}
-          nestedZoneCount={nestedZoneCount}
-          onVoteButton={onVoteButton}
-          onTimerSetupOpenChange={onTimerSetupOpenChange}
-          onStartTimer={onStartTimer}
-        />
-      )}
-      {sections.zone && <SaveTemplateButton onSaveTemplate={onSaveTemplate} />}
       <IconButton onClick={() => can && onBringToFront()} disabled={!can} title={t('selection.bringToFront')}>
         <BringToFront size={TOOLBAR_ICON_SIZE_PX} />
       </IconButton>

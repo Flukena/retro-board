@@ -7,6 +7,7 @@ export const ZONE_CHIP_PADDING_HORIZONTAL_PX = 14;
 export const ZONE_HEADER_INSET_PX = 14;
 export const ZONE_HEADER_GAP_PX = 8;
 export const ZONE_HEADER_ICONS_BREAKPOINT_PX = 180;
+export const ZONE_HEADER_MENU_BREAKPOINT_PX = 72;
 export const ZONE_HEADER_Z_INDEX = 4; // Above intra-card badge/medal layers (2/3).
 const CHIP_VERTICAL_SIDES = 2;
 

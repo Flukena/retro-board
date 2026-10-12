@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   selectionToolbarAnchor, groupSelectionToolbarAnchor, fontSizeForItem,
-  clampFontSize, canDecreaseFontSize, canIncreaseFontSize,
+  clampFontSize, canDecreaseFontSize, canIncreaseFontSize, selectionToolbarSections,
 } from './selection-toolbar-model.js';
 import { toolbarAnchorY, SELECTION_TOOLBAR_GAP_PX } from './chrome-layout.js';
 
@@ -61,4 +61,10 @@ test('zone toolbar stays above the body for every title size', () => {
       - SELECTION_TOOLBAR_GAP_PX);
 
   }
+});
+
+test('zones have no floating toolbar sections', () => {
+  assert.deepEqual(selectionToolbarSections('zone'), {
+    palette: false, fontSize: false, fontColor: false, privacy: false,
+  });
 });
