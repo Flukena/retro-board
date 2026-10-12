@@ -35,7 +35,7 @@ Release gate (full list, run from a clean checkout): `DEPLOYMENT.md` §Release g
 
 ## Verifying work
 
-Unit tests are necessary but not sufficient for UI or sync changes. Run `yjs:dev` + `dev`, open the board in **two** browser contexts (`playwright-cli`; its logs land in the ignored `.playwright-cli/`) and confirm the edit syncs both ways, undo/redo still works, and both `th` and `en` render. Report what you exercised.
+Unit tests are necessary but not sufficient for UI or sync changes. Run `yjs:dev` + `dev`, open the board in **two** browser contexts (global `playwright` 1.64 at `/opt/homebrew/bin/playwright`; `playwright-cli` is not installed) and confirm the edit syncs both ways, undo/redo still works, and both `th` and `en` render. Report what you exercised.
 
 ## Needs owner approval (prepare, then stop)
 
