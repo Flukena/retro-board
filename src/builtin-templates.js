@@ -2,40 +2,6 @@ import { t } from './i18n.js';
 
 // Built-in templates are evaluated lazily so titles re-localize on lang change.
 export const getTemplates = () => ({
-  retro3: {
-    name: t('tmpl.retro3.name'),
-    zones: [
-      { title: t('tmpl.retro3.well'),    color: 2, x: 0,    y: 0, w: 1140, h: 1560 },
-      { title: t('tmpl.retro3.improve'), color: 1, x: 1200, y: 0, w: 1140, h: 1560 },
-      { title: t('tmpl.retro3.action'),  color: 3, x: 2400, y: 0, w: 1140, h: 1560 },
-    ],
-  },
-  ssc: {
-    name: t('tmpl.ssc.name'),
-    zones: [
-      { title: '▶️ Start',    color: 2, x: 0,    y: 0, w: 1140, h: 1560 },
-      { title: '⏹ Stop',     color: 1, x: 1200, y: 0, w: 1140, h: 1560 },
-      { title: '⏩ Continue', color: 3, x: 2400, y: 0, w: 1140, h: 1560 },
-    ],
-  },
-  fourLs: {
-    name: t('tmpl.4ls.name'),
-    zones: [
-      { title: '❤️ Liked',      color: 1, x: 0,    y: 0,    w: 1200, h: 1080 },
-      { title: '🧠 Learned',    color: 3, x: 1260, y: 0,    w: 1200, h: 1080 },
-      { title: '🫥 Lacked',     color: 5, x: 0,    y: 1140, w: 1200, h: 1080 },
-      { title: '💭 Longed for', color: 4, x: 1260, y: 1140, w: 1200, h: 1080 },
-    ],
-  },
-  sailboat: {
-    name: t('tmpl.sailboat.name'),
-    zones: [
-      { title: t('tmpl.sailboat.wind'),   color: 2, x: 0,    y: 0,    w: 1200, h: 1080 },
-      { title: t('tmpl.sailboat.anchor'), color: 1, x: 1260, y: 0,    w: 1200, h: 1080 },
-      { title: t('tmpl.sailboat.rocks'),  color: 5, x: 0,    y: 1140, w: 1200, h: 1080 },
-      { title: t('tmpl.sailboat.island'), color: 3, x: 1260, y: 1140, w: 1200, h: 1080 },
-    ],
-  },
   retroLoop: {
     name: t('tmpl.loop.name'),
     zones: [
