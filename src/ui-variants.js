@@ -1,3 +1,5 @@
+import { Z } from './chrome-layout.js';
+
 export const BUTTON_VARIANT = Object.freeze({ DEFAULT: 'default', ACTIVE: 'active', PRIMARY: 'primary', DANGER: 'danger' });
 export const MENU_ITEM_VARIANT = Object.freeze({ DEFAULT: 'default', DANGER: 'danger' });
 export const DIVIDER_ORIENTATION = Object.freeze({ VERTICAL: 'vertical', HORIZONTAL: 'horizontal' });
@@ -59,3 +61,22 @@ export function choiceChipState(selected) {
 export function toastSurfaceKind(type) {
   return type === 'warn' ? SURFACE_KIND.TOAST_WARN : SURFACE_KIND.TOAST;
 }
+
+export const MODAL_SIZE = Object.freeze({ SM: 'sm', MD: 'md', LG: 'lg' });
+export const MODAL_LAYER = Object.freeze({ DEFAULT: 'default', RAISED: 'raised' });
+const MODAL_SIZE_CLASSES = Object.freeze({
+  [MODAL_SIZE.SM]: 'rb-modal__panel rb-modal__panel--sm',
+  [MODAL_SIZE.MD]: 'rb-modal__panel rb-modal__panel--md',
+  [MODAL_SIZE.LG]: 'rb-modal__panel rb-modal__panel--lg',
+});
+const MODAL_LAYER_CLASSES = Object.freeze({
+  [MODAL_LAYER.DEFAULT]: 'rb-modal rb-modal--default',
+  [MODAL_LAYER.RAISED]: 'rb-modal rb-modal--raised',
+});
+const MODAL_LAYER_Z = Object.freeze({
+  [MODAL_LAYER.DEFAULT]: Z.MODAL,
+  [MODAL_LAYER.RAISED]: Z.MODAL_RAISED,
+});
+export function modalSizeClass(size) { return mappedClass(MODAL_SIZE_CLASSES, size); }
+export function modalLayerClass(layer) { return mappedClass(MODAL_LAYER_CLASSES, layer); }
+export function modalLayerZ(layer) { return mappedClass(MODAL_LAYER_Z, layer); }

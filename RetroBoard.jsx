@@ -5,13 +5,12 @@ import React, {
   useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, startTransition,
 } from 'react';
 import {
-  Trash2, Lock, Unlock, ThumbsUp,
-  X, AlertCircle,
+  Lock, Unlock, ThumbsUp,
+  AlertCircle,
   MousePointer2, RotateCcw,
-  Upload, HelpCircle,
+  Upload,
   MessageSquare, Map as MapIcon,
 } from 'lucide-react';
-import { COMMENT_MAX_LEN } from './src/comment-schema.js';
 import {
   IMPORT_MAX_BUNDLE_BYTES,
   IMPORT_MAX_ARCHIVE_FILE_BYTES,
@@ -27,7 +26,6 @@ import { restoreBackupImages } from './src/backup-images.js';
 import { geometryErrorForItem, geometryErrorForPatch } from './src/board-geometry.js';
 import {
   BOARD_TEXT_MAX_LENGTH,
-  DISPLAY_NAME_MAX_LENGTH,
   IMAGE_MAX_BYTES,
   IMAGE_OUTPUT_MAX_DIMENSION,
   TEMPLATE_NAME_MAX_LENGTH,
@@ -39,6 +37,11 @@ import {
   redactBoardExportForViewer,
   stickyTextForDom,
 } from './src/security-boundaries.js';
+import {
+  ConfirmDialog, NameDialog, HelpDialog, CommentsDialog, AdminPinDialog, SaveTemplateDialog,
+} from './src/Modals.jsx';
+import { MODAL_SIZE, BUTTON_VARIANT } from './src/ui-variants.js';
+import { importWarningNotes } from './src/modal-model.js';
 import { ToolDock, TOOL_ID } from './src/ToolDock.jsx';
 import { ZoomControls } from './src/ZoomControls.jsx';
 import { TopCenterStack } from './src/TopCenterStack.jsx';
@@ -5768,250 +5771,56 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         />
       )}
 
-      {/* Save template modal */}
       {saveTemplateOpen && (
-        <SaveTemplateModal
+        <SaveTemplateDialog
           onClose={() => setSaveTemplateOpen(false)}
           onSave={saveCurrentAsTemplate}
           zoneCount={board.items.filter((i) => i.type === 'zone').length}
         />
       )}
-
-      {/* Name modal */}
       {nameModalOpen && (
-        <div
-          style={{
-            position: 'fixed', inset: 0, zIndex: Z.MODAL,
-            background: 'rgba(0,0,0,0.4)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}
-        >
-          <div
-            style={{
-              background: 'var(--bg-panel)', borderRadius: 14, padding: 24,
-              minWidth: 320, boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
-            }}
-          >
-            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 12, color: 'var(--text)' }}>
-              {t('name.head')}
-            </div>
-            <input
-              autoFocus
-              value={nameDraft}
-              maxLength={DISPLAY_NAME_MAX_LENGTH}
-              onChange={(e) => setNameDraft(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') saveName(); }}
-              placeholder={t('name.placeholder')}
-              style={{
-                width: '100%', padding: '10px 12px', fontSize: 15,
-                border: '1px solid var(--border)', borderRadius: 8, outline: 'none',
-                background: 'var(--bg-panel)', color: 'var(--text)',
-                boxSizing: 'border-box',
-              }}
-            />
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
-              <button
-                type="button"
-                onClick={saveName}
-                style={{
-                  background: 'var(--accent)', color: 'var(--accent-fg)', border: 'none',
-                  padding: '8px 16px', borderRadius: 8, fontWeight: 600,
-                  cursor: 'pointer', fontSize: 14,
-                }}
-              >{t('name.confirm')}
-              </button>
-            </div>
-          </div>
-        </div>
+        <NameDialog draft={nameDraft} onDraftChange={setNameDraft} onSave={saveName} />
       )}
-
-      {/* Reset votes confirm */}
       {confirmUnlockAll && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          style={{
-            position: 'fixed', inset: 0, zIndex: Z.MODAL,
-            background: 'rgba(0,0,0,0.4)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}
-        >
-          <div
-            style={{
-              background: 'var(--bg-elev)', borderRadius: 14, padding: 24,
-              minWidth: 320, boxShadow: 'var(--shadow-modal)',
-              animation: 'rb-pop 0.2s ease-out',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-              <Unlock size={22} color="var(--accent)" />
-              <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--text)' }}>{t('unlockAll.confirm.head')}</div>
-            </div>
-            <div style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 18 }}>
-              {t('unlockAll.confirm.body')}
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <button
-                type="button"
-                autoFocus
-                onClick={() => setConfirmUnlockAll(false)}
-                style={{
-                  background: 'var(--bg-panel-2)', color: 'var(--text-mid)', border: 'none',
-                  padding: '8px 16px', borderRadius: 8, fontWeight: 600,
-                  cursor: 'pointer', fontSize: 14,
-                }}
-              >{t('common.cancel')}
-              </button>
-              <button
-                type="button"
-                onClick={() => requireAdminPin(adminUnlockAll)}
-                style={{
-                  background: 'var(--accent)', color: 'var(--accent-fg)', border: 'none',
-                  padding: '8px 16px', borderRadius: 8, fontWeight: 600,
-                  cursor: 'pointer', fontSize: 14,
-                }}
-              >{t('unlockAll.confirm.ok')}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          icon={<Unlock size={22} color="var(--accent)" />}
+          title={t('unlockAll.confirm.head')}
+          body={t('unlockAll.confirm.body')}
+          cancelLabel={t('common.cancel')}
+          confirmLabel={t('unlockAll.confirm.ok')}
+          onCancel={() => setConfirmUnlockAll(false)}
+          onConfirm={() => requireAdminPin(adminUnlockAll)}
+        />
       )}
-
       {confirmResetVotes && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          style={{
-            position: 'fixed', inset: 0, zIndex: Z.MODAL,
-            background: 'rgba(0,0,0,0.4)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}
-        >
-          <div
-            style={{
-              background: 'var(--bg-elev)', borderRadius: 14, padding: 24,
-              minWidth: 320, boxShadow: 'var(--shadow-modal)',
-              animation: 'rb-pop 0.2s ease-out',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-              <RotateCcw size={22} color="var(--accent)" />
-              <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--text)' }}>{t('reset.confirm.head')}</div>
-            </div>
-            <div style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 18 }}>
-              {t('reset.confirm.body')}
-              <br />
-              {t('reset.confirm.body2')}
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <button
-                type="button"
-                autoFocus
-                onClick={() => setConfirmResetVotes(false)}
-                style={{
-                  background: 'var(--bg-panel-2)', color: 'var(--text-mid)', border: 'none',
-                  padding: '8px 16px', borderRadius: 8, fontWeight: 600,
-                  cursor: 'pointer', fontSize: 14,
-                }}
-              >{t('common.cancel')}
-              </button>
-              <button
-                type="button"
-                onClick={() => requireAdminPin(adminResetVotes)}
-                style={{
-                  background: 'var(--accent)', color: 'var(--accent-fg)', border: 'none',
-                  padding: '8px 16px', borderRadius: 8, fontWeight: 600,
-                  cursor: 'pointer', fontSize: 14,
-                }}
-              >{t('reset.confirm.ok')}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          icon={<RotateCcw size={22} color="var(--accent)" />}
+          title={t('reset.confirm.head')}
+          body={<>{t('reset.confirm.body')}<br />{t('reset.confirm.body2')}</>}
+          cancelLabel={t('common.cancel')}
+          confirmLabel={t('reset.confirm.ok')}
+          onCancel={() => setConfirmResetVotes(false)}
+          onConfirm={() => requireAdminPin(adminResetVotes)}
+        />
       )}
-
-      {/* Import confirm */}
       {pendingImport && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          style={{
-            position: 'fixed', inset: 0, zIndex: Z.MODAL,
-            background: 'var(--bg-modal-veil)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}
-        >
-          <div
-            style={{
-              background: 'var(--bg-elev)', borderRadius: 14, padding: 24,
-              minWidth: 360, boxShadow: 'var(--shadow-modal)',
-              animation: 'rb-pop 0.2s ease-out',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-              <Upload size={22} color="var(--accent)" />
-              <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--text)' }}>{t('import.confirm.head')}</div>
-            </div>
-            <div style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 18 }}>
-              {importBusy ? t('import.processing') : t('import.confirm.body', {
-                n: pendingImport.items.length,
-                file: pendingImport.name,
-              })}
-            </div>
-            {pendingImport.sourceFormat === 'csv' && (
-              <div
-                role="note"
-                style={{ fontSize: 13, color: 'var(--warn-text)', marginTop: -8, marginBottom: 18 }}
-              >{t('import.csv.warning', {
-                votes: pendingImport.csvSummary?.voteCountLost ?? 0,
-                skipped: pendingImport.csvSummary?.skippedRows ?? 0,
-              })}
-              </div>
-            )}
-            {(pendingImport.geometryRepairs?.positions > 0
-              || pendingImport.geometryRepairs?.zoneDimensions > 0) && (
-              <div
-                role="note"
-                style={{ fontSize: 13, color: 'var(--warn-text)', marginTop: -8, marginBottom: 18 }}
-              >{t('import.geometry.warning', {
-                positions: pendingImport.geometryRepairs.positions,
-                zones: pendingImport.geometryRepairs.zoneDimensions,
-              })}
-              </div>
-            )}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <button
-                type="button"
-                autoFocus
-                onClick={() => setPendingImport(null)}
-                disabled={importBusy}
-                style={{
-                  background: 'var(--bg-panel-2)', color: 'var(--text-mid)', border: 'none',
-                  padding: '8px 16px', borderRadius: 8, fontWeight: 600,
-                  cursor: importBusy ? 'not-allowed' : 'pointer', fontSize: 14,
-                  opacity: importBusy ? 0.6 : 1,
-                }}
-              >{t('common.cancel')}
-              </button>
-              <button
-                type="button"
-                onClick={confirmImport}
-                disabled={importBusy}
-                style={{
-                  background: 'var(--accent)', color: 'var(--accent-fg)', border: 'none',
-                  padding: '8px 16px', borderRadius: 8, fontWeight: 600,
-                  cursor: importBusy ? 'not-allowed' : 'pointer', fontSize: 14,
-                  opacity: importBusy ? 0.6 : 1,
-                }}
-              >{importBusy ? t('import.processing') : t('import.confirm.ok')}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          size={MODAL_SIZE.MD}
+          icon={<Upload size={22} color="var(--accent)" />}
+          title={t('import.confirm.head')}
+          body={importBusy ? t('import.processing') : t('import.confirm.body', {
+            n: pendingImport.items.length, file: pendingImport.name,
+          })}
+          notes={importWarningNotes(pendingImport).map(({ key, params }) => t(key, params))}
+          cancelLabel={t('common.cancel')}
+          confirmLabel={importBusy ? t('import.processing') : t('import.confirm.ok')}
+          busy={importBusy}
+          onCancel={() => setPendingImport(null)}
+          onConfirm={confirmImport}
+        />
       )}
-
-      {commentsOpenReadable ? (
-        <CommentsModal
+      {commentsOpenReadable && (
+        <CommentsDialog
           item={commentsOpenItem}
           comments={commentsByItem.get(commentsOpenItem.id) ?? EMPTY_COMMENTS}
           editingAllowed={editingAllowed}
@@ -6019,467 +5828,35 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           onDelete={(commentId) => deleteCommentFrom(commentsOpenItem.id, commentId)}
           onClose={() => setCommentsOpenFor(null)}
         />
-      ) : null}
-
-      {helpOpen && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          onClick={() => setHelpOpen(false)}
-          style={{
-            position: 'fixed', inset: 0, zIndex: Z.MODAL,
-            background: 'var(--bg-modal-veil)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            padding: 20,
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              background: 'var(--bg-elev)', borderRadius: 14, padding: 24,
-              width: '100%', maxWidth: 680, maxHeight: '82vh', overflowY: 'auto',
-              boxShadow: 'var(--shadow-modal)',
-              animation: 'rb-pop 0.2s ease-out',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <HelpCircle size={22} color="var(--accent)" />
-                <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--text)' }}>{t('help.title')}</div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setHelpOpen(false)}
-                aria-label={t('common.close')}
-                style={{
-                  background: 'transparent', border: 'none', color: 'var(--text-muted)',
-                  cursor: 'pointer', padding: 4, display: 'inline-flex',
-                }}
-              ><X size={18} />
-              </button>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-              {HELP_SECTIONS.map((s) => (
-                <div key={s.key}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                    <span style={{
-                      width: 10, height: 10, borderRadius: 3, flexShrink: 0,
-                      background: PALETTE[s.color].border,
-                    }}
-                    />
-                    <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--text)' }}>{t(`help.${s.key}.title`)}</div>
-                  </div>
-                  <ul style={{ margin: 0, paddingLeft: 22, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    {t(`help.${s.key}.body`).split('\n').map((line) => (
-                      <li key={line} style={{ fontSize: 13.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>{line}</li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
       )}
-
-      {/* Clear board confirm */}
-      {/* Admin PIN gate — set on first use, verify after. Cached for the
-          tab session via pinSessionOkRef so subsequent destructive actions
-          don't pester the admin. */}
+      {helpOpen && (
+        <HelpDialog
+          sections={HELP_SECTIONS.map((section) => ({ ...section, color: PALETTE[section.color].border }))}
+          onClose={() => setHelpOpen(false)}
+        />
+      )}
       {pinPromptCfg && (
-        <AdminPinModal
-          cfg={pinPromptCfg}
+        <AdminPinDialog
+          isSetting={pinPromptCfg.isSetting}
+          error={pinPromptCfg.error}
           onCancel={pinPromptCfg.onCancel}
           onSubmit={pinPromptCfg.onSuccess}
         />
       )}
-
       {confirmClear && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          style={{
-            position: 'fixed', inset: 0, zIndex: Z.MODAL,
-            background: 'var(--bg-modal-veil)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}
-        >
-          <div
-            style={{
-              background: 'var(--bg-elev)', borderRadius: 14, padding: 24,
-              minWidth: 320, boxShadow: 'var(--shadow-modal)',
-              animation: 'rb-pop 0.2s ease-out',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-              <AlertCircle size={22} color="var(--danger)" />
-              <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--text)' }}>{t('clear.confirm.head')}</div>
-            </div>
-            <div style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 18 }}>
-              {t('clear.confirm.body')}
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <button
-                type="button"
-                autoFocus
-                onClick={() => setConfirmClear(false)}
-                style={{
-                  background: 'var(--bg-panel-2)', color: 'var(--text-mid)', border: 'none',
-                  padding: '8px 16px', borderRadius: 8, fontWeight: 600,
-                  cursor: 'pointer', fontSize: 14,
-                }}
-              >{t('common.cancel')}
-              </button>
-              <button
-                type="button"
-                onClick={() => requireAdminPin(adminClearBoard)}
-                style={{
-                  background: 'var(--danger)', color: 'var(--danger-fg)', border: 'none',
-                  padding: '8px 16px', borderRadius: 8, fontWeight: 600,
-                  cursor: 'pointer', fontSize: 14,
-                }}
-              >{t('clear.confirm.ok')}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          icon={<AlertCircle size={22} color="var(--danger)" />}
+          title={t('clear.confirm.head')}
+          body={t('clear.confirm.body')}
+          cancelLabel={t('common.cancel')}
+          confirmLabel={t('clear.confirm.ok')}
+          confirmVariant={BUTTON_VARIANT.DANGER}
+          onCancel={() => setConfirmClear(false)}
+          onConfirm={() => requireAdminPin(adminClearBoard)}
+        />
       )}
 
       <Toast toast={toast} onClose={() => setToast(null)} />
-    </div>
-  );
-}
-
-/* ============================================================
-   Small subcomponents & style helpers
-   ============================================================ */
-
-function CommentsModal({ item, comments, editingAllowed, onAdd, onDelete, onClose }) {
-  const [draft, setDraft] = useState('');
-  const fmtAgo = (ts) => {
-    const diff = Date.now() - ts;
-    if (diff < 60_000) return t('common.justNow');
-    if (diff < 3600_000) return t('common.minutesAgo', { n: Math.floor(diff / 60000) });
-    if (diff < 86_400_000) return t('common.hoursAgo', { n: Math.floor(diff / 3_600_000) });
-    return t('common.daysAgo', { n: Math.floor(diff / 86_400_000) });
-  };
-  const submit = () => {
-    const text = draft.trim();
-    if (!text || !editingAllowed) return;
-    if (onAdd(text) !== false) setDraft('');
-  };
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="comments-dialog-title"
-      onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0, zIndex: Z.MODAL,
-        background: 'var(--bg-modal-veil)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        padding: 20,
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          background: 'var(--bg-elev)', borderRadius: 14, padding: 24,
-          width: '100%', maxWidth: 560, maxHeight: '82vh',
-          boxShadow: 'var(--shadow-modal)', animation: 'rb-pop 0.2s ease-out',
-          display: 'flex', flexDirection: 'column', overflow: 'hidden',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <MessageSquare size={22} color="var(--accent)" />
-            <div id="comments-dialog-title" style={{ fontSize: 17, fontWeight: 700, color: 'var(--text)' }}>{t('comments.title')}</div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label={t('common.close')}
-            autoFocus={!editingAllowed}
-            style={{
-              background: 'transparent', border: 'none', color: 'var(--text-muted)',
-              cursor: 'pointer', padding: 4, display: 'inline-flex',
-            }}
-          ><X size={18} />
-          </button>
-        </div>
-        {item.text && (
-          <div style={{
-            color: 'var(--text-muted)', fontSize: 13, marginBottom: 12,
-            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-          }}
-          >{item.text}
-          </div>
-        )}
-        <div style={{ flex: 1, minHeight: 120, overflowY: 'auto', marginBottom: 16 }}>
-          {comments.length === 0 ? (
-            <div style={{ color: 'var(--text-faint)', fontSize: 14, textAlign: 'center', padding: '32px 0' }}>
-              {t('comments.empty')}
-            </div>
-          ) : comments.map((comment) => (
-            <div
-              key={comment.id}
-              style={{
-                padding: '10px 0', borderBottom: '1px solid var(--border-soft)',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                <span style={{ color: 'var(--text)', fontSize: 13, fontWeight: 700 }}>
-                  {comment.authorName || 'Anon'}
-                </span>
-                <span style={{ color: 'var(--text-faint)', fontSize: 11 }}>{fmtAgo(comment.createdAt)}</span>
-                <div style={{ flex: 1 }} />
-                {editingAllowed && (
-                  <button
-                    type="button"
-                    onClick={() => onDelete(comment.id)}
-                    title={t('comments.delete')}
-                    aria-label={t('comments.delete')}
-                    style={{
-                      background: 'transparent', border: 'none', color: 'var(--text-faint)',
-                      cursor: 'pointer', padding: 3, display: 'inline-flex',
-                    }}
-                  ><Trash2 size={14} />
-                  </button>
-                )}
-              </div>
-              <div style={{ color: 'var(--text-mid)', fontSize: 14, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                {comment.text}
-              </div>
-            </div>
-          ))}
-        </div>
-        <div style={{ borderTop: '1px solid var(--border-soft)', paddingTop: 16 }}>
-          <textarea
-            autoFocus={editingAllowed}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submit();
-              if (e.key === 'Escape') onClose();
-            }}
-            maxLength={COMMENT_MAX_LEN}
-            disabled={!editingAllowed}
-            placeholder={t('comments.placeholder')}
-            style={{
-              width: '100%', minHeight: 80, resize: 'vertical', boxSizing: 'border-box',
-              padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 8,
-              background: 'var(--bg-panel)', color: 'var(--text)', fontFamily: 'inherit',
-              fontSize: 14, outline: 'none',
-            }}
-          />
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
-            <button
-              type="button"
-              onClick={submit}
-              disabled={!editingAllowed || !draft.trim()}
-              style={{
-                background: 'var(--accent)', color: 'var(--accent-fg)', border: 'none',
-                padding: '8px 16px', borderRadius: 8, fontWeight: 600, fontSize: 14,
-                cursor: (!editingAllowed || !draft.trim()) ? 'not-allowed' : 'pointer',
-                opacity: (!editingAllowed || !draft.trim()) ? 0.5 : 1,
-              }}
-            >{t('comments.send')}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function AdminPinModal({ cfg, onCancel, onSubmit }) {
-  const [pin, setPin] = useState('');
-  const [pin2, setPin2] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState(null);
-  const isSetting = cfg.isSetting;
-  const valid = /^[0-9]{4,8}$/.test(pin);
-  const matches = !isSetting || pin === pin2;
-  const submit = async () => {
-    if (!valid || !matches || busy) return;
-    setBusy(true);
-    setErr(null);
-    try {
-      await onSubmit(pin);
-    } catch (e) {
-      setErr(e?.message || t('pin.genericError') || 'Something went wrong. Try again.');
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      style={{
-        position: 'fixed', inset: 0, zIndex: Z.MODAL_RAISED,
-        background: 'rgba(0,0,0,0.45)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}
-    >
-      <div
-        style={{
-          background: 'var(--bg-elev)', borderRadius: 14, padding: 24,
-          minWidth: 320, maxWidth: 380, boxShadow: 'var(--shadow-modal)',
-          animation: 'rb-pop 0.18s ease-out',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-          <Lock size={20} color="var(--accent)" />
-          <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--text)' }}>
-            {isSetting ? (t('pin.setHead') || 'Set admin PIN') : (t('pin.verifyHead') || 'Enter admin PIN')}
-          </div>
-        </div>
-        <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 14 }}>
-          {isSetting
-            ? (t('pin.setBody') || '4–8 digits. Required for Clear / Reset / Transfer.')
-            : (t('pin.verifyBody') || 'Confirm this destructive action.')}
-        </div>
-        <input
-          type="password"
-          inputMode="numeric"
-          autoFocus
-          value={pin}
-          onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
-          onKeyDown={(e) => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') onCancel(); }}
-          placeholder="••••"
-          style={{
-            width: '100%', padding: '10px 12px', fontSize: 18,
-            letterSpacing: 6, textAlign: 'center',
-            border: '1px solid var(--border)', borderRadius: 8, outline: 'none',
-            background: 'var(--bg-panel)', color: 'var(--text)',
-            boxSizing: 'border-box', fontFamily: 'var(--font-mono)',
-          }}
-        />
-        {isSetting && (
-          <input
-            type="password"
-            inputMode="numeric"
-            value={pin2}
-            onChange={(e) => setPin2(e.target.value.replace(/\D/g, '').slice(0, 8))}
-            onKeyDown={(e) => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') onCancel(); }}
-            placeholder={t('pin.confirm') || 'confirm'}
-            style={{
-              marginTop: 8,
-              width: '100%', padding: '10px 12px', fontSize: 18,
-              letterSpacing: 6, textAlign: 'center',
-              border: '1px solid var(--border)', borderRadius: 8, outline: 'none',
-              background: 'var(--bg-panel)', color: 'var(--text)',
-              boxSizing: 'border-box', fontFamily: 'var(--font-mono)',
-            }}
-          />
-        )}
-        {cfg.error === 'wrong' && (
-          <div style={{ color: '#dc2626', fontSize: 12, marginTop: 8 }}>
-            {t('pin.wrong') || 'Wrong PIN'}
-          </div>
-        )}
-        {err && (
-          <div style={{ color: '#dc2626', fontSize: 12, marginTop: 8 }}>
-            {err}
-          </div>
-        )}
-        {isSetting && pin && pin2 && !matches && (
-          <div style={{ color: '#dc2626', fontSize: 12, marginTop: 8 }}>
-            {t('pin.mismatch') || "PINs don't match"}
-          </div>
-        )}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={busy}
-            style={{
-              background: 'var(--bg-panel-2)', color: 'var(--text-mid)', border: 'none',
-              padding: '8px 16px', borderRadius: 8, fontWeight: 600,
-              cursor: busy ? 'not-allowed' : 'pointer', fontSize: 14,
-            }}
-          >{t('common.cancel')}
-          </button>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={!valid || !matches || busy}
-            style={{
-              background: 'var(--accent)', color: 'var(--accent-fg)', border: 'none',
-              padding: '8px 16px', borderRadius: 8, fontWeight: 600,
-              cursor: (!valid || !matches || busy) ? 'not-allowed' : 'pointer',
-              opacity: (!valid || !matches || busy) ? 0.5 : 1,
-              fontSize: 14,
-            }}
-          >{isSetting ? (t('pin.set') || 'Set PIN') : (t('pin.unlock') || 'Unlock')}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function SaveTemplateModal({ onClose, onSave, zoneCount }) {
-  const [name, setName] = useState('');
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      style={{
-        position: 'fixed', inset: 0, zIndex: Z.MODAL,
-        background: 'var(--bg-modal-veil)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}
-    >
-      <div
-        style={{
-          background: 'var(--bg-elev)', borderRadius: 14, padding: 24,
-          minWidth: 340, boxShadow: 'var(--shadow-modal)',
-        }}
-      >
-        <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 6, color: 'var(--text)' }}>
-          {t('tmpl.saveDialog.head')}
-        </div>
-        <input
-          autoFocus
-          value={name}
-          maxLength={TEMPLATE_NAME_MAX_LENGTH}
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) onSave(name); if (e.key === 'Escape') onClose(); }}
-          placeholder={t('tmpl.saveDialog.placeholder')}
-          style={{
-            width: '100%', padding: '10px 12px', fontSize: 15,
-            border: '1px solid var(--border)', borderRadius: 8, outline: 'none',
-            background: 'var(--bg-panel)', color: 'var(--text)',
-            boxSizing: 'border-box', marginTop: 8,
-          }}
-        />
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
-          <button
-            type="button"
-            onClick={onClose}
-            style={{
-              background: 'var(--bg-panel-2)', color: 'var(--text-mid)', border: 'none',
-              padding: '8px 16px', borderRadius: 8, fontWeight: 600,
-              cursor: 'pointer', fontSize: 14,
-            }}
-          >{t('common.cancel')}
-          </button>
-          <button
-            type="button"
-            disabled={!name.trim() || zoneCount === 0}
-            onClick={() => onSave(name)}
-            style={{
-              background: name.trim() && zoneCount > 0 ? 'var(--accent)' : 'var(--text-faint)',
-              color: 'var(--accent-fg)', border: 'none',
-              padding: '8px 16px', borderRadius: 8, fontWeight: 600,
-              cursor: name.trim() && zoneCount > 0 ? 'pointer' : 'not-allowed',
-              fontSize: 14,
-            }}
-          >{t('common.save')}
-          </button>
-        </div>
-      </div>
     </div>
   );
 }

@@ -219,6 +219,8 @@ const dict = {
     'sticky.delete': 'ลบ',
     'sticky.private.placeholder': '••••••',
 
+    'comments.anonymous': 'ผู้ไม่ระบุชื่อ',
+    'pin.placeholder': '••••',
     'comments.title': 'ความคิดเห็น',
     'comments.empty': 'ยังไม่มีความคิดเห็น',
     'comments.placeholder': 'เขียนความคิดเห็น…',
@@ -537,6 +539,8 @@ const dict = {
     'sticky.delete': 'Delete',
     'sticky.private.placeholder': '••••••',
 
+    'comments.anonymous': 'Anon',
+    'pin.placeholder': '••••',
     'comments.title': 'Comments',
     'comments.empty': 'No comments yet',
     'comments.placeholder': 'Write a comment…',

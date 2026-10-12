@@ -136,3 +136,11 @@ test('toast shadow resolves in both modes', () => {
     for (const name of ['--shadow-toast', '--minimap-viewport-bg', '--zone-preview-bg']) assert.ok(tokens[name]);
   }
 });
+
+test('modal appearance tokens resolve in both themes', () => {
+  for (const tokens of Object.values(TOKENS)) {
+    for (const name of ['--bg-modal-veil', '--bg-elev', '--border', '--radius-lg', '--shadow-modal']) {
+      assert.ok(tokens[name], 'Missing modal token ' + name);
+    }
+  }
+});

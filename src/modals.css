@@ -1,0 +1,186 @@
+/* Body classes own layout; primitives own button and shell appearances. */
+.rb-dialog__scroll {
+  max-height: calc(82vh - 2 * 24px - 2 * 1.5px);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+.rb-help__swatch {
+  width: 10px; height: 10px; border-radius: var(--radius-sticky); flex-shrink: 0;
+  background: var(--rb-help-color);
+}
+.rb-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+.rb-dialog__title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text);
+}
+.rb-dialog__excerpt {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin-bottom: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rb-dialog__comment-list {
+  flex: 1;
+  min-height: 120px;
+  overflow-y: auto;
+  margin-bottom: 16px;
+}
+.rb-dialog__empty {
+  color: var(--text-faint);
+  font-size: 14px;
+  text-align: center;
+  padding: 32px 0;
+}
+.rb-dialog__comment {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+.rb-dialog__comment-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.rb-dialog__author {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+}
+.rb-dialog__timestamp {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+.rb-dialog__spacer {
+  flex: 1;
+}
+.rb-dialog__comment-text {
+  color: var(--text-mid);
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.rb-dialog__composer {
+  border-top: 1px solid var(--border-soft);
+  padding-top: 16px;
+}
+.rb-dialog__textarea {
+  width: 100%;
+  min-height: 80px;
+  resize: vertical;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  font-size: 14px;
+}
+.rb-dialog__send-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+.rb-dialog__pin-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.rb-dialog__pin-body {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 14px;
+}
+.rb-dialog__pin-input {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 18px;
+  letter-spacing: 6px;
+  text-align: center;
+  box-sizing: border-box;
+}
+.rb-dialog__error {
+  color: var(--danger);
+  font-size: 12px;
+  margin-top: 8px;
+}
+.rb-dialog__help-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.rb-dialog__help-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.rb-dialog__help-title {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--text);
+}
+.rb-dialog__help-list {
+  margin: 0px;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rb-dialog__help-line {
+  font-size: 13.5px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.rb-input.rb-dialog__pin-input, .rb-input.rb-dialog__heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.rb-dialog__header.rb-dialog__heading {
+  margin-bottom: 0;
+}
+.rb-dialog__body {
+  font-size: 14px;
+  color: var(--text-muted);
+  margin-bottom: 18px;
+}
+.rb-dialog__note {
+  font-size: 13px;
+  color: var(--warn-text);
+  margin-top: -8px;
+  margin-bottom: 18px;
+}
+.rb-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.rb-dialog__actions--spaced {
+  margin-top: 16px;
+}
+.rb-dialog__input {
+  width: 100%;
+  padding: 10px 12px;
+  box-sizing: border-box;
+  font-size: 15px;
+}
+
+.rb-dialog__pin-input--confirmation, .rb-dialog__input--template { margin-top: 8px; }
+.rb-dialog__comments {
+  max-height: calc(82vh - 2 * 24px - 2 * 1.5px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.rb-dialog__name-heading { margin-bottom: 12px; }
+.rb-dialog__template-heading { margin-bottom: 6px; }

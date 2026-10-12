@@ -2,12 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
+  MODAL_SIZE, MODAL_LAYER, modalSizeClass, modalLayerClass,
   BUTTON_VARIANT, MENU_ITEM_VARIANT, DIVIDER_ORIENTATION, SURFACE_KIND,
   buttonClass, menuItemClass, dividerClass, topBarButtonVariant, surfaceClass,
   ICON_BUTTON_VARIANT, CHOICE_CHIP_STATE, iconButtonClass, choiceChipClass, choiceChipState, toastSurfaceKind,
 } from './ui-variants.js';
 
 const CONTRACTS = [
+  ['modal size', MODAL_SIZE, modalSizeClass],
+  ['modal layer', MODAL_LAYER, modalLayerClass],
   ['icon button', ICON_BUTTON_VARIANT, iconButtonClass],
   ['choice chip', CHOICE_CHIP_STATE, choiceChipClass],
   ['surface', SURFACE_KIND, surfaceClass],

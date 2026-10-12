@@ -229,3 +229,33 @@
   .rb-surface.rb-surface--toast,
   .rb-surface.rb-surface--toast-warn { animation: none; }
 }
+
+.rb-modal {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-modal-veil);
+  padding: 20px;
+  font-family: var(--font-ui);
+}
+.rb-modal--default, .rb-modal--raised { isolation: isolate; }
+.rb-modal__panel {
+  background: var(--bg-elev);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  box-shadow: var(--shadow-modal);
+  animation: rb-pop 0.2s ease-out;
+  box-sizing: border-box;
+  width: 100%;
+}
+.rb-modal__panel--sm { max-width: 320px; }
+.rb-modal__panel--md { max-width: 380px; }
+.rb-modal__panel--lg { max-width: 680px; }
+@media (prefers-reduced-motion: reduce) {
+  .rb-modal__panel { animation: none; }
+}
+
+.rb-input.rb-input--mono { font-family: var(--font-mono); }
