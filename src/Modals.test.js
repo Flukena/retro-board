@@ -91,7 +91,7 @@ test('confirmation and name report events without adding dismissal or keyboard b
   });
 });
 
-const COMPONENT_CLASS_PATTERN = /^rb-(?:dialog|help|timer-setup|selection-toolbar|landing|minimap)__/;
+const COMPONENT_CLASS_PATTERN = /^(?:rb-(?:dialog|help|timer-setup|selection-toolbar|landing|minimap)__|rb-(?:tool-dock|dock-tile|template)(?:$|[-_]))/;
 test('selector contract distinguishes target compounds from ancestors and incompatible classes', () => {
   const heading = new Set(['rb-dialog__heading']);
   assert.equal(targetsClass('.rb-input.rb-dialog__heading', 'rb-dialog__heading', heading), false);
@@ -106,7 +106,7 @@ test('every scoped component class has a compatible stylesheet selector targetin
   for (const [component, stylesheet] of [
     ['Modals.jsx', 'modals.css'], ['TimerSetup.jsx', 'timer-setup.css'],
     ['SelectionToolbar.jsx', 'selection-toolbar.css'], ['Landing.jsx', 'landing.css'],
-    ['MinimapPanel.jsx', 'minimap.css'],
+    ['MinimapPanel.jsx', 'minimap.css'], ['ToolDock.jsx', 'tool-dock.css'],
   ]) {
     const source = readFileSync(new URL(component, import.meta.url), 'utf8');
     const css = readFileSync(new URL(stylesheet, import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
@@ -118,4 +118,29 @@ test('every scoped component class has a compatible stylesheet selector targetin
       }
     }
   }
+});
+
+test('save dialog describes its draft count; blank Save is disabled and Enter does nothing', async () => {
+  await withChromeModule('/src/Modals.jsx', ({ SaveTemplateDialog }, { t, setLang }) => {
+    for (const lang of ['th', 'en']) {
+      setLang(lang);
+      let tree;
+      let saves = 0;
+      let closes = 0;
+      function InspectDialog() {
+        tree = SaveTemplateDialog({ zoneCount: 3, onSave: () => { saves += 1; }, onClose: () => { closes += 1; } });
+        return tree;
+      }
+      const markup = renderToStaticMarkup(React.createElement(InspectDialog));
+      assert.ok(markup.includes(t('tmpl.saveDialog.count', { n: 3 })));
+      assert.notEqual(t('tmpl.saveDialog.count', { n: 3 }), 'tmpl.saveDialog.count');
+      const input = tree.props.children.find((child) => child?.type === 'input');
+      input.props.onKeyDown({ key: 'Enter' });
+      assert.equal(saves, 0);
+      const save = tree.props.children.at(-1).props.children.at(-1);
+      assert.equal(save.props.disabled, true);
+      input.props.onKeyDown({ key: 'Escape' });
+      assert.equal(closes, 1);
+    }
+  });
 });

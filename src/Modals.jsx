@@ -207,6 +207,7 @@ export function SaveTemplateDialog({ onClose, onSave, zoneCount }) {
       <div className="rb-dialog__title rb-dialog__template-heading">
         {t('tmpl.saveDialog.head')}
       </div>
+      <div className="rb-dialog__body">{t('tmpl.saveDialog.count', { n: zoneCount })}</div>
       <input
         autoFocus
         value={name}

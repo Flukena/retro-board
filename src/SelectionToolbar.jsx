@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  Trash2, Lock, Unlock, Eye, EyeOff, Download, ThumbsUp, Square, Type, BringToFront, SendToBack,
+  LayoutTemplate, Trash2, Lock, Unlock, Eye, EyeOff, Download, ThumbsUp, Square, Type, BringToFront, SendToBack,
 } from 'lucide-react';
 import { IconButton, Surface } from './UiPrimitives.jsx';
 import { ICON_BUTTON_VARIANT, SURFACE_KIND } from './ui-variants.js';
@@ -30,7 +30,7 @@ function ToolbarSurface({ anchor, children }) {
   );
 }
 
-export function GroupSelectionToolbar({ anchor, lockedCount, canUnlock, onUnlockAll }) {
+export function GroupSelectionToolbar({ anchor, lockedCount, canUnlock, onUnlockAll, zoneCount = 0, onSaveTemplate }) {
   const title = lockedCount > 0
     ? t('selection.unlockAll', { n: lockedCount }) : t('selection.nothingLocked');
   return (
@@ -44,7 +44,17 @@ export function GroupSelectionToolbar({ anchor, lockedCount, canUnlock, onUnlock
         <Unlock size={TOOLBAR_ICON_SIZE_PX} />
         <span>{t('selection.unlockAll', { n: lockedCount })}</span>
       </IconButton>
+      {zoneCount > 0 && <SaveTemplateButton onSaveTemplate={onSaveTemplate} />}
     </ToolbarSurface>
+  );
+}
+
+function SaveTemplateButton({ onSaveTemplate }) {
+  const label = t('selection.saveTemplate');
+  return (
+    <IconButton onClick={onSaveTemplate} title={label} aria-label={label}>
+      <LayoutTemplate size={TOOLBAR_ICON_SIZE_PX} />
+    </IconButton>
   );
 }
 
@@ -189,7 +199,7 @@ function ZoneControls({ item, can, isAdmin, onToggleLock, onExportCsv, onToggleR
 
 export function SelectionToolbar({ anchor, item, can, canDelete, isAdmin, nestedZoneCount, timerSetupOpen,
   onColor, onFontSize, onFontColor, onTogglePrivate, onToggleLock, onExportCsv, onToggleReveal,
-  onVoteButton, onTimerSetupOpenChange, onStartTimer, onBringToFront, onSendToBack, onDelete }) {
+  onVoteButton, onTimerSetupOpenChange, onStartTimer, onBringToFront, onSendToBack, onDelete, onSaveTemplate }) {
   const sections = selectionToolbarSections(item.type);
   return (
     <ToolbarSurface anchor={anchor}>
@@ -220,6 +230,7 @@ export function SelectionToolbar({ anchor, item, can, canDelete, isAdmin, nested
           onStartTimer={onStartTimer}
         />
       )}
+      {sections.zone && <SaveTemplateButton onSaveTemplate={onSaveTemplate} />}
       <IconButton onClick={() => can && onBringToFront()} disabled={!can} title={t('selection.bringToFront')}>
         <BringToFront size={TOOLBAR_ICON_SIZE_PX} />
       </IconButton>

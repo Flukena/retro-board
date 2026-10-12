@@ -51,8 +51,8 @@ test('toolbar event contracts preserve native disabled, permission guards and po
     assert.deepEqual(received, [2, 13, 17]);
     const group = GroupSelectionToolbar({ anchor: { x: 1, y: 2 }, lockedCount: 2,
       canUnlock: false, onUnlockAll: () => record('unlock') });
-    assert.equal(group.props.children.props.disabled, true);
-    group.props.children.props.onClick();
+    assert.equal(group.props.children[0].props.disabled, true);
+    group.props.children[0].props.onClick();
     assert.equal(received.at(-1), 'unlock');
     let stopped = false;
     group.type(group.props).props.onMouseDown({ stopPropagation: () => { stopped = true; } });
@@ -81,5 +81,36 @@ test('toolbar event contracts preserve native disabled, permission guards and po
     assert.equal(actions[2].props.disabled, false);
     actions[2].props.onClick();
     assert.equal(received.at(-1), 'delete');
+  });
+});
+
+test('save template is accessible for a zone or group containing zones and emits the callback', async () => {
+  await withChromeModule('/src/SelectionToolbar.jsx', ({ SelectionToolbar, GroupSelectionToolbar }, { t, setLang }) => {
+    let saves = 0;
+    for (const lang of ['th', 'en']) {
+      setLang(lang);
+      const label = t('selection.saveTemplate');
+      assert.notEqual(label, 'selection.saveTemplate');
+      const props = { anchor: { x: 0, y: 0 }, onSaveTemplate: () => { saves += 1; } };
+      const single = SelectionToolbar({ ...props, item: { type: 'zone' } });
+      const button = single.props.children.find((child) => child?.props?.onSaveTemplate);
+      button.type(button.props).props.onClick();
+      for (const zoneCount of [0, 1, 2]) {
+        const group = GroupSelectionToolbar({ ...props, zoneCount, lockedCount: 0 });
+        const markup = renderToStaticMarkup(group);
+        assert.equal(markup.includes(`aria-label="${label}"`), zoneCount > 0);
+        if (zoneCount) {
+          const save = group.props.children.find((child) => child?.props?.onSaveTemplate);
+          save.type(save.props).props.onClick();
+        }
+      }
+      const markup = renderToStaticMarkup(single);
+      assert.ok(markup.includes(`title="${label}"`));
+      assert.ok(markup.includes(`aria-label="${label}"`));
+      for (const type of ['sticky', 'text', 'image']) {
+        assert.ok(!renderToStaticMarkup(SelectionToolbar({ ...props, item: { type } })).includes(label));
+      }
+    }
+    assert.equal(saves, 6);
   });
 });

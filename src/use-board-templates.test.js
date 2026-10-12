@@ -30,13 +30,13 @@ const fixture = (t) => {
   const toast = [];
   let closed = false;
   const boardRef = { current: { items: [
-    { type: 'zone', title: 'A', color: 2, x: 100, y: 200, w: 240, h: 200 },
+    { id: 'a', type: 'zone', title: 'A', color: 2, x: 100, y: 200, w: 240, h: 200 },
     { type: 'sticky', x: 0, y: 0 },
-    { type: 'zone', title: 'B', color: 1, x: 400, y: 500, w: 240, h: 200 },
+    { id: 'b', type: 'zone', title: 'B', color: 1, x: 400, y: 500, w: 240, h: 200 },
   ] } };
   const actions = templates.createTemplateActions({
-    storage, boardRef, createId: () => 'saved',
-    setToast: (value) => toast.push(value), closeSaveDialog: () => { closed = true; },
+    storage, createId: () => 'saved',
+    setToast: (value) => toast.push(value), setSaveTemplateOpen: (open) => { closed = !open; },
   });
   return { doc, map, storage, sync, toast, actions, boardRef, isClosed: () => closed };
 };
@@ -46,6 +46,7 @@ test('subscription catches initial state, local/remote changes, resync, and clea
   const snapshots = [];
   const off = templates.subscribeTemplates(f.storage, (value) => snapshots.push(value));
   assert.deepEqual(snapshots, [[]]);
+  f.actions.openSaveTemplate(f.boardRef.current.items, ['a']);
   f.actions.saveCurrentAsTemplate('Saved');
   assert.equal(snapshots.at(-1)[0].name, 'Saved');
   const peer = new Y.Doc();
@@ -58,6 +59,7 @@ test('subscription catches initial state, local/remote changes, resync, and clea
   f.sync.dispatchEvent(new Event('sync'));
   assert.equal(snapshots.length, beforeSync + 1);
   off();
+  f.actions.openSaveTemplate(f.boardRef.current.items, ['a']);
   f.actions.saveCurrentAsTemplate('After cleanup');
   f.sync.dispatchEvent(new Event('sync'));
   assert.equal(snapshots.length, beforeSync + 1);
@@ -65,6 +67,7 @@ test('subscription catches initial state, local/remote changes, resync, and clea
 
 test('saving current zones keeps existing relative geometry and deletes through the store', (t) => {
   const f = fixture(t);
+  f.actions.openSaveTemplate(f.boardRef.current.items, ['a', 'b']);
   f.actions.saveCurrentAsTemplate('  Saved  ');
   const [saved] = readTemplates(f.map);
   assert.equal(saved.name, 'Saved');
@@ -78,17 +81,19 @@ test('saving current zones keeps existing relative geometry and deletes through 
   assert.deepEqual(readTemplates(f.map), []);
 });
 
-test('blank and empty saves keep the dialog; rejected save/delete warnings use th and en', (t) => {
+test('blank saves are inert, empty selection stays closed, and rejected saves stay open in th/en', (t) => {
   const f = fixture(t);
   f.actions.saveCurrentAsTemplate('  ');
   assert.deepEqual(f.toast, []);
   assert.equal(f.isClosed(), false);
   f.boardRef.current.items = [];
-  f.actions.saveCurrentAsTemplate('Empty');
-  assert.equal(f.toast.at(-1).msg, translate('tmpl.empty'));
-  f.boardRef.current.items = [{ type: 'zone', x: 0, y: 0, w: -1, h: 200 }];
+  f.actions.openSaveTemplate([], []);
+  assert.equal(f.toast.at(-1).msg, translate('tmpl.selectZones'));
+  assert.equal(f.isClosed(), true);
+  f.boardRef.current.items = [{ id: 'invalid', type: 'zone', x: 0, y: 0, w: -1, h: 200 }];
   for (const lang of ['th', 'en']) {
     setLang(lang);
+    f.actions.openSaveTemplate(f.boardRef.current.items, ['invalid']);
     f.actions.saveCurrentAsTemplate('Invalid');
     assert.equal(f.toast.at(-1).msg, translate('tmpl.saveFailed'));
     assert.notEqual(f.toast.at(-1).msg, 'tmpl.saveFailed');
@@ -98,4 +103,86 @@ test('blank and empty saves keep the dialog; rejected save/delete warnings use t
   }
   assert.equal(f.isClosed(), false);
   assert.deepEqual(readTemplates(f.map), []);
+});
+
+
+test('draft copies selected values once, survives moves/deletes, and clears on success or cancel', (t) => {
+  const f = fixture(t);
+  const ids = new Set(['a']);
+  f.actions.openSaveTemplate(f.boardRef.current.items, ids);
+  ids.clear();
+  f.boardRef.current.items[0].x = 900;
+  f.boardRef.current.items[0].title = 'Changed remotely';
+  f.boardRef.current.items = [];
+  f.actions.saveCurrentAsTemplate('Snapshot');
+  const [saved] = readTemplates(f.map);
+  assert.equal(saved.zones.length, 1);
+  assert.equal(saved.zones[0].title, 'A');
+  assert.equal(saved.zones[0].x, 0);
+  f.actions.saveCurrentAsTemplate('Cleared');
+  assert.equal(readTemplates(f.map)[0].name, 'Snapshot');
+  f.actions.openSaveTemplate([{ id: 'c', type: 'zone', title: 'C', color: 1, x: 0, y: 0, w: 200, h: 200 }], ['c']);
+  f.actions.closeSaveDialog();
+  f.actions.saveCurrentAsTemplate('Cancelled');
+  assert.equal(readTemplates(f.map)[0].name, 'Snapshot');
+});
+
+test('apply places zones with current author and rederived owners; write/placement failures stay open', () => {
+  const toasts = [];
+  const added = [];
+  let closed = 0;
+  let accepts = true;
+  const zones = [{ title: 'Parent', color: 2, x: 0, y: 0, w: 500, h: 500 }, { title: 'Child', color: 1, x: 100, y: 100, w: 100, h: 100 }];
+  let id = 0;
+  const actions = templates.createTemplateActions({
+    storage: { snapshotTemplates: () => [{ id: 'custom', name: 'Custom', zones }] },
+    createId: () => `placed-${++id}`, userId: 'author', userName: 'Ada',
+    setToast: (value) => toasts.push(value), closeTemplates: () => { closed += 1; },
+    addItemsLocal: (items) => { added.push(items); return accepts; },
+  });
+  const bounds = actions.applyTemplate('custom', { viewportCenter: { x: 0, y: 0 }, items: [{ type: 'text', x: -250, y: -250 }] });
+  assert.ok(bounds);
+  assert.notEqual(bounds.x, -250);
+  assert.equal(added[0][0].parentZoneId, null);
+  assert.equal(added[0][1].parentZoneId, added[0][0].id);
+  assert.equal(added[0][1].authorId, 'author');
+  assert.equal(added[0][1].authorName, 'Ada');
+  assert.equal(closed, 1);
+  accepts = false;
+  assert.equal(actions.applyTemplate('custom', { viewportCenter: { x: 0, y: 0 }, items: [] }), null);
+  assert.equal(closed, 1);
+  const writes = added.length;
+  for (const lang of ['th', 'en']) {
+    setLang(lang);
+    assert.equal(actions.applyTemplate('custom', { viewportCenter: { x: 1e20, y: 1e20 }, items: [] }), null);
+    assert.equal(toasts.at(-1).msg, translate('tmpl.placementFailed'));
+  }
+  assert.equal(added.length, writes);
+  assert.equal(closed, 1);
+});
+
+
+test('failed store writes retain draft and count for retry, including action recreation', () => {
+  const draftRef = { current: [] };
+  const counts = [];
+  const saved = [];
+  let accepts = false;
+  let opened = false;
+  const config = {
+    draftRef, storage: { putTemplate: (entry) => { if (accepts) saved.push(entry); return accepts; } },
+    onDraftChange: (zones) => counts.push(zones.length),
+    setSaveTemplateOpen: (open) => { opened = open; }, setToast: () => {}, createId: () => 'retry',
+  };
+  const actions = templates.createTemplateActions(config);
+  actions.openSaveTemplate([{ id: 'a', type: 'zone', title: 'A', color: 2, x: 10, y: 20, w: 200, h: 200 }], ['a']);
+  actions.saveCurrentAsTemplate('First');
+  assert.equal(opened, true);
+  assert.deepEqual(counts, [1]);
+  accepts = true;
+  templates.createTemplateActions(config).saveCurrentAsTemplate('Retry');
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].zones.length, 1);
+  assert.equal(saved[0].zones[0].title, 'A');
+  assert.equal(opened, false);
+  assert.deepEqual(counts, [1, 0]);
 });

@@ -25,7 +25,7 @@ const finiteCoordinate = (value) => (
 const validDimension = (value) => (
   Number.isFinite(value) && value > 0 && value <= IMPORT_DIMENSION_MAX
 );
-const sizeForPlacement = (item) => {
+export const sizeForPlacement = (item) => {
   const fallback = ITEM_SIZE[item?.type] || ITEM_SIZE.sticky;
   return {
     w: validDimension(item?.w) ? item.w : fallback.w,

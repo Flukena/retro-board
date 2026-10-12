@@ -60,6 +60,8 @@ import {
   MINIMAP_W_PX, MINIMAP_H_PX, GRID_PITCH_PX, topStackHeightPx, Z,
 } from './src/chrome-layout.js';
 import { useUserIdentity } from './src/useUserIdentity.js';
+import { getTemplates } from './src/builtin-templates.js';
+import { templateRevealViewport } from './src/template-model.js';
 import { useBoardTemplates } from './src/use-board-templates.js';
 import { useAdminRole } from './src/useAdminRole.js';
 import { clientPointToWorld } from './src/board-coordinates.js';
@@ -160,57 +162,6 @@ const COMMENT_PREVIEW_TEXT_LIMIT = 120;
 const COMMENT_CAROUSEL_MS = 3600;
 const EMPTY_COMMENT_PREVIEWS = [];
 const EMPTY_COMMENTS = [];
-
-// Built-in templates are evaluated lazily so titles re-localize on lang change.
-const getTemplates = () => ({
-  retro3: {
-    name: t('tmpl.retro3.name'),
-    zones: [
-      { title: t('tmpl.retro3.well'),    color: 2, x: 0,    y: 0, w: 1140, h: 1560 },
-      { title: t('tmpl.retro3.improve'), color: 1, x: 1200, y: 0, w: 1140, h: 1560 },
-      { title: t('tmpl.retro3.action'),  color: 3, x: 2400, y: 0, w: 1140, h: 1560 },
-    ],
-  },
-  ssc: {
-    name: t('tmpl.ssc.name'),
-    zones: [
-      { title: '▶️ Start',    color: 2, x: 0,    y: 0, w: 1140, h: 1560 },
-      { title: '⏹ Stop',     color: 1, x: 1200, y: 0, w: 1140, h: 1560 },
-      { title: '⏩ Continue', color: 3, x: 2400, y: 0, w: 1140, h: 1560 },
-    ],
-  },
-  fourLs: {
-    name: t('tmpl.4ls.name'),
-    zones: [
-      { title: '❤️ Liked',      color: 1, x: 0,    y: 0,    w: 1200, h: 1080 },
-      { title: '🧠 Learned',    color: 3, x: 1260, y: 0,    w: 1200, h: 1080 },
-      { title: '🫥 Lacked',     color: 5, x: 0,    y: 1140, w: 1200, h: 1080 },
-      { title: '💭 Longed for', color: 4, x: 1260, y: 1140, w: 1200, h: 1080 },
-    ],
-  },
-  sailboat: {
-    name: t('tmpl.sailboat.name'),
-    zones: [
-      { title: t('tmpl.sailboat.wind'),   color: 2, x: 0,    y: 0,    w: 1200, h: 1080 },
-      { title: t('tmpl.sailboat.anchor'), color: 1, x: 1260, y: 0,    w: 1200, h: 1080 },
-      { title: t('tmpl.sailboat.rocks'),  color: 5, x: 0,    y: 1140, w: 1200, h: 1080 },
-      { title: t('tmpl.sailboat.island'), color: 3, x: 1260, y: 1140, w: 1200, h: 1080 },
-    ],
-  },
-  retroLoop: {
-    name: t('tmpl.loop.name'),
-    zones: [
-      // Outer wrapper — drag its title bar to move the whole template as one.
-      { title: t('tmpl.loop.wrapper'), color: 3, x: 0,    y: 0,   w: 6219, h: 2316 },
-      { title: t('tmpl.loop.prev'),    color: 0, x: 171,  y: 456, w: 927,  h: 1440 },
-      { title: t('tmpl.loop.good'),    color: 2, x: 1191, y: 351, w: 1140, h: 1560 },
-      { title: t('tmpl.loop.bad'),     color: 1, x: 2391, y: 351, w: 1140, h: 1560 },
-      { title: t('tmpl.loop.try'),     color: 4, x: 3591, y: 351, w: 1140, h: 1560 },
-      { title: t('tmpl.loop.next'),    color: 5, x: 4848, y: 417, w: 1086, h: 1464 },
-    ],
-  },
-});
-
 
 // Help modal sections, in display order. `color` indexes PALETTE so each
 // section's accent dot matches a real sticky-note color from the palette.
@@ -1435,10 +1386,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   }, []);
   const [now, setNow] = useState(Date.now());
   const [loaded, setLoaded] = useState(false);
-  const { customTemplates, saveCurrentAsTemplate, deleteCustomTemplate } = useBoardTemplates({
-    storage: typeof window !== 'undefined' ? window.storage : null,
-    boardRef, createId: uid, setToast, setSaveTemplateOpen,
-  });
   const [confirmResetVotes, setConfirmResetVotes] = useState(false);
   const [confirmUnlockAll, setConfirmUnlockAll] = useState(false);
   const [undoState, setUndoState] = useState({ canUndo: false, canRedo: false });
@@ -1991,6 +1938,17 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     setBoard((prev) => ({ ...prev, items: [...prev.items, ...items] }));
     return true;
   }, [reportWriteFailure]);
+
+  const closeTemplates = useCallback(() => setTemplatesOpen(false), []);
+  const { customTemplates, templateDraft, openSaveTemplate, closeSaveDialog,
+    saveCurrentAsTemplate, deleteCustomTemplate, applyTemplate: placeTemplate } = useBoardTemplates({
+    storage: typeof window !== 'undefined' ? window.storage : null,
+    createId: uid, setToast, setSaveTemplateOpen, addItemsLocal, userId, userName, closeTemplates,
+  });
+  const selectedZoneCount = board.items.filter((item) => item.type === 'zone' && selectedIds.has(item.id)).length;
+  const saveSelectedTemplate = () => {
+    if (openSaveTemplate(boardRef.current.items, selectedIds)) closeTemplates();
+  };
 
   // ---- Board-level meta patch ----
   const patchMeta = useCallback((patch, opts) => {
@@ -2674,37 +2632,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     addImage(worldX, worldY, url, prepared.nw, prepared.nh);
   }, [addImage, setToast]);
 
-  const applyTemplate = useCallback((key) => {
-    const builtins = getTemplates();
-    let tpl = builtins[key];
-    if (!tpl) {
-      const cust = customTemplates.find((c) => c.id === key);
-      if (cust) tpl = { name: cust.name, zones: cust.zones };
-    }
-    if (!tpl || !canvasRef.current) return;
-    const rect = canvasRef.current.getBoundingClientRect();
-    const center = screenToWorld(rect.width / 2, rect.height / 2);
-    const cx = (Math.min(...tpl.zones.map((z) => z.x)) + Math.max(...tpl.zones.map((z) => z.x + z.w))) / 2;
-    const cy = (Math.min(...tpl.zones.map((z) => z.y)) + Math.max(...tpl.zones.map((z) => z.y + z.h))) / 2;
-    const dx = center.x - cx;
-    const dy = center.y - cy;
-    const zones = tpl.zones.map((z) => ({
-      id: uid(),
-      type: 'zone',
-      x: z.x + dx,
-      y: z.y + dy,
-      w: z.w,
-      h: z.h,
-      title: z.title,
-      color: z.color,
-      authorId: userId,
-      authorName: userName,
-      createdAt: Date.now(),
-    }));
-    zones.forEach((z) => { z.parentZoneId = resolveOwnerZone(z, zones)?.id ?? null; });
-    addItemsLocal(zones);
-    setTemplatesOpen(false);
-  }, [userId, userName, addItemsLocal, screenToWorld, customTemplates]);
 
   /* ============================================================
      Admin gates
@@ -3362,6 +3289,18 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     selectedIds, requireEdit, screenToWorld, addZone,
     settleWheelBeforeInteraction, startPan, updateFocusedText,
   ]);
+
+  const applyTemplate = useCallback((key) => {
+    if (!canvasRef.current) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    const bounds = placeTemplate(key, {
+      viewportCenter: screenToWorld(rect.width / 2, rect.height / 2), items: boardRef.current.items,
+    });
+    if (!bounds) return;
+    const next = templateRevealViewport({ bounds, viewport: viewportRef.current,
+      viewportSize: { w: rect.width, h: rect.height } });
+    if (next) { stopFollowing(); commitViewportImmediately(next); }
+  }, [placeTemplate, screenToWorld, stopFollowing, commitViewportImmediately]);
 
   const fitToContent = useCallback(() => {
     if (interactionRef.current !== null || !canvasRef.current) return;
@@ -5013,6 +4952,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       <GroupSelectionToolbar
         anchor={groupSelectionToolbarAnchor(groupBBox, viewport, stackHeightPx)}
         lockedCount={lockedCount}
+        zoneCount={selectedZoneCount}
+        onSaveTemplate={saveSelectedTemplate}
         canUnlock={editingAllowed && lockedCount > 0}
         onUnlockAll={unlockSelectedItems}
       />
@@ -5041,6 +4982,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       : 0;
     return (
       <SelectionToolbar
+        onSaveTemplate={saveSelectedTemplate}
         anchor={selectionToolbarAnchor(selectedItem, viewport, stackHeightPx)}
         item={{
           type: selectedItem.type, colorIndex: selectedItem.color,
@@ -5612,11 +5554,12 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         creationMode={creationMode}
         templatesOpen={templatesOpen}
         rows={templateRows(getTemplates(), customTemplates)}
+        selectedZoneCount={selectedZoneCount}
         onTool={(toolId) => toolHandlers[toolId]()}
         onTemplatesOpenChange={setTemplatesOpen}
         onApplyTemplate={applyTemplate}
         onDeleteCustomTemplate={deleteCustomTemplate}
-        onSaveTemplate={() => { setSaveTemplateOpen(true); setTemplatesOpen(false); }}
+        onSaveTemplate={saveSelectedTemplate}
       />
       <ZoomControls
         percentage={Math.round(viewport.zoom * 100)}
@@ -5649,9 +5592,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
 
       {saveTemplateOpen && (
         <SaveTemplateDialog
-          onClose={() => setSaveTemplateOpen(false)}
+          onClose={closeSaveDialog}
           onSave={saveCurrentAsTemplate}
-          zoneCount={board.items.filter((i) => i.type === 'zone').length}
+          zoneCount={templateDraft.length}
         />
       )}
       {nameModalOpen && (

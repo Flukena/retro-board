@@ -43,7 +43,7 @@ export function ToolTile({ toolId, active, onTool }) {
   );
 }
 
-function TemplatePopover({ rows, onApplyTemplate, onDeleteCustomTemplate, onSaveTemplate, onClose }) {
+export function TemplatePopover({ selectedZoneCount = 0, rows, onApplyTemplate, onDeleteCustomTemplate, onSaveTemplate, onClose }) {
   return (
     <>
       <div className="rb-template-backdrop" onClick={onClose} style={{ zIndex: Z.POPOVER_BACKDROP }} />
@@ -79,14 +79,15 @@ function TemplatePopover({ rows, onApplyTemplate, onDeleteCustomTemplate, onSave
           </div>
         ))}
         <Divider orientation={DIVIDER_ORIENTATION.HORIZONTAL} />
-        <MenuItem label={t('tmpl.save')} onClick={onSaveTemplate} />
+        <MenuItem label={t('tmpl.saveSelection')} disabled={selectedZoneCount === 0} onClick={onSaveTemplate} />
+        {selectedZoneCount === 0 && <div className="rb-template-popover__hint">{t('tmpl.selectZonesHint')}</div>}
       </Surface>
     </>
   );
 }
 
 export function ToolDock({
-  creationMode, templatesOpen, rows, onTool, onTemplatesOpenChange,
+  creationMode, templatesOpen, rows, selectedZoneCount = 0, onTool, onTemplatesOpenChange,
   onApplyTemplate, onDeleteCustomTemplate, onSaveTemplate,
 }) {
   return (
@@ -120,6 +121,7 @@ export function ToolDock({
       {templatesOpen && (
         <TemplatePopover
           rows={rows}
+          selectedZoneCount={selectedZoneCount}
           onApplyTemplate={onApplyTemplate}
           onDeleteCustomTemplate={onDeleteCustomTemplate}
           onSaveTemplate={onSaveTemplate}

@@ -21,3 +21,25 @@ test('ToolDock preserves presentation and event contracts', async () => {
     assert.ok(Object.isFrozen(TOOL_ID));
   });
 });
+
+test('template save menu requires selected zones and explains the disabled state in both languages', async () => {
+  await withChromeModule('/src/ToolDock.jsx', ({ TemplatePopover }, { t, setLang }) => {
+    for (const lang of ['th', 'en']) {
+      setLang(lang);
+      for (const selectedZoneCount of [0, 1]) {
+        let saves = 0;
+        const popover = TemplatePopover({ rows: { builtin: [], custom: [] }, selectedZoneCount,
+          onSaveTemplate: () => { saves += 1; } });
+        const children = popover.props.children[1].props.children;
+        const save = children.find((child) => child?.props?.label === t('tmpl.saveSelection'));
+        assert.equal(save.props.disabled, selectedZoneCount === 0);
+        if (selectedZoneCount) save.props.onClick();
+        assert.equal(saves, selectedZoneCount);
+        const markup = renderToStaticMarkup(popover);
+        assert.ok(markup.includes(t('tmpl.saveSelection')));
+        assert.equal(markup.includes(t('tmpl.selectZonesHint')), selectedZoneCount === 0);
+        assert.notEqual(t('tmpl.selectZonesHint'), 'tmpl.selectZonesHint');
+      }
+    }
+  });
+});
