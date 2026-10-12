@@ -6,8 +6,30 @@ import { useEffect, useState } from 'react';
 
 const STORAGE_KEY = 'rb_theme';
 
-const TOKENS = {
-  light: {
+function tokenKeys(mode, label) {
+  if (mode === null || typeof mode !== 'object'
+    || ![Object.prototype, null].includes(Object.getPrototypeOf(mode))) {
+    throw new Error(`${label} tokens must be a plain object`);
+  }
+  const keys = Reflect.ownKeys(mode);
+  if (keys.some((key) => typeof key !== 'string' || !key.startsWith('--'))) {
+    throw new Error(`${label} token keys must start with --`);
+  }
+  return keys;
+}
+
+export function defineTokens(light, dark) {
+  const lightKeys = tokenKeys(light, 'Light');
+  const darkKeys = tokenKeys(dark, 'Dark');
+  const missing = lightKeys.filter((key) => !darkKeys.includes(key));
+  const extra = darkKeys.filter((key) => !lightKeys.includes(key));
+  if (missing.length || extra.length) {
+    throw new Error(`Dark tokens missing keys: ${missing.join(', ')}; extra keys: ${extra.join(', ')}`);
+  }
+  return Object.freeze({ light: Object.freeze({ ...light }), dark: Object.freeze({ ...dark }) });
+}
+
+export const TOKENS = defineTokens({
     '--bg': '#f8f7f4',
     '--bg-panel': '#ffffff',
     '--bg-panel-2': '#f3f4f6',
@@ -35,8 +57,7 @@ const TOKENS = {
     '--shadow-card': '0 4px 12px rgba(0,0,0,0.06)',
     '--shadow-pop': '0 8px 20px rgba(0,0,0,0.18)',
     '--shadow-modal': '0 20px 60px rgba(0,0,0,0.3)',
-  },
-  dark: {
+  }, {
     '--bg': '#0f172a',
     '--bg-panel': '#1e293b',
     '--bg-panel-2': '#334155',
@@ -64,8 +85,7 @@ const TOKENS = {
     '--shadow-card': '0 4px 12px rgba(0,0,0,0.4)',
     '--shadow-pop': '0 8px 20px rgba(0,0,0,0.5)',
     '--shadow-modal': '0 20px 60px rgba(0,0,0,0.6)',
-  },
-};
+  });
 
 function resolveMode(pref) {
   if (pref === 'light' || pref === 'dark') return pref;

@@ -44,6 +44,11 @@ import {
 import { t, useLang } from './src/i18n.js';
 import { getActiveRoomSession, roomFetch } from './src/room-session.js';
 import { useTheme, nextThemePref } from './src/theme.js';
+import { PALETTE, FONT_COLORS, STICKY_AUTO_TEXT, STICKY_AUTO_TEXT_FAINT } from './src/palette.js';
+import {
+  TOPBAR_INSET_PX, TOPBAR_H_PX, TOPBAR_BOTTOM_PX, FOLLOW_BANNER_GAP_PX,
+  SELECTION_TOOLBAR_GAP_PX, GRID_PITCH_PX, toolbarAnchorY, Z,
+} from './src/chrome-layout.js';
 import { useUserIdentity } from './src/useUserIdentity.js';
 import { useAdminRole } from './src/useAdminRole.js';
 import { clientPointToWorld } from './src/board-coordinates.js';
@@ -90,34 +95,6 @@ const loadBoardArchive = () => import('./src/board-archive.js');
    Constants
    ============================================================ */
 
-const COLORS = [
-  { bg: '#fef3c7', border: '#f59e0b', zoneBg: 'rgba(251,191,36,0.12)' }, // yellow
-  { bg: '#fecaca', border: '#ef4444', zoneBg: 'rgba(239,68,68,0.10)'  }, // red
-  { bg: '#bbf7d0', border: '#22c55e', zoneBg: 'rgba(34,197,94,0.10)'  }, // green
-  { bg: '#bae6fd', border: '#0ea5e9', zoneBg: 'rgba(14,165,233,0.10)' }, // blue
-  { bg: '#e9d5ff', border: '#a855f7', zoneBg: 'rgba(168,85,247,0.10)' }, // purple
-  { bg: '#fed7aa', border: '#f97316', zoneBg: 'rgba(249,115,22,0.10)' }, // orange
-];
-
-// Font-color presets shown in the toolbar swatch popover. `null` = auto/default.
-const FONT_COLORS = [
-  { value: null,      label: 'auto',  swatch: 'linear-gradient(135deg,#111 50%,#fff 50%)' },
-  { value: '#111827', label: 'black', swatch: '#111827' },
-  { value: '#6b7280', label: 'gray',  swatch: '#6b7280' },
-  { value: '#ffffff', label: 'white', swatch: '#ffffff' },
-  { value: '#dc2626', label: 'red',   swatch: '#dc2626' },
-  { value: '#f97316', label: 'orange',swatch: '#f97316' },
-  { value: '#16a34a', label: 'green', swatch: '#16a34a' },
-  { value: '#2563eb', label: 'blue',  swatch: '#2563eb' },
-  { value: '#9333ea', label: 'purple',swatch: '#9333ea' },
-];
-
-// Sticky note backgrounds (COLORS above) are fixed pastels that never follow
-// the app theme, unlike var(--text) — pin "auto" sticky text to the
-// light-theme text colors instead, since the card's own background is
-// always light regardless of dark mode.
-const STICKY_AUTO_TEXT = '#111827';
-const STICKY_AUTO_TEXT_FAINT = '#9ca3af';
 
 const STICKY_W = 200;
 const STICKY_H = 180;
@@ -226,7 +203,7 @@ const getTemplates = () => ({
 
 const TIMER_PRESETS = [1, 3, 5, 10];
 
-// Help modal sections, in display order. `color` indexes COLORS so each
+// Help modal sections, in display order. `color` indexes PALETTE so each
 // section's accent dot matches a real sticky-note color from the palette.
 const HELP_SECTIONS = [
   { key: 'collab', color: 0 },
@@ -810,6 +787,9 @@ const CollaborativeTextEditor = ({
   );
 };
 
+const CARD_BADGE_Z = 2;
+const CARD_MEDAL_Z = 3;
+
 const StickyCard = React.memo(function StickyCard({
   item, selected, remoteSelected, remoteSelectionHue, isEditing, isOwner, allRevealed, dense, compact,
   voted, voteCount, voteFlash, voteRank, votingAllowedNow, showVoteCount, inZone,
@@ -823,7 +803,7 @@ const StickyCard = React.memo(function StickyCard({
 }) {
   void lang;
   const it = item;
-  const c = COLORS[it.color] || COLORS[0];
+  const c = PALETTE[it.color] || PALETTE[0];
   const hideContent = it.private && !allRevealed && !isOwner;
   const visibleText = stickyTextForDom(it, hideContent);
   const w = it.w || STICKY_W;
@@ -956,7 +936,7 @@ const StickyCard = React.memo(function StickyCard({
       }}
     >
       <div style={{
-        position: 'absolute', top: 6, right: 6, zIndex: 2,
+        position: 'absolute', top: 6, right: 6, zIndex: CARD_BADGE_Z,
         width: 'calc(100% - 12px)', display: 'flex', alignItems: 'center',
         justifyContent: 'flex-end', gap: 4, pointerEvents: 'none',
       }}>
@@ -1015,7 +995,7 @@ const StickyCard = React.memo(function StickyCard({
         <div
           title={t('vote.rank', { n: voteRank })}
           style={{
-            position: 'absolute', top: -24, left: -24, zIndex: 3,
+            position: 'absolute', top: -24, left: -24, zIndex: CARD_MEDAL_Z,
             width: 64, height: 64, display: 'grid', placeItems: 'center',
             fontSize: 56,
             filter: 'drop-shadow(0 4px 7px rgba(0,0,0,0.38))',
@@ -1184,7 +1164,7 @@ const ZoneCard = React.memo(function ZoneCard({
 }) {
   void lang;
   const it = item;
-  const c = COLORS[it.color] || COLORS[0];
+  const c = PALETTE[it.color] || PALETTE[0];
   const titleFs = it.fontSize || 16;
   const titleH = Math.max(ZONE_TITLE_H, titleFs + 18);
   return (
@@ -2691,7 +2671,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     }, boardRef.current.items);
     const color = enclosingZone
       ? enclosingZone.color
-      : Math.floor(Math.random() * COLORS.length);
+      : Math.floor(Math.random() * PALETTE.length);
     // Target each sticky at ~2.5% of the enclosing zone's area, keeping the
     // default sticky aspect ratio so ~40 cards fit comfortably per zone.
     // Font size scales with sticky width so text stays readable on small
@@ -3108,7 +3088,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       worldRef.current.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.zoom})`;
     }
     if (gridRef.current) {
-      const s = 24 * v.zoom;
+      const s = GRID_PITCH_PX * v.zoom;
       gridRef.current.style.backgroundSize = `${s}px ${s}px`;
       gridRef.current.style.backgroundPosition = `${v.x}px ${v.y}px`;
     }
@@ -5215,7 +5195,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       ), 0);
       const canUnlock = editingAllowed && lockedCount > 0;
       const sx = (groupBBox.x + groupBBox.w / 2) * v.zoom + v.x;
-      const sy = Math.max(groupBBox.y * v.zoom + v.y - 14, 112);
+      const sy = toolbarAnchorY(groupBBox.y * v.zoom + v.y - SELECTION_TOOLBAR_GAP_PX);
       return (
         <div
           style={{
@@ -5224,7 +5204,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
             background: 'var(--bg-panel)', borderRadius: 10,
             boxShadow: '0 8px 20px rgba(0,0,0,0.18)',
             padding: '6px 8px', display: 'flex', alignItems: 'center',
-            zIndex: 30, pointerEvents: 'auto', animation: 'rb-pop 0.18s ease-out',
+            zIndex: Z.SELECTION_TOOLBAR, pointerEvents: 'auto', animation: 'rb-pop 0.18s ease-out',
           }}
           onMouseDown={(e) => e.stopPropagation()}
         >
@@ -5250,19 +5230,19 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     let sy;
     if (selectedItem.type === 'zone') {
       sx = selectedItem.x * v.zoom + v.x + (selectedItem.w * v.zoom) / 2;
-      sy = selectedItem.y * v.zoom + v.y - ZONE_TITLE_H * v.zoom - 14;
+      sy = selectedItem.y * v.zoom + v.y - ZONE_TITLE_H * v.zoom - SELECTION_TOOLBAR_GAP_PX;
     } else if (selectedItem.type === 'sticky' || selectedItem.type === 'image') {
       const iw = selectedItem.w || (selectedItem.type === 'sticky' ? STICKY_W : 200);
       sx = selectedItem.x * v.zoom + v.x + (iw * v.zoom) / 2;
-      sy = selectedItem.y * v.zoom + v.y - 14;
+      sy = selectedItem.y * v.zoom + v.y - SELECTION_TOOLBAR_GAP_PX;
     } else {
       sx = selectedItem.x * v.zoom + v.x + 60;
-      sy = selectedItem.y * v.zoom + v.y - 14;
+      sy = selectedItem.y * v.zoom + v.y - SELECTION_TOOLBAR_GAP_PX;
     }
     // The toolbar is translated upward by its own height. Keep its bottom
     // anchor far enough below the 60px top bar that admin controls cannot sit
     // above it and intercept clicks (most visible on fitted/zoomed-out zones).
-    sy = Math.max(sy, 112);
+    sy = toolbarAnchorY(sy);
     const can = canModifyOwnedItem(selectedItem);
     const canDelete = canDeleteItem(selectedItem);
     // A zone with no explicit override inherits visibility from its nearest
@@ -5292,7 +5272,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           display: 'flex',
           alignItems: 'center',
           gap: 6,
-          zIndex: 30,
+          zIndex: Z.SELECTION_TOOLBAR,
           pointerEvents: 'auto',
           animation: 'rb-pop 0.18s ease-out',
         }}
@@ -5300,7 +5280,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       >
         {(selectedItem.type === 'sticky' || selectedItem.type === 'zone') && (
           <div style={{ display: 'flex', gap: 4 }}>
-            {COLORS.map((c, i) => (
+            {PALETTE.map((c, i) => (
               <button
                 key={i}
                 type="button"
@@ -5367,7 +5347,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
               <>
                 <div
                   onMouseDown={() => setFontColorOpen(false)}
-                  style={{ position: 'fixed', inset: 0, zIndex: 31 }}
+                  style={{ position: 'fixed', inset: 0, zIndex: Z.TOOLBAR_POPOVER_BACKDROP }}
                 />
                 <div
                   onMouseDown={(e) => e.stopPropagation()}
@@ -5378,7 +5358,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                     boxShadow: '0 8px 20px rgba(0,0,0,0.18)',
                     padding: 8, display: 'grid',
                     gridTemplateColumns: 'repeat(5, 22px)',
-                    gap: 6, zIndex: 32,
+                    gap: 6, zIndex: Z.TOOLBAR_POPOVER,
                   }}
                 >
                   {FONT_COLORS.map((fc) => {
@@ -5529,7 +5509,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
               border: '2px dashed #2563eb',
               borderRadius: 4,
               pointerEvents: 'none',
-              zIndex: 24,
+              zIndex: Z.SELECTION_OUTLINE,
             }}
           />
           {corners.map((c) => (
@@ -5546,7 +5526,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                 border: '2px solid #2563eb',
                 borderRadius: '50%',
                 cursor: c.cursor,
-                zIndex: 25,
+                zIndex: Z.SELECTION_HANDLE,
               }}
             />
           ))}
@@ -5580,7 +5560,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           border: '2px solid #2563eb',
           borderRadius: '50%',
           cursor: c.cursor,
-          zIndex: 25,
+          zIndex: Z.SELECTION_HANDLE,
         }}
       />
     ));
@@ -5594,11 +5574,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     return (
     <div
       style={{
-        position: 'fixed', top: 0, left: 0, right: 0, height: 60,
+        position: 'fixed', top: TOPBAR_INSET_PX, left: 0, right: 0, height: TOPBAR_H_PX,
         background: 'var(--bg-overlay)', backdropFilter: 'blur(8px)',
         borderBottom: '1px solid var(--border-soft)',
         display: 'flex', alignItems: 'center', gap: 16, padding: '0 16px',
-        zIndex: 50,
+        zIndex: Z.TOPBAR,
       }}
     >
       <button
@@ -5692,14 +5672,14 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
             <>
               <div
                 onClick={() => setMoreMenuOpen(false)}
-                style={{ position: 'fixed', inset: 0, zIndex: 59 }}
+                style={{ position: 'fixed', inset: 0, zIndex: Z.POPOVER_BACKDROP }}
               />
               <div
                 style={{
                   position: 'absolute', top: '110%', right: 0,
                   background: 'var(--bg-elev)', borderRadius: 10,
                   boxShadow: 'var(--shadow-pop)',
-                  padding: 6, marginTop: 6, minWidth: 220, zIndex: 60,
+                  padding: 6, marginTop: 6, minWidth: 220, zIndex: Z.POPOVER,
                   animation: 'rb-pop 0.18s ease-out',
                 }}
               >
@@ -5786,7 +5766,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
             <>
               <div
                 onClick={() => setTransferOpen(false)}
-                style={{ position: 'fixed', inset: 0, zIndex: 59 }}
+                style={{ position: 'fixed', inset: 0, zIndex: Z.POPOVER_BACKDROP }}
               />
               <div
                 data-board-shortcuts="off"
@@ -5794,7 +5774,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                   position: 'absolute', top: '110%', right: 0,
                   background: 'var(--bg-panel)', borderRadius: 10,
                   boxShadow: '0 8px 20px rgba(0,0,0,0.18)',
-                  padding: 8, marginTop: 6, minWidth: 200, zIndex: 60,
+                  padding: 8, marginTop: 6, minWidth: 200, zIndex: Z.POPOVER,
                   animation: 'rb-pop 0.18s ease-out',
                 }}
               >
@@ -5907,14 +5887,14 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
             {/* click-outside backdrop */}
             <div
               onClick={() => setPlayerListOpen(false)}
-              style={{ position: 'fixed', inset: 0, zIndex: 59 }}
+              style={{ position: 'fixed', inset: 0, zIndex: Z.POPOVER_BACKDROP }}
             />
             <div
               style={{
                 position: 'absolute', top: '110%', right: 0,
                 background: 'var(--bg-elev)', borderRadius: 10,
                 boxShadow: 'var(--shadow-pop)',
-                padding: 8, marginTop: 6, minWidth: 300, zIndex: 60,
+                padding: 8, marginTop: 6, minWidth: 300, zIndex: Z.POPOVER,
                 animation: 'rb-pop 0.18s ease-out',
               }}
             >
@@ -6146,7 +6126,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       <div
         style={{
           position: 'fixed', left: '50%', bottom: 16, transform: 'translateX(-50%)',
-          display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center', zIndex: 41,
+          display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center', zIndex: Z.TIMER_DOCK,
         }}
       >
         {activeZones.map((z) => renderTimerDockFor(z))}
@@ -6165,7 +6145,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         onFocusCapture={revealMinimap}
         onBlurCapture={revealMinimap}
         style={{
-          position: 'fixed', right: 16, bottom: 60, zIndex: 40,
+          position: 'fixed', right: 16, bottom: 60, zIndex: Z.DOCK,
           width: MINIMAP_W + 16,
           padding: '8px 8px 9px', boxSizing: 'border-box',
           background: 'var(--bg-overlay)',
@@ -6207,7 +6187,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
             outline: 'none',
           }}
         >
-          <MinimapCanvas model={minimapModel} colors={COLORS} />
+          <MinimapCanvas model={minimapModel} colors={PALETTE} />
           <div
             ref={minimapViewportRef}
             aria-hidden="true"
@@ -6231,7 +6211,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const renderBottomBar = () => (
     <>
       {/* Templates (bottom-left) */}
-      <div style={{ position: 'fixed', bottom: 16, left: 16, zIndex: 40 }}>
+      <div style={{ position: 'fixed', bottom: 16, left: 16, zIndex: Z.DOCK }}>
         <div style={{ position: 'relative' }}>
           <button
             type="button"
@@ -6245,7 +6225,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
               {/* click-outside backdrop */}
               <div
                 onClick={() => setTemplatesOpen(false)}
-                style={{ position: 'fixed', inset: 0, zIndex: 59 }}
+                style={{ position: 'fixed', inset: 0, zIndex: Z.POPOVER_BACKDROP }}
               />
               <div
                 data-board-shortcuts="off"
@@ -6253,7 +6233,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                   position: 'absolute', bottom: '120%', left: 0,
                   background: 'var(--bg-panel)', borderRadius: 12, padding: 8,
                   boxShadow: '0 10px 30px rgba(0,0,0,0.15)',
-                  minWidth: 300, maxHeight: '70vh', overflow: 'auto', zIndex: 60,
+                  minWidth: 300, maxHeight: '70vh', overflow: 'auto', zIndex: Z.POPOVER,
                 }}
               >
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '6px 8px', textTransform: 'uppercase', letterSpacing: 0.4, fontWeight: 700 }}>built-in</div>
@@ -6325,7 +6305,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
 
       {/* Creator toolbar (bottom-left, next to templates) */}
       <div style={{
-        position: 'fixed', bottom: 16, left: 170, zIndex: 40,
+        position: 'fixed', bottom: 16, left: 170, zIndex: Z.DOCK,
         display: 'flex', gap: 8,
       }}
       >
@@ -6390,7 +6370,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       {/* Zoom (bottom-right) */}
       <div
         style={{
-          position: 'fixed', bottom: 16, right: 16, zIndex: 40,
+          position: 'fixed', bottom: 16, right: 16, zIndex: Z.DOCK,
           background: 'var(--bg-panel)', borderRadius: 10,
           boxShadow: '0 6px 16px rgba(0,0,0,0.1)',
           display: 'flex', alignItems: 'center', overflow: 'hidden',
@@ -6550,7 +6530,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       <div
         ref={gridRef}
         style={{
-          position: 'absolute', inset: 0, zIndex: 0,
+          position: 'absolute', inset: 0, zIndex: Z.GRID,
           backgroundColor: 'var(--bg)',
           backgroundImage: 'radial-gradient(circle, var(--grid-dot) 1px, transparent 1px)',
         }}
@@ -6569,7 +6549,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         onDrop={onCanvasDrop}
         className="rb-no-select"
         style={{
-          position: 'absolute', inset: 0, zIndex: 1,
+          position: 'absolute', inset: 0, zIndex: Z.CANVAS,
           cursor: interactionRef.current?.kind === 'pan' ? 'grabbing'
             : spaceHeldRef.current ? 'grab'
             : creationMode === 'zone' ? 'crosshair'
@@ -6626,7 +6606,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                     fontFamily: '"Sarabun", "Plus Jakarta Sans", sans-serif',
                     fontSize: 13, lineHeight: 1.2, fontWeight: 700,
                     whiteSpace: 'nowrap', pointerEvents: 'none',
-                    zIndex: 2147483644,
+                    zIndex: Z.REMOTE_SELECTION_LABEL,
                   }}
                 >
                   <MousePointer2 size={13} style={{ flex: '0 0 auto' }} />
@@ -6664,7 +6644,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                     border: `${2 / zoom}px solid ${color}`,
                     borderRadius: `${7 / zoom}px`,
                     boxShadow: `0 0 0 ${3 / zoom}px ${glow}`,
-                    pointerEvents: 'none', zIndex: 2147483645,
+                    pointerEvents: 'none', zIndex: Z.REMOTE_EDITOR_BOX,
                   }}
                 />
                 <div
@@ -6681,7 +6661,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                     fontFamily: '"Sarabun", "Plus Jakarta Sans", sans-serif',
                     fontSize: 13, lineHeight: 1.2, fontWeight: 700,
                     whiteSpace: 'nowrap', pointerEvents: 'none',
-                    zIndex: 2147483646,
+                    zIndex: Z.REMOTE_EDITOR_LABEL,
                   }}
                 >
                   <span
@@ -6738,7 +6718,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         ref={cursorLayerRef}
         aria-hidden="true"
         style={{
-          position: 'fixed', inset: 0, zIndex: 36,
+          position: 'fixed', inset: 0, zIndex: Z.CURSOR_LAYER,
           overflow: 'hidden', pointerEvents: 'none',
         }}
       >
@@ -6789,7 +6769,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         <div
           role="status"
           style={{
-            position: 'fixed', top: 72, left: '50%', zIndex: 49,
+            position: 'fixed', top: TOPBAR_BOTTOM_PX + FOLLOW_BANNER_GAP_PX, left: '50%', zIndex: Z.FOLLOW_BANNER,
             transform: 'translateX(-50%)',
             display: 'flex', alignItems: 'center', gap: 9,
             maxWidth: 'calc(100vw - 32px)', padding: '7px 8px 7px 11px',
@@ -6850,7 +6830,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
             border: '1.5px solid #2563eb',
             borderRadius: 2,
             pointerEvents: 'none',
-            zIndex: 35,
+            zIndex: Z.MARQUEE,
           }}
         />
       )}
@@ -6868,7 +6848,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       {nameModalOpen && (
         <div
           style={{
-            position: 'fixed', inset: 0, zIndex: 100,
+            position: 'fixed', inset: 0, zIndex: Z.MODAL,
             background: 'rgba(0,0,0,0.4)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}
@@ -6918,7 +6898,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           role="dialog"
           aria-modal="true"
           style={{
-            position: 'fixed', inset: 0, zIndex: 100,
+            position: 'fixed', inset: 0, zIndex: Z.MODAL,
             background: 'rgba(0,0,0,0.4)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}
@@ -6969,7 +6949,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           role="dialog"
           aria-modal="true"
           style={{
-            position: 'fixed', inset: 0, zIndex: 100,
+            position: 'fixed', inset: 0, zIndex: Z.MODAL,
             background: 'rgba(0,0,0,0.4)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}
@@ -7023,7 +7003,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           role="dialog"
           aria-modal="true"
           style={{
-            position: 'fixed', inset: 0, zIndex: 100,
+            position: 'fixed', inset: 0, zIndex: Z.MODAL,
             background: 'var(--bg-modal-veil)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}
@@ -7114,7 +7094,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           aria-modal="true"
           onClick={() => setHelpOpen(false)}
           style={{
-            position: 'fixed', inset: 0, zIndex: 100,
+            position: 'fixed', inset: 0, zIndex: Z.MODAL,
             background: 'var(--bg-modal-veil)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             padding: 20,
@@ -7151,7 +7131,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                     <span style={{
                       width: 10, height: 10, borderRadius: 3, flexShrink: 0,
-                      background: COLORS[s.color].border,
+                      background: PALETTE[s.color].border,
                     }}
                     />
                     <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--text)' }}>{t(`help.${s.key}.title`)}</div>
@@ -7185,7 +7165,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           role="dialog"
           aria-modal="true"
           style={{
-            position: 'fixed', inset: 0, zIndex: 100,
+            position: 'fixed', inset: 0, zIndex: Z.MODAL,
             background: 'var(--bg-modal-veil)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}
@@ -7239,7 +7219,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
             position: 'fixed', bottom: 80, left: '50%', transform: 'translateX(-50%)',
             background: toast.type === 'warn' ? 'var(--toast-warn-bg)' : 'var(--toast-bg)',
             color: '#fff', padding: '10px 16px', borderRadius: 10,
-            fontSize: 14, fontWeight: 500, zIndex: 200,
+            fontSize: 14, fontWeight: 500, zIndex: Z.TOAST,
             boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
             animation: 'rb-toast-in 0.28s ease-out',
             display: 'flex', alignItems: 'center', gap: 10,
@@ -7332,7 +7312,7 @@ function CommentsModal({ item, comments, editingAllowed, onAdd, onDelete, onClos
       aria-labelledby="comments-dialog-title"
       onClick={onClose}
       style={{
-        position: 'fixed', inset: 0, zIndex: 100,
+        position: 'fixed', inset: 0, zIndex: Z.MODAL,
         background: 'var(--bg-modal-veil)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         padding: 20,
@@ -7474,7 +7454,7 @@ function AdminPinModal({ cfg, onCancel, onSubmit }) {
       role="dialog"
       aria-modal="true"
       style={{
-        position: 'fixed', inset: 0, zIndex: 110,
+        position: 'fixed', inset: 0, zIndex: Z.MODAL_RAISED,
         background: 'rgba(0,0,0,0.45)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
       }}
@@ -7703,7 +7683,7 @@ function TimerSetup({ onClose, onStart, nestedZoneCount }) {
         position: 'absolute', top: '110%', right: 0, marginTop: 6,
         background: 'var(--bg-elev)', borderRadius: 14, padding: 16,
         boxShadow: 'var(--shadow-pop)',
-        minWidth: 320, zIndex: 60,
+        minWidth: 320, zIndex: Z.POPOVER,
         animation: 'rb-pop 0.18s ease-out',
       }}
     >
@@ -7835,7 +7815,7 @@ function SaveTemplateModal({ onClose, onSave, zoneCount }) {
       role="dialog"
       aria-modal="true"
       style={{
-        position: 'fixed', inset: 0, zIndex: 100,
+        position: 'fixed', inset: 0, zIndex: Z.MODAL,
         background: 'var(--bg-modal-veil)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
       }}
