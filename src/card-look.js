@@ -1,6 +1,6 @@
 import { MEDAL_COLORS } from './palette.js';
 
-// Matches the title strip's negative side offsets; changing it opens the seam.
+// The header's negative side offsets align its row with the body's outer edges.
 export const ZONE_BORDER_W_PX = 2;
 
 export function stickyShadowClass({ remoteSelected, winner, dense }) {

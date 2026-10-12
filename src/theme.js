@@ -45,6 +45,14 @@ const MODE_INDEPENDENT_TOKENS = Object.freeze({
   '--selection': '#2563eb',
   '--radius-sticky': '3px',
   '--radius-zone': '24px',
+  // The chip sits just above the zone body so cards never cover it.
+  '--zone-header-padding': '0 14px 6px',
+  '--zone-chip-padding': '6px 14px',
+  '--radius-zone-chip': '12px',
+  '--zone-title-font-weight': '500',
+  '--zone-count-font-size': '0.6875em', // 11px relative to the default 16px title.
+  '--zone-chip-gap': '8px',
+  '--zone-lock-size': '13px',
   '--zone-title-shadow': '0 2px 0 rgba(0,0,0,0.08)',
   '--shadow-winner': '0 0 0 3px #fbbf24, 0 16px 22px -12px rgba(194,120,3,0.65)',
   '--shadow-winner-peak': '0 0 0 3px #fbbf24, 0 16px 22px -12px rgba(194,120,3,0.9)',

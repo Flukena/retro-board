@@ -46,6 +46,7 @@ import { TopCenterStack } from './src/TopCenterStack.jsx';
 import { templateRows, followBannerModel } from './src/chrome-model.js';
 import { SelectionToolbar, GroupSelectionToolbar } from './src/SelectionToolbar.jsx';
 import { selectionToolbarAnchor, groupSelectionToolbarAnchor } from './src/selection-toolbar-model.js';
+import { ZoneCard, ZONE_TITLE_H } from './src/ZoneCard.jsx';
 import { Toast } from './src/Toast.jsx';
 import { TopBar } from './src/TopBar.jsx';
 import { adminPillModel, playerRows, shareLinkModel } from './src/topbar-model.js';
@@ -54,7 +55,7 @@ import { t, useLang } from './src/i18n.js';
 import { getActiveRoomSession, roomFetch } from './src/room-session.js';
 import { useTheme, nextThemePref } from './src/theme.js';
 import { PALETTE, STICKY_AUTO_TEXT } from './src/palette.js';
-import { stickyClassName, stickyCardVars, zoneCardVars, medalLook } from './src/card-look.js';
+import { stickyClassName, stickyCardVars, medalLook } from './src/card-look.js';
 import './src/board-cards.css';
 import {
   MINIMAP_W_PX, MINIMAP_H_PX, GRID_PITCH_PX, topStackHeightPx, Z,
@@ -131,7 +132,6 @@ const TEXT_MIN_H = 30;
 // exports with embedded base64 images get converted back to short URLs
 // before this check (see sanitizeImportedImages), but this is the
 // belt-and-suspenders net for anything that still doesn't fit.
-const ZONE_TITLE_H = 40;
 const DRAG_THRESHOLD = 4;
 const ZOOM_MIN = 0.15;
 const ZOOM_MAX = 3.0;
@@ -1002,70 +1002,6 @@ const StickyCard = React.memo(function StickyCard({
           )}
         </div>
       </div>
-    </div>
-  );
-});
-
-const ZoneCard = React.memo(function ZoneCard({
-  item, selected, isEditingTitle, childCount, lang,
-  onStartZoneDrag, onBeginFocus, onTextChange, onTextKeyDown, onTextBlur,
-  editAreaRef,
-}) {
-  void lang;
-  const it = item;
-  const c = PALETTE[it.color] || PALETTE[0];
-  const titleFs = it.fontSize || 16;
-  const titleH = Math.max(ZONE_TITLE_H, titleFs + 18);
-  return (
-    <div
-      className={`rb-zone ${selected ? 'rb-zone--selected' : ''}`}
-      style={{
-        left: it.x,
-        top: it.y,
-        width: it.w,
-        height: it.h,
-        ...zoneCardVars(c),
-      }}
-    >
-      <div
-        onMouseDown={(e) => { if (!isEditingTitle) onStartZoneDrag(e, it); }}
-        onDoubleClick={(e) => { e.stopPropagation(); onBeginFocus(it, 'title'); }}
-        className="rb-zone__title"
-        style={{
-          top: -titleH,
-          height: titleH,
-          cursor: isEditingTitle ? 'text' : (it.locked ? 'not-allowed' : 'grab'),
-          fontSize: titleFs,
-        }}
-      >
-        {isEditingTitle ? (
-          <CollaborativeTextEditor
-            kind="input"
-            editorRef={editAreaRef}
-            value={it.title || ''}
-            maxLength={ZONE_TITLE_MAX_LENGTH}
-            onValueChange={(value) => onTextChange(it.id, { title: value })}
-            onKeyDown={(e) => onTextKeyDown(e, { singleLine: true })}
-            onBlur={() => onTextBlur(it.id)}
-            onMouseDown={(e) => e.stopPropagation()}
-            className="rb-zone__editor"
-            style={{
-              fontSize: titleFs,
-            }}
-          />
-        ) : (
-          <>
-            {it.locked && <Lock size={13} />}
-            <span className="rb-zone__label">
-              {it.title}
-            </span>
-            <span className="rb-zone__count">
-              {childCount}
-            </span>
-          </>
-        )}
-      </div>
-      <div data-surface="1" className="rb-zone__surface" />
     </div>
   );
 });
@@ -4804,6 +4740,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       item={it}
       selected={selectedIds.has(it.id)}
       isEditingTitle={focusedTextId === `${it.id}:title`}
+      TextEditor={CollaborativeTextEditor}
       childCount={zoneChildCount.get(it.id) || 0}
       lang={lang}
       onStartZoneDrag={startZoneDrag}

@@ -220,60 +220,84 @@
   animation: rb-sticky__vote-float 0.9s ease-out forwards;
 }
 
-/* Square top corners meet the pastel strip; both outer radii are 24px. */
 .rb-zone {
   position: absolute;
   background: rgba(var(--rb-zone-rgb), var(--zone-fill-alpha));
   border: var(--rb-zone-border-w) dashed rgba(var(--rb-zone-rgb), var(--zone-border-alpha));
-  border-radius: 0 0 var(--radius-zone) var(--radius-zone);
+  border-radius: var(--radius-zone);
   box-sizing: border-box;
   outline-offset: 6px;
   pointer-events: none;
   animation: rb-appear 0.28s ease-out;
 }
 
-/* Negate the dashed border width on each side to keep the title seam flush. */
+/* The whole transparent row remains the drag handle above the body. */
 .rb-zone__title {
   position: absolute;
   left: calc(-1 * var(--rb-zone-border-w));
   right: calc(-1 * var(--rb-zone-border-w));
-  background: var(--rb-zone-bg);
-  color: var(--rb-zone-ink);
-  border-radius: var(--radius-zone) var(--radius-zone) 0 0;
+  background: transparent;
+  display: flex;
+  align-items: flex-end;
+  padding: var(--zone-header-padding);
+  box-sizing: border-box;
+  user-select: none;
+  pointer-events: auto;
+}
+
+.rb-zone__chip {
   display: flex;
   align-items: center;
-  padding: 0 14px;
-  gap: 8px;
-  font-family: var(--font-display);
-  font-weight: 500;
-  user-select: none;
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: var(--zone-chip-padding);
+  gap: var(--zone-chip-gap);
+  background: var(--rb-zone-bg);
+  color: var(--rb-zone-ink);
+  border-radius: var(--radius-zone-chip);
   box-shadow: var(--zone-title-shadow);
-  pointer-events: auto;
+  font-family: var(--font-display);
+  font-weight: var(--zone-title-font-weight);
+}
+
+.rb-zone__chip--editing {
+  width: 100%;
+}
+
+.rb-zone__lock {
+  flex-shrink: 0;
+  width: var(--zone-lock-size);
+  height: var(--zone-lock-size);
 }
 
 .rb-zone__editor {
   flex: 1;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
   background: color-mix(in srgb, currentColor 12%, transparent);
   border: none;
   outline: none;
   color: var(--rb-zone-ink);
   font-family: var(--font-display);
-  font-weight: 500;
+  font-weight: var(--zone-title-font-weight);
 }
 
 .rb-zone__label {
-  flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .rb-zone__count {
-  background: color-mix(in srgb, currentColor 12%, transparent);
-  padding: 2px 8px;
-  border-radius: var(--radius-pill);
-  font-size: 12px;
-  font-weight: 600;
+  flex-shrink: 0;
+  white-space: nowrap;
+  color: inherit;
+  font-size: var(--zone-count-font-size);
+  font-weight: var(--zone-title-font-weight);
 }
 
 .rb-zone__surface {
