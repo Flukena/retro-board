@@ -61,10 +61,10 @@ test('normal text token pairs meet WCAG AA contrast in both modes', () => {
   }
 });
 
-test('JSX and HTML token references resolve in both theme modes', () => {
+test('JSX, HTML and CSS token references resolve in both theme modes', () => {
   const sourceDirectory = new URL('./', import.meta.url);
   const sourceFiles = readdirSync(sourceDirectory)
-    .filter((name) => name.endsWith('.jsx')).map((name) => `src/${name}`);
+    .filter((name) => name.endsWith('.jsx') || name.endsWith('.css')).map((name) => `src/${name}`);
   const scannedFiles = ['RetroBoard.jsx', 'index.html', ...sourceFiles];
   const unresolved = [];
   for (const file of scannedFiles) {

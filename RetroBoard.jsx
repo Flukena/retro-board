@@ -41,6 +41,8 @@ import {
   redactBoardExportForViewer,
   stickyTextForDom,
 } from './src/security-boundaries.js';
+import { Button, MenuItem, Divider } from './src/UiPrimitives.jsx';
+import { MENU_ITEM_VARIANT, DIVIDER_ORIENTATION, topBarButtonVariant } from './src/ui-variants.js';
 import { t, useLang } from './src/i18n.js';
 import { getActiveRoomSession, roomFetch } from './src/room-session.js';
 import { useTheme, nextThemePref } from './src/theme.js';
@@ -5641,16 +5643,16 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           disabledHint={t('topbar.nothingToRedo')}
           icon={<Redo2 size={16} />}
         />
-        <TopBarDivider />
+        <Divider orientation={DIVIDER_ORIENTATION.VERTICAL} />
         <TopBtn
-          title={board.editingLocked ? 'Editing locked' : 'Lock editing'}
+          title={board.editingLocked ? t('topbar.editingLocked') : t('topbar.lockEdit')}
           onClick={() => adminToggle('editingLocked')}
           active={board.editingLocked}
           enabled={isAdmin}
           icon={board.editingLocked ? <Lock size={16} /> : <Unlock size={16} />}
           label={board.editingLocked ? t('topbar.unlockEdit') : t('topbar.lockEdit')}
         />
-        <TopBarDivider />
+        <Divider orientation={DIVIDER_ORIENTATION.VERTICAL} />
         {/* Hidden file input — opened via the More menu's Import action. */}
         <input
           ref={fileInputRef}
@@ -5663,7 +5665,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
             admin-transfer out of the always-visible cluster. */}
         <div style={{ position: 'relative' }}>
           <TopBtn
-            title={t('topbar.more') || 'More'}
+            title={t('topbar.more')}
             onClick={() => setMoreMenuOpen((v) => !v)}
             enabled
             icon={<MoreHorizontal size={16} />}
@@ -5683,24 +5685,25 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                   animation: 'rb-pop 0.18s ease-out',
                 }}
               >
-                <MoreMenuItem
+                <MenuItem
                   icon={<ZoomIn size={15} />}
                   label={t('settings.scrollWheelZoom')}
                   checked={scrollWheelZoomEnabled}
+                  checkIcon={<Check size={15} />}
                   onClick={toggleScrollWheelZoom}
                 />
-                <MoreMenuDivider />
-                <MoreMenuItem
+                <Divider orientation={DIVIDER_ORIENTATION.HORIZONTAL} />
+                <MenuItem
                   icon={<Download size={15} />}
                   label={exportBusy ? t('export.processing') : t('topbar.export')}
                   onClick={() => { setMoreMenuOpen(false); exportBoard(); }}
                 />
-                <MoreMenuItem
+                <MenuItem
                   icon={<Download size={15} />}
                   label={t('topbar.exportCsv')}
                   onClick={() => { setMoreMenuOpen(false); exportBoardCsv(); }}
                 />
-                <MoreMenuItem
+                <MenuItem
                   icon={<Upload size={15} />}
                   label={t('topbar.import')}
                   disabled={!isAdmin}
@@ -5710,13 +5713,13 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                     onImportPick();
                   }}
                 />
-                <MoreMenuItem
+                <MenuItem
                   icon={<HelpCircle size={15} />}
                   label={t('help.menuLabel')}
                   onClick={() => { setMoreMenuOpen(false); setHelpOpen(true); }}
                 />
-                <MoreMenuDivider />
-                <MoreMenuItem
+                <Divider orientation={DIVIDER_ORIENTATION.HORIZONTAL} />
+                <MenuItem
                   icon={<Unlock size={15} />}
                   label={t('topbar.unlockAll')}
                   disabled={!isAdmin}
@@ -5726,30 +5729,30 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                     setConfirmUnlockAll(true);
                   }}
                 />
-                <MoreMenuItem
+                <MenuItem
                   icon={<RotateCcw size={15} />}
                   label={t('topbar.resetVotes')}
                   disabled={!isAdmin}
-                  danger
+                  variant={MENU_ITEM_VARIANT.DANGER}
                   onClick={() => {
                     if (!isAdmin) { setToast({ msg: t('common.adminOnly'), type: 'warn' }); return; }
                     setMoreMenuOpen(false);
                     setConfirmResetVotes(true);
                   }}
                 />
-                <MoreMenuItem
+                <MenuItem
                   icon={<Trash2 size={15} />}
                   label={t('topbar.clear')}
                   disabled={!isAdmin}
-                  danger
+                  variant={MENU_ITEM_VARIANT.DANGER}
                   onClick={() => {
                     if (!isAdmin) { setToast({ msg: t('common.adminOnly'), type: 'warn' }); return; }
                     setMoreMenuOpen(false);
                     setConfirmClear(true);
                   }}
                 />
-                <MoreMenuDivider />
-                <MoreMenuItem
+                <Divider orientation={DIVIDER_ORIENTATION.HORIZONTAL} />
+                <MenuItem
                   icon={<Crown size={15} />}
                   label={t('topbar.transfer')}
                   disabled={!isAdmin}
@@ -7549,79 +7552,17 @@ function AdminPinModal({ cfg, onCancel, onSubmit }) {
   );
 }
 
-function TopBtn({
-  title, onClick, active, enabled, icon, label, danger, disabledHint,
-}) {
-  const baseColor = active
-    ? 'var(--warn-text)'
-    : danger
-      ? '#dc2626'
-      : 'var(--text-mid)';
+function TopBtn({ title, onClick, active, enabled, icon, label, disabledHint }) {
   return (
-    <button
-      type="button"
+    <Button
+      variant={topBarButtonVariant({ active })}
+      disabledLook={!enabled}
       onClick={onClick}
-      title={enabled ? title : (disabledHint || `${title} (admin only)`)}
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: 6,
-        background: active ? 'var(--warn-bg)' : 'transparent',
-        color: enabled ? baseColor : 'var(--text-faint)',
-        border: '1px solid',
-        borderColor: active ? '#fbbf24' : 'var(--border-strong)',
-        borderRadius: 8,
-        padding: '6px 10px',
-        fontSize: 13,
-        fontWeight: 600,
-        cursor: enabled ? 'pointer' : 'not-allowed',
-      }}
+      title={enabled ? title : (disabledHint || `${title} (${t('common.adminOnly')})`)}
     >
       {icon}
       {label && <span>{label}</span>}
-    </button>
-  );
-}
-
-function MoreMenuItem({ icon, label, onClick, disabled, danger, checked }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      aria-pressed={checked == null ? undefined : checked}
-      style={{
-        display: 'flex', alignItems: 'center', gap: 10,
-        width: '100%', textAlign: 'left',
-        background: 'transparent', border: 'none',
-        padding: '8px 10px', borderRadius: 8,
-        fontSize: 13, fontWeight: 500,
-        color: disabled ? 'var(--text-faint)' : danger ? '#dc2626' : 'var(--text)',
-        cursor: disabled ? 'not-allowed' : 'pointer',
-      }}
-      onMouseOver={(e) => { if (!disabled) e.currentTarget.style.background = 'var(--bg-panel-2)'; }}
-      onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; }}
-    >
-      <span style={{ display: 'inline-flex', width: 18, justifyContent: 'center' }}>{icon}</span>
-      <span style={{ flex: 1 }}>{label}</span>
-      {checked && <Check size={15} />}
-    </button>
-  );
-}
-
-function MoreMenuDivider() {
-  return <div aria-hidden style={{ height: 1, background: 'var(--border-soft)', margin: '4px 6px' }} />;
-}
-
-function TopBarDivider() {
-  return (
-    <div
-      aria-hidden
-      style={{
-        width: 1, height: 22,
-        background: 'var(--border-strong)',
-        margin: '0 4px',
-        opacity: 0.6,
-      }}
-    />
+    </Button>
   );
 }
 
