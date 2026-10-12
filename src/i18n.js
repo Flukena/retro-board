@@ -204,6 +204,7 @@ const dict = {
     'tmpl.saveDialog.placeholder': 'ชื่อ template เช่น "Mad/Sad/Glad"',
     'tmpl.empty': 'ยังไม่มี zone บนบอร์ดให้บันทึก',
     'tmpl.saved': 'บันทึก template "{name}"',
+    'tmpl.saveFailed': 'เปลี่ยนแปลง template ไม่สำเร็จ โปรดลองอีกครั้ง',
 
     // sticky
     'sticky.placeholder': 'ดับเบิลคลิกเพื่อแก้ไข',
@@ -527,6 +528,7 @@ const dict = {
     'tmpl.saveDialog.placeholder': 'Template name e.g. "Mad/Sad/Glad"',
     'tmpl.empty': 'No zones on the board to save',
     'tmpl.saved': 'Saved template "{name}"',
+    'tmpl.saveFailed': 'Could not update the template. Please try again.',
 
     'sticky.placeholder': 'Double-click to edit',
     'sticky.hidden': '🔒 Hidden',

@@ -17,7 +17,6 @@ import {
   IMPORT_MAX_CSV_FILE_BYTES,
   IMPORT_MAX_FILE_BYTES,
   importBundleByteLength,
-  normalizeCustomTemplates,
   normalizeImportManifest,
 } from './src/import-schema.js';
 import { parseBoardCsv } from './src/csv-import.js';
@@ -28,7 +27,6 @@ import {
   BOARD_TEXT_MAX_LENGTH,
   IMAGE_MAX_BYTES,
   IMAGE_OUTPUT_MAX_DIMENSION,
-  TEMPLATE_NAME_MAX_LENGTH,
   ZONE_TITLE_MAX_LENGTH,
   imageInfoIsWithinLimits,
   inspectRasterImageBlob,
@@ -62,6 +60,7 @@ import {
   MINIMAP_W_PX, MINIMAP_H_PX, GRID_PITCH_PX, topStackHeightPx, Z,
 } from './src/chrome-layout.js';
 import { useUserIdentity } from './src/useUserIdentity.js';
+import { useBoardTemplates } from './src/use-board-templates.js';
 import { useAdminRole } from './src/useAdminRole.js';
 import { clientPointToWorld } from './src/board-coordinates.js';
 import { buildTopVotedRanks } from './src/voting-results.js';
@@ -662,14 +661,6 @@ const safeRuntimeImageSource = (value) => {
     relayBaseUrl: runtimeRelayBaseUrl(),
     roomHandle: getActiveRoomSession()?.roomHandle,
   });
-};
-
-const safeCustomTemplates = (value) => {
-  try {
-    return normalizeCustomTemplates(value, Date.now()) || [];
-  } catch {
-    return [];
-  }
 };
 
 const useBrowserLayoutEffect = (
@@ -1426,7 +1417,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const [confirmClear, setConfirmClear] = useState(false);
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
   const [commentsOpenFor, setCommentsOpenFor] = useState(null);
-  const [customTemplates, setCustomTemplates] = useState([]);
   const [toast, setToastRaw] = useState(null);
   const setToast = useCallback((next) => {
     setToastRaw(next ? { ...next, t: Date.now() } : null);
@@ -1445,6 +1435,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   }, []);
   const [now, setNow] = useState(Date.now());
   const [loaded, setLoaded] = useState(false);
+  const { customTemplates, saveCurrentAsTemplate, deleteCustomTemplate } = useBoardTemplates({
+    storage: typeof window !== 'undefined' ? window.storage : null,
+    boardRef, createId: uid, setToast, setSaveTemplateOpen,
+  });
   const [confirmResetVotes, setConfirmResetVotes] = useState(false);
   const [confirmUnlockAll, setConfirmUnlockAll] = useState(false);
   const [undoState, setUndoState] = useState({ canUndo: false, canRedo: false });
@@ -1930,15 +1924,12 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
 
       const pRec = await storage.get('presence', true);
       const pmap = pRec?.value || {};
-      const tRec = await storage.get('customTemplates', true);
-      const tpls = tRec?.value || [];
 
       if (cancelled) return;
       hydrateIdentity(id, name);
       setViewport(vp);
       setBoard({ ...DEFAULT_BOARD, ...bs });
       setPresence(pmap);
-      setCustomTemplates(safeCustomTemplates(tpls));
       setLoaded(true);
 
       // No initial-load admin claim here. The race was: storage.get returns
@@ -2194,7 +2185,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       // editors see the merged text on every remote keystroke.
       if (key === 'boardState') applyRemoteBoard(value, isUndoRedo);
       else if (key === 'presence') setPresence(value || {});
-      else if (key === 'customTemplates') setCustomTemplates(safeCustomTemplates(value));
     };
     if (typeof storage.on === 'function') storage.on(handler);
     // If Yjs sync completed BETWEEN the initial bRec read above and this
@@ -2219,11 +2209,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       });
       storage.get('presence', true).then((r) => {
         if (r?.value) setPresence(r.value);
-      });
-      // Custom templates can flicker to empty if the initial cold read landed
-      // before Yjs sync and the change handler wasn't subscribed yet.
-      storage.get('customTemplates', true).then((r) => {
-        if (Array.isArray(r?.value)) setCustomTemplates(safeCustomTemplates(r.value));
       });
       voteHandler();
       commentHandler();
@@ -2720,42 +2705,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     addItemsLocal(zones);
     setTemplatesOpen(false);
   }, [userId, userName, addItemsLocal, screenToWorld, customTemplates]);
-
-  const saveCurrentAsTemplate = useCallback((rawName) => {
-    const name = (rawName || '').trim().slice(0, TEMPLATE_NAME_MAX_LENGTH);
-    if (!name) return;
-    const zones = boardRef.current.items.filter((i) => i.type === 'zone');
-    if (zones.length === 0) {
-      setToast({ msg: t('tmpl.empty'), type: 'warn' });
-      return;
-    }
-    const minX = Math.min(...zones.map((z) => z.x));
-    const minY = Math.min(...zones.map((z) => z.y));
-    const normalized = zones.map((z) => ({
-      title: z.title, color: z.color,
-      x: z.x - minX, y: z.y - minY, w: z.w, h: z.h,
-    }));
-    let next;
-    try {
-      next = normalizeCustomTemplates([
-        ...customTemplates,
-        { id: uid(), name, zones: normalized, createdAt: Date.now() },
-      ]);
-    } catch (err) {
-      setToast({ msg: err.message, type: 'warn' });
-      return;
-    }
-    setCustomTemplates(next);
-    storage.set('customTemplates', next, true);
-    setSaveTemplateOpen(false);
-    setToast({ msg: t('tmpl.saved', { name }), type: 'info' });
-  }, [customTemplates]);
-
-  const deleteCustomTemplate = useCallback((id) => {
-    const next = customTemplates.filter((t) => t.id !== id);
-    setCustomTemplates(next);
-    storage.set('customTemplates', next, true);
-  }, [customTemplates]);
 
   /* ============================================================
      Admin gates
@@ -4667,7 +4616,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         },
         votes,
         comments: redacted.comments,
-        customTemplates,
+        customTemplates: window.storage?.snapshotTemplates?.() || [],
       }, readBackupImage);
     } catch (err) {
       setExportBusy(false);
@@ -4693,7 +4642,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         : t('export.done', { file: artifact.fileName }),
       type: 'info',
     });
-  }, [boardCode, customTemplates, userId, exportBusy]);
+  }, [boardCode, userId, exportBusy]);
 
   // Export only the sticky cards inside one zone as CSV. The all-zones version
   // got swapped out for this per-zone flow — users wanted to grab a single

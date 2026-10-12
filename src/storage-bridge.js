@@ -53,6 +53,15 @@ import {
 import { normalizeRuntimeImageSource } from './security-boundaries.js';
 import { repairStoredBoardGeometry } from './stored-geometry-repair.js';
 import {
+  isTemplateKey,
+  migrateLegacyTemplates,
+  normalizeTemplateEntries,
+  putTemplate,
+  readTemplates,
+  removeTemplate,
+  replaceTemplates,
+} from './template-store.js';
+import {
   geometryErrorForBoard,
   geometryErrorForItem,
   geometryErrorForPatch,
@@ -63,6 +72,11 @@ if (route.kind !== 'board') {
   window.storage = {
     async get() { return null; },
     async set() { /* noop */ },
+    snapshotTemplates() { return []; },
+    putTemplate() { return false; },
+    removeTemplate() { return false; },
+    onTemplatesChange() { /* noop */ },
+    offTemplatesChange() { /* noop */ },
     on() { /* noop */ },
     off() { /* noop */ },
     setLocalBusyItems() { /* noop */ },
@@ -98,7 +112,7 @@ const ROOM = activeRoomSession?.roomHandle || `landing-${route.code || 'unused'}
 // Some per-device prefs (display name) are scoped per-board so identity
 // doesn't leak across rooms — moving from board A (where you're admin "Alice")
 // to board B starts you as a fresh participant who picks a name for B. Other
-// per-device prefs (userId, viewport, customTemplates) stay global so the
+// per-device prefs (userId) stay global so the
 // browser still recognises itself across rooms.
 // `viewport` is per-board because pan/zoom coordinates are meaningless across
 // boards — landing on a brand-new board at the far corner of board A's last
@@ -401,12 +415,14 @@ if (provider) {
       tryMigrate();
       repairStoredBoardGeometry(ydoc, yItems);
       ensureCollaborativeTextFields();
+      migrateLegacyTemplates(ydoc, ymap);
     }
   });
   if (provider.synced) {
     tryMigrate();
     repairStoredBoardGeometry(ydoc, yItems);
     ensureCollaborativeTextFields();
+    migrateLegacyTemplates(ydoc, ymap);
   }
 }
 
@@ -549,6 +565,16 @@ ymap.observe((event) => {
     )));
   });
   if (dirty) commentEmitter.dispatchEvent(new Event('change'));
+});
+
+// Cache the validated, bounded snapshot; notify for local, remote, system,
+// and undo/redo changes alike. React always reads canonical Yjs state.
+const templateEmitter = new EventTarget();
+let templateSnapshot = readTemplates(ymap);
+ymap.observe((event) => {
+  if (![...event.keysChanged].some(isTemplateKey)) return;
+  templateSnapshot = readTemplates(ymap);
+  templateEmitter.dispatchEvent(new Event('change'));
 });
 
 // Keys that should never enter the undo stack even when written with shared=true.
@@ -815,7 +841,7 @@ if (provider) {
       }
       const ck = keyOf('s', key, '');
       // Presence heartbeats fire every ~8s — keep them off the undo stack.
-      // Everything else on shared scope (customTemplates, etc.) IS undoable
+      // Everything else on shared scope IS undoable
       // unless `silent` is set.
       const origin = silent || NEVER_UNDO_KEYS.has(key) ? 'system' : 'local';
       ydoc.transact(() => { ymap.set(ck, value); }, origin);
@@ -974,7 +1000,8 @@ if (provider) {
     importBundle(board, voteEntries, commentEntries, customTemplates) {
       if (!board || typeof board !== 'object' || !Array.isArray(board.items)) return false;
       if (!Array.isArray(voteEntries) || !Array.isArray(commentEntries)) return false;
-      if (customTemplates != null && !Array.isArray(customTemplates)) return false;
+      const normalizedTemplates = normalizeTemplateEntries(customTemplates);
+      if (customTemplates != null && !normalizedTemplates) return false;
       if (boardItemsWriteError(board.items)) return false;
 
       const itemTypes = new Map();
@@ -1017,9 +1044,7 @@ if (provider) {
         relatedKeys.forEach((key) => ymap.delete(key));
         normalizedVotes.forEach((key) => ymap.set(key, 1));
         normalizedComments.forEach(({ key, comment }) => ymap.set(key, comment));
-        if (Array.isArray(customTemplates)) {
-          ymap.set(keyOf('s', 'customTemplates', ''), customTemplates);
-        }
+        if (normalizedTemplates) replaceTemplates(ymap, normalizedTemplates);
       }, 'local');
       return true;
     },
@@ -1156,6 +1181,11 @@ if (provider) {
     offVotesChange(handler) { voteEmitter.removeEventListener('change', handler); },
     onCommentsChange(handler) { commentEmitter.addEventListener('change', handler); },
     offCommentsChange(handler) { commentEmitter.removeEventListener('change', handler); },
+    snapshotTemplates() { return templateSnapshot; },
+    putTemplate(template) { return putTemplate(ydoc, ymap, template); },
+    removeTemplate(id) { return removeTemplate(ydoc, ymap, id); },
+    onTemplatesChange(handler) { templateEmitter.addEventListener('change', handler); },
+    offTemplatesChange(handler) { templateEmitter.removeEventListener('change', handler); },
 
     // True once the WebSocket has finished its initial state exchange with
     // the server. RetroBoard gates admin election on this so a returning
@@ -1186,9 +1216,9 @@ if (provider) {
 // ---------------------------------------------------------------------------
 // Undo / Redo via Y.UndoManager.
 //
-// Tracks operations on yItems, yMeta, and ymap (votes, comments, and customTemplates).
+// Tracks operations on yItems, yMeta, and ymap (per-vote, comment, and template keys).
 // `trackedOrigins: ['local']` means:
-//   - Local board edits, vote/comment changes, customTemplate saves → tracked.
+//   - Local board edits, vote/comment changes, template puts/removes → tracked.
 //   - Remote peer writes (origin = WebsocketProvider) → ignored, so undo
 //     never reverses another user's work.
 //   - Per-device settings + presence (origin = 'system') → ignored.
