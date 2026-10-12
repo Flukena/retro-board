@@ -30,6 +30,18 @@ export function defineTokens(light, dark) {
 }
 
 const MODE_INDEPENDENT_TOKENS = Object.freeze({
+  '--radius-bar': '20px',
+  '--radius-lg': '16px',
+  '--radius-tile': '11px',
+  '--radius-round': '50%',
+  '--radius-pill': '999px',
+  '--brand-tile-bg': '#fed7aa',
+  '--brand-tile-fg': '#7c2d12',
+  '--avatar-fg': '#fff',
+  '--avatar-crown-bg': '#facc15',
+  '--avatar-ring-shadow': '0 0 0 2px var(--bg-panel), 0 0 0 3px var(--border-soft)',
+  '--avatar-saturation': '65%',
+  '--avatar-lightness': '55%',
   '--radius-sm': '10px',
   '--radius-md': '12px',
   '--font-ui': '"Sarabun", system-ui, -apple-system, "Segoe UI", sans-serif',

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'vite';
-import { BUTTON_VARIANT, MENU_ITEM_VARIANT, DIVIDER_ORIENTATION } from './ui-variants.js';
+import { BUTTON_VARIANT, MENU_ITEM_VARIANT, DIVIDER_ORIENTATION, SURFACE_KIND } from './ui-variants.js';
 
 const TEST_LABEL = 'Action';
 const TEST_EXTRA_CLASS = 'caller-class';
@@ -14,7 +14,7 @@ test('UI primitives preserve native button and accessibility contracts', async (
     appType: 'custom',
   });
   try {
-    const { Button, MenuItem, Divider } = await server.ssrLoadModule('/src/UiPrimitives.jsx');
+    const { Button, MenuItem, Divider, Surface } = await server.ssrLoadModule('/src/UiPrimitives.jsx');
     await context.test('disabled-look buttons keep the click handler and omit native disabled', () => {
       let clicks = 0;
       const onClick = () => { clicks += 1; };
@@ -51,6 +51,14 @@ test('UI primitives preserve native button and accessibility contracts', async (
       assert.equal(unchecked.props['aria-pressed'], false);
       assert.equal(unchecked.props.children[2], false);
       assert.equal(MenuItem({}).props['aria-pressed'], undefined);
+    });
+    await context.test('surfaces preserve content, attributes and validate kind', () => {
+      const surface = Surface({ kind: SURFACE_KIND.POPOVER, className: TEST_EXTRA_CLASS, children: TEST_LABEL, 'data-board-shortcuts': 'off' });
+      assert.equal(surface.type, 'div');
+      assert.equal(surface.props.children, TEST_LABEL);
+      assert.equal(surface.props['data-board-shortcuts'], 'off');
+      assert.ok(surface.props.className.split(' ').includes(TEST_EXTRA_CLASS));
+      assert.throws(() => Surface({ kind: 'unknown' }), /Unknown/);
     });
     await context.test('dividers are decorative and reject unknown orientations', () => {
       for (const orientation of Object.values(DIVIDER_ORIENTATION)) {

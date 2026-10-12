@@ -1,4 +1,4 @@
-export const TOPBAR_INSET_PX = 0;
+export const TOPBAR_INSET_PX = 12;
 export const TOPBAR_H_PX = 60;
 export const TOPBAR_BOTTOM_PX = TOPBAR_INSET_PX + TOPBAR_H_PX;
 export const TOOLBAR_TOPBAR_CLEARANCE_PX = 52;
@@ -6,6 +6,9 @@ export const TOOLBAR_MIN_ANCHOR_PX = TOPBAR_BOTTOM_PX + TOOLBAR_TOPBAR_CLEARANCE
 export const SELECTION_TOOLBAR_GAP_PX = 14;
 export const FOLLOW_BANNER_GAP_PX = 12;
 export const GRID_PITCH_PX = 24;
+export const TOPBAR_ICON_SIZE_PX = Object.freeze({
+  ACTION: 16, MENU: 15, CHIP: 12, TOGGLE: 14, BRAND: 18, CROWN: 9,
+});
 
 export function toolbarAnchorY(rawY) {
   return Math.max(rawY, TOOLBAR_MIN_ANCHOR_PX);

@@ -1,7 +1,7 @@
 import React from 'react';
 import {
-  BUTTON_VARIANT, MENU_ITEM_VARIANT,
-  buttonClass, menuItemClass, dividerClass,
+  BUTTON_VARIANT, MENU_ITEM_VARIANT, SURFACE_KIND,
+  buttonClass, menuItemClass, dividerClass, surfaceClass,
 } from './ui-variants.js';
 import './ui.css';
 
@@ -36,4 +36,8 @@ export function MenuItem({ icon, label, variant = MENU_ITEM_VARIANT.DEFAULT, che
 
 export function Divider({ orientation }) {
   return <div aria-hidden className={dividerClass(orientation)} />;
+}
+
+export function Surface({ kind = SURFACE_KIND.POPOVER, className, children, ...rest }) {
+  return <div className={[surfaceClass(kind), className].filter(Boolean).join(' ')} {...rest}>{children}</div>;
 }

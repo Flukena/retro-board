@@ -8,6 +8,7 @@ const MIN_NORMAL_TEXT_CONTRAST_RATIO = 4.5; // WCAG 2.2 SC 1.4.3.
 const COMPONENT_LOCAL_TOKEN_PREFIX = '--rb-';
 const TOKEN_REFERENCE_PATTERN = /var\(\s*(--[\w-]+)/g;
 const TEXT_BACKGROUND_PAIRS = [
+  ['--brand-tile-fg', '--brand-tile-bg'],
   ['--text', '--bg'],
   ['--text', '--bg-panel'],
   ['--text-mid', '--bg-panel-2'],
@@ -17,6 +18,7 @@ const TEXT_BACKGROUND_PAIRS = [
   ['--text', '--bg-overlay'],
   ['--text-muted', '--bg-overlay'],
   ['--accent-fg', '--accent'],
+  ['--accent-fg', '--accent-strong'],
   ['--accent', '--bg-panel'],
   ['--accent-text', '--accent-bg'],
   ['--ok-text', '--ok-bg'],

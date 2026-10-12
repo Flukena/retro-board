@@ -2,11 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  BUTTON_VARIANT, MENU_ITEM_VARIANT, DIVIDER_ORIENTATION,
-  buttonClass, menuItemClass, dividerClass, topBarButtonVariant,
+  BUTTON_VARIANT, MENU_ITEM_VARIANT, DIVIDER_ORIENTATION, SURFACE_KIND,
+  buttonClass, menuItemClass, dividerClass, topBarButtonVariant, surfaceClass,
 } from './ui-variants.js';
 
 const CONTRACTS = [
+  ['surface', SURFACE_KIND, surfaceClass],
   ['button', BUTTON_VARIANT, buttonClass],
   ['menu item', MENU_ITEM_VARIANT, menuItemClass],
   ['divider', DIVIDER_ORIENTATION, dividerClass],

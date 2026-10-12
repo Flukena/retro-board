@@ -6,11 +6,10 @@ import React, {
 } from 'react';
 import {
   Trash2, Lock, Unlock, Eye, EyeOff, ZoomIn, ZoomOut, Maximize2,
-  ThumbsUp, Crown, Clock, Square, LayoutTemplate,
-  ChevronDown, X, Sparkles, AlertCircle, Type, Copy,
+  ThumbsUp, Clock, Square, LayoutTemplate,
+  ChevronDown, X, AlertCircle, Type,
   Image as ImageIcon, MousePointer2, RotateCcw,
-  Languages, Sun, Moon, Monitor, Download, Upload, Undo2, Redo2,
-  MoreHorizontal, Check, BringToFront, SendToBack, HelpCircle,
+  Download, Upload, BringToFront, SendToBack, HelpCircle,
   MessageSquare, Map as MapIcon, LocateFixed,
 } from 'lucide-react';
 import { COMMENT_MAX_LEN } from './src/comment-schema.js';
@@ -41,14 +40,15 @@ import {
   redactBoardExportForViewer,
   stickyTextForDom,
 } from './src/security-boundaries.js';
-import { Button, MenuItem, Divider } from './src/UiPrimitives.jsx';
-import { MENU_ITEM_VARIANT, DIVIDER_ORIENTATION, topBarButtonVariant } from './src/ui-variants.js';
+import { TopBar } from './src/TopBar.jsx';
+import { adminPillModel, playerRows, shareLinkModel } from './src/topbar-model.js';
+import { hueFromId } from './src/player-colors.js';
 import { t, useLang } from './src/i18n.js';
 import { getActiveRoomSession, roomFetch } from './src/room-session.js';
 import { useTheme, nextThemePref } from './src/theme.js';
 import { PALETTE, FONT_COLORS, STICKY_AUTO_TEXT, STICKY_AUTO_TEXT_FAINT } from './src/palette.js';
 import {
-  TOPBAR_INSET_PX, TOPBAR_H_PX, TOPBAR_BOTTOM_PX, FOLLOW_BANNER_GAP_PX,
+  TOPBAR_BOTTOM_PX, FOLLOW_BANNER_GAP_PX,
   SELECTION_TOOLBAR_GAP_PX, GRID_PITCH_PX, toolbarAnchorY, Z,
 } from './src/chrome-layout.js';
 import { useUserIdentity } from './src/useUserIdentity.js';
@@ -369,14 +369,6 @@ const fitViewportToItems = (items, width, height) => {
     y: height / 2 - cy * zoom,
   };
 };
-
-const hueFromId = (id) => {
-  let h = 0;
-  for (let i = 0; i < id.length; i += 1) h = (h * 31 + id.charCodeAt(i)) >>> 0;
-  return h % 360;
-};
-
-const initialOf = (name) => (name || '?').trim().charAt(0).toUpperCase() || '?';
 
 const fmtClock = (ms) => {
   const s = Math.max(0, Math.ceil(ms / 1000));
@@ -1554,10 +1546,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   useEffect(() => { creationModeRef.current = creationMode; }, [creationMode]);
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [timerSetupOpen, setTimerSetupOpen] = useState(false);
-  const [transferOpen, setTransferOpen] = useState(false);
-  const [playerListOpen, setPlayerListOpen] = useState(false);
   const [followedUserId, setFollowedUserId] = useState(null);
-  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [fontColorOpen, setFontColorOpen] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
@@ -3185,7 +3174,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     followMotionSignatureRef.current = '';
     followLastCommitAtRef.current = 0;
     setFollowedUserId(targetUserId);
-    setPlayerListOpen(false);
   }, []);
 
   useEffect(() => {
@@ -5242,7 +5230,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       sy = selectedItem.y * v.zoom + v.y - SELECTION_TOOLBAR_GAP_PX;
     }
     // The toolbar is translated upward by its own height. Keep its bottom
-    // anchor far enough below the 60px top bar that admin controls cannot sit
+    // anchor far enough below the inset top bar that admin controls cannot sit
     // above it and intercept clicks (most visible on fitted/zoomed-out zones).
     sy = toolbarAnchorY(sy);
     const can = canModifyOwnedItem(selectedItem);
@@ -5571,458 +5559,69 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   /* ============================================================
      Top bar / floating UI
      ============================================================ */
-  const renderTopBar = () => {
-    const ThemeIcon = themePref === 'auto' ? Monitor : themePref === 'dark' ? Moon : Sun;
-    return (
-    <div
-      style={{
-        position: 'fixed', top: TOPBAR_INSET_PX, left: 0, right: 0, height: TOPBAR_H_PX,
-        background: 'var(--bg-overlay)', backdropFilter: 'blur(8px)',
-        borderBottom: '1px solid var(--border-soft)',
-        display: 'flex', alignItems: 'center', gap: 16, padding: '0 16px',
-        zIndex: Z.TOPBAR,
-      }}
-    >
-      <button
-        type="button"
-        onClick={() => { window.location.href = '/'; }}
-        title={t('topbar.home')}
-        style={{
-          background: 'transparent', border: 'none', cursor: 'pointer',
-          padding: '4px 8px', borderRadius: 8, color: 'var(--text)',
-          display: 'flex', alignItems: 'center', gap: 6,
-          fontWeight: 500, fontSize: 18, fontFamily: 'var(--font-display)',
-        }}
-      >
-        <Sparkles size={18} color="var(--accent)" /> {t('app.title')}
-      </button>
-      {boardCode && (
-        <button
-          type="button"
-          onClick={async () => {
-            // Share URL must include the token in the #fragment so joiners
-            // land on the same yjs doc. Without it they'd get a sibling
-            // tokenless board with the same code prefix.
-            const shareUrl = `${window.location.origin}/b/${boardCode}${boardToken ? `#${boardToken}` : ''}`;
-            if (await copyTextToClipboard(navigator.clipboard, shareUrl)) {
-              setToast({ msg: t('topbar.copied'), type: 'info' });
-            } else {
-              const manualCode = `${boardCode}${boardToken ? `#${boardToken}` : ''}`;
-              setToast({ msg: t('topbar.shareLink', { code: manualCode }), type: 'info', sticky: true });
-            }
-          }}
-          title={t('topbar.copyLink')}
-          style={{
-            display: 'inline-flex', alignItems: 'center', gap: 6,
-            background: 'var(--bg-panel-2)', border: '1px solid #e5e7eb',
-            borderRadius: 999, padding: '4px 10px',
-            fontFamily: 'var(--font-mono)',
-            fontSize: 12, fontWeight: 700, color: 'var(--accent)',
-            cursor: 'pointer',
-          }}
-        >
-          <Copy size={12} /> {boardCode}
-        </button>
-      )}
-
-      <div style={{ flex: 1 }} />
-
-      {/* Admin controls */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <TopBtn
-          title={t('topbar.undo')}
-          onClick={doUndo}
-          enabled={undoState.canUndo}
-          disabledHint={t('topbar.nothingToUndo')}
-          icon={<Undo2 size={16} />}
-        />
-        <TopBtn
-          title={t('topbar.redo')}
-          onClick={doRedo}
-          enabled={undoState.canRedo}
-          disabledHint={t('topbar.nothingToRedo')}
-          icon={<Redo2 size={16} />}
-        />
-        <Divider orientation={DIVIDER_ORIENTATION.VERTICAL} />
-        <TopBtn
-          title={board.editingLocked ? t('topbar.editingLocked') : t('topbar.lockEdit')}
-          onClick={() => adminToggle('editingLocked')}
-          active={board.editingLocked}
-          enabled={isAdmin}
-          icon={board.editingLocked ? <Lock size={16} /> : <Unlock size={16} />}
-          label={board.editingLocked ? t('topbar.unlockEdit') : t('topbar.lockEdit')}
-        />
-        <Divider orientation={DIVIDER_ORIENTATION.VERTICAL} />
-        {/* Hidden file input — opened via the More menu's Import action. */}
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="application/zip,.zip,application/json,.json,text/csv,.csv"
-          onChange={onImportFileChange}
-          style={{ display: 'none' }}
-        />
-        {/* Consolidated overflow menu — keeps file I/O + destructive +
-            admin-transfer out of the always-visible cluster. */}
-        <div style={{ position: 'relative' }}>
-          <TopBtn
-            title={t('topbar.more')}
-            onClick={() => setMoreMenuOpen((v) => !v)}
-            enabled
-            icon={<MoreHorizontal size={16} />}
-          />
-          {moreMenuOpen && (
-            <>
-              <div
-                onClick={() => setMoreMenuOpen(false)}
-                style={{ position: 'fixed', inset: 0, zIndex: Z.POPOVER_BACKDROP }}
-              />
-              <div
-                style={{
-                  position: 'absolute', top: '110%', right: 0,
-                  background: 'var(--bg-elev)', borderRadius: 10,
-                  boxShadow: 'var(--shadow-pop)',
-                  padding: 6, marginTop: 6, minWidth: 220, zIndex: Z.POPOVER,
-                  animation: 'rb-pop 0.18s ease-out',
-                }}
-              >
-                <MenuItem
-                  icon={<ZoomIn size={15} />}
-                  label={t('settings.scrollWheelZoom')}
-                  checked={scrollWheelZoomEnabled}
-                  checkIcon={<Check size={15} />}
-                  onClick={toggleScrollWheelZoom}
-                />
-                <Divider orientation={DIVIDER_ORIENTATION.HORIZONTAL} />
-                <MenuItem
-                  icon={<Download size={15} />}
-                  label={exportBusy ? t('export.processing') : t('topbar.export')}
-                  onClick={() => { setMoreMenuOpen(false); exportBoard(); }}
-                />
-                <MenuItem
-                  icon={<Download size={15} />}
-                  label={t('topbar.exportCsv')}
-                  onClick={() => { setMoreMenuOpen(false); exportBoardCsv(); }}
-                />
-                <MenuItem
-                  icon={<Upload size={15} />}
-                  label={t('topbar.import')}
-                  disabled={!isAdmin}
-                  onClick={() => {
-                    if (!isAdmin) { setToast({ msg: t('common.adminOnly'), type: 'warn' }); return; }
-                    setMoreMenuOpen(false);
-                    onImportPick();
-                  }}
-                />
-                <MenuItem
-                  icon={<HelpCircle size={15} />}
-                  label={t('help.menuLabel')}
-                  onClick={() => { setMoreMenuOpen(false); setHelpOpen(true); }}
-                />
-                <Divider orientation={DIVIDER_ORIENTATION.HORIZONTAL} />
-                <MenuItem
-                  icon={<Unlock size={15} />}
-                  label={t('topbar.unlockAll')}
-                  disabled={!isAdmin}
-                  onClick={() => {
-                    if (!isAdmin) { setToast({ msg: t('common.adminOnly'), type: 'warn' }); return; }
-                    setMoreMenuOpen(false);
-                    setConfirmUnlockAll(true);
-                  }}
-                />
-                <MenuItem
-                  icon={<RotateCcw size={15} />}
-                  label={t('topbar.resetVotes')}
-                  disabled={!isAdmin}
-                  variant={MENU_ITEM_VARIANT.DANGER}
-                  onClick={() => {
-                    if (!isAdmin) { setToast({ msg: t('common.adminOnly'), type: 'warn' }); return; }
-                    setMoreMenuOpen(false);
-                    setConfirmResetVotes(true);
-                  }}
-                />
-                <MenuItem
-                  icon={<Trash2 size={15} />}
-                  label={t('topbar.clear')}
-                  disabled={!isAdmin}
-                  variant={MENU_ITEM_VARIANT.DANGER}
-                  onClick={() => {
-                    if (!isAdmin) { setToast({ msg: t('common.adminOnly'), type: 'warn' }); return; }
-                    setMoreMenuOpen(false);
-                    setConfirmClear(true);
-                  }}
-                />
-                <Divider orientation={DIVIDER_ORIENTATION.HORIZONTAL} />
-                <MenuItem
-                  icon={<Crown size={15} />}
-                  label={t('topbar.transfer')}
-                  disabled={!isAdmin}
-                  onClick={() => {
-                    if (!isAdmin) { setToast({ msg: t('common.adminOnly'), type: 'warn' }); return; }
-                    setMoreMenuOpen(false);
-                    setTransferOpen(true);
-                  }}
-                />
-              </div>
-            </>
-          )}
-          {transferOpen && isAdmin && (
-            <>
-              <div
-                onClick={() => setTransferOpen(false)}
-                style={{ position: 'fixed', inset: 0, zIndex: Z.POPOVER_BACKDROP }}
-              />
-              <div
-                data-board-shortcuts="off"
-                style={{
-                  position: 'absolute', top: '110%', right: 0,
-                  background: 'var(--bg-panel)', borderRadius: 10,
-                  boxShadow: '0 8px 20px rgba(0,0,0,0.18)',
-                  padding: 8, marginTop: 6, minWidth: 200, zIndex: Z.POPOVER,
-                  animation: 'rb-pop 0.18s ease-out',
-                }}
-              >
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '4px 8px' }}>{t('transfer.list.title')}</div>
-                {onlineUsers.filter((u) => u.userId !== userId).length === 0 && (
-                  <div style={{ fontSize: 12, color: 'var(--text-faint)', padding: 8 }}>{t('transfer.list.empty')}</div>
-                )}
-                {onlineUsers.filter((u) => u.userId !== userId).map((u) => (
-                  <button
-                    key={u.userId}
-                    type="button"
-                    onClick={() => { setTransferOpen(false); requireAdminPin(() => adminTransfer(u.userId)); }}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 8,
-                      width: '100%', textAlign: 'left',
-                      background: 'transparent', border: 'none',
-                      padding: '6px 8px', borderRadius: 6, cursor: 'pointer',
-                    }}
-                    onMouseOver={(e) => { e.currentTarget.style.background = 'var(--bg-panel-2)'; }}
-                    onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; }}
-                  >
-                    <Avatar id={u.userId} name={u.name} />
-                    <span style={{ fontSize: 13 }}>{u.name}</span>
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Current-admin pill — visible to every user so non-admins can tell
-          at a glance who's running the board (the crown on the avatar is
-          only 9px, easy to miss). Always renders when an adminUserId is
-          set; falls back through presence → yMeta-cached name → localized
-          generic so the pill stays visible even before awareness sync. */}
-      {board.adminUserId && (() => {
-        const isOnline = onlineUsers.some((u) => u.userId === board.adminUserId);
-        const adminName = presence[board.adminUserId]?.name
-          || board.adminName
-          || t('common.admin');
-        return (
-          <div
-            title={t('common.admin')}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 6,
-              padding: '4px 10px', borderRadius: 999,
-              background: 'var(--warn-bg)', color: 'var(--warn-text)',
-              fontSize: 12, fontWeight: 700,
-              border: '1px solid var(--warn-text)',
-              marginLeft: 4,
-              opacity: isOnline ? 1 : 0.55,
-            }}
-          >
-            <Crown size={12} />
-            <span>{adminName}{isAdmin ? ` ${t('common.you')}` : ''}</span>
-          </div>
-        );
-      })()}
-
-      {/* Claim-admin button — visible when no admin is active (no adminUserId
-          set OR the recorded admin hasn't been seen for a while) and the
-          current user isn't already admin. Anyone holding the PIN can take
-          over a vacant role, which is the one recovery path for a board
-          whose creator lost their localStorage. */}
-      {canClaim && (
-        <button
-          type="button"
-          onClick={adminClaim}
-          title={t('admin.claim.title')}
-          style={{
-            display: 'inline-flex', alignItems: 'center', gap: 6,
-            padding: '4px 10px', borderRadius: 999,
-            background: 'var(--accent)', color: 'var(--accent-fg)',
-            fontSize: 12, fontWeight: 700,
-            border: 'none', cursor: 'pointer',
-            marginLeft: 4,
-          }}
-        >
-          <Crown size={12} />
-          <span>{t('admin.claim')}</span>
-        </button>
-      )}
-
-      {/* Presence avatars — click to open player list */}
-      <div style={{ position: 'relative', paddingLeft: 6, borderLeft: '1px solid var(--border-soft)', marginLeft: 4 }}>
-        <button
-          type="button"
-          onClick={() => setPlayerListOpen((v) => !v)}
-          title={t('topbar.playersTitle', { n: onlineUsers.length })}
-          style={{
-            display: 'flex', alignItems: 'center', gap: -8,
-            background: 'transparent', border: 'none', cursor: 'pointer',
-            padding: '2px 4px', borderRadius: 999,
-          }}
-          onMouseOver={(e) => { e.currentTarget.style.background = 'var(--bg-panel-2)'; }}
-          onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; }}
-        >
-          {onlineUsers.slice(0, 6).map((u) => (
-            <div key={u.userId} style={{ marginLeft: -8 }}>
-              <Avatar id={u.userId} name={u.name} crown={u.userId === board.adminUserId} ring />
-            </div>
-          ))}
-          {onlineUsers.length > 6 && (
-            <div style={{ marginLeft: 4, fontSize: 12, color: 'var(--text-muted)' }}>+{onlineUsers.length - 6}</div>
-          )}
-        </button>
-        {playerListOpen && (
-          <>
-            {/* click-outside backdrop */}
-            <div
-              onClick={() => setPlayerListOpen(false)}
-              style={{ position: 'fixed', inset: 0, zIndex: Z.POPOVER_BACKDROP }}
-            />
-            <div
-              style={{
-                position: 'absolute', top: '110%', right: 0,
-                background: 'var(--bg-elev)', borderRadius: 10,
-                boxShadow: 'var(--shadow-pop)',
-                padding: 8, marginTop: 6, minWidth: 300, zIndex: Z.POPOVER,
-                animation: 'rb-pop 0.18s ease-out',
-              }}
-            >
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '4px 8px' }}>
-                {t('players.head', { n: onlineUsers.length })}
-              </div>
-              {onlineUsers.map((u) => {
-                const isMe = u.userId === userId;
-                const isUserAdmin = u.userId === board.adminUserId;
-                const isFollowing = u.userId === followedUserId;
-                const used = votesUsedByUser.get(u.userId) || 0;
-                // Concurrent zone sessions can carry different vote limits — use
-                // the strictest active one so "full" doesn't under-warn.
-                const limit = activeZoneVoteLimit;
-                const isFull = limit != null && used >= limit;
-                return (
-                  <div
-                    key={u.userId}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 8,
-                      padding: '6px 8px', borderRadius: 6,
-                      background: isFollowing ? 'var(--accent-bg)' : 'transparent',
-                    }}
-                  >
-                    <Avatar id={u.userId} name={u.name} crown={isUserAdmin} />
-                    <span style={{ fontSize: 13, flex: 1 }}>
-                      {u.name}
-                      {isMe && <span style={{ color: 'var(--text-faint)', marginLeft: 4 }}>{t('common.you')}</span>}
-                    </span>
-                    <span
-                      title={t('players.votesTooltip')}
-                      style={{
-                        fontSize: 11, fontVariantNumeric: 'tabular-nums',
-                        color: isFull ? 'var(--ok-text)' : 'var(--text-muted)',
-                        background: isFull ? 'var(--ok-bg)' : 'var(--bg-panel-2)',
-                        padding: '2px 6px', borderRadius: 999, fontWeight: 600,
-                      }}
-                    >
-                      {limit != null ? `${used}/${limit}` : `${used}`}
-                    </span>
-                    {isUserAdmin && (
-                      <span style={{
-                        fontSize: 10, fontWeight: 700, color: 'var(--warn-text)',
-                        background: 'var(--warn-bg)', padding: '2px 6px', borderRadius: 999,
-                      }}
-                      >{t('common.admin')}
-                      </span>
-                    )}
-                    {!isMe && (
-                      <button
-                        type="button"
-                        aria-pressed={isFollowing}
-                        title={isFollowing ? t('follow.stop') : t('follow.start', { name: u.name })}
-                        onClick={() => {
-                          if (isFollowing) {
-                            stopFollowing();
-                            setPlayerListOpen(false);
-                          } else {
-                            startFollowing(u.userId);
-                          }
-                        }}
-                        style={{
-                          width: 30, height: 30, display: 'grid', placeItems: 'center',
-                          flex: '0 0 auto', borderRadius: 8, cursor: 'pointer',
-                          border: `1px solid ${isFollowing ? 'var(--accent)' : 'var(--border)'}`,
-                          background: isFollowing ? 'var(--accent)' : 'var(--bg-panel)',
-                          color: isFollowing ? 'var(--accent-fg)' : 'var(--text-mid)',
-                        }}
-                      >
-                        <LocateFixed size={15} />
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </>
-        )}
-      </div>
-
-      <button
-        type="button"
-        onClick={() => { setNameDraft(userName); setNameModalOpen(true); }}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 6,
-          background: 'transparent', border: '1px solid var(--border-strong)',
-          padding: '4px 10px', borderRadius: 999, cursor: 'pointer',
-          fontSize: 13, color: 'var(--text-mid)',
-        }}
-        title={t('topbar.editName')}
-      >
-        <Avatar id={userId || ''} name={userName} crown={isAdmin} small />
-        <span>{userName || t('topbar.setName')}</span>
-      </button>
-
-      {/* Lang + theme toggles */}
-      <button
-        type="button"
-        onClick={() => setLang(lang === 'th' ? 'en' : 'th')}
-        title={t('settings.lang')}
-        style={{
-          background: 'transparent', border: '1px solid var(--border-strong)',
-          padding: '4px 8px', borderRadius: 999, cursor: 'pointer',
-          fontSize: 12, fontWeight: 700, color: 'var(--text)',
-          display: 'inline-flex', alignItems: 'center', gap: 4,
-        }}
-      >
-        <Languages size={14} /> {lang === 'th' ? 'TH' : 'EN'}
-      </button>
-      <button
-        type="button"
-        onClick={() => setThemePref(nextThemePref(themePref))}
-        title={`${t('settings.theme')}: ${t(`settings.theme.${themePref}`)}`}
-        style={{
-          background: 'transparent', border: '1px solid var(--border-strong)',
-          padding: '4px 8px', borderRadius: 999, cursor: 'pointer',
-          fontSize: 12, color: 'var(--text)',
-          display: 'inline-flex', alignItems: 'center',
-        }}
-      >
-        <ThemeIcon size={14} />
-      </button>
-    </div>
-    );
+  const copyRoomLink = async () => {
+    const share = shareLinkModel(window.location.origin, boardCode, boardToken);
+    if (await copyTextToClipboard(navigator.clipboard, share.url)) {
+      setToast({ msg: t('topbar.copied'), type: 'info' });
+    } else {
+      setToast({ msg: t('topbar.shareLink', { code: share.manualCode }), type: 'info', sticky: true });
+    }
   };
+  const topbarAdminAction = (action) => {
+    if (!isAdmin) { setToast({ msg: t('common.adminOnly'), type: 'warn' }); return; }
+    action();
+  };
+  const renderTopBar = () => (
+    <TopBar
+      code={boardCode}
+      canUndo={undoState.canUndo}
+      canRedo={undoState.canRedo}
+      editingLocked={board.editingLocked}
+      isAdmin={isAdmin}
+      canClaim={canClaim}
+      admin={adminPillModel({
+        adminUserId: board.adminUserId,
+        adminName: board.adminName,
+        presence,
+        onlineUsers,
+        fallbackName: t('common.admin'),
+      })}
+      players={playerRows({
+        onlineUsers,
+        userId,
+        adminUserId: board.adminUserId,
+        followedUserId,
+        votesUsedByUser,
+        limit: activeZoneVoteLimit,
+      })}
+      userId={userId}
+      userName={userName}
+      lang={lang}
+      themePref={themePref}
+      exportBusy={exportBusy}
+      scrollWheelZoomEnabled={scrollWheelZoomEnabled}
+      onHome={() => { window.location.href = '/'; }}
+      onCopyLink={copyRoomLink}
+      onUndo={doUndo}
+      onRedo={doRedo}
+      onToggleEditingLock={() => adminToggle('editingLocked')}
+      onClaimAdmin={adminClaim}
+      onEditName={() => { setNameDraft(userName); setNameModalOpen(true); }}
+      onToggleLanguage={() => setLang(lang === 'th' ? 'en' : 'th')}
+      onToggleTheme={() => setThemePref(nextThemePref(themePref))}
+      onToggleScrollWheelZoom={toggleScrollWheelZoom}
+      onExport={exportBoard}
+      onExportCsv={exportBoardCsv}
+      onImport={onImportPick}
+      onHelp={() => setHelpOpen(true)}
+      onUnlockAll={() => topbarAdminAction(() => setConfirmUnlockAll(true))}
+      onResetVotes={() => topbarAdminAction(() => setConfirmResetVotes(true))}
+      onClear={() => topbarAdminAction(() => setConfirmClear(true))}
+      onTransferAdmin={(targetUserId) => requireAdminPin(() => adminTransfer(targetUserId))}
+      onFollow={startFollowing}
+      onStopFollowing={stopFollowing}
+    />
+  );
 
   const renderTimerDockFor = (zone) => {
     const zTimer = zone.voteTimer;
@@ -6759,6 +6358,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       </div>
 
       {/* Floating UI */}
+      <input ref={fileInputRef} type="file" accept="application/zip,.zip,application/json,.json,text/csv,.csv"
+        onChange={onImportFileChange} style={{ display: 'none' }} />
       {renderTopBar()}
       {followedUserId && (
         <div
@@ -7548,54 +7149,6 @@ function AdminPinModal({ cfg, onCancel, onSubmit }) {
           </button>
         </div>
       </div>
-    </div>
-  );
-}
-
-function TopBtn({ title, onClick, active, enabled, icon, label, disabledHint }) {
-  return (
-    <Button
-      variant={topBarButtonVariant({ active })}
-      disabledLook={!enabled}
-      onClick={onClick}
-      title={enabled ? title : (disabledHint || `${title} (${t('common.adminOnly')})`)}
-    >
-      {icon}
-      {label && <span>{label}</span>}
-    </Button>
-  );
-}
-
-function Avatar({ id, name, crown, ring, small }) {
-  const size = small ? 22 : 28;
-  const hue = hueFromId(id || 'x');
-  return (
-    <div
-      style={{
-        position: 'relative',
-        width: size, height: size, borderRadius: '50%',
-        background: `hsl(${hue}, 65%, 55%)`,
-        color: '#fff', display: 'inline-flex',
-        alignItems: 'center', justifyContent: 'center',
-        fontWeight: 700, fontSize: small ? 11 : 12,
-        boxShadow: ring ? '0 0 0 2px #fff, 0 0 0 3px rgba(0,0,0,0.08)' : 'none',
-      }}
-    >
-      {initialOf(name)}
-      {crown && (
-        <span
-          style={{
-            position: 'absolute', top: -6, right: -4,
-            background: '#facc15', borderRadius: '50%',
-            width: 14, height: 14, display: 'inline-flex',
-            alignItems: 'center', justifyContent: 'center',
-            color: '#7c2d12',
-            border: '1.5px solid #fff',
-          }}
-        >
-          <Crown size={9} />
-        </span>
-      )}
     </div>
   );
 }

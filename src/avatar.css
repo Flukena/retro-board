@@ -1,0 +1,40 @@
+.rb-avatar {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-round);
+  background: hsl(var(--rb-avatar-hue), var(--avatar-saturation), var(--avatar-lightness));
+  color: var(--avatar-fg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-ui);
+  font-weight: 700;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.rb-avatar--small {
+  width: 22px;
+  height: 22px;
+  font-size: 11px;
+}
+
+.rb-avatar--ring {
+  box-shadow: var(--avatar-ring-shadow);
+}
+
+.rb-avatar__crown {
+  position: absolute;
+  top: -6px;
+  right: -4px;
+  background: var(--avatar-crown-bg);
+  border-radius: var(--radius-round);
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--brand-tile-fg);
+  border: 1.5px solid var(--bg-panel);
+}

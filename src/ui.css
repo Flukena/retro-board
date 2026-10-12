@@ -16,7 +16,7 @@
   transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
 
-.rb-btn:hover:not(:disabled, [aria-disabled="true"], .rb-btn--active) {
+.rb-btn:hover:not(:disabled, [aria-disabled="true"], .rb-btn--active, .rb-btn--primary) {
   background: var(--bg-panel-2);
 }
 
@@ -35,6 +35,29 @@
   color: var(--warn-text);
   background: var(--warn-bg);
   border-color: var(--warn-border);
+}
+
+.rb-btn--primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+
+.rb-btn--primary:hover:not(:disabled, [aria-disabled="true"], .rb-btn--active) {
+  background: var(--accent-strong);
+}
+
+.rb-btn--pill {
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+}
+
+.rb-btn--icon-sm {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  justify-content: center;
+  flex: 0 0 auto;
 }
 
 .rb-btn:disabled,
@@ -97,9 +120,25 @@
   margin: 4px 6px;
 }
 
+.rb-surface {
+  background: var(--bg-panel);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
+  padding: 8px;
+}
+
+.rb-surface--popover {
+  animation: rb-pop 0.18s ease-out;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .rb-btn,
   .rb-menu-item {
     transition: none;
+  }
+
+  .rb-surface--popover {
+    animation: none;
   }
 }

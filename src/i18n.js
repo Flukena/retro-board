@@ -54,6 +54,7 @@ const dict = {
     'room.bootstrap.home': 'กลับหน้าหลัก',
 
     // top bar
+    'topbar.extraPlayers': '+{n}',
     'topbar.home': 'กลับหน้าหลัก',
     'topbar.copyLink': 'คลิกเพื่อคัดลอกลิงก์ห้อง',
     'topbar.copied': 'คัดลอกลิงก์ห้องแล้ว',
@@ -348,6 +349,7 @@ const dict = {
     'room.bootstrap.retry': 'Retry',
     'room.bootstrap.home': 'Back to home',
 
+    'topbar.extraPlayers': '+{n}',
     'topbar.home': 'Back to home',
     'topbar.copyLink': 'Click to copy room link',
     'topbar.copied': 'Room link copied',
