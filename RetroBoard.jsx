@@ -4785,7 +4785,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       return;
     }
     setBoard(nextBoard);
-    if (Array.isArray(importedTemplates)) setCustomTemplates(importedTemplates);
     const n = importedItems.length;
     setPendingImport(null);
     setImportBusy(false);
