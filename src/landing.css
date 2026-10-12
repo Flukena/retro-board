@@ -8,9 +8,9 @@
   font-family: var(--font-ui);
   color: var(--text);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  padding: 40px 20px;
+  padding: var(--landing-page-padding);
   box-sizing: border-box;
 }
 
@@ -23,46 +23,96 @@
   z-index: var(--landing-corner-layer);
 }
 
-.rb-landing__content { width: 100%; max-width: 560px; }
-.rb-landing__hero { display: flex; align-items: center; gap: 10px; margin-bottom: 24px; }
+.rb-landing__content {
+  width: 100%;
+  max-width: var(--landing-max-width);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--landing-gap);
+}
+.rb-landing__hero {
+  display: flex;
+  align-items: center;
+  gap: var(--landing-hero-gap);
+  margin: var(--landing-hero-margin);
+}
 .rb-landing__brand {
-  background: var(--accent);
-  color: var(--accent-fg);
-  border-radius: var(--radius-md);
-  width: 44px;
-  height: 44px;
+  background: var(--brand-tile-bg);
+  color: var(--brand-tile-fg);
+  border-radius: var(--radius-lg);
+  width: var(--landing-logo-size);
+  height: var(--landing-logo-size);
   display: flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
 }
-.rb-landing__title { font-family: var(--font-display); font-size: 34px; font-weight: 500; }
-.rb-landing__tagline { font-size: 13px; color: var(--text-muted); }
-.rb-landing__page .rb-landing__card { padding: 20px; margin-bottom: 16px; }
-.rb-landing__section-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 14px;
-  font-weight: 700;
-  margin-bottom: 10px;
+.rb-landing__title {
+  font-family: var(--font-display);
+  font-size: var(--landing-title-font-size);
+  font-weight: var(--landing-title-font-weight);
+  line-height: var(--landing-title-line-height);
 }
-.rb-landing__description { font-size: 13px; color: var(--text-muted); margin-bottom: 14px; }
-.rb-landing__form-row { display: flex; gap: 8px; }
-.rb-input.rb-landing__input { flex: 1; min-width: 0; padding: 10px 14px; font-size: 14px; }
-.rb-landing__page .rb-landing__action { height: auto; padding: 10px 16px; white-space: nowrap; }
-.rb-landing__error { margin-top: 10px; color: var(--danger); font-size: 13px; }
+.rb-landing__tagline {
+  font-size: var(--landing-body-font-size);
+  color: var(--text-muted);
+  margin: var(--landing-subtitle-margin);
+}
+.rb-landing__page .rb-landing__card {
+  padding: var(--landing-card-padding);
+  background: var(--bg-panel);
+  border: var(--landing-line-width) solid var(--border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-card);
+}
+.rb-landing__section-head {
+  font-family: var(--font-display);
+  font-size: var(--landing-heading-font-size);
+  font-weight: var(--landing-heading-font-weight);
+  margin: var(--landing-heading-margin);
+}
+.rb-landing__section-head:has(+ .rb-landing__description) { margin: var(--landing-create-heading-margin); }
+.rb-landing__description {
+  font-size: var(--landing-body-font-size);
+  color: var(--text-muted);
+  margin: var(--landing-description-margin);
+}
+.rb-landing__form-row { display: flex; flex-wrap: wrap; gap: var(--landing-form-gap); }
+.rb-input.rb-landing__input {
+  flex: 1 1 var(--landing-input-basis);
+  min-width: 0;
+  box-sizing: border-box;
+  height: var(--landing-control-height);
+  padding: var(--landing-input-padding);
+  font-size: var(--landing-control-font-size);
+  background: var(--bg-panel-2);
+  border: var(--landing-line-width) solid var(--border);
+  border-radius: var(--radius-md);
+}
+.rb-landing__page .rb-landing__action {
+  height: var(--landing-control-height);
+  padding: var(--landing-action-padding);
+  font-size: var(--landing-control-font-size);
+  font-weight: var(--landing-heading-font-weight);
+  white-space: nowrap;
+}
+.rb-landing__page .rb-landing__action:not(.rb-btn--primary):not(:disabled) { color: var(--text); }
+.rb-landing__error { margin: var(--landing-error-margin); color: var(--danger); font-size: var(--landing-body-font-size); }
+.rb-landing__page .rb-landing__card--recents { padding: var(--landing-recents-padding); }
+.rb-landing__card--recents .rb-landing__section-head { margin: var(--landing-recents-heading-margin); }
 .rb-landing__recent {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: var(--radius-sm);
-  transition: background 0.1s;
+  gap: var(--landing-recent-gap);
+  padding: var(--landing-recent-padding);
+  transition: var(--landing-hover-transition);
 }
+.rb-landing__recent + .rb-landing__recent { border-top: var(--landing-line-width) solid var(--border); }
 .rb-landing__recent:hover { background: var(--bg-panel-2); }
 .rb-landing__recent-open {
   flex: 1;
+  min-width: 0;
   text-align: left;
   background: transparent;
   border: none;
@@ -71,19 +121,28 @@
   color: inherit;
   font-family: inherit;
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: var(--landing-recent-detail-gap);
 }
 .rb-landing__recent-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.rb-landing__recent-code {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--accent);
+.rb-landing__recent-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--landing-control-font-size);
+  font-weight: var(--landing-recent-font-weight);
 }
-.rb-landing__recent-name { font-size: 13px; color: var(--text-mid); }
-.rb-landing__timestamp { font-size: 11px; color: var(--text-faint); }
-.rb-landing__footer { text-align: center; font-size: 12px; color: var(--text-faint); margin-top: 20px; }
+.rb-landing__recent-detail { font-size: var(--landing-small-font-size); color: var(--text-muted); overflow-wrap: anywhere; }
+.rb-landing__recent-code { font-family: var(--font-mono); }
+.rb-landing__remove { width: var(--landing-remove-size); height: var(--landing-remove-size); flex: none; }
+.rb-landing__footer {
+  text-align: center;
+  font-size: var(--landing-small-font-size);
+  color: var(--text-muted);
+  margin: var(--landing-footer-margin);
+  line-height: var(--landing-footer-line-height);
+}
 @media (prefers-reduced-motion: reduce) {
   .rb-landing__recent { transition: none; }
 }

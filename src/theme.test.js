@@ -20,6 +20,8 @@ const TEXT_BACKGROUND_PAIRS = [
   ['--text-muted', '--bg-panel-2'],
   ['--text', '--bg-overlay'],
   ['--text-muted', '--bg-overlay'],
+  ['--btn-primary-fg', '--btn-primary-bg'],
+  ['--btn-primary-fg', '--btn-primary-hover'],
   ['--accent-fg', '--accent'],
   ['--accent-fg', '--accent-strong'],
   ['--accent', '--bg-panel'],
@@ -236,4 +238,35 @@ test('sticky CSS consumes design tokens in full and overview paths without resiz
   assert.equal(cardDeclarations('.rb-sticky__comment-preview-slide')['text-overflow'], 'ellipsis');
   assert.ok(!cardDeclarations('.rb-sticky__vote-pill').transition.includes('padding'));
   assert.ok(!cardDeclarations('.rb-sticky__vote-pill').transition.includes('font-size'));
+});
+
+
+test('B1 keeps white light canvas, dark canvas and orange signals with independent ink buttons', () => {
+  const modes = {
+    light: { background: '#ffffff', ink: '#2b2118', foreground: '#fffcf6', hover: '#4d4033', accent: '#c2410c' },
+    dark: { background: '#1b1814', ink: '#f3ebdf', foreground: '#1b1814', hover: '#d8cbb8', accent: '#fb923c' },
+  };
+  for (const [mode, expected] of Object.entries(modes)) {
+    const tokens = TOKENS[mode];
+    assert.equal(tokens['--bg'], expected.background);
+    assert.equal(tokens['--btn-primary-bg'], expected.ink);
+    assert.equal(tokens['--btn-primary-fg'], expected.foreground);
+    assert.equal(tokens['--btn-primary-border'], expected.ink);
+    assert.equal(tokens['--btn-primary-hover'], expected.hover);
+    assert.equal(tokens['--accent'], expected.accent);
+    assert.equal(tokens['--radius-xl'], '22px');
+    assert.equal(tokens['--radius-md'], '12px');
+    assert.equal(tokens['--radius-lg'], '16px');
+    assert.equal(tokens['--landing-line-width'], '1.5px');
+    assert.equal(tokens['--landing-max-width'], '580px');
+    assert.equal(tokens['--landing-page-padding'], '95px 16px 56px');
+    assert.equal(tokens['--landing-gap'], '16px');
+    assert.equal(tokens['--landing-logo-size'], '52px');
+    assert.equal(tokens['--landing-title-font-size'], '34px');
+    assert.equal(tokens['--landing-title-font-weight'], '500');
+    assert.equal(tokens['--brand-tile-bg'], '#fed7aa');
+    assert.equal(tokens['--brand-tile-fg'], '#7c2d12');
+  }
+  assert.equal(TOKENS.light['--bg-panel'], '#fffcf6');
+  assert.equal(TOKENS.light['--grid-dot'], 'rgba(110,80,40,0.16)');
 });

@@ -38,13 +38,13 @@
 }
 
 .rb-btn--primary {
-  background: var(--accent);
-  color: var(--accent-fg);
-  border-color: var(--accent);
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-fg);
+  border-color: var(--btn-primary-border);
 }
 
 .rb-btn--primary:hover:not(:disabled, [aria-disabled="true"], .rb-btn--active) {
-  background: var(--accent-strong);
+  background: var(--btn-primary-hover);
 }
 
 .rb-btn--pill {

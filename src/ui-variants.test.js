@@ -54,3 +54,14 @@ test('choice selection and toast severity choose exclusive appearances', () => {
   assert.equal(toastSurfaceKind('warn'), SURFACE_KIND.TOAST_WARN);
   for (const type of [undefined, 'info', 'success']) assert.equal(toastSurfaceKind(type), SURFACE_KIND.TOAST);
 });
+
+
+test('primary buttons consume ink tokens and preserve disabled affordances', () => {
+  const css = readFileSync(new URL('./ui.css', import.meta.url), 'utf8');
+  const primary = css.match(/\.rb-btn--primary \{([^}]+)\}/)[1];
+  assert.match(primary, /background: var\(--btn-primary-bg\)/);
+  assert.match(primary, /color: var\(--btn-primary-fg\)/);
+  assert.match(primary, /border-color: var\(--btn-primary-border\)/);
+  assert.match(css, /\.rb-btn--primary:hover:not\(:disabled, \[aria-disabled="true"\], \.rb-btn--active\) \{\s*background: var\(--btn-primary-hover\)/);
+  assert.match(css, /\.rb-btn:disabled,[\s\S]*?color: var\(--text-faint\);[\s\S]*?cursor: not-allowed;/);
+});

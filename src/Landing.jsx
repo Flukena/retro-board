@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Sparkles, Plus, Clock, ArrowRight, Trash2, Languages, Sun, Moon, Monitor,
+  Sparkles, Plus, ArrowRight, X, Languages, Sun, Moon, Monitor,
 } from 'lucide-react';
 import {
   gotoBoard, loadRecents, forgetRecent, markBoardCreated, rememberRecent,
@@ -21,7 +21,7 @@ import {
 import './landing.css';
 
 const CREATE_RETRY_FALLBACK_SECONDS = 2;
-const LANDING_ICON_SIZE_PX = Object.freeze({ BRAND: 22, ACTION: 16, REMOVE: 13 });
+const LANDING_ICON_SIZE_PX = Object.freeze({ BRAND: 22, ACTION: 16, REMOVE: 15 });
 const THEME_ICONS = Object.freeze({ auto: Monitor, dark: Moon, light: Sun });
 
 export default function Landing() {
@@ -151,9 +151,8 @@ export default function Landing() {
         />
         <JoinCard joinCode={joinCode} onCodeChange={setJoinCode} onJoin={join} />
         {recents.length > 0 && (
-          <Surface kind={SURFACE_KIND.CARD} className="rb-landing__card">
+          <Surface kind={SURFACE_KIND.CARD} className="rb-landing__card rb-landing__card--recents">
             <div className="rb-landing__section-head">
-              <Clock size={TOPBAR_ICON_SIZE_PX.TOGGLE} />
               {t('landing.recents.head')}
             </div>
             {recents.map((recent) => (
@@ -228,7 +227,7 @@ function CreateCard({ boardName, onNameChange, onCreate, creating, error }) {
   );
 }
 
-function JoinCard({ joinCode, onCodeChange, onJoin }) {
+export function JoinCard({ joinCode, onCodeChange, onJoin }) {
   return (
     <Surface kind={SURFACE_KIND.CARD} className="rb-landing__card">
       <div className="rb-landing__section-head">{t('landing.join.head')}</div>
@@ -262,16 +261,20 @@ export function RecentRow({ recent, onRemove }) {
         className="rb-landing__recent-open"
         onClick={() => gotoBoard(recent.code, recent.token)}
       >
-        <span className="rb-landing__recent-code">{recent.code}</span>
-        {recent.name && <span className="rb-landing__recent-name">{recent.name}</span>}
+        <span className="rb-landing__recent-name">{recent.name || recent.code}</span>
+        <span className="rb-landing__recent-detail">
+          <span className="rb-landing__recent-code">{recent.code}</span>
+          {t('landing.recents.separator')}
+          <span>{formatRelativeTime(recent.visitedAt)}</span>
+        </span>
       </button>
-      <span className="rb-landing__timestamp">{formatRelativeTime(recent.visitedAt)}</span>
       <IconButton
+        className="rb-landing__remove"
         onClick={() => onRemove(recent.code, recent.token)}
         title={removeLabel}
         aria-label={removeLabel}
       >
-        <Trash2 size={LANDING_ICON_SIZE_PX.REMOVE} />
+        <X size={LANDING_ICON_SIZE_PX.REMOVE} />
       </IconButton>
     </div>
   );

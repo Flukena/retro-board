@@ -1,6 +1,7 @@
 import React from 'react';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { withChromeModule } from './chrome-test-helper.js';
 
@@ -53,5 +54,39 @@ test('recent row labels removal in both languages and forwards its code and toke
     } finally {
       setLang(originalLang);
     }
+  });
+});
+
+
+test('landing CSS matches design C surfaces, filled inputs and top column', () => {
+  const css = readFileSync(new URL('./landing.css', import.meta.url), 'utf8');
+  const contracts = {
+    '.rb-landing__page': ['align-items: flex-start', 'padding: var(--landing-page-padding)'],
+    '.rb-landing__content': ['max-width: var(--landing-max-width)', 'flex-direction: column', 'gap: var(--landing-gap)'],
+    '.rb-landing__brand': ['background: var(--brand-tile-bg)', 'color: var(--brand-tile-fg)', 'width: var(--landing-logo-size)', 'border-radius: var(--radius-lg)'],
+    '.rb-landing__page .rb-landing__card': ['border-radius: var(--radius-xl)', 'box-shadow: var(--shadow-card)', 'background: var(--bg-panel)'],
+    '.rb-input.rb-landing__input': ['background: var(--bg-panel-2)', 'border: var(--landing-line-width) solid var(--border)', 'border-radius: var(--radius-md)', 'min-width: 0'],
+    '.rb-landing__page .rb-landing__action:not(.rb-btn--primary):not(:disabled)': ['color: var(--text)'],
+  };
+  for (const [selector, declarations] of Object.entries(contracts)) {
+    const start = css.indexOf(selector + ' {');
+    assert.ok(start >= 0, selector);
+    const rule = css.slice(start, css.indexOf('}', start));
+    for (const declaration of declarations) assert.ok(rule.includes(declaration), selector + ': ' + declaration);
+  }
+});
+
+test('Join is secondary, enabled for text, and forwards click and Enter', async () => {
+  await withChromeModule('/src/Landing.jsx', ({ JoinCard }) => {
+    let joins = 0;
+    const card = JoinCard({ joinCode: ' room-code ', onCodeChange: () => {}, onJoin: () => { joins += 1; } });
+    const html = renderToStaticMarkup(card);
+    assert.doesNotMatch(html, /disabled=""|rb-btn--primary/);
+    assert.match(html, /class="rb-btn rb-landing__action"/);
+    const [input, button] = card.props.children.at(-1).props.children;
+    button.props.onClick();
+    input.props.onKeyDown({ key: 'Enter' });
+    input.props.onKeyDown({ key: 'Escape' });
+    assert.equal(joins, 2);
   });
 });
