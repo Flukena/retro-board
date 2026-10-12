@@ -2,7 +2,7 @@
 // Yjs-backed realtime board with character-level collaborative text editing.
 
 import React, {
-  useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo,
+  useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, startTransition,
 } from 'react';
 import {
   Trash2, Lock, Unlock, Eye, EyeOff, ZoomIn, ZoomOut, Maximize2,
@@ -16,13 +16,16 @@ import {
 import { COMMENT_MAX_LEN } from './src/comment-schema.js';
 import {
   IMPORT_MAX_BUNDLE_BYTES,
+  IMPORT_MAX_ARCHIVE_FILE_BYTES,
+  IMPORT_MAX_CSV_FILE_BYTES,
   IMPORT_MAX_FILE_BYTES,
   importBundleByteLength,
   normalizeCustomTemplates,
   normalizeImportManifest,
 } from './src/import-schema.js';
 import { parseBoardCsv } from './src/csv-import.js';
-import { createCsvExportArtifact, createJsonBackupArtifact } from './src/board-backup.js';
+import { createCsvExportArtifact } from './src/board-backup.js';
+import { restoreBackupImages } from './src/backup-images.js';
 import { geometryErrorForItem, geometryErrorForPatch } from './src/board-geometry.js';
 import {
   BOARD_TEXT_MAX_LENGTH,
@@ -31,7 +34,6 @@ import {
   IMAGE_OUTPUT_MAX_DIMENSION,
   TEMPLATE_NAME_MAX_LENGTH,
   ZONE_TITLE_MAX_LENGTH,
-  classifyImportedImageSource,
   imageInfoIsWithinLimits,
   inspectRasterImageBlob,
   isSafeImageMime,
@@ -40,7 +42,7 @@ import {
   stickyTextForDom,
 } from './src/security-boundaries.js';
 import { t, useLang } from './src/i18n.js';
-import { getActiveRoomSession } from './src/room-session.js';
+import { getActiveRoomSession, roomFetch } from './src/room-session.js';
 import { useTheme, nextThemePref } from './src/theme.js';
 import { useUserIdentity } from './src/useUserIdentity.js';
 import { useAdminRole } from './src/useAdminRole.js';
@@ -71,6 +73,9 @@ import {
   mapSelectionIndexThroughReplacement,
 } from './src/collaborative-text.js';
 import { copyTextToClipboard } from './src/clipboard.js';
+import { MinimapCanvas } from './src/MinimapCanvas.jsx';
+import { wheelZoomFactor, viewportNeedsCullRefresh } from './src/viewport-zoom.js';
+import { centerOf, insideZone, resolveOwnerZone, effectiveOwnerZone } from './src/board-ownership.js';
 import {
   normalizeDisplayName,
   normalizeStoredUserId,
@@ -78,6 +83,8 @@ import {
 } from './src/local-preferences.js';
 import { voteTimerIsOpen, voteTimerPhaseSignature } from './src/vote-timing.js';
 import { planVoteFinalization } from './src/vote-finalization.js';
+
+const loadBoardArchive = () => import('./src/board-archive.js');
 
 /* ============================================================
    Constants
@@ -560,21 +567,6 @@ const memMerge = (obj, patch) => {
   return out;
 };
 
-const centerOf = (it) => {
-  if (it.type === 'zone') return { x: it.x + it.w / 2, y: it.y + it.h / 2 };
-  if (it.type === 'sticky') {
-    const w = it.w || STICKY_W;
-    const h = it.h || STICKY_H;
-    return { x: it.x + w / 2, y: it.y + h / 2 };
-  }
-  if (it.type === 'text') return { x: it.x + (it.w || TEXT_W) / 2, y: it.y + (it.h || TEXT_H) / 2 };
-  if (it.type === 'image') return { x: it.x + (it.w || 200) / 2, y: it.y + (it.h || 200) / 2 };
-  return { x: it.x, y: it.y };
-};
-
-const insideZone = (p, z) =>
-  p.x >= z.x && p.x <= z.x + z.w && p.y >= z.y && p.y <= z.y + z.h;
-
 const isNestedIn = (z, ancestor, allItems) => {
   let current = z;
   const visited = new Set();
@@ -603,43 +595,6 @@ const zoneGroupIds = (zone, allItems) => {
     if (owner && ids.has(owner.id)) ids.add(it.id);
   });
   return ids;
-};
-
-// Mirrors centerOf's per-type size defaults, so a dimensionless legacy item
-// can't trivially satisfy resolveOwnerZone's strictly-larger guard below.
-const effectiveArea = (it) => {
-  if (it.type === 'zone') return it.w * it.h;
-  const w = it.w || (it.type === 'sticky' ? STICKY_W : it.type === 'text' ? TEXT_W : it.type === 'image' ? 200 : 0);
-  const h = it.h || (it.type === 'sticky' ? STICKY_H : it.type === 'text' ? TEXT_H : it.type === 'image' ? 200 : 0);
-  return w * h;
-};
-
-// Pure geometric lookup, used only when writing a new persistent owner.
-const resolveOwnerZone = (item, allItems) => {
-  const c = centerOf(item);
-  const area = effectiveArea(item);
-  const candidates = allItems.filter((z) => (
-    z.type === 'zone' && z.id !== item.id && z.w * z.h > area && insideZone(c, z)
-  ));
-  if (!candidates.length) return null;
-  const minArea = Math.min(...candidates.map((z) => z.w * z.h));
-  const tied = candidates.filter((z) => z.w * z.h === minArea);
-  if (tied.length > 1) {
-    const incumbent = tied.find((z) => z.id === item.parentZoneId);
-    if (incumbent) return incumbent;
-  }
-  return tied[0];
-};
-
-// A persisted owner wins while it still covers the item. Explicit null means
-// durably unzoned; only legacy items with no field fall back to geometry.
-const effectiveOwnerZone = (item, allItems) => {
-  if (Object.prototype.hasOwnProperty.call(item, 'parentZoneId')) {
-    if (!item.parentZoneId) return null;
-    const z = allItems.find((i) => i.id === item.parentZoneId && i.type === 'zone' && i.id !== item.id);
-    return (z && insideZone(centerOf(item), z)) ? z : null;
-  }
-  return resolveOwnerZone(item, allItems);
 };
 
 // Nearest zone — the item's own owner, or the nearest ancestor via the
@@ -856,7 +811,7 @@ const CollaborativeTextEditor = ({
 };
 
 const StickyCard = React.memo(function StickyCard({
-  item, selected, remoteSelected, remoteSelectionHue, isEditing, isOwner, allRevealed, dense,
+  item, selected, remoteSelected, remoteSelectionHue, isEditing, isOwner, allRevealed, dense, compact,
   voted, voteCount, voteFlash, voteRank, votingAllowedNow, showVoteCount, inZone,
   commentCount, commentPreviews,
   // `lang` is unused inside the body, but its presence as a prop
@@ -880,6 +835,8 @@ const StickyCard = React.memo(function StickyCard({
   const commentPreview = commentPreviews[commentPreviewIndex] ?? commentPreviews[0] ?? '';
   const showCommentPreview = !hideContent && !!commentPreview;
   const showCommentEntry = !hideContent && (commentCount > 0 || hovered);
+  const overview = compact && w <= 400 && h <= 400
+    && !selected && !remoteSelected && !isEditing && !hovered && !top3;
   const growToFit = useCallback((overflow, patch = null) => {
     const nextHeight = autoGrownStickyHeight(h, overflow);
     if (patch) {
@@ -890,18 +847,54 @@ const StickyCard = React.memo(function StickyCard({
   }, [h, it.id, onTextChange]);
   const [contentRef, contentOverflows] = useContentOverflow(
     visibleText,
-    !hideContent && !isEditing,
+    !hideContent && !isEditing && !overview,
     `${it.fontSize || 15}:${h}:${showCommentPreview ? 1 : 0}:${top3 ? 1 : 0}`,
     growToFit,
   );
   useEffect(() => {
     setCommentPreviewIndex(0);
-    if (hideContent || commentPreviews.length < 2) return undefined;
+    if (hideContent || overview || commentPreviews.length < 2) return undefined;
     const timer = setInterval(() => {
       setCommentPreviewIndex((index) => (index + 1) % commentPreviews.length);
     }, COMMENT_CAROUSEL_MS);
     return () => clearInterval(timer);
-  }, [commentPreviews, hideContent]);
+  }, [commentPreviews, hideContent, overview]);
+  if (overview) {
+    return (
+      <div
+        className="rb-card-overview"
+        onMouseDown={e => onStartDrag(e, it)}
+        onDoubleClick={e => { e.stopPropagation(); if (!hideContent) onBeginFocus(it, 'text'); }}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        style={{
+          position: 'absolute', left: it.x, top: it.y, width: w, height: h,
+          background: c.bg, border: `1.5px solid ${c.border}`, borderRadius: 4,
+          padding: 12, boxSizing: 'border-box', contain: 'layout paint style',
+          transform: `rotate(${it.rotation || 0}deg)`, cursor: 'grab',
+          color: it.fontColor || STICKY_AUTO_TEXT, fontSize: it.fontSize || 15,
+          fontFamily: 'Sarabun, Inter, system-ui, sans-serif',
+          overflow: 'hidden', userSelect: 'none',
+        }}
+      >
+        <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: h - 48, overflow: 'hidden' }}>
+          {hideContent ? t('sticky.hidden') : visibleText?.slice(0, 200)}
+        </div>
+        {showVoteCount && !hideContent && (voteCount > 0 || votingAllowedNow) && (
+          <button
+            type="button"
+            onMouseDown={e => e.stopPropagation()}
+            onClick={e => { e.stopPropagation(); onToggleVote(it); }}
+            disabled={!votingAllowedNow && !voted}
+            aria-label={voted ? t('vote.tooltip.unvote') : t('vote.tooltip.vote')}
+            style={{ position: 'absolute', right: 8, bottom: 6, border: 'none', borderRadius: 12,
+              background: voted ? c.border : 'rgba(0,0,0,0.06)', color: voted ? '#fff' : '#374151',
+              padding: '3px 10px', fontSize: 12, cursor: 'pointer' }}
+          >{voteCount}</button>
+        )}
+      </div>
+    );
+  }
   return (
     <div
       className={remoteSelected ? 'rb-remote-selected-card' : undefined}
@@ -926,7 +919,9 @@ const StickyCard = React.memo(function StickyCard({
         transition: 'transform 0.18s ease, box-shadow 0.18s ease',
         animation: remoteSelected
           ? undefined
-          : (top3 ? 'rb-glow 1.6s ease-in-out infinite, rb-appear-rot 0.28s ease-out' : 'rb-appear-rot 0.28s ease-out'),
+          : top3
+            ? (dense ? 'rb-glow 1.6s ease-in-out infinite' : 'rb-glow 1.6s ease-in-out infinite, rb-appear-rot 0.28s ease-out')
+            : (dense ? undefined : 'rb-appear-rot 0.28s ease-out'),
         // Drop the blurred shadow in dense mode — the 1.5px border still
         // separates cards, and overlapping blur is the main cluster paint cost.
         // The top3 glow is kept (only ≤3 cards, meaningful highlight);
@@ -1365,7 +1360,7 @@ const ImageCard = React.memo(function ImageCard({
         outlineOffset: 6,
         cursor: 'grab',
         userSelect: 'none',
-        animation: remoteSelected ? undefined : 'rb-appear 0.28s ease-out',
+        animation: remoteSelected || dense ? undefined : 'rb-appear 0.28s ease-out',
         contain: remoteSelected ? 'layout style' : 'layout paint style',
       }}
     >
@@ -1449,15 +1444,23 @@ const prepareImageBlob = async (blob) => {
   }
 };
 
-// Decode manually instead of fetch(dataUrl) — the page's CSP connect-src
-// doesn't list `data:`, so fetch() of a data URL is blocked in production.
-const dataUrlToBlob = (dataUrl) => {
-  const source = classifyImportedImageSource(dataUrl);
-  if (!source || source.kind !== 'data') throw new Error('invalid image data URL');
-  const binary = atob(source.payload);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-  return new Blob([bytes], { type: source.mime });
+// Read only validated image routes. Room reads refresh the authenticated
+// session through the same transport as uploads.
+const readBackupImage = async (source) => {
+  const src = safeRuntimeImageSource(source);
+  if (!src) throw new Error('image belongs to another room or server');
+  const path = new URL(src).pathname;
+  const roomImage = path.match(/^\/(?:yjs\/)?rooms\/[A-Za-z0-9_-]{32}\/(images\/[^/]+)$/);
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const response = roomImage
+      ? await roomFetch(roomImage[1])
+      : await fetch(src, { credentials: 'include', redirect: 'error', referrerPolicy: 'no-referrer' });
+    if (response.ok) return response.blob();
+    const status = response.status;
+    await response.body?.cancel();
+    if (status !== 429 || attempt === 5) throw new Error(`image read failed: ${status}`);
+    await new Promise(resolve => { setTimeout(resolve, 1100); });
+  }
 };
 
 // Server 429s ("image upload failed: 429") when the per-IP upload bucket is
@@ -1477,46 +1480,15 @@ const uploadWithRetry = async (blob, attempts = 6) => {
   return null; // unreachable — loop always returns or throws
 };
 
-// Legacy exports (from before server-hosted image storage) embed images as
-// base64 data URLs directly on the item. Writing those into Yjs as-is can
-// produce a single transaction bigger than the yjs-server WS frame cap —
-// the server silently refuses the oversized frame, so the import never
-// reaches persistence or any other peer while the importer's own optimistic
-// state still shows it (a split-brain). Re-upload each one through the
-// normal image pipeline so it shrinks back to a short URL before it's ever
-// written to the board.
-const sanitizeImportedImages = async (items) => {
-  let skipped = 0;
-  const out = [];
-  // eslint-disable-next-line no-restricted-syntax
-  for (const item of items) {
-    if (item.type !== 'image') {
-      out.push(item);
-      continue;
-    }
-    const source = classifyImportedImageSource(item.src);
-    if (!source) { skipped += 1; continue; }
-    if (source.kind === 'server') {
-      const safeSrc = safeRuntimeImageSource(source.source);
-      if (!safeSrc) { skipped += 1; continue; }
-      out.push({ ...item, src: safeSrc });
-      continue;
-    }
-    try {
-      // eslint-disable-next-line no-await-in-loop
-      const rawBlob = await dataUrlToBlob(item.src);
-      // eslint-disable-next-line no-await-in-loop
-      const prepared = await prepareImageBlob(rawBlob);
-      if (!prepared) { skipped += 1; continue; }
-      // eslint-disable-next-line no-await-in-loop
-      const url = await uploadWithRetry(prepared.blob);
-      out.push({ ...item, src: url, natW: prepared.nw, natH: prepared.nh });
-    } catch {
-      skipped += 1;
-    }
-  }
-  return { items: out, skipped };
-};
+// Embedded backup images are uploaded before the board's one Yjs update,
+// keeping the update small. Do not replace live state if any image fails.
+const sanitizeImportedImages = (items, readImageBlob) => restoreBackupImages(items, {
+  readImage: readBackupImage,
+  readImageBlob,
+  prepareImage: prepareImageBlob,
+  uploadImage: uploadWithRetry,
+  resolveSource: safeRuntimeImageSource,
+});
 
 /* ============================================================
    Component
@@ -1545,8 +1517,15 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   /* ---------- Viewport (per-user) ---------- */
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 });
   const viewportRef = useRef(viewport);
+  const renderedViewportRef = useRef(viewport);
+  const viewportCullCommitAtRef = useRef(0);
+  const wheelCommitRef = useRef(null);
+  const wheelRafRef = useRef(null);
+  const wheelQueueRef = useRef([]);
   useEffect(() => {
-    if (interactionRef.current === null) viewportRef.current = viewport;
+    renderedViewportRef.current = viewport;
+    if (interactionRef.current === null && wheelCommitRef.current == null
+      && wheelRafRef.current == null && !followedUserIdRef.current) viewportRef.current = viewport;
   }, [viewport]);
   const [scrollWheelZoomEnabled, setScrollWheelZoomEnabled] = useState(readScrollWheelZoomEnabled);
   const scrollWheelZoomEnabledRef = useRef(scrollWheelZoomEnabled);
@@ -1822,6 +1801,22 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     ) >= DENSE_CARD_THRESHOLD,
     [board.items],
   );
+  const [compactRender, setCompactRender] = useState(false);
+  useEffect(() => {
+    let timer;
+    const settleDetails = () => {
+      // Culling snapshots change during a gesture, but card structure must
+      // not switch back and forth as zoom crosses the overview threshold.
+      if (wheelCommitRef.current != null || wheelRafRef.current != null
+        || interactionRef.current !== null) {
+        timer = setTimeout(settleDetails, 120);
+        return;
+      }
+      setCompactRender(denseRender && viewportRef.current.zoom < 0.4);
+    };
+    settleDetails();
+    return () => clearTimeout(timer);
+  }, [denseRender, viewport.zoom]);
 
   // Viewport size — tracked so we can cull off-screen items at render time.
   // Initialised lazily to handle SSR-style first paint with no window.
@@ -1971,11 +1966,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   // Snapped viewport — quantize pan/zoom so small movements don't invalidate
   // the visibleItems memo. The actual transform still uses the live viewport;
   // this only stabilises the culling decision.
-  const cullViewport = useMemo(() => ({
-    x: Math.floor(viewport.x / 200) * 200,
-    y: Math.floor(viewport.y / 200) * 200,
-    zoom: Math.round(viewport.zoom * 20) / 20,
-  }), [viewport]);
+  const cullX = Math.floor(viewport.x / 200) * 200;
+  const cullY = Math.floor(viewport.y / 200) * 200;
+  const cullZoom = Math.round(viewport.zoom * 20) / 20;
+  const cullViewport = useMemo(() => ({ x: cullX, y: cullY, zoom: cullZoom }), [cullX, cullY, cullZoom]);
 
   // Only render items whose AABB intersects the visible world rect (with a
   // generous margin so items don't pop in at the edge during pan/zoom). The
@@ -1986,7 +1980,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     const wy0 = -cullViewport.y / z;
     const wx1 = (viewportSize.w - cullViewport.x) / z;
     const wy1 = (viewportSize.h - cullViewport.y) / z;
-    const margin = 600 / z;
+    const margin = (z < 0.4 ? 320 : 600) / z;
     return sortedItems.filter((it) => {
       const iw = it.w || (it.type === 'sticky' ? STICKY_W : it.type === 'text' ? TEXT_W : 200);
       const ih = it.h || (it.type === 'sticky' ? STICKY_H : it.type === 'text' ? TEXT_H : 200);
@@ -3140,14 +3134,26 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   // initial load). Continuous wheel/pan input applies directly to the DOM,
   // and its final commit brings React state back into sync.
   useEffect(() => {
-    if (interactionRef.current === null) applyViewportToDom(viewport);
+    if (interactionRef.current === null && wheelCommitRef.current == null
+      && wheelRafRef.current == null && !followedUserIdRef.current) applyViewportToDom(viewport);
   }, [viewport, applyViewportToDom]);
 
   const liveApplyViewport = useCallback((next, { broadcastView = true } = {}) => {
     viewportRef.current = next;
     applyViewportToDom(next);
     if (broadcastView) publishLocalView(next);
-  }, [applyViewportToDom, publishLocalView]);
+    // Refresh culling during long gestures without reconciling on every input
+    // frame. Otherwise newly reached objects stay blank until mouseup.
+    const rendered = renderedViewportRef.current;
+    const nowMs = performance.now();
+    if (nowMs - viewportCullCommitAtRef.current >= 100
+      && viewportNeedsCullRefresh(rendered, next, viewportSize)) {
+      viewportCullCommitAtRef.current = nowMs;
+      // The transform is already current. Let input frames preempt the
+      // more expensive React work that mounts newly visible cards.
+      startTransition(() => setViewport(next));
+    }
+  }, [applyViewportToDom, publishLocalView, viewportSize]);
 
   // Wheel input is the noisiest input on the page — trackpads / Magic Mice
   // can fire 120+ events/sec. Each event used to force a layout via
@@ -3155,9 +3161,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   // jitter. Coalesce events into one rAF tick: cache rect once, fold every
   // queued delta on top of the current viewport, then write the final
   // transform once per frame.
-  const wheelCommitRef = useRef(null);
-  const wheelRafRef = useRef(null);
-  const wheelQueueRef = useRef([]);
   const cancelPendingWheel = useCallback(() => {
     if (wheelRafRef.current != null) {
       cancelAnimationFrame(wheelRafRef.current);
@@ -3333,6 +3336,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     if (shouldZoom && deltaY === 0) return;
     wheelQueueRef.current.push({
       kind: shouldZoom ? 'zoom' : 'pan',
+      pinch: e.ctrlKey || e.metaKey,
       deltaX,
       deltaY,
       clientX: e.clientX,
@@ -3351,7 +3355,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         if (ev.kind === 'pan') {
           v = { ...v, x: v.x - ev.deltaX, y: v.y - ev.deltaY };
         } else {
-          const factor = ev.deltaY < 0 ? 1.05 : 1 / 1.05;
+          const factor = wheelZoomFactor(ev.deltaY, ev.pinch);
           v = zoomViewportAt(v, v.zoom * factor, {
             x: ev.clientX - rect.left,
             y: ev.clientY - rect.top,
@@ -4782,12 +4786,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   }, [isAdmin, patchMeta, reportWriteFailure]);
 
   /* ----- Export / Import ----- */
-  const exportBoard = useCallback(() => {
-    // Bundle the live board snapshot plus the CRDT-backed vote/template state
-    // into a single JSON file. Images are server-hosted (items.src is a URL,
-    // not embedded base64) — the file is no longer fully self-contained, and
-    // restoring it elsewhere requires the image files to still be reachable
-    // at that URL.
+  const [exportBusy, setExportBusy] = useState(false);
+  const exportBoard = useCallback(async () => {
+    if (exportBusy) return;
+    setExportBusy(true);
+    setToast({ msg: t('export.processing'), type: 'info' });
     const b = boardRef.current;
     const voteSnap = window.storage?.snapshotVotes?.() || new Map();
     const votes = Object.create(null);
@@ -4802,7 +4805,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     );
     let artifact;
     try {
-      artifact = createJsonBackupArtifact({
+      artifact = await (await loadBoardArchive()).createBoardArchiveArtifact({
         fallbackBoardCode: boardCode,
         board: {
           items: redacted.items,
@@ -4815,12 +4818,14 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         votes,
         comments: redacted.comments,
         customTemplates,
-      });
+      }, readBackupImage);
     } catch (err) {
+      setExportBusy(false);
       setToast({ msg: t('export.fail', { err: err.message }), type: 'warn' });
       return;
     }
-    const blob = new Blob([artifact.contents], { type: artifact.mimeType });
+    setExportBusy(false);
+    const blob = artifact.blob;
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -4838,7 +4843,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         : t('export.done', { file: artifact.fileName }),
       type: 'info',
     });
-  }, [boardCode, customTemplates, userId]);
+  }, [boardCode, customTemplates, userId, exportBusy]);
 
   // Export only the sticky cards inside one zone as CSV. The all-zones version
   // got swapped out for this per-zone flow — users wanted to grab a single
@@ -4961,19 +4966,22 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     e.target.value = ''; // allow re-picking the same file later
     if (!file) return;
     try {
-      if (file.size > IMPORT_MAX_FILE_BYTES) {
-        throw new Error(`file exceeds ${(IMPORT_MAX_FILE_BYTES / 1024 / 1024).toFixed(0)} MB`);
+      const isCsv = file.name.toLowerCase().endsWith('.csv') || /text\/csv/i.test(file.type);
+      const isArchive = file.name.toLowerCase().endsWith('.zip') || /application\/zip/i.test(file.type);
+      const maxFileBytes = isArchive ? IMPORT_MAX_ARCHIVE_FILE_BYTES
+        : isCsv ? IMPORT_MAX_CSV_FILE_BYTES : IMPORT_MAX_FILE_BYTES;
+      if (file.size > maxFileBytes) {
+        throw new Error(`file exceeds ${(maxFileBytes / 1024 / 1024).toFixed(0)} MB`);
       }
       const importedAt = Date.now();
-      const text = await file.text();
-      const isCsv = file.name.toLowerCase().endsWith('.csv') || /text\/csv/i.test(file.type);
+      const text = isArchive ? null : await file.text();
       const csvImport = isCsv ? parseBoardCsv(text, importedAt) : null;
-      const parsed = csvImport ? csvImport.payload : JSON.parse(text);
-      const manifest = normalizeImportManifest(parsed, importedAt);
+      const manifest = isArchive ? await (await loadBoardArchive()).readBoardArchive(file, importedAt)
+        : normalizeImportManifest(csvImport ? csvImport.payload : JSON.parse(text), importedAt);
       setPendingImport({
         name: file.name,
         ...manifest,
-        sourceFormat: isCsv ? 'csv' : 'json',
+        sourceFormat: isArchive ? 'zip' : isCsv ? 'csv' : 'json',
         csvSummary: csvImport?.summary ?? null,
       });
     } catch (err) {
@@ -4993,11 +5001,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     ));
     setImportBusy(true);
     let importedItems;
-    let skippedImages;
     try {
-      const sanitized = await sanitizeImportedImages(rawItems);
-      importedItems = sanitized.items;
-      skippedImages = sanitized.skipped;
+      importedItems = await sanitizeImportedImages(rawItems, pendingImport.readImageBlob);
     } catch (err) {
       setImportBusy(false);
       setToast({ msg: t('import.fail', { err: err.message }), type: 'warn' });
@@ -5047,9 +5052,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     setPendingImport(null);
     setImportBusy(false);
     setToast({
-      msg: skippedImages
-        ? t('import.doneWithSkipped', { n, skipped: skippedImages })
-        : t('import.done', { n }),
+      msg: t('import.done', { n }),
       type: 'info',
     });
   }, [pendingImport, isAdmin, importBusy]);
@@ -5104,6 +5107,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       isOwner={it.authorId === userId}
       allRevealed={stickyVotingContext.get(it.id)?.revealed ?? board.allRevealed}
       dense={denseRender}
+      compact={compactRender}
       voted={didUserVoteOn(it.id)}
       voteCount={voteCountOf(it.id)}
       voteFlash={voteFlashes[it.id] || null}
@@ -5188,6 +5192,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       stickyVotingContext,
       userId,
       denseRender,
+      compactRender,
       lang,
       zoneChildCount,
       startItemDrag,
@@ -5670,7 +5675,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         <input
           ref={fileInputRef}
           type="file"
-          accept="application/json,.json,text/csv,.csv"
+          accept="application/zip,.zip,application/json,.json,text/csv,.csv"
           onChange={onImportFileChange}
           style={{ display: 'none' }}
         />
@@ -5707,7 +5712,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                 <MoreMenuDivider />
                 <MoreMenuItem
                   icon={<Download size={15} />}
-                  label={t('topbar.export')}
+                  label={exportBusy ? t('export.processing') : t('topbar.export')}
                   onClick={() => { setMoreMenuOpen(false); exportBoard(); }}
                 />
                 <MoreMenuItem
@@ -6150,10 +6155,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   };
 
   const renderMinimap = () => {
-    const orderedItems = [
-      ...minimapModel.items.filter((item) => item.type === 'zone'),
-      ...minimapModel.items.filter((item) => item.type !== 'zone'),
-    ];
     return (
       <aside
         ref={minimapPanelRef}
@@ -6206,33 +6207,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
             outline: 'none',
           }}
         >
-          {orderedItems.map((item) => {
-            const palette = COLORS[item.color] || COLORS[3];
-            const isZone = item.type === 'zone';
-            const background = isZone
-              ? palette.zoneBg
-              : item.type === 'sticky'
-                ? palette.bg
-                : item.type === 'image'
-                  ? '#a78bfa'
-                  : 'var(--text-muted)';
-            return (
-              <div
-                key={item.id}
-                aria-hidden="true"
-                style={{
-                  position: 'absolute', left: item.x, top: item.y,
-                  width: Math.max(item.w, isZone ? 2 : 3),
-                  height: Math.max(item.h, isZone ? 2 : 3),
-                  boxSizing: 'border-box', borderRadius: isZone ? 2 : 1.5,
-                  background,
-                  border: isZone ? `1px solid ${palette.border}` : 'none',
-                  opacity: item.type === 'text' ? 0.72 : 0.9,
-                  pointerEvents: 'none',
-                }}
-              />
-            );
-          })}
+          <MinimapCanvas model={minimapModel} colors={COLORS} />
           <div
             ref={minimapViewportRef}
             aria-hidden="true"

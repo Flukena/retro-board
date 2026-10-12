@@ -23,7 +23,11 @@ import {
   repairBoardGeometry,
 } from './board-geometry.js';
 
-export const IMPORT_MAX_FILE_BYTES = 25 * 1024 * 1024;
+// Portable JSON backups include raster bytes expanded by base64. This file
+// budget is separate from the small Yjs transaction after image uploads.
+export const IMPORT_MAX_FILE_BYTES = 256 * 1024 * 1024;
+export const IMPORT_MAX_CSV_FILE_BYTES = 25 * 1024 * 1024;
+export const IMPORT_MAX_ARCHIVE_FILE_BYTES = 1024 * 1024 * 1024;
 // A full import becomes one Yjs update. The encoded CRDT update is larger
 // than its JSON snapshot, so leave headroom below the relay's 2 MB frame cap.
 export const IMPORT_MAX_BUNDLE_BYTES = 1 * 1024 * 1024;

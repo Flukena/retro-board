@@ -3,7 +3,8 @@ import {
   repairBoardGeometry,
 } from './board-geometry.js';
 import { resolveExportBoardCode } from './export-filename.js';
-import { normalizeImportManifest } from './import-schema.js';
+import { IMPORT_MAX_FILE_BYTES, normalizeImportManifest } from './import-schema.js';
+import { embedBackupImages } from './backup-images.js';
 
 const jsonTimestamp = (timestamp) => (
   new Date(timestamp).toISOString().slice(0, 19).replace(/[:T]/g, '-')
@@ -77,6 +78,19 @@ export const createJsonBackupArtifact = ({
     geometryRepairs: geometry.repairs,
   };
 };
+
+export async function createPortableJsonBackupArtifact(options, readImage) {
+  const artifact = createJsonBackupArtifact(options);
+  const remainingBytes = IMPORT_MAX_FILE_BYTES - new TextEncoder().encode(artifact.contents).byteLength;
+  if (remainingBytes < 0) throw new Error(`backup exceeds ${IMPORT_MAX_FILE_BYTES / 1024 / 1024} MB`);
+  const items = await embedBackupImages(artifact.payload.board.items, readImage, remainingBytes);
+  const payload = { ...artifact.payload, board: { ...artifact.payload.board, items } };
+  const contents = JSON.stringify(payload, null, 2);
+  if (new TextEncoder().encode(contents).byteLength > IMPORT_MAX_FILE_BYTES) {
+    throw new Error(`backup exceeds ${IMPORT_MAX_FILE_BYTES / 1024 / 1024} MB`);
+  }
+  return { ...artifact, payload, contents };
+}
 
 export const createCsvExportArtifact = ({
   csv,

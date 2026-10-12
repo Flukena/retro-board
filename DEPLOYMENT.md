@@ -153,6 +153,15 @@ container IDs, and graceful-drain/startup logs.
 
 ## Operations
 
+Portable board exports use a ZIP archive up to 1 GiB containing `board.json`
+and binary raster files under `images/`. Image bytes are stored once per source
+without base64. Import reads the manifest first and uploads one image at a time;
+the archive is never decoded as a single JSON string or sent through WebSocket.
+Existing JSON (up to 256 MiB) and CSV (25 MiB) imports remain supported.
+Each image still has a 5 MiB limit and the normalized board update a 1 MiB limit.
+Production upload storage allows 2 GiB / 10,000 files per room and 8 GiB / 50,000
+files globally. Retained images from past imports also count toward these quotas.
+
 Monitor `/yjs/readyz`, container restarts, both persistent-volume usage, room
 count, and bursts of `429`, `503`, or `507` responses. Alert with enough free
 space to intervene before a configured quota or filesystem limit is reached.

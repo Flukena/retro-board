@@ -56,6 +56,12 @@ services:
       # them to at most once per room per minute under adversarial churn.
       - YJS_ROOM_COMPACTION_MIN_INTERVAL_MS=60000
       - YJS_DOCUMENT_REMEASURE_MIN_INTERVAL_MS=60000
+      # A portable backup can contain 1 GiB of images. Allow room headroom
+      # for retained uploads and repeated imports without changing WS limits.
+      - YJS_MAX_ROOM_UPLOAD_BYTES=2147483648
+      - YJS_MAX_UPLOAD_STORAGE_BYTES=8589934592
+      - YJS_MAX_ROOM_UPLOAD_FILES=10000
+      - YJS_MAX_UPLOAD_FILES=50000
     depends_on:
       volume-init:
         condition: service_completed_successfully

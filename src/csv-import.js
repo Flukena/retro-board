@@ -1,6 +1,6 @@
 import { COMMENT_AUTHOR_NAME_MAX_LEN } from './comment-schema.js';
 import {
-  IMPORT_MAX_FILE_BYTES,
+  IMPORT_MAX_CSV_FILE_BYTES,
   IMPORT_MAX_ITEMS,
 } from './import-schema.js';
 import {
@@ -70,8 +70,8 @@ const boundedTimestamp = (value, fallback) => {
 
 const parseCsvRows = (source) => {
   if (typeof source !== 'string') throw new Error('CSV content must be a string');
-  if (new TextEncoder().encode(source).byteLength > IMPORT_MAX_FILE_BYTES) {
-    throw new Error(`CSV file exceeds ${IMPORT_MAX_FILE_BYTES} bytes`);
+  if (new TextEncoder().encode(source).byteLength > IMPORT_MAX_CSV_FILE_BYTES) {
+    throw new Error(`CSV file exceeds ${IMPORT_MAX_CSV_FILE_BYTES} bytes`);
   }
   const input = source.startsWith('\uFEFF') ? source.slice(1) : source;
   const rows = [];
