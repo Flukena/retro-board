@@ -128,8 +128,8 @@ test('tab appearance uses tokens, an auto-width chip and a fully rounded body', 
   const label = declarations(css, '.rb-zone__label');
   const count = declarations(css, '.rb-zone__count');
   assert.equal(row.background, 'transparent');
-  assert.equal(row.transform, 'scale(calc(1 / var(--rb-zoom)))');
-  assert.equal(row['transform-origin'], 'top left');
+  assert.equal(row.transform, undefined);
+  assert.equal(row['transform-origin'], undefined);
   assert.equal(row['z-index'], 'var(--z-zone-header)');
   assert.equal(row['pointer-events'], 'none');
   assert.equal(body.animation, undefined);
@@ -191,12 +191,13 @@ test('zone header owns its local menu, admin icons and timer setup in th/en', as
   });
 });
 
-test('header width, inset, icon sizing and narrow breakpoint use screen coordinates', () => {
+test('header width, inset, icon sizing and narrow breakpoints use world coordinates', () => {
   const css = readFileSync(new URL('./board-cards.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
   const row = declarations(css, '.rb-zone__title');
-  assert.equal(row.left, 'calc(var(--zone-header-inset) / var(--rb-zoom) - var(--rb-zone-border-w))');
-  assert.equal(row.top, 'calc(var(--zone-header-inset) / var(--rb-zoom) - var(--rb-zone-border-w))');
-  assert.equal(row.width, 'max(0px, calc(var(--rb-zone-width) * var(--rb-zoom) - 2 * var(--zone-header-inset)))');
+  assert.doesNotMatch(Object.values(row).join(' '), /--rb-zoom\b/);
+  assert.equal(row.left, 'calc(var(--zone-header-inset) - var(--rb-zone-border-w))');
+  assert.equal(row.top, 'calc(var(--zone-header-inset) - var(--rb-zone-border-w))');
+  assert.equal(row.width, 'max(0px, calc(var(--rb-zone-width) - 2 * var(--zone-header-inset)))');
   assert.equal(row['container-type'], 'inline-size');
   assert.equal(row['overflow-x'], undefined);
   assert.ok(css.includes(`@container rb-zone-header (max-width: ${ZONE_HEADER_MENU_BREAKPOINT_PX}px)`));

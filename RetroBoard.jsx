@@ -2390,7 +2390,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const applyViewportToDom = useCallback((v) => {
     revealMinimap();
     if (worldRef.current) {
-      worldRef.current.style.setProperty('--rb-zoom', String(v.zoom));
       worldRef.current.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.zoom})`;
     }
     if (gridRef.current) {
@@ -4872,7 +4871,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           ref={worldRef}
           style={{
             position: 'absolute', top: 0, left: 0,
-            transformOrigin: '0 0', '--rb-zoom': viewportRef.current.zoom,
+            transformOrigin: '0 0',
           }}
         >
           {/* A fixed-size, invisible world-space ruler. Its rendered rect lets

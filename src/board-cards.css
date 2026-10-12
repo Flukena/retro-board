@@ -235,11 +235,9 @@
 /* Only the chip and buttons receive input; transparent space passes through. */
 .rb-zone__title {
   position: absolute;
-  left: calc(var(--zone-header-inset) / var(--rb-zoom) - var(--rb-zone-border-w));
-  top: calc(var(--zone-header-inset) / var(--rb-zoom) - var(--rb-zone-border-w));
-  width: max(0px, calc(var(--rb-zone-width) * var(--rb-zoom) - 2 * var(--zone-header-inset)));
-  transform: scale(calc(1 / var(--rb-zoom)));
-  transform-origin: top left;
+  left: calc(var(--zone-header-inset) - var(--rb-zone-border-w));
+  top: calc(var(--zone-header-inset) - var(--rb-zone-border-w));
+  width: max(0px, calc(var(--rb-zone-width) - 2 * var(--zone-header-inset)));
   z-index: var(--z-zone-header);
   container-type: inline-size;
   container-name: rb-zone-header;
