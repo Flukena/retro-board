@@ -2,6 +2,7 @@ import test, { beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import * as Y from 'yjs';
 import { putTemplate, readTemplates, removeTemplate, isTemplateKey } from './template-store.js';
+import { TEMPLATE_NAME_MAX_LENGTH } from './security-boundaries.js';
 import { setLang, t as translate } from './i18n.js';
 
 let templates;
@@ -29,16 +30,19 @@ const fixture = (t) => {
   };
   const toast = [];
   let closed = false;
+  let menuClosed = false;
+  const renameRef = { current: null };
   const boardRef = { current: { items: [
     { id: 'a', type: 'zone', title: 'A', color: 2, x: 100, y: 200, w: 240, h: 200 },
     { type: 'sticky', x: 0, y: 0 },
     { id: 'b', type: 'zone', title: 'B', color: 1, x: 400, y: 500, w: 240, h: 200 },
   ] } };
   const actions = templates.createTemplateActions({
-    storage, createId: () => 'saved',
+    storage, createId: () => 'saved', renameRef,
+    onRenameTargetChange: (value) => { renameRef.current = value; }, closeTemplates: () => { menuClosed = true; },
     setToast: (value) => toast.push(value), setSaveTemplateOpen: (open) => { closed = !open; },
   });
-  return { doc, map, storage, sync, toast, actions, boardRef, isClosed: () => closed };
+  return { doc, map, storage, sync, toast, actions, boardRef, renameRef, isMenuClosed: () => menuClosed, isClosed: () => closed };
 };
 
 test('subscription catches initial state, local/remote changes, resync, and cleans up', (t) => {
@@ -185,4 +189,75 @@ test('failed store writes retain draft and count for retry, including action rec
   assert.equal(saved[0].zones[0].title, 'A');
   assert.equal(opened, false);
   assert.deepEqual(counts, [1, 0]);
+});
+
+
+const saveRenameFixture = (f) => {
+  f.actions.openSaveTemplate(f.boardRef.current.items, ['a']);
+  f.actions.saveCurrentAsTemplate('Original');
+};
+
+test('rename uses latest zones/timestamp, trims/caps name, closes menu and dialog, and undo restores old name', (t) => {
+  const f = fixture(t);
+  saveRenameFixture(f);
+  const undo = new Y.UndoManager(f.map, { trackedOrigins: new Set(['local']) });
+  t.after(() => undo.destroy());
+  f.actions.openRenameTemplate('saved');
+  assert.deepEqual(f.renameRef.current, { id: 'saved', name: 'Original' });
+  assert.equal(f.isMenuClosed(), true);
+  const latest = { ...f.storage.snapshotTemplates()[0], zones: [{ title: 'Remote', color: 1, x: 0, y: 0, w: 300, h: 200 }], createdAt: 123 };
+  f.doc.transact(() => f.map.set('s||template:saved', latest), 'remote');
+  f.actions.renameCustomTemplate('  ' + 'N'.repeat(TEMPLATE_NAME_MAX_LENGTH + 1) + '  ');
+  assert.deepEqual(f.storage.snapshotTemplates()[0], { ...latest, name: 'N'.repeat(TEMPLATE_NAME_MAX_LENGTH) });
+  assert.equal(f.renameRef.current, null);
+  assert.equal(f.toast.at(-1).msg, translate('tmpl.renamed', { name: 'N'.repeat(TEMPLATE_NAME_MAX_LENGTH) }));
+  undo.undo();
+  assert.equal(f.storage.snapshotTemplates()[0].name, 'Original');
+});
+
+test('remote delete before rename submit warns in th/en, closes and never resurrects', (t) => {
+  const f = fixture(t);
+  for (const lang of ['th', 'en']) {
+    setLang(lang);
+    saveRenameFixture(f);
+    f.actions.openRenameTemplate('saved');
+    const peer = new Y.Doc();
+    t.after(() => peer.destroy());
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(f.doc));
+    removeTemplate(peer, peer.getMap('kv'), 'saved');
+    Y.applyUpdate(f.doc, Y.encodeStateAsUpdate(peer));
+    f.actions.renameCustomTemplate('New');
+    assert.deepEqual(f.storage.snapshotTemplates(), []);
+    assert.equal(f.renameRef.current, null);
+    assert.equal(f.toast.at(-1).type, 'warn');
+    assert.equal(f.toast.at(-1).msg, translate('tmpl.renameMissing'));
+    assert.notEqual(translate('tmpl.renameMissing'), 'tmpl.renameMissing');
+    f.actions.openRenameTemplate('missing');
+    assert.equal(f.renameRef.current, null);
+    assert.equal(f.toast.at(-1).msg, translate('tmpl.renameMissing'));
+  }
+});
+
+test('rename blanks are rejected; failure retains target for retry; close and switching reset target', (t) => {
+  const f = fixture(t);
+  saveRenameFixture(f);
+  f.actions.openRenameTemplate('saved');
+  const originalToastCount = f.toast.length;
+  f.actions.renameCustomTemplate('  ');
+  assert.equal(f.storage.snapshotTemplates()[0].name, 'Original');
+  assert.equal(f.toast.length, originalToastCount);
+  const write = f.storage.putTemplate;
+  f.storage.putTemplate = () => false;
+  f.actions.renameCustomTemplate('Retry');
+  assert.equal(f.renameRef.current.id, 'saved');
+  assert.equal(f.toast.at(-1).msg, translate('tmpl.saveFailed'));
+  f.storage.putTemplate = write;
+  f.actions.renameCustomTemplate('Retry');
+  assert.equal(f.renameRef.current, null);
+  f.storage.putTemplate({ ...f.storage.snapshotTemplates()[0], id: 'other', name: 'Other' });
+  f.actions.openRenameTemplate('saved');
+  f.actions.openRenameTemplate('other');
+  assert.deepEqual(f.renameRef.current, { id: 'other', name: 'Other' });
+  f.actions.closeRenameDialog();
+  assert.equal(f.renameRef.current, null);
 });

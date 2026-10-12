@@ -2,8 +2,8 @@ import { DEFAULT_PLAYER_NAME } from './player-cursors.js';
 
 export function templateRows(builtins, customTemplates) {
   return {
-    builtin: Object.entries(builtins).map(([id, template]) => ({ id, name: template.name })),
-    custom: customTemplates.map(({ id, name, zones }) => ({ id, name, zoneCount: zones.length })),
+    builtin: Object.entries(builtins).map(([id, template]) => ({ id, name: template.name, zones: template.zones })),
+    custom: customTemplates.map(({ id, name, zones }) => ({ id, name, zones, zoneCount: zones.length })),
   };
 }
 

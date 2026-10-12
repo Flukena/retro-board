@@ -31,7 +31,7 @@ test('extracted dialogs preserve attributes, focus and disabled states in both l
           [modals.HelpDialog, { sections: [] }, true, undefined],
           [modals.CommentsDialog, { item: {}, comments: [], editingAllowed: true }, true, 'comments-dialog-title'],
           [modals.AdminPinDialog, { isSetting: true }, true, undefined],
-          [modals.SaveTemplateDialog, { zoneCount: 1 }, true, undefined],
+          [modals.TemplateNameDialog, { mode: modals.TEMPLATE_NAME_MODE.SAVE, zoneCount: 1 }, true, undefined],
         ];
         for (const [Component, props, dialog, label] of cases) {
           const html = renderToStaticMarkup(React.createElement(Component, props));
@@ -54,7 +54,7 @@ test('extracted dialogs preserve attributes, focus and disabled states in both l
         assert.equal((setting.match(/type="password"/g) || []).length, 2);
         assert.equal((verifying.match(/type="password"/g) || []).length, 1);
         assert.match(setting, /<button[^>]*disabled=""/);
-        const saving = renderToStaticMarkup(React.createElement(modals.SaveTemplateDialog, { zoneCount: 1 }));
+        const saving = renderToStaticMarkup(React.createElement(modals.TemplateNameDialog, { mode: modals.TEMPLATE_NAME_MODE.SAVE, zoneCount: 1 }));
         assert.match(saving, /<button[^>]*disabled=""/);
         for (const key of [
           'pin.setHead', 'pin.verifyHead', 'pin.setBody', 'pin.verifyBody', 'pin.confirm',
@@ -107,7 +107,7 @@ test('every scoped component class has a compatible stylesheet selector targetin
     ['Modals.jsx', 'modals.css'], ['TimerSetup.jsx', 'timer-setup.css'],
     ['SelectionToolbar.jsx', 'selection-toolbar.css'], ['Landing.jsx', 'landing.css'],
     ['MinimapPanel.jsx', 'minimap.css'], ['ToolDock.jsx', 'tool-dock.css'],
-    ['ZoneCard.jsx', 'board-cards.css'],
+    ['ZoneCard.jsx', 'board-cards.css'], ['TemplateThumbnail.jsx', 'template-thumbnail.css'],
   ]) {
     const source = readFileSync(new URL(component, import.meta.url), 'utf8');
     const css = readFileSync(new URL(stylesheet, import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
@@ -121,27 +121,47 @@ test('every scoped component class has a compatible stylesheet selector targetin
   }
 });
 
-test('save dialog describes its draft count; blank Save is disabled and Enter does nothing', async () => {
-  await withChromeModule('/src/Modals.jsx', ({ SaveTemplateDialog }, { t, setLang }) => {
+const checkTemplateNameState = ({ TemplateNameDialog, TEMPLATE_NAME_MODE, templateNameKeys, t, mode, initialName }) => {
+  let tree;
+  const submitted = [];
+  let closes = 0;
+  function InspectDialog() {
+    tree = TemplateNameDialog({ mode, initialName, zoneCount: 3,
+      onSubmit: (name) => submitted.push(name), onClose: () => { closes += 1; } });
+    return tree;
+  }
+  const html = renderToStaticMarkup(React.createElement(InspectDialog));
+  const input = tree.props.children.find((child) => child?.type === 'input');
+  assert.equal(input.props.value, initialName);
+  const enabled = mode === TEMPLATE_NAME_MODE.SAVE && initialName === 'Original';
+  const save = tree.props.children.at(-1).props.children.at(-1);
+  assert.equal(save.props.disabled, !enabled);
+  input.props.onKeyDown({ key: 'Enter' });
+  save.props.onClick();
+  assert.equal(submitted.length, enabled ? 2 : 0);
+  input.props.onKeyDown({ key: 'Escape' });
+  assert.equal(closes, 1);
+  assert.equal(html.includes(t('tmpl.saveDialog.count', { n: 3 })), mode === TEMPLATE_NAME_MODE.SAVE);
+  assert.ok(html.includes(t(templateNameKeys(mode).heading)));
+  assert.notEqual(t(templateNameKeys(mode).heading), templateNameKeys(mode).heading);
+};
+
+test('template name dialog modes validate names, count, keyboard and initial value in th/en', async () => {
+  await withChromeModule('/src/Modals.jsx', ({ TemplateNameDialog, TEMPLATE_NAME_MODE, templateNameKeys, templateNameCanSubmit }, { t, setLang }) => {
+    assert.ok(Object.isFrozen(TEMPLATE_NAME_MODE));
+    assert.throws(() => templateNameKeys('unknown'));
     for (const lang of ['th', 'en']) {
       setLang(lang);
-      let tree;
-      let saves = 0;
-      let closes = 0;
-      function InspectDialog() {
-        tree = SaveTemplateDialog({ zoneCount: 3, onSave: () => { saves += 1; }, onClose: () => { closes += 1; } });
-        return tree;
+      for (const mode of Object.values(TEMPLATE_NAME_MODE)) {
+        assert.equal(templateNameKeys(mode).button, 'common.save');
+        for (const initialName of ['', '   ', 'Original']) {
+          checkTemplateNameState({ TemplateNameDialog, TEMPLATE_NAME_MODE, templateNameKeys, t, mode, initialName });
+        }
+        for (const name of ['', '   ']) assert.equal(templateNameCanSubmit(mode, name, 'Original', 3), false);
       }
-      const markup = renderToStaticMarkup(React.createElement(InspectDialog));
-      assert.ok(markup.includes(t('tmpl.saveDialog.count', { n: 3 })));
-      assert.notEqual(t('tmpl.saveDialog.count', { n: 3 }), 'tmpl.saveDialog.count');
-      const input = tree.props.children.find((child) => child?.type === 'input');
-      input.props.onKeyDown({ key: 'Enter' });
-      assert.equal(saves, 0);
-      const save = tree.props.children.at(-1).props.children.at(-1);
-      assert.equal(save.props.disabled, true);
-      input.props.onKeyDown({ key: 'Escape' });
-      assert.equal(closes, 1);
+      assert.equal(templateNameCanSubmit(TEMPLATE_NAME_MODE.RENAME, ' Original ', 'Original', 3), false);
+      assert.equal(templateNameCanSubmit(TEMPLATE_NAME_MODE.RENAME, 'Changed', 'Original', 0), true);
+      assert.equal(templateNameCanSubmit(TEMPLATE_NAME_MODE.SAVE, 'New', '', 0), false);
     }
   });
 });

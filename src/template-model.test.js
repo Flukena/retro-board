@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { templateZonesFromSelection, templateBounds, templatePlacementOffset, templateOccupiedRects, templateRevealViewport } from './template-model.js';
+import { templateThumbnail, templateZonesFromSelection, templateBounds, templatePlacementOffset, templateOccupiedRects, templateRevealViewport } from './template-model.js';
 import { IMPORT_COORDINATE_MAX_ABS } from './security-boundaries.js';
 
 const zone = (id, x, y, w, h, extra = {}) => ({ id, type: 'zone', title: id, color: 2, x, y, w, h, ...extra });
@@ -88,4 +88,30 @@ test('distance order crosses ring boundaries for tall templates rather than exha
     occupiedRects: [{ x: -170, y: -500, w: 340, h: 1000 }] });
   assert.equal(Math.hypot(tall.dx + 50, tall.dy + 500), 240);
   assert.ok(free({ x: tall.dx, y: tall.dy, w: 100, h: 1000 }, [{ x: -170, y: -500, w: 340, h: 1000 }], 20));
+});
+
+
+test('thumbnail uniformly fits padded bounds, preserves ratios, paints parents first and is deterministic', () => {
+  const zones = [zone('small', -40, 30, 20, 10), zone('large', -50, 20, 100, 80)];
+  const before = structuredClone(zones);
+  const rects = templateThumbnail(zones, 60, 40, 4);
+  for (const rect of rects) {
+    assert.ok(rect.x >= 4 && rect.y >= 4);
+    assert.ok(rect.x + rect.w <= 56 && rect.y + rect.h <= 36);
+  }
+  assert.equal(rects[0].w / rects[0].h, 100 / 80);
+  assert.equal(rects[1].w / rects[1].h, 20 / 10);
+  assert.equal(rects[0].w / 100, rects[1].w / 20);
+  assert.ok(rects[0].w * rects[0].h > rects[1].w * rects[1].h);
+  assert.deepEqual(templateThumbnail(zones, 60, 40, 4), rects);
+  assert.deepEqual(zones, before);
+});
+
+test('single thumbnail is centred; empty and zero-size bounds produce no rectangles', () => {
+  const [rect] = templateThumbnail([zone('one', 30, -20, 100, 20)], 60, 40, 4);
+  assert.equal(rect.x + rect.w / 2, 30);
+  assert.equal(rect.y + rect.h / 2, 20);
+  assert.deepEqual(templateThumbnail([], 60, 40, 4), []);
+  assert.deepEqual(templateThumbnail([zone('zero', 0, 0, 0, 0)], 60, 40, 4), []);
+  assert.deepEqual(templateThumbnail([zone('zero-width', 0, 0, 0, 10)], 60, 40, 4), []);
 });

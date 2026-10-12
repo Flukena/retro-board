@@ -36,7 +36,7 @@ import {
   stickyTextForDom,
 } from './src/security-boundaries.js';
 import {
-  ConfirmDialog, NameDialog, HelpDialog, CommentsDialog, AdminPinDialog, SaveTemplateDialog,
+  ConfirmDialog, NameDialog, HelpDialog, CommentsDialog, AdminPinDialog, TemplateNameDialog, TEMPLATE_NAME_MODE,
 } from './src/Modals.jsx';
 import { MODAL_SIZE, BUTTON_VARIANT } from './src/ui-variants.js';
 import { importWarningNotes } from './src/modal-model.js';
@@ -1876,15 +1876,14 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   }, [reportWriteFailure]);
 
   const closeTemplates = useCallback(() => setTemplatesOpen(false), []);
-  const { customTemplates, templateDraft, openSaveTemplate, closeSaveDialog,
-    saveCurrentAsTemplate, deleteCustomTemplate, applyTemplate: placeTemplate } = useBoardTemplates({
+  const { customTemplates, templateDraft, renameTarget, openSaveTemplate, closeSaveDialog,
+    openRenameTemplate, renameCustomTemplate, closeRenameDialog, saveCurrentAsTemplate,
+    deleteCustomTemplate, applyTemplate: placeTemplate } = useBoardTemplates({
     storage: typeof window !== 'undefined' ? window.storage : null,
     createId: uid, setToast, setSaveTemplateOpen, addItemsLocal, userId, userName, closeTemplates,
   });
   const selectedZoneCount = board.items.filter((item) => item.type === 'zone' && selectedIds.has(item.id)).length;
-  const saveSelectedTemplate = () => {
-    if (openSaveTemplate(boardRef.current.items, selectedIds)) closeTemplates();
-  };
+  const saveSelectedTemplate = () => openSaveTemplate(boardRef.current.items, selectedIds);
 
   // ---- Board-level meta patch ----
   const patchMeta = useCallback((patch, opts) => {
@@ -5494,7 +5493,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         onTool={(toolId) => toolHandlers[toolId]()}
         onTemplatesOpenChange={setTemplatesOpen}
         onApplyTemplate={applyTemplate}
-        onDeleteCustomTemplate={deleteCustomTemplate}
+        onDeleteCustomTemplate={deleteCustomTemplate} onRenameCustomTemplate={openRenameTemplate}
         onSaveTemplate={saveSelectedTemplate}
       />
       <ZoomControls
@@ -5526,13 +5525,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         />
       )}
 
-      {saveTemplateOpen && (
-        <SaveTemplateDialog
-          onClose={closeSaveDialog}
-          onSave={saveCurrentAsTemplate}
-          zoneCount={templateDraft.length}
-        />
-      )}
+      {saveTemplateOpen && <TemplateNameDialog mode={TEMPLATE_NAME_MODE.SAVE}
+        onClose={closeSaveDialog} onSubmit={saveCurrentAsTemplate} zoneCount={templateDraft.length} />}
+      {renameTarget && <TemplateNameDialog key={renameTarget.id} mode={TEMPLATE_NAME_MODE.RENAME}
+        initialName={renameTarget.name} onSubmit={renameCustomTemplate} onClose={closeRenameDialog} />}
       {nameModalOpen && (
         <NameDialog draft={nameDraft} onDraftChange={setNameDraft} onSave={saveName} />
       )}

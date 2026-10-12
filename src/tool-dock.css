@@ -100,3 +100,9 @@
   font: 400 12px var(--font-ui);
   padding: 6px 8px;
 }
+
+/* Template previews are wider than the shared menu's glyph slot. */
+.rb-template-popover .rb-menu-item__icon {
+  width: auto;
+  flex-shrink: 0;
+}

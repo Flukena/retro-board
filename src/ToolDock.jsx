@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutTemplate, MousePointer2, Type, Image, Trash2 } from 'lucide-react';
+import { LayoutTemplate, MousePointer2, Type, Image, Trash2, Pencil } from 'lucide-react';
 import { Button, Divider, MenuItem, Surface } from './UiPrimitives.jsx';
 import { DIVIDER_ORIENTATION } from './ui-variants.js';
 import { PALETTE, DOCK_TILE_INDEX } from './palette.js';
@@ -8,6 +8,7 @@ import {
   CHROME_ICON_SIZE_PX, Z,
 } from './chrome-layout.js';
 import { t } from './i18n.js';
+import { TemplateThumbnail } from './TemplateThumbnail.jsx';
 import './tool-dock.css';
 
 export const TOOL_ID = Object.freeze({ SELECT: 'select', TEXT: 'text', ZONE: 'zone', IMAGE: 'image' });
@@ -43,7 +44,7 @@ export function ToolTile({ toolId, active, onTool }) {
   );
 }
 
-export function TemplatePopover({ selectedZoneCount = 0, rows, onApplyTemplate, onDeleteCustomTemplate, onSaveTemplate, onClose }) {
+export function TemplatePopover({ selectedZoneCount = 0, rows, onApplyTemplate, onDeleteCustomTemplate, onRenameCustomTemplate, onSaveTemplate, onClose }) {
   return (
     <>
       <div className="rb-template-backdrop" onClick={onClose} style={{ zIndex: Z.POPOVER_BACKDROP }} />
@@ -54,12 +55,13 @@ export function TemplatePopover({ selectedZoneCount = 0, rows, onApplyTemplate, 
       >
         <div className="rb-template-heading">{t('tmpl.builtin')}</div>
         {rows.builtin.map((row) => (
-          <MenuItem key={row.id} label={row.name} onClick={() => onApplyTemplate(row.id)} />
+          <MenuItem key={row.id} icon={<TemplateThumbnail zones={row.zones} />} label={row.name} onClick={() => onApplyTemplate(row.id)} />
         ))}
         {rows.custom.length > 0 && <div className="rb-template-heading">{t('tmpl.custom')}</div>}
         {rows.custom.map((row) => (
           <div key={row.id} className="rb-template-custom">
             <MenuItem
+              icon={<TemplateThumbnail zones={row.zones} />}
               label={(
                 <>
                   {row.name}
@@ -68,6 +70,14 @@ export function TemplatePopover({ selectedZoneCount = 0, rows, onApplyTemplate, 
               )}
               onClick={() => onApplyTemplate(row.id)}
             />
+            <Button
+              className="rb-btn--icon-sm"
+              title={t('tmpl.rename')}
+              aria-label={t('tmpl.rename')}
+              onClick={() => onRenameCustomTemplate(row.id)}
+            >
+              <Pencil size={CHROME_ICON_SIZE_PX.SMALL} />
+            </Button>
             <Button
               className="rb-btn--icon-sm"
               title={t('common.delete')}
@@ -88,7 +98,7 @@ export function TemplatePopover({ selectedZoneCount = 0, rows, onApplyTemplate, 
 
 export function ToolDock({
   creationMode, templatesOpen, rows, selectedZoneCount = 0, onTool, onTemplatesOpenChange,
-  onApplyTemplate, onDeleteCustomTemplate, onSaveTemplate,
+  onApplyTemplate, onDeleteCustomTemplate, onRenameCustomTemplate, onSaveTemplate,
 }) {
   return (
     <div
@@ -124,6 +134,7 @@ export function ToolDock({
           selectedZoneCount={selectedZoneCount}
           onApplyTemplate={onApplyTemplate}
           onDeleteCustomTemplate={onDeleteCustomTemplate}
+          onRenameCustomTemplate={onRenameCustomTemplate}
           onSaveTemplate={onSaveTemplate}
           onClose={() => onTemplatesOpenChange(false)}
         />

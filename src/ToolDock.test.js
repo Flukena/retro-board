@@ -43,3 +43,27 @@ test('template save menu requires selected zones and explains the disabled state
     }
   });
 });
+
+
+test('each template row has a thumbnail; custom rename emits its id with localized accessible labels', async () => {
+  await withChromeModule('/src/ToolDock.jsx', ({ TemplatePopover }, { t, setLang }) => {
+    const zones = [{ x: 0, y: 0, w: 100, h: 80, color: 2 }];
+    const rows = { builtin: [{ id: 'loop', name: 'Loop', zones }],
+      custom: [{ id: 'mine', name: 'Mine', zones, zoneCount: 1 }] };
+    for (const lang of ['th', 'en']) {
+      setLang(lang);
+      const renamed = [];
+      const tree = TemplatePopover({ rows, onRenameCustomTemplate: (id) => renamed.push(id) });
+      const html = renderToStaticMarkup(tree);
+      assert.equal((html.match(/class="rb-template-thumbnail"/g) || []).length, 2);
+      const buttons = tree.props.children[1].props.children[3][0].props.children;
+      const rename = buttons.find((child) => child.props['aria-label'] === t('tmpl.rename'));
+      assert.ok(rename);
+      assert.equal(rename.props.title, t('tmpl.rename'));
+      assert.notEqual(t('tmpl.rename'), 'tmpl.rename');
+      rename.props.onClick();
+      assert.deepEqual(renamed, ['mine']);
+      assert.ok(html.includes(`aria-label="${t('tmpl.rename')}"`));
+    }
+  });
+});

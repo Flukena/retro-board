@@ -1,0 +1,6 @@
+.rb-template-thumbnail {
+  display: block;
+  flex-shrink: 0;
+  background: var(--bg-panel-2);
+  border-radius: var(--radius-sm);
+}

@@ -5,10 +5,12 @@ import { Button, IconButton } from './UiPrimitives.jsx';
 import { BUTTON_VARIANT, MODAL_SIZE, MODAL_LAYER } from './ui-variants.js';
 import { COMMENT_MAX_LEN } from './comment-schema.js';
 import { DISPLAY_NAME_MAX_LENGTH, TEMPLATE_NAME_MAX_LENGTH } from './security-boundaries.js';
-import { pinValidity, sanitizePin } from './modal-model.js';
+import { pinValidity, sanitizePin, TEMPLATE_NAME_MODE, templateNameKeys, templateNameCanSubmit } from './modal-model.js';
 import { formatRelativeTime } from './relative-time.js';
 import { t } from './i18n.js';
 import './modals.css';
+
+export { TEMPLATE_NAME_MODE, templateNameKeys, templateNameCanSubmit } from './modal-model.js';
 
 export function CommentsDialog({ item, comments, editingAllowed, onAdd, onDelete, onClose }) {
   const [draft, setDraft] = useState('');
@@ -196,8 +198,11 @@ export function AdminPinDialog({ isSetting, error, onCancel, onSubmit }) {
   );
 }
 
-export function SaveTemplateDialog({ onClose, onSave, zoneCount }) {
-  const [name, setName] = useState('');
+export function TemplateNameDialog({ mode, initialName = '', zoneCount, onSubmit, onClose }) {
+  const [name, setName] = useState(initialName);
+  const keys = templateNameKeys(mode);
+  const canSubmit = templateNameCanSubmit(mode, name, initialName, zoneCount);
+  const submit = () => { if (canSubmit) onSubmit(name); };
   return (
     <ModalShell
       size={MODAL_SIZE.SM}
@@ -205,16 +210,16 @@ export function SaveTemplateDialog({ onClose, onSave, zoneCount }) {
       aria-modal="true"
     >
       <div className="rb-dialog__title rb-dialog__template-heading">
-        {t('tmpl.saveDialog.head')}
+        {t(keys.heading)}
       </div>
-      <div className="rb-dialog__body">{t('tmpl.saveDialog.count', { n: zoneCount })}</div>
+      {mode === TEMPLATE_NAME_MODE.SAVE && <div className="rb-dialog__body">{t('tmpl.saveDialog.count', { n: zoneCount })}</div>}
       <input
         autoFocus
         value={name}
         maxLength={TEMPLATE_NAME_MAX_LENGTH}
         onChange={(e) => setName(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === 'Enter' && name.trim()) onSave(name);
+          if (e.key === 'Enter') submit();
           if (e.key === 'Escape') onClose();
         }}
         placeholder={t('tmpl.saveDialog.placeholder')}
@@ -227,9 +232,9 @@ export function SaveTemplateDialog({ onClose, onSave, zoneCount }) {
         </Button>
         <Button
           variant={BUTTON_VARIANT.PRIMARY}
-          disabled={!name.trim() || zoneCount === 0}
-          onClick={() => onSave(name)}
-        >{t('common.save')}
+          disabled={!canSubmit}
+          onClick={submit}
+        >{t(keys.button)}
         </Button>
       </div>
     </ModalShell>

@@ -5,6 +5,8 @@ import { resolveOwnerZone } from './board-ownership.js';
 import { templateZonesFromSelection, templateBounds, templatePlacementOffset, templateOccupiedRects } from './template-model.js';
 import { t } from './i18n.js';
 
+const normalizeTemplateName = (rawName) => (rawName || '').trim().slice(0, TEMPLATE_NAME_MAX_LENGTH);
+
 export const subscribeTemplates = (storage, onSnapshot) => {
   let active = true;
   const refresh = () => {
@@ -23,6 +25,7 @@ export const subscribeTemplates = (storage, onSnapshot) => {
 export const createTemplateActions = ({
   storage, createId, setToast, setSaveTemplateOpen, onDraftChange = () => {},
   addItemsLocal, userId, userName, closeTemplates, draftRef = { current: [] },
+  renameRef = { current: null }, onRenameTargetChange = () => {},
 }) => {
   const warn = (key) => setToast({ msg: t(key), type: 'warn' });
   const updateDraft = (zones) => {
@@ -42,16 +45,42 @@ export const createTemplateActions = ({
     }
     updateDraft(zones);
     setSaveTemplateOpen(true);
+    closeTemplates?.();
     return true;
   };
   const saveCurrentAsTemplate = (rawName) => {
-    const name = (rawName || '').trim().slice(0, TEMPLATE_NAME_MAX_LENGTH);
+    const name = normalizeTemplateName(rawName);
     if (!name) return;
     if (!draftRef.current.length) { warn('tmpl.selectZones'); return; }
     const saved = storage?.putTemplate?.({ id: createId(), name, zones: draftRef.current, createdAt: Date.now() });
     if (!saved) { warn('tmpl.saveFailed'); return; }
     closeSaveDialog();
     setToast({ msg: t('tmpl.saved', { name }), type: 'info' });
+  };
+  const updateRenameTarget = (target) => {
+    renameRef.current = target;
+    onRenameTargetChange(target);
+  };
+  const closeRenameDialog = () => updateRenameTarget(null);
+  const findTemplate = (id) => storage?.snapshotTemplates?.().find((entry) => entry.id === id);
+  const openRenameTemplate = (id) => {
+    const template = findTemplate(id);
+    if (!template) { warn('tmpl.renameMissing'); return; }
+    updateRenameTarget({ id, name: template.name });
+    closeTemplates?.();
+  };
+  const renameCustomTemplate = (rawName) => {
+    const name = normalizeTemplateName(rawName);
+    if (!name || !renameRef.current) return;
+    const latest = findTemplate(renameRef.current.id);
+    if (!latest) {
+      warn('tmpl.renameMissing');
+      closeRenameDialog();
+      return;
+    }
+    if (!storage.putTemplate({ ...latest, name })) { warn('tmpl.saveFailed'); return; }
+    setToast({ msg: t('tmpl.renamed', { name }), type: 'info' });
+    closeRenameDialog();
   };
   const deleteCustomTemplate = (id) => {
     if (!storage?.removeTemplate?.(id)) warn('tmpl.saveFailed');
@@ -72,7 +101,8 @@ export const createTemplateActions = ({
     closeTemplates();
     return templateBounds(zones);
   };
-  return { openSaveTemplate, closeSaveDialog, saveCurrentAsTemplate, deleteCustomTemplate, applyTemplate };
+  return { openSaveTemplate, closeSaveDialog, saveCurrentAsTemplate, deleteCustomTemplate, applyTemplate,
+    openRenameTemplate, renameCustomTemplate, closeRenameDialog };
 };
 
 export const useBoardTemplates = ({ storage, createId, setToast, setSaveTemplateOpen,
@@ -80,10 +110,12 @@ export const useBoardTemplates = ({ storage, createId, setToast, setSaveTemplate
   const [customTemplates, setCustomTemplates] = useState(() => storage?.snapshotTemplates?.() || []);
   const [templateDraft, setTemplateDraft] = useState([]);
   const draftRef = useRef([]);
+  const [renameTarget, setRenameTarget] = useState(null);
+  const renameRef = useRef(null);
   useEffect(() => subscribeTemplates(storage, setCustomTemplates), [storage]);
   const actions = useMemo(() => createTemplateActions({
     storage, createId, setToast, setSaveTemplateOpen, onDraftChange: setTemplateDraft,
-    addItemsLocal, userId, userName, closeTemplates, draftRef,
+    addItemsLocal, userId, userName, closeTemplates, draftRef, renameRef, onRenameTargetChange: setRenameTarget,
   }), [storage, createId, setToast, setSaveTemplateOpen, addItemsLocal, userId, userName, closeTemplates]);
-  return { customTemplates, templateDraft, ...actions };
+  return { customTemplates, templateDraft, renameTarget, ...actions };
 };

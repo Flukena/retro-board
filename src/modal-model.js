@@ -22,3 +22,21 @@ export function importWarningNotes(pendingImport) {
   }
   return notes;
 }
+
+export const TEMPLATE_NAME_MODE = Object.freeze({ SAVE: 'save', RENAME: 'rename' });
+const TEMPLATE_NAME_KEYS = Object.freeze({
+  [TEMPLATE_NAME_MODE.SAVE]: Object.freeze({ heading: 'tmpl.saveDialog.head', button: 'common.save' }),
+  [TEMPLATE_NAME_MODE.RENAME]: Object.freeze({ heading: 'tmpl.renameDialog.head', button: 'common.save' }),
+});
+
+export function templateNameKeys(mode) {
+  if (!Object.hasOwn(TEMPLATE_NAME_KEYS, mode)) throw new Error(`Unknown template name mode: ${mode}`);
+  return TEMPLATE_NAME_KEYS[mode];
+}
+
+export function templateNameCanSubmit(mode, name, initialName, zoneCount) {
+  templateNameKeys(mode);
+  const trimmed = name.trim();
+  if (!trimmed) return false;
+  return mode === TEMPLATE_NAME_MODE.SAVE ? zoneCount > 0 : trimmed !== initialName.trim();
+}

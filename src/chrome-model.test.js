@@ -5,11 +5,11 @@ import { DOCK_TILE_INDEX, PALETTE } from './palette.js';
 import { timerDockModel } from './vote-timing.js';
 
 test('template rows preserve source order, names and custom zone counts', () => {
-  assert.deepEqual(templateRows({ retro: { name: 'Retro' } }, [
+  assert.deepEqual(templateRows({ retro: { name: 'Retro', zones: [{ color: 2 }] } }, [
     { id: 'mine', name: 'Mine', zones: [{}, {}] },
   ]), {
-    builtin: [{ id: 'retro', name: 'Retro' }],
-    custom: [{ id: 'mine', name: 'Mine', zoneCount: 2 }],
+    builtin: [{ id: 'retro', name: 'Retro', zones: [{ color: 2 }] }],
+    custom: [{ id: 'mine', name: 'Mine', zones: [{}, {}], zoneCount: 2 }],
   });
   assert.deepEqual(templateRows({}, []).custom, []);
 });

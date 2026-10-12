@@ -29,6 +29,22 @@ export const templateBounds = (zones) => {
   };
 };
 
+export const templateThumbnail = (zones, boxW, boxH, paddingPx) => {
+  const bounds = templateBounds(zones);
+  if (!bounds || bounds.w <= 0 || bounds.h <= 0) return [];
+  const availableW = boxW - paddingPx * CENTRE_DIVISOR;
+  const availableH = boxH - paddingPx * CENTRE_DIVISOR;
+  if (availableW <= 0 || availableH <= 0) return [];
+  const scale = Math.min(availableW / bounds.w, availableH / bounds.h);
+  const offsetX = (boxW - bounds.w * scale) / CENTRE_DIVISOR;
+  const offsetY = (boxH - bounds.h * scale) / CENTRE_DIVISOR;
+  return [...zones].sort((a, b) => b.w * b.h - a.w * a.h).map((zone) => ({
+    x: offsetX + (zone.x - bounds.x) * scale,
+    y: offsetY + (zone.y - bounds.y) * scale,
+    w: zone.w * scale, h: zone.h * scale, color: zone.color,
+  }));
+};
+
 export const templateZonesFromSelection = (items, selectedIds) => {
   const zones = items.filter((item) => item.type === 'zone');
   const selected = new Set(selectedIds);
