@@ -16,7 +16,7 @@
   transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
 
-.rb-btn:hover:not(:disabled, [aria-disabled="true"], .rb-btn--active, .rb-btn--primary) {
+.rb-btn:hover:not(:disabled, [aria-disabled="true"], .rb-btn--active, .rb-btn--primary, .rb-btn--danger) {
   background: var(--bg-panel-2);
 }
 
@@ -141,4 +141,18 @@
   .rb-surface--popover {
     animation: none;
   }
+}
+
+.rb-btn--danger {
+  background: var(--danger);
+  color: var(--danger-fg);
+  border-color: var(--danger);
+}
+
+.rb-btn--danger:hover:not(:disabled, [aria-disabled="true"]) {
+  box-shadow: var(--shadow-card);
+}
+
+.rb-btn--mono {
+  font-family: var(--font-mono);
 }

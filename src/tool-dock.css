@@ -1,0 +1,96 @@
+.rb-tool-dock {
+  position: absolute;
+  left: 0;
+  right: 0;
+  width: max-content;
+  margin: 0 auto;
+}
+
+.rb-tool-dock__body {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: var(--rb-dock-padding);
+  background: var(--bg-panel);
+  border: var(--rb-chrome-border) solid var(--border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-card);
+}
+
+.rb-dock-tile {
+  box-sizing: border-box;
+  min-width: 64px;
+  height: var(--rb-dock-tile-height);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 8px;
+  font: 600 12px var(--font-ui);
+  color: var(--text-mid);
+  background: transparent;
+  border: var(--rb-chrome-border) solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.rb-dock-tile:hover,
+.rb-dock-tile[aria-pressed="true"] {
+  background: var(--bg-panel-2);
+  color: var(--text);
+}
+
+.rb-dock-tile[aria-pressed="true"] {
+  border-color: var(--border);
+}
+
+.rb-dock-tile:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.rb-dock-tile__icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-icon-tile);
+  color: var(--tile-ink);
+}
+
+.rb-template-backdrop {
+  position: fixed;
+  inset: 0;
+}
+
+.rb-template-popover {
+  position: absolute;
+  bottom: calc(100% + 12px);
+  left: 0;
+  min-width: 300px;
+  max-height: 70vh;
+  overflow: auto;
+}
+
+.rb-template-heading {
+  padding: 6px 8px;
+  color: var(--text-muted);
+  font: 700 11px var(--font-ui);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.rb-template-custom {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.rb-template-count {
+  color: var(--text-faint);
+  font-size: 11px;
+  margin-left: 6px;
+}

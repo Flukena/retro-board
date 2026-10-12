@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { createServer } from 'vite';
 import { BUTTON_VARIANT, MENU_ITEM_VARIANT, DIVIDER_ORIENTATION, SURFACE_KIND } from './ui-variants.js';
 
@@ -51,6 +52,12 @@ test('UI primitives preserve native button and accessibility contracts', async (
       assert.equal(unchecked.props['aria-pressed'], false);
       assert.equal(unchecked.props.children[2], false);
       assert.equal(MenuItem({}).props['aria-pressed'], undefined);
+    });
+    await context.test('menu items omit absent icon slots and retain supplied icons', () => {
+      for (const icon of [null, undefined]) {
+        assert.doesNotMatch(renderToStaticMarkup(MenuItem({ icon, label: TEST_LABEL })), /rb-menu-item__icon/);
+      }
+      assert.match(renderToStaticMarkup(MenuItem({ icon: 'icon', label: TEST_LABEL })), /rb-menu-item__icon/);
     });
     await context.test('surfaces preserve content, attributes and validate kind', () => {
       const surface = Surface({ kind: SURFACE_KIND.POPOVER, className: TEST_EXTRA_CLASS, children: TEST_LABEL, 'data-board-shortcuts': 'off' });

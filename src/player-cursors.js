@@ -1,3 +1,5 @@
+export const DEFAULT_PLAYER_NAME = 'Guest';
+
 export const PLAYER_CURSOR_STALE_MS = 10_000;
 export const PLAYER_CURSOR_MAX_WORLD_COORD = 10_000_000;
 export const PLAYER_VIEW_ZOOM_MIN = 0.15;
@@ -94,7 +96,7 @@ export const visiblePlayerCursors = ({
   if (!cursor || now - cursor.updatedAt >= staleMs) return [];
   return [{
     userId: player.userId,
-    name: String(player.name || 'Guest'),
+    name: String(player.name || DEFAULT_PLAYER_NAME),
     cursor,
   }];
 });

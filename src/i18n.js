@@ -7,6 +7,7 @@ const STORAGE_KEY = 'rb_lang';
 
 const dict = {
   th: {
+
     // common chrome
     'app.title': 'Retro Board',
     'app.tagline': 'สร้างหรือเข้าร่วมห้อง retrospective แบบ real-time',
@@ -155,6 +156,9 @@ const dict = {
 
     // templates
     'tmpl.btn': 'Templates',
+    'tmpl.builtin': 'สำเร็จรูป',
+    'tmpl.custom': 'กำหนดเอง',
+    'tmpl.zoneCount': '· {n} โซน',
     'tmpl.head': 'Template',
     // Built-in template names + zone titles
     'tmpl.retro3.name': '😊😞🚀 Retro 3 ช่อง',
@@ -299,12 +303,16 @@ const dict = {
     'settings.theme.dark': 'Dark',
     'settings.theme.auto': 'Auto',
     'zoom.reset': 'รีเซ็ตการซูมเป็น 100%',
+    'zoom.out': 'ซูมออก',
+    'zoom.in': 'ซูมเข้า',
+    'zoom.fit': 'พอดีกับเนื้อหา',
     'minimap.title': 'แผนที่บอร์ด',
     'minimap.navigate': 'คลิกหรือลากเพื่อเลื่อนไปยังตำแหน่งบนบอร์ด ใช้ปุ่มลูกศรเพื่อเลื่อน',
     'empty.hint': 'ดับเบิลคลิกเพื่อเริ่ม · เลือก template ด้านล่าง',
     'loading': 'กำลังโหลด…',
   },
   en: {
+
     'app.title': 'Retro Board',
     'app.tagline': 'Create or join a real-time retrospective room',
     'common.cancel': 'Cancel',
@@ -448,6 +456,9 @@ const dict = {
     'tool.image.title': 'Add image (Ctrl+V or drag-drop also works)',
 
     'tmpl.btn': 'Templates',
+    'tmpl.builtin': 'built-in',
+    'tmpl.custom': 'custom',
+    'tmpl.zoneCount': '· {n} zones',
     'tmpl.head': 'Template',
     'tmpl.retro3.name': '😊😞🚀 Retro 3 columns',
     'tmpl.retro3.well': '😊 What went well',
@@ -583,6 +594,9 @@ const dict = {
     'settings.theme.dark': 'Dark',
     'settings.theme.auto': 'Auto',
     'zoom.reset': 'Reset zoom to 100%',
+    'zoom.out': 'Zoom out',
+    'zoom.in': 'Zoom in',
+    'zoom.fit': 'Fit to content',
     'minimap.title': 'Board map',
     'minimap.navigate': 'Click or drag to navigate the board. Use arrow keys to move.',
     'empty.hint': 'Double-click to start · or pick a template below',

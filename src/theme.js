@@ -30,6 +30,10 @@ export function defineTokens(light, dark) {
 }
 
 const MODE_INDEPENDENT_TOKENS = Object.freeze({
+  '--radius-xl': '22px',
+  '--radius-icon-tile': '9px',
+  '--radius-banner': '18px',
+  '--tile-ink': '#2b2118',
   '--radius-bar': '20px',
   '--radius-lg': '16px',
   '--radius-tile': '11px',

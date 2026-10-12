@@ -1,3 +1,5 @@
+export const ZOOM_STEP_FACTOR = 1.2;
+
 // Trackpad pinch emits small pixel deltas; mouse wheels emit much larger
 // notches. Integrating their distance keeps event coalescing from changing
 // zoom speed. Bound extreme input before exponentiation.

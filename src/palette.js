@@ -28,6 +28,19 @@ export const PALETTE = Object.freeze([
   paletteColor({ name: 'orange', bg: '#fed7aa', border: '#f97316', zoneBg: 'rgba(249,115,22,0.10)' }),
 ]);
 
+export function paletteIndexByName(name) {
+  const index = PALETTE.findIndex((entry) => entry.name === name);
+  if (index < 0) throw new Error(`Unknown palette name: ${String(name)}`);
+  return index;
+}
+
+export const DOCK_TILE_NAME = Object.freeze({
+  templates: 'purple', select: 'orange', text: 'yellow', zone: 'green', image: 'blue',
+});
+export const DOCK_TILE_INDEX = Object.freeze(Object.fromEntries(
+  Object.entries(DOCK_TILE_NAME).map(([tool, name]) => [tool, paletteIndexByName(name)]),
+));
+
 // Font-color presets shown in the toolbar swatch popover. `null` = auto/default.
 export const FONT_COLORS = Object.freeze([
   { value: null,      label: 'auto',  swatch: 'linear-gradient(135deg,#111 50%,#fff 50%)' },

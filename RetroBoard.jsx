@@ -5,12 +5,12 @@ import React, {
   useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, startTransition,
 } from 'react';
 import {
-  Trash2, Lock, Unlock, Eye, EyeOff, ZoomIn, ZoomOut, Maximize2,
-  ThumbsUp, Clock, Square, LayoutTemplate,
-  ChevronDown, X, AlertCircle, Type,
-  Image as ImageIcon, MousePointer2, RotateCcw,
+  Trash2, Lock, Unlock, Eye, EyeOff,
+  ThumbsUp, Square,
+  X, AlertCircle, Type,
+  MousePointer2, RotateCcw,
   Download, Upload, BringToFront, SendToBack, HelpCircle,
-  MessageSquare, Map as MapIcon, LocateFixed,
+  MessageSquare, Map as MapIcon,
 } from 'lucide-react';
 import { COMMENT_MAX_LEN } from './src/comment-schema.js';
 import {
@@ -40,16 +40,20 @@ import {
   redactBoardExportForViewer,
   stickyTextForDom,
 } from './src/security-boundaries.js';
+import { ToolDock, TOOL_ID } from './src/ToolDock.jsx';
+import { ZoomControls } from './src/ZoomControls.jsx';
+import { TopCenterStack } from './src/TopCenterStack.jsx';
+import { templateRows, followBannerModel } from './src/chrome-model.js';
 import { TopBar } from './src/TopBar.jsx';
 import { adminPillModel, playerRows, shareLinkModel } from './src/topbar-model.js';
-import { hueFromId } from './src/player-colors.js';
+import { hueFromId, playerAccentColor } from './src/player-colors.js';
 import { t, useLang } from './src/i18n.js';
 import { getActiveRoomSession, roomFetch } from './src/room-session.js';
 import { useTheme, nextThemePref } from './src/theme.js';
 import { PALETTE, FONT_COLORS, STICKY_AUTO_TEXT, STICKY_AUTO_TEXT_FAINT } from './src/palette.js';
 import {
-  TOPBAR_BOTTOM_PX, FOLLOW_BANNER_GAP_PX,
-  SELECTION_TOOLBAR_GAP_PX, GRID_PITCH_PX, toolbarAnchorY, Z,
+  MINIMAP_BOTTOM_PX, TOAST_BOTTOM_PX,
+  SELECTION_TOOLBAR_GAP_PX, GRID_PITCH_PX, toolbarAnchorY, topStackHeightPx, Z,
 } from './src/chrome-layout.js';
 import { useUserIdentity } from './src/useUserIdentity.js';
 import { useAdminRole } from './src/useAdminRole.js';
@@ -81,14 +85,14 @@ import {
 } from './src/collaborative-text.js';
 import { copyTextToClipboard } from './src/clipboard.js';
 import { MinimapCanvas } from './src/MinimapCanvas.jsx';
-import { wheelZoomFactor, viewportNeedsCullRefresh } from './src/viewport-zoom.js';
+import { ZOOM_STEP_FACTOR, wheelZoomFactor, viewportNeedsCullRefresh } from './src/viewport-zoom.js';
 import { centerOf, insideZone, resolveOwnerZone, effectiveOwnerZone } from './src/board-ownership.js';
 import {
   normalizeDisplayName,
   normalizeStoredUserId,
   normalizeViewport,
 } from './src/local-preferences.js';
-import { voteTimerIsOpen, voteTimerPhaseSignature } from './src/vote-timing.js';
+import { timerDockModel, voteTimerIsOpen, voteTimerPhaseSignature } from './src/vote-timing.js';
 import { planVoteFinalization } from './src/vote-finalization.js';
 
 const loadBoardArchive = () => import('./src/board-archive.js');
@@ -368,13 +372,6 @@ const fitViewportToItems = (items, width, height) => {
     x: width / 2 - cx * zoom,
     y: height / 2 - cy * zoom,
   };
-};
-
-const fmtClock = (ms) => {
-  const s = Math.max(0, Math.ceil(ms / 1000));
-  const m = Math.floor(s / 60);
-  const r = s % 60;
-  return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;
 };
 
 // Thin wrapper over window.storage with an in-memory fallback for dev/preview.
@@ -1703,7 +1700,12 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     && Number.isFinite(followedPlayer?.view?.y)
     ? followedPlayer.view
     : null;
-
+  const stackFollow = followedUserId ? followBannerModel(
+    hueFromId(followedUserId), followedPlayer, presence[followedUserId], !followedView && !followedCursor,
+  ) : null;
+  const stackTimers = board.items.filter((item) => item.type === 'zone' && item.voteTimer)
+    .map((zone) => timerDockModel(zone, now));
+  const stackHeightPx = topStackHeightPx({ hasFollow: !!stackFollow, timerCount: stackTimers.length });
   const remoteEditorsByItem = useMemo(
     () => summarizeRemoteEditors(remoteEditingItems),
     [remoteEditingItems],
@@ -4406,8 +4408,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       if (meta && (zoomInKey || zoomOutKey || resetZoomKey)) {
         e.preventDefault();
         if (interactionRef.current !== null) return;
-        if (zoomInKey) zoomBy(1.2);
-        else if (zoomOutKey) zoomBy(1 / 1.2);
+        if (zoomInKey) zoomBy(ZOOM_STEP_FACTOR);
+        else if (zoomOutKey) zoomBy(1 / ZOOM_STEP_FACTOR);
         else resetZoom();
         return;
       }
@@ -5185,7 +5187,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       ), 0);
       const canUnlock = editingAllowed && lockedCount > 0;
       const sx = (groupBBox.x + groupBBox.w / 2) * v.zoom + v.x;
-      const sy = toolbarAnchorY(groupBBox.y * v.zoom + v.y - SELECTION_TOOLBAR_GAP_PX);
+      const sy = toolbarAnchorY(groupBBox.y * v.zoom + v.y - SELECTION_TOOLBAR_GAP_PX, stackHeightPx);
       return (
         <div
           style={{
@@ -5232,7 +5234,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     // The toolbar is translated upward by its own height. Keep its bottom
     // anchor far enough below the inset top bar that admin controls cannot sit
     // above it and intercept clicks (most visible on fitted/zoomed-out zones).
-    sy = toolbarAnchorY(sy);
+    sy = toolbarAnchorY(sy, stackHeightPx);
     const can = canModifyOwnedItem(selectedItem);
     const canDelete = canDeleteItem(selectedItem);
     // A zone with no explicit override inherits visibility from its nearest
@@ -5623,119 +5625,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     />
   );
 
-  const renderTimerDockFor = (zone) => {
-    const zTimer = zone.voteTimer;
-    const remainingMs = zTimer.endsAt ? zTimer.endsAt - now : null;
-    const isUrgent = remainingMs != null && remainingMs < 30000;
-    // used/limit, ascending — matches the players-list badge's semantics
-    // (votesUsedByUser), so the same "X/Y" shape means the same thing
-    // everywhere instead of counting up in one place and down in another.
-    return (
-      <div
-        key={zone.id}
-        style={{
-          background: 'var(--bg-elev)',
-          color: 'var(--text)',
-          border: '1px solid var(--border-soft)',
-          padding: '8px 12px', borderRadius: 14,
-          display: 'flex', alignItems: 'center', gap: 12,
-          boxShadow: '0 12px 30px rgba(0,0,0,0.18)',
-          animation: isUrgent
-            ? 'rb-banner-in 0.35s cubic-bezier(.2,1,.3,1) both, rb-pulse 1s ease-in-out infinite'
-            : 'rb-banner-in 0.35s cubic-bezier(.2,1,.3,1) both',
-          backdropFilter: 'blur(8px)',
-        }}
-      >
-        <span
-          style={{
-            maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            fontSize: 12, fontWeight: 700, color: 'var(--text-mid)',
-          }}
-        >
-          {zone.title || t('export.csv.untitledZone')}
-        </span>
-        <div
-          style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            color: isUrgent ? '#dc2626' : 'var(--text)',
-            padding: '0 6px',
-          }}
-        >
-          {remainingMs != null ? <Clock size={18} /> : <ThumbsUp size={18} />}
-          <span style={{ fontFamily: 'tabular-nums', fontSize: 22, fontWeight: 700, minWidth: 56, textAlign: 'center' }}>
-            {remainingMs != null ? fmtClock(remainingMs) : t('vote.banner.open')}
-          </span>
-        </div>
-        <span
-          style={{
-            fontSize: 12, fontWeight: 600,
-            background: 'var(--bg-panel-2)', color: 'var(--text-mid)',
-            padding: '4px 10px', borderRadius: 999,
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {zTimer.voteLimit != null
-            ? t('vote.banner.votesUsed', { used: votesUsed, limit: zTimer.voteLimit })
-            : t('vote.banner.unlimited')}
-        </span>
-        {isAdmin && (
-          <>
-            <div aria-hidden style={{ width: 1, height: 22, background: 'var(--border-soft)' }} />
-            {[1, 2, 5].map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => adminExtendTimer(zone.id, m)}
-                title={t('topbar.extend', { m }) || `+${m}m`}
-                style={{
-                  background: 'transparent',
-                  border: '1px solid var(--border-strong)',
-                  borderRadius: 8,
-                  padding: '5px 10px',
-                  fontSize: 12, fontWeight: 700,
-                  color: 'var(--text-mid)',
-                  cursor: 'pointer',
-                  fontVariantNumeric: 'tabular-nums',
-                }}
-              >+{m}m
-              </button>
-            ))}
-            <div aria-hidden style={{ width: 1, height: 22, background: 'var(--border-soft)' }} />
-            <button
-              type="button"
-              onClick={() => adminStopTimer(zone.id)}
-              title={t('topbar.stopVote')}
-              style={{
-                background: '#dc2626', color: '#fff',
-                border: 'none', borderRadius: 8,
-                padding: '6px 12px', fontSize: 13, fontWeight: 700,
-                cursor: 'pointer',
-                display: 'inline-flex', alignItems: 'center', gap: 6,
-              }}
-            >
-              <Square size={14} /> {t('topbar.stopVote')}
-            </button>
-          </>
-        )}
-      </div>
-    );
-  };
-
-  const renderTimerDocks = () => {
-    const activeZones = board.items.filter((i) => i.type === 'zone' && i.voteTimer);
-    if (!activeZones.length) return null;
-    return (
-      <div
-        style={{
-          position: 'fixed', left: '50%', bottom: 16, transform: 'translateX(-50%)',
-          display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center', zIndex: Z.TIMER_DOCK,
-        }}
-      >
-        {activeZones.map((z) => renderTimerDockFor(z))}
-      </div>
-    );
-  };
-
   const renderMinimap = () => {
     return (
       <aside
@@ -5747,7 +5636,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         onFocusCapture={revealMinimap}
         onBlurCapture={revealMinimap}
         style={{
-          position: 'fixed', right: 16, bottom: 60, zIndex: Z.DOCK,
+          position: 'fixed', right: 16, bottom: MINIMAP_BOTTOM_PX, zIndex: Z.DOCK,
           width: MINIMAP_W + 16,
           padding: '8px 8px 9px', boxSizing: 'border-box',
           background: 'var(--bg-overlay)',
@@ -5810,192 +5699,24 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     );
   };
 
-  const renderBottomBar = () => (
-    <>
-      {/* Templates (bottom-left) */}
-      <div style={{ position: 'fixed', bottom: 16, left: 16, zIndex: Z.DOCK }}>
-        <div style={{ position: 'relative' }}>
-          <button
-            type="button"
-            onClick={() => setTemplatesOpen((v) => !v)}
-            style={floatBtn}
-          >
-            <LayoutTemplate size={16} /> Templates <ChevronDown size={14} />
-          </button>
-          {templatesOpen && (
-            <>
-              {/* click-outside backdrop */}
-              <div
-                onClick={() => setTemplatesOpen(false)}
-                style={{ position: 'fixed', inset: 0, zIndex: Z.POPOVER_BACKDROP }}
-              />
-              <div
-                data-board-shortcuts="off"
-                style={{
-                  position: 'absolute', bottom: '120%', left: 0,
-                  background: 'var(--bg-panel)', borderRadius: 12, padding: 8,
-                  boxShadow: '0 10px 30px rgba(0,0,0,0.15)',
-                  minWidth: 300, maxHeight: '70vh', overflow: 'auto', zIndex: Z.POPOVER,
-                }}
-              >
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '6px 8px', textTransform: 'uppercase', letterSpacing: 0.4, fontWeight: 700 }}>built-in</div>
-                {Object.entries(getTemplates()).map(([k, v]) => (
-                  <button
-                    key={k}
-                    type="button"
-                    onClick={() => applyTemplate(k)}
-                    style={tplRow}
-                    onMouseOver={(e) => { e.currentTarget.style.background = 'var(--bg-panel-2)'; }}
-                    onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; }}
-                  >
-                    {v.name}
-                  </button>
-                ))}
-                {customTemplates.length > 0 && (
-                  <>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '10px 8px 6px', textTransform: 'uppercase', letterSpacing: 0.4, fontWeight: 700 }}>custom</div>
-                    {customTemplates.map((ct) => (
-                      <div
-                        key={ct.id}
-                        style={{ display: 'flex', alignItems: 'center', gap: 4 }}
-                        onMouseOver={(e) => { e.currentTarget.style.background = 'var(--bg-panel-2)'; }}
-                        onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; }}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => applyTemplate(ct.id)}
-                          style={{ ...tplRow, flex: 1 }}
-                        >
-                          {ct.name}
-                          <span style={{ fontSize: 11, color: 'var(--text-faint)', marginLeft: 6 }}>· {ct.zones.length} zones</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => deleteCustomTemplate(ct.id)}
-                          title={t('common.delete')}
-                          style={{
-                            background: 'transparent', border: 'none', color: 'var(--text-faint)',
-                            padding: 6, marginRight: 4, borderRadius: 6, cursor: 'pointer',
-                          }}
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    ))}
-                  </>
-                )}
-                <div style={{ height: 1, background: 'var(--border)', margin: '8px 4px' }} />
-                <button
-                  type="button"
-                  onClick={() => { setSaveTemplateOpen(true); setTemplatesOpen(false); }}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 6,
-                    width: '100%', background: 'transparent', border: 'none',
-                    padding: '8px 10px', borderRadius: 8, cursor: 'pointer',
-                    fontSize: 13, color: 'var(--accent)', fontWeight: 600,
-                  }}
-                  onMouseOver={(e) => { e.currentTarget.style.background = 'var(--accent-bg)'; }}
-                  onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; }}
-                >
-                  {t('tmpl.save')}
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Creator toolbar (bottom-left, next to templates) */}
-      <div style={{
-        position: 'fixed', bottom: 16, left: 170, zIndex: Z.DOCK,
-        display: 'flex', gap: 8,
-      }}
-      >
-        <button
-          type="button"
-          onClick={() => {
-            setCreationMode((m) => (m === 'select' ? null : 'select'));
-            setSelectedIds(new Set());
-          }}
-          style={{
-            ...floatBtn,
-            background: creationMode === 'select' ? 'var(--accent)' : 'var(--bg-panel)',
-            color: creationMode === 'select' ? 'var(--accent-fg)' : 'var(--text)',
-          }}
-          title={creationMode === 'select' ? t('tool.select.active') : t('tool.select.title')}
-        >
-          <MousePointer2 size={16} />
-          {creationMode === 'select' ? t('tool.select.placeholder') : t('tool.select')}
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            if (!requireEdit() || !canvasRef.current) return;
-            const rect = canvasRef.current.getBoundingClientRect();
-            const w = screenToWorld(rect.width / 2, rect.height / 2);
-            addText(w.x, w.y);
-          }}
-          style={floatBtn}
-          title={t('tool.text.title')}
-        >
-          <Type size={16} /> {t('tool.text')}
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            if (!requireEdit()) return;
-            setCreationMode((m) => (m === 'zone' ? null : 'zone'));
-            setSelectedIds(new Set());
-          }}
-          style={{
-            ...floatBtn,
-            background: creationMode === 'zone' ? 'var(--accent)' : 'var(--bg-panel)',
-            color: creationMode === 'zone' ? 'var(--accent-fg)' : 'var(--text)',
-          }}
-          title={creationMode === 'zone' ? t('tool.zone.active') : t('tool.zone.title')}
-        >
-          {creationMode === 'zone' ? <MousePointer2 size={16} /> : <LayoutTemplate size={16} />}
-          {creationMode === 'zone' ? t('tool.zone.placeholder') : t('tool.zone')}
-        </button>
-        <button
-          type="button"
-          onClick={pickImageFile}
-          style={floatBtn}
-          title={t('tool.image.title')}
-        >
-          <ImageIcon size={16} /> {t('tool.image')}
-        </button>
-      </div>
-
-      {renderMinimap()}
-
-      {/* Zoom (bottom-right) */}
-      <div
-        style={{
-          position: 'fixed', bottom: 16, right: 16, zIndex: Z.DOCK,
-          background: 'var(--bg-panel)', borderRadius: 10,
-          boxShadow: '0 6px 16px rgba(0,0,0,0.1)',
-          display: 'flex', alignItems: 'center', overflow: 'hidden',
-        }}
-      >
-        <button type="button" onClick={() => zoomBy(1 / 1.2)} style={zoomBtn} title="Zoom out">
-          <ZoomOut size={16} />
-        </button>
-        <button type="button" onClick={resetZoom} style={{
-          ...zoomBtn, fontSize: 13, minWidth: 70, justifyContent: 'center',
-        }}
-        title={t('zoom.reset')}
-        >{Math.round(viewport.zoom * 100)}%
-        </button>
-        <button type="button" onClick={() => zoomBy(1.2)} style={zoomBtn} title="Zoom in">
-          <ZoomIn size={16} />
-        </button>
-        <button type="button" onClick={fitToContent} style={zoomBtn} title="Fit to content">
-          <Maximize2 size={16} />
-        </button>
-      </div>
-    </>
-  );
+  const toolHandlers = {
+    [TOOL_ID.SELECT]: () => {
+      setCreationMode((mode) => (mode === TOOL_ID.SELECT ? null : TOOL_ID.SELECT));
+      setSelectedIds(new Set());
+    },
+    [TOOL_ID.TEXT]: () => {
+      if (!requireEdit() || !canvasRef.current) return;
+      const rect = canvasRef.current.getBoundingClientRect();
+      const world = screenToWorld(rect.width / 2, rect.height / 2);
+      addText(world.x, world.y);
+    },
+    [TOOL_ID.ZONE]: () => {
+      if (!requireEdit()) return;
+      setCreationMode((mode) => (mode === TOOL_ID.ZONE ? null : TOOL_ID.ZONE));
+      setSelectedIds(new Set());
+    },
+    [TOOL_ID.IMAGE]: pickImageFile,
+  };
 
   /* ============================================================
      Render
@@ -6020,10 +5741,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       style={{ position: 'fixed', inset: 0, overflow: 'hidden', fontFamily: 'var(--font-ui)' }}
     >
       <style>{`
-        @keyframes rb-pulse {
-          0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(220,38,38,0.5); }
-          50% { transform: scale(1.04); box-shadow: 0 0 0 12px rgba(220,38,38,0); }
-        }
         @keyframes rb-appear {
           0%   { opacity: 0; transform: scale(0.78); }
           60%  { opacity: 1; transform: scale(1.04); }
@@ -6065,10 +5782,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         @keyframes rb-toast-in {
           0%   { opacity: 0; transform: translate(-50%, 14px) scale(0.96); }
           100% { opacity: 1; transform: translate(-50%, 0) scale(1); }
-        }
-        @keyframes rb-banner-in {
-          0%   { opacity: 0; transform: translateY(-14px) scale(0.9); }
-          100% { opacity: 1; transform: translateY(0) scale(1); }
         }
         @keyframes rb-pop {
           0%   { opacity: 0; transform: scale(0.9); }
@@ -6180,7 +5893,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           {selectionIndicators.map(({ item, selector }) => {
             const zoom = Math.max(viewport.zoom, 0.01);
             const selectorHue = hueFromId(selector.userId);
-            const color = `hsl(${selectorHue} 72% 46%)`;
+            const color = playerAccentColor(selectorHue);
             const label = selector.extraCount > 0
               ? t('selection.byMany', { name: selector.name, n: selector.extraCount })
               : t('selection.by', { name: selector.name });
@@ -6223,8 +5936,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
             const boxTop = item.y - titleHeight;
             const boxHeight = height + titleHeight;
             const editorHue = hueFromId(editor.userId);
-            const color = `hsl(${editorHue} 72% 46%)`;
-            const glow = `hsl(${editorHue} 72% 46% / 0.18)`;
+            const color = playerAccentColor(editorHue);
+            const glow = playerAccentColor(editorHue, 0.18);
             const label = editor.extraCount > 0
               ? t('editing.byMany', { name: editor.name, n: editor.extraCount })
               : t('editing.by', { name: editor.name });
@@ -6318,7 +6031,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       >
         {playerCursors.map((player) => {
           const screen = cursorScreenPosition(player.cursor, viewportRef.current);
-          const color = `hsl(${hueFromId(player.userId)} 72% 46%)`;
+          const color = playerAccentColor(hueFromId(player.userId));
           return (
             <div
               key={player.userId}
@@ -6361,55 +6074,33 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       <input ref={fileInputRef} type="file" accept="application/zip,.zip,application/json,.json,text/csv,.csv"
         onChange={onImportFileChange} style={{ display: 'none' }} />
       {renderTopBar()}
-      {followedUserId && (
-        <div
-          role="status"
-          style={{
-            position: 'fixed', top: TOPBAR_BOTTOM_PX + FOLLOW_BANNER_GAP_PX, left: '50%', zIndex: Z.FOLLOW_BANNER,
-            transform: 'translateX(-50%)',
-            display: 'flex', alignItems: 'center', gap: 9,
-            maxWidth: 'calc(100vw - 32px)', padding: '7px 8px 7px 11px',
-            background: 'var(--bg-overlay)', color: 'var(--text)',
-            border: '1px solid var(--border-strong)', borderRadius: 999,
-            boxShadow: '0 8px 24px rgba(0,0,0,0.16)',
-            backdropFilter: 'blur(10px)', animation: 'rb-banner-in 0.2s ease-out',
-          }}
-        >
-          <LocateFixed
-            size={16}
-            color={`hsl(${hueFromId(followedUserId)} 72% 46%)`}
-            style={{ flex: '0 0 auto' }}
-          />
-          <span style={{ fontSize: 14, fontWeight: 700, whiteSpace: 'nowrap' }}>
-            {t('follow.active', {
-              name: followedPlayer?.name || presence[followedUserId]?.name || 'Guest',
-            })}
-          </span>
-          {!followedView && !followedCursor && (
-            <span style={{
-              minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              fontSize: 12, color: 'var(--text-muted)',
-            }}
-            >{t('follow.waiting')}
-            </span>
-          )}
-          <button
-            type="button"
-            onClick={stopFollowing}
-            title={t('follow.stop')}
-            aria-label={t('follow.stop')}
-            style={{
-              width: 28, height: 28, display: 'grid', placeItems: 'center',
-              flex: '0 0 auto', border: 'none', borderRadius: '50%',
-              background: 'var(--bg-panel-2)', color: 'var(--text-mid)', cursor: 'pointer',
-            }}
-          >
-            <X size={14} />
-          </button>
-        </div>
-      )}
-      {renderBottomBar()}
-      {renderTimerDocks()}
+      <TopCenterStack
+        follow={stackFollow}
+        timers={stackTimers}
+        votesUsed={votesUsed}
+        isAdmin={isAdmin}
+        onStopFollowing={stopFollowing}
+        onExtendTimer={adminExtendTimer}
+        onStopTimer={adminStopTimer}
+      />
+      <ToolDock
+        creationMode={creationMode}
+        templatesOpen={templatesOpen}
+        rows={templateRows(getTemplates(), customTemplates)}
+        onTool={(toolId) => toolHandlers[toolId]()}
+        onTemplatesOpenChange={setTemplatesOpen}
+        onApplyTemplate={applyTemplate}
+        onDeleteCustomTemplate={deleteCustomTemplate}
+        onSaveTemplate={() => { setSaveTemplateOpen(true); setTemplatesOpen(false); }}
+      />
+      <ZoomControls
+        percentage={Math.round(viewport.zoom * 100)}
+        onZoomOut={() => zoomBy(1 / ZOOM_STEP_FACTOR)}
+        onResetZoom={resetZoom}
+        onZoomIn={() => zoomBy(ZOOM_STEP_FACTOR)}
+        onFitToContent={fitToContent}
+      />
+      {renderMinimap()}
       {renderActionToolbar()}
       {renderResizeHandles()}
 
@@ -6812,7 +6503,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         <div
           key={toast.t || toast.msg}
           style={{
-            position: 'fixed', bottom: 80, left: '50%', transform: 'translateX(-50%)',
+            position: 'fixed', bottom: TOAST_BOTTOM_PX, left: '50%', transform: 'translateX(-50%)',
             background: toast.type === 'warn' ? 'var(--toast-warn-bg)' : 'var(--toast-bg)',
             color: 'var(--toast-text)', padding: '10px 16px', borderRadius: 10,
             fontSize: 14, fontWeight: 500, zIndex: Z.TOAST,
@@ -6854,38 +6545,6 @@ const iconBtn = (enabled) => ({
   display: 'inline-flex',
   alignItems: 'center',
 });
-
-const floatBtn = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 6,
-  background: 'var(--bg-panel)',
-  border: 'none',
-  borderRadius: 10,
-  padding: '8px 14px',
-  fontSize: 14,
-  fontWeight: 600,
-  color: 'var(--text)',
-  boxShadow: '0 6px 16px rgba(0,0,0,0.1)',
-  cursor: 'pointer',
-};
-
-const tplRow = {
-  display: 'block', width: '100%', textAlign: 'left',
-  background: 'transparent', border: 'none',
-  padding: '8px 10px', borderRadius: 8, cursor: 'pointer',
-  fontSize: 13, color: 'var(--text)',
-};
-
-const zoomBtn = {
-  background: 'transparent',
-  border: 'none',
-  padding: '8px 10px',
-  cursor: 'pointer',
-  color: 'var(--text-mid)',
-  display: 'inline-flex',
-  alignItems: 'center',
-};
 
 function CommentsModal({ item, comments, editingAllowed, onAdd, onDelete, onClose }) {
   const [draft, setDraft] = useState('');

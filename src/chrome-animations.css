@@ -1,0 +1,17 @@
+@keyframes rb-banner-in {
+  0% { opacity: 0; transform: translateY(-14px) scale(0.9); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes rb-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.04); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rb-follow-banner,
+  .rb-timer-dock,
+  .rb-timer-dock--urgent {
+    animation: none;
+  }
+}

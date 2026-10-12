@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PALETTE, FONT_COLORS, paletteColor } from './palette.js';
+import { PALETTE, FONT_COLORS, paletteColor, paletteIndexByName } from './palette.js';
 import { parseBoardCsv } from './csv-import.js';
 import { normalizeImportManifest } from './import-schema.js';
 
@@ -31,5 +31,14 @@ test('palette entries validate their invariants and presets are frozen', () => {
   for (const array of [PALETTE, FONT_COLORS]) {
     assert.ok(Object.isFrozen(array));
     assert.ok(array.every(Object.isFrozen));
+  }
+});
+
+test('palette name lookup resolves known names and rejects unknown names', () => {
+  for (const entry of PALETTE) {
+    assert.equal(PALETTE[paletteIndexByName(entry.name)], entry);
+  }
+  for (const unknown of ['purpel', '', 'toString', undefined]) {
+    assert.throws(() => paletteIndexByName(unknown), /Unknown palette name/);
   }
 });

@@ -1,4 +1,4 @@
-export const BUTTON_VARIANT = Object.freeze({ DEFAULT: 'default', ACTIVE: 'active', PRIMARY: 'primary' });
+export const BUTTON_VARIANT = Object.freeze({ DEFAULT: 'default', ACTIVE: 'active', PRIMARY: 'primary', DANGER: 'danger' });
 export const MENU_ITEM_VARIANT = Object.freeze({ DEFAULT: 'default', DANGER: 'danger' });
 export const DIVIDER_ORIENTATION = Object.freeze({ VERTICAL: 'vertical', HORIZONTAL: 'horizontal' });
 
@@ -6,6 +6,7 @@ export const SURFACE_KIND = Object.freeze({ POPOVER: 'popover' });
 const SURFACE_CLASSES = Object.freeze({ [SURFACE_KIND.POPOVER]: 'rb-surface rb-surface--popover' });
 
 const BUTTON_CLASSES = Object.freeze({
+  [BUTTON_VARIANT.DANGER]: 'rb-btn rb-btn--danger',
   [BUTTON_VARIANT.DEFAULT]: 'rb-btn',
   [BUTTON_VARIANT.ACTIVE]: 'rb-btn rb-btn--active',
   [BUTTON_VARIANT.PRIMARY]: 'rb-btn rb-btn--primary',

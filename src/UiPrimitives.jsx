@@ -27,7 +27,7 @@ export function MenuItem({ icon, label, variant = MENU_ITEM_VARIANT.DEFAULT, che
       onClick={onClick}
       aria-pressed={checked == null ? undefined : checked}
     >
-      <span className="rb-menu-item__icon">{icon}</span>
+      {icon != null && <span className="rb-menu-item__icon">{icon}</span>}
       <span className="rb-menu-item__label">{label}</span>
       {checked && checkIcon}
     </button>
