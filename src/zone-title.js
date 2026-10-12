@@ -1,16 +1,21 @@
-// Shared geometry also supplies theme tokens so CSS and board calculations agree.
-export const ZONE_TITLE_DEFAULT_FONT_PX = 24;
-export const ZONE_TITLE_LINE_HEIGHT_RATIO = 1.25;
-export const ZONE_CHIP_PADDING_VERTICAL_EM = 0.375;
-export const ZONE_CHIP_PADDING_HORIZONTAL_EM = 0.875;
-export const ZONE_TITLE_BODY_GAP_EM = 0.5;
+// Screen geometry shared by theme, browser and relay vote finalization.
+export const ZONE_TITLE_DEFAULT_FONT_PX = 16;
+export const ZONE_COUNT_FONT_PX = 11;
+export const ZONE_TITLE_LINE_HEIGHT_RATIO = 1.35;
+export const ZONE_CHIP_PADDING_VERTICAL_PX = 6;
+export const ZONE_CHIP_PADDING_HORIZONTAL_PX = 14;
+export const ZONE_HEADER_INSET_PX = 14;
+export const ZONE_HEADER_GAP_PX = 8;
+export const ZONE_HEADER_ICONS_BREAKPOINT_PX = 180;
+export const ZONE_HEADER_Z_INDEX = 4; // Above intra-card badge/medal layers (2/3).
 const CHIP_VERTICAL_SIDES = 2;
 
 export function zoneTitleFontSize(item) {
   return item.fontSize || ZONE_TITLE_DEFAULT_FONT_PX;
 }
 
-export function zoneTitleHeight(item) {
-  return zoneTitleFontSize(item) * (ZONE_TITLE_LINE_HEIGHT_RATIO
-    + CHIP_VERTICAL_SIDES * ZONE_CHIP_PADDING_VERTICAL_EM + ZONE_TITLE_BODY_GAP_EM);
+export function zoneHeaderClearancePx(zone) {
+  const lineFontPx = Math.max(zoneTitleFontSize(zone), ZONE_COUNT_FONT_PX);
+  return ZONE_HEADER_INSET_PX + lineFontPx * ZONE_TITLE_LINE_HEIGHT_RATIO
+    + CHIP_VERTICAL_SIDES * ZONE_CHIP_PADDING_VERTICAL_PX + ZONE_HEADER_GAP_PX;
 }

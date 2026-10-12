@@ -222,30 +222,39 @@
 
 .rb-zone {
   position: absolute;
-  background: rgba(var(--rb-zone-rgb), var(--zone-fill-alpha));
-  border: var(--rb-zone-border-w) dashed rgba(var(--rb-zone-rgb), var(--zone-border-alpha));
+  border: var(--rb-zone-border-w) solid transparent;
   border-radius: var(--radius-zone);
   box-sizing: border-box;
   outline-offset: 6px;
   pointer-events: none;
-  animation: rb-appear 0.28s ease-out;
 }
 
-/* The whole transparent row remains the drag handle above the body. */
+/* Only the chip and buttons receive input; transparent space passes through. */
 .rb-zone__title {
   position: absolute;
-  left: calc(-1 * var(--rb-zone-border-w));
-  right: calc(-1 * var(--rb-zone-border-w));
+  left: calc(var(--zone-header-inset) / var(--rb-zoom) - var(--rb-zone-border-w));
+  top: calc(var(--zone-header-inset) / var(--rb-zoom) - var(--rb-zone-border-w));
+  width: max(0px, calc(var(--rb-zone-width) * var(--rb-zoom) - 2 * var(--zone-header-inset)));
+  transform: scale(calc(1 / var(--rb-zoom)));
+  transform-origin: top left;
+  z-index: var(--z-zone-header);
+  container-type: inline-size;
+  overflow-x: clip;
+  container-name: rb-zone-header;
+  font-size: var(--zone-title-font-size);
   background: transparent;
   display: flex;
-  align-items: flex-end;
-  padding: var(--zone-header-padding);
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--zone-chip-gap);
   box-sizing: border-box;
   user-select: none;
-  pointer-events: auto;
+  pointer-events: none;
 }
 
 .rb-zone__chip {
+  pointer-events: auto;
+  overflow: hidden;
   display: flex;
   align-items: center;
   flex-shrink: 1;
@@ -305,8 +314,48 @@
 
 .rb-zone__surface {
   position: absolute;
-  inset: 0;
+  inset: calc(-1 * var(--rb-zone-border-w));
   pointer-events: none;
+  background: rgba(var(--rb-zone-rgb), var(--zone-fill-alpha));
+  border: var(--rb-zone-border-w) dashed rgba(var(--rb-zone-rgb), var(--zone-border-alpha));
+  border-radius: inherit;
+  box-sizing: border-box;
+  animation: rb-appear 0.28s ease-out;
+}
+
+.rb-zone__actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--zone-icon-gap);
+}
+
+.rb-zone__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--zone-icon-button-size);
+  height: var(--zone-icon-button-size);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-zone-icon);
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.rb-zone__icon svg {
+  width: var(--zone-icon-size);
+  height: var(--zone-icon-size);
+}
+
+.rb-zone__icon:hover {
+  background: var(--zone-icon-hover-bg);
+}
+
+/* ZONE_HEADER_ICONS_BREAKPOINT_PX; paired contract checks zone-title.js. */
+@container rb-zone-header (max-width: 180px) {
+  .rb-zone__actions { display: none; }
 }
 
 .rb-sticky--selected,

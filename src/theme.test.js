@@ -113,9 +113,13 @@ test('every component-local board CSS variable has an inline producer', () => {
   const supplied = {
     ...stickyCardVars(PALETTE[0]), ...zoneCardVars(PALETTE[0]), ...medalLook(1),
   };
+  const componentSource = ['../RetroBoard.jsx', './ZoneCard.jsx']
+    .map((path) => readFileSync(new URL(path, import.meta.url), 'utf8')).join('\n');
+  const inlineNames = new Set([...componentSource.matchAll(/['"](--rb-[\w-]+)['"]\s*:/g)]
+    .map((match) => match[1]));
   for (const [, name] of css.matchAll(TOKEN_REFERENCE_PATTERN)) {
     if (name.startsWith(COMPONENT_LOCAL_TOKEN_PREFIX)) {
-      assert.ok(Object.hasOwn(supplied, name), `Missing inline producer for ${name}`);
+      assert.ok(Object.hasOwn(supplied, name) || inlineNames.has(name), `Missing inline producer for ${name}`);
     }
   }
 });
@@ -156,13 +160,14 @@ test('minimap grid and viewport highlight tokens resolve in both modes', () => {
   assert.notEqual(TOKENS.light['--minimap-viewport-highlight'], TOKENS.dark['--minimap-viewport-highlight']);
 });
 
-test('zone chip dimensions scale with font size in both themes', () => {
+test('zone chip keeps design screen dimensions in both themes', () => {
   for (const tokens of Object.values(TOKENS)) {
-    assert.equal(tokens['--zone-header-padding'], '0 0.875em 0.5em');
-    assert.equal(tokens['--zone-chip-padding'], '0.375em 0.875em');
-    assert.equal(tokens['--zone-chip-gap'], '0.5em');
-    assert.equal(tokens['--zone-title-line-height'], '1.25');
-    assert.equal(tokens['--zone-count-font-size'], '0.6875em');
+    assert.equal(tokens['--zone-header-inset'], '14px');
+    assert.equal(tokens['--zone-title-font-size'], '16px');
+    assert.equal(tokens['--zone-chip-padding'], '6px 14px');
+    assert.equal(tokens['--zone-chip-gap'], '8px');
+    assert.equal(tokens['--zone-title-line-height'], '1.35');
+    assert.equal(tokens['--zone-count-font-size'], '11px');
     assert.equal(tokens['--zone-lock-size'], '0.8125em');
   }
 });

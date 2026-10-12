@@ -1,10 +1,11 @@
+import { zoneHeaderClearancePx } from './zone-title.js';
+
 // Deterministic finalization plan shared by the browser and the relay. The
 // relay runs it when a deadline passes even if the room creator is offline.
 const STICKY_W = 200;
 const STICKY_H = 180;
 const TEXT_W = 400;
 const TEXT_H = 80;
-const ZONE_TITLE_H = 40;
 const GAP = 24;
 const PAD = 16;
 
@@ -84,7 +85,9 @@ export const planVoteFinalization = (items, votesByItem, zoneId, atTime) => {
     const rowH = Math.max(...children.map((child) => child.h || STICKY_H));
     const cols = Math.max(1, Math.floor((zone.w - PAD * 2 + GAP) / (colW + GAP)));
     const rowsNeeded = Math.ceil(children.length / cols);
-    const availH = Math.max(0, zone.h - ZONE_TITLE_H - PAD * 2);
+    // Short zones keep overflowing: do not shrink cards or reduce header clearance.
+    const headerClearancePx = zoneHeaderClearancePx(zone);
+    const availH = Math.max(0, zone.h - headerClearancePx - PAD * 2);
     let rowStep = rowH + GAP;
     if (rowsNeeded > 1) rowStep = Math.min(rowStep, Math.max(1, (availH - rowH) / (rowsNeeded - 1)));
     children.forEach((sticky, index) => {
@@ -94,7 +97,7 @@ export const planVoteFinalization = (items, votesByItem, zoneId, atTime) => {
         id: sticky.id,
         patch: {
           x: zone.x + PAD + col * (colW + GAP),
-          y: zone.y + ZONE_TITLE_H + PAD + row * rowStep,
+          y: zone.y + headerClearancePx + PAD + row * rowStep,
           zIndex: nextZIndex + children.length - index - 1,
         },
       });

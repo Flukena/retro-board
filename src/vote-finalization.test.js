@@ -28,3 +28,15 @@ test('another active nested session is not sorted by its ancestor', () => {
   const plan = planVoteFinalization(items, new Map(), 'root', 600);
   assert.deepEqual(plan.entries.map((entry) => entry.id), ['root']);
 });
+
+test('finalized rows clear default and explicit titles; short zones retain overflow', () => {
+  for (const [fontSize, height] of [[16, 600], [96, 600], [96, 40]]) {
+    const zone = { id: 'zone', type: 'zone', x: 0, y: 10, w: 400, h: height, fontSize, voteTimer: { endsAt: 1 } };
+    const note = { id: 'note', type: 'sticky', x: 0, y: 10, w: 20, h: 20, parentZoneId: 'zone' };
+    const plan = planVoteFinalization([zone, note], new Map(), 'zone', 1);
+    const row = plan.entries.find((entry) => entry.id === 'note').patch;
+    assert.ok(row.y >= zone.y + 14 + 12 + fontSize * 1.35 + 8);
+    if (height === 40) assert.ok(row.y > zone.y + zone.h);
+    else assert.ok(row.y + note.h <= zone.y + zone.h);
+  }
+});

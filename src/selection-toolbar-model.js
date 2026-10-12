@@ -1,5 +1,5 @@
 import { toolbarAnchorY, SELECTION_TOOLBAR_GAP_PX } from './chrome-layout.js';
-import { zoneTitleFontSize, zoneTitleHeight } from './zone-title.js';
+import { zoneTitleFontSize } from './zone-title.js';
 
 const DEFAULT_STICKY_WIDTH_PX = 200;
 const DEFAULT_IMAGE_WIDTH_PX = 200;
@@ -12,10 +12,8 @@ const FONT_SIZE_DEFAULT_PX = Object.freeze({ text: 40, sticky: 15 });
 
 export function selectionToolbarAnchor(item, viewport, stackHeightPx) {
   let offsetX = TEXT_ANCHOR_OFFSET_PX;
-  let offsetY = 0;
   if (item.type === 'zone') {
     offsetX = item.w * viewport.zoom / CENTRE_DIVISOR;
-    offsetY = zoneTitleHeight(item) * viewport.zoom;
   } else if (item.type === 'sticky' || item.type === 'image') {
     const defaultWidth = item.type === 'sticky' ? DEFAULT_STICKY_WIDTH_PX : DEFAULT_IMAGE_WIDTH_PX;
     offsetX = (item.w || defaultWidth) * viewport.zoom / CENTRE_DIVISOR;
@@ -23,7 +21,7 @@ export function selectionToolbarAnchor(item, viewport, stackHeightPx) {
   return {
     x: item.x * viewport.zoom + viewport.x + offsetX,
     y: toolbarAnchorY(
-      item.y * viewport.zoom + viewport.y - offsetY - SELECTION_TOOLBAR_GAP_PX, stackHeightPx,
+      item.y * viewport.zoom + viewport.y - SELECTION_TOOLBAR_GAP_PX, stackHeightPx,
     ),
   };
 }

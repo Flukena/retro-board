@@ -45,7 +45,8 @@ import { templateRows, followBannerModel } from './src/chrome-model.js';
 import { SelectionToolbar, GroupSelectionToolbar } from './src/SelectionToolbar.jsx';
 import { selectionToolbarAnchor, groupSelectionToolbarAnchor } from './src/selection-toolbar-model.js';
 import { ZoneCard } from './src/ZoneCard.jsx';
-import { zoneTitleHeight } from './src/zone-title.js';
+import { effectiveRevealed, zoneEffectiveRevealed, zoneGroupIds, isNestedIn } from './src/zone-actions.js';
+import { useZoneHeaderActions } from './src/useZoneHeaderActions.js';
 import { Toast } from './src/Toast.jsx';
 import { TopBar } from './src/TopBar.jsx';
 import { adminPillModel, playerRows, shareLinkModel } from './src/topbar-model.js';
@@ -485,36 +486,6 @@ const memMerge = (obj, patch) => {
   return out;
 };
 
-const isNestedIn = (z, ancestor, allItems) => {
-  let current = z;
-  const visited = new Set();
-  while (!visited.has(current.id)) {
-    visited.add(current.id);
-    const parent = effectiveOwnerZone(current, allItems);
-    if (!parent) return false;
-    if (parent.id === ancestor.id) return true;
-    current = parent;
-  }
-  return false;
-};
-
-// Ids of every item that moves together with `zone` for drag/z-order: the zone
-// itself, any persistently nested zone, and any sticky/image/text owned by the
-// root zone or one of those nested zones.
-const zoneGroupIds = (zone, allItems) => {
-  const ids = new Set([zone.id]);
-  const allZones = allItems.filter((i) => i.type === 'zone');
-  allZones.forEach((z) => {
-    if (z.id !== zone.id && isNestedIn(z, zone, allItems)) ids.add(z.id);
-  });
-  allItems.forEach((it) => {
-    if (it.type === 'zone' || ids.has(it.id)) return;
-    const owner = effectiveOwnerZone(it, allItems);
-    if (owner && ids.has(owner.id)) ids.add(it.id);
-  });
-  return ids;
-};
-
 // Nearest zone — the item's own owner, or the nearest ancestor via the
 // ownership chain — that currently has an active voteTimer. Mutual exclusion
 // at start time guarantees at most one zone in a chain is active at once.
@@ -547,27 +518,8 @@ const zoneHasActiveGovernor = (zone, allItems) => {
   return false;
 };
 
-// A card's owner zone can hide/reveal its own private cards independently of
-// the board-wide (now-legacy) allRevealed flag. A zone that has never had its
-// own toggle clicked (revealed == null) inherits from the nearest ancestor
-// zone that HAS an explicit value instead of jumping straight to the board
-// default — so hiding a wrapper zone also hides a nested zone that hasn't
-// set its own override, while a nested zone with its own explicit setting
-// still keeps it (mirrors the ownership-chain walk activeVoteZone uses).
-const effectiveRevealed = (item, allItems, boardAllRevealed) => {
-  let zone = effectiveOwnerZone(item, allItems);
-  const visited = new Set();
-  while (zone && !visited.has(zone.id)) {
-    if (zone.revealed != null) return zone.revealed;
-    visited.add(zone.id);
-    zone = effectiveOwnerZone(zone, allItems);
-  }
-  return boardAllRevealed;
-};
-
 // One privacy predicate for every non-owner view (card chrome, modal, copy,
-// and exports). Keeping it beside effectiveRevealed prevents those surfaces
-// from drifting when nested-zone inheritance changes.
+// and exports), using shared nested-zone reveal inheritance.
 const isStickyHiddenForUser = (item, allItems, boardAllRevealed, userId) => (
   item?.type === 'sticky'
   && item.private
@@ -1388,13 +1340,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     return sortedItems.filter((it) => {
       const iw = it.w || (it.type === 'sticky' ? STICKY_W : it.type === 'text' ? TEXT_W : 200);
       const ih = it.h || (it.type === 'sticky' ? STICKY_H : it.type === 'text' ? TEXT_H : 200);
-      // Zones host a title bar that hangs above their box — extend the AABB
-      // upward by a conservative title height so the bar isn't clipped first.
-      const topPad = it.type === 'zone' ? zoneTitleHeight(it) : 0;
       return it.x + iw >= wx0 - margin
         && it.x <= wx1 + margin
         && it.y + ih >= wy0 - margin
-        && it.y - topPad <= wy1 + margin;
+        && it.y <= wy1 + margin;
     });
   }, [sortedItems, cullViewport, viewportSize]);
 
@@ -2443,6 +2392,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const applyViewportToDom = useCallback((v) => {
     revealMinimap();
     if (worldRef.current) {
+      worldRef.current.style.setProperty('--rb-zoom', String(v.zoom));
       worldRef.current.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.zoom})`;
     }
     if (gridRef.current) {
@@ -4409,6 +4359,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
      Rendering helpers
      ============================================================ */
 
+  const zoneHeaderActions = useZoneHeaderActions({ isAdmin, boardRef, setSelectedId,
+    updateFocusedText, setTimerSetupOpen, adminStopTimer, updateItem });
   const renderZone = (it) => (
     <ZoneCard
       key={it.id}
@@ -4417,6 +4369,12 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       isEditingTitle={focusedTextId === `${it.id}:title`}
       TextEditor={CollaborativeTextEditor}
       childCount={zoneChildCount.get(it.id) || 0}
+      isAdmin={isAdmin}
+      revealed={zoneEffectiveRevealed(it, board.items, board.allRevealed)}
+      hasVoteTimer={!!it.voteTimer}
+      onToggleReveal={zoneHeaderActions.toggleReveal}
+      onVote={zoneHeaderActions.vote}
+      onOptions={zoneHeaderActions.options}
       lang={lang}
       onStartZoneDrag={startZoneDrag}
       onBeginFocus={beginFocus}
@@ -4544,7 +4502,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       denseRender,
       compactRender,
       lang,
-      zoneChildCount,
+      zoneChildCount, isAdmin, board.items, board.allRevealed, zoneHeaderActions,
       startItemDrag,
       startZoneDrag,
       beginFocus,
@@ -4584,7 +4542,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     // that effective state; toggling the raw undefined value would write true
     // again when an inherited-visible zone is clicked, making "hide" a no-op.
     const selectedZoneRevealed = selectedItem.type === 'zone'
-      ? (selectedItem.revealed ?? effectiveRevealed(selectedItem, board.items, board.allRevealed))
+      ? zoneEffectiveRevealed(selectedItem, board.items, board.allRevealed)
       : false;
     const nestedZoneCount = selectedItem.type === 'zone'
       ? [...zoneGroupIds(selectedItem, board.items)].filter((id) => (
@@ -4613,11 +4571,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         onTogglePrivate={() => can && updateItem(selectedItem.id, { private: !selectedItem.private })}
         onToggleLock={() => can && updateItem(selectedItem.id, { locked: !selectedItem.locked })}
         onExportCsv={() => exportZoneCsv(selectedItem)}
-        onToggleReveal={() => updateItem(selectedItem.id, { revealed: !selectedZoneRevealed })}
-        onVoteButton={() => {
-          if (selectedItem.voteTimer) adminStopTimer(selectedItem.id);
-          else setTimerSetupOpen((open) => !open);
-        }}
+        onToggleReveal={() => zoneHeaderActions.toggleReveal(selectedItem.id)}
+        onVoteButton={() => zoneHeaderActions.vote(selectedItem.id)}
         onTimerSetupOpenChange={setTimerSetupOpen}
         onStartTimer={(m, v, h, s) => adminStartTimer(selectedItem.id, m, v, h, s)}
         onBringToFront={() => can && bringToFront(new Set([selectedItem.id]))}
@@ -4947,7 +4902,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           ref={worldRef}
           style={{
             position: 'absolute', top: 0, left: 0,
-            transformOrigin: '0 0',
+            transformOrigin: '0 0', '--rb-zoom': viewportRef.current.zoom,
           }}
         >
           {/* A fixed-size, invisible world-space ruler. Its rendered rect lets
@@ -5007,9 +4962,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
             const zoom = Math.max(viewport.zoom, 0.01);
             const width = item.w || (item.type === 'sticky' ? STICKY_W : item.type === 'text' ? TEXT_W : 200);
             const height = item.h || (item.type === 'sticky' ? STICKY_H : item.type === 'text' ? TEXT_H : 200);
-            const titleHeight = item.type === 'zone' ? zoneTitleHeight(item) : 0;
-            const boxTop = item.y - titleHeight;
-            const boxHeight = height + titleHeight;
             const editorHue = hueFromId(editor.userId);
             const color = playerAccentColor(editorHue);
             const glow = playerAccentColor(editorHue, 0.18);
@@ -5021,8 +4973,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                 <div
                   aria-hidden="true"
                   style={{
-                    position: 'absolute', left: item.x, top: boxTop,
-                    width, height: boxHeight, boxSizing: 'border-box',
+                    position: 'absolute', left: item.x, top: item.y,
+                    width, height, boxSizing: 'border-box',
                     border: `${2 / zoom}px solid ${color}`,
                     borderRadius: `${7 / zoom}px`,
                     boxShadow: `0 0 0 ${3 / zoom}px ${glow}`,
@@ -5034,7 +4986,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                   aria-label={label}
                   style={{
                     position: 'absolute', left: item.x,
-                    top: boxTop + boxHeight + (8 / zoom),
+                    top: item.y + height + (8 / zoom),
                     transform: `scale(${1 / zoom})`, transformOrigin: 'top left',
                     display: 'inline-flex', alignItems: 'center', gap: 7,
                     maxWidth: 240, padding: '5px 9px 5px 7px',

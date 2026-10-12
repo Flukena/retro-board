@@ -10,6 +10,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
+import { planVoteFinalization } from './src/vote-finalization.js';
+import { zoneHeaderClearancePx } from './src/zone-title.js';
 import { createMotionPublisher, sendOnlyLocalAwareness } from './src/awareness-transport.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -855,13 +857,16 @@ test('finalizes an expired vote when the room reopens without an admin', async (
   const doc = await persisted.getYDoc(docName);
   const items = doc.getMap('items');
   const zone = new Y.Map();
-  Object.entries({ type: 'zone', x: 0, y: 0, w: 800, h: 600, voteTimer: { endsAt: Date.now() - 1000 } })
+  Object.entries({ type: 'zone', x: 0, y: 0, w: 800, h: 600, fontSize: 48, voteTimer: { endsAt: Date.now() - 1000 } })
     .forEach(([key, value]) => zone.set(key, value));
   const sticky = new Y.Map();
   Object.entries({ type: 'sticky', x: 80, y: 120, w: 200, h: 180, parentZoneId: 'zone' })
     .forEach(([key, value]) => sticky.set(key, value));
   items.set('zone', zone);
   items.set('note', sticky);
+  const browserItems = [{ id: 'zone', ...zone.toJSON() }, { id: 'note', ...sticky.toJSON() }];
+  const browserPlan = planVoteFinalization(browserItems, new Map([['note', new Set(['alice'])]]), 'zone', Date.now());
+  const browserPosition = browserPlan.entries.find((entry) => entry.id === 'note').patch;
   doc.getMap('kv').set('s||vote:note:alice', 1);
   await persisted.storeUpdate(docName, Y.encodeStateAsUpdate(doc));
   doc.destroy();
@@ -877,7 +882,10 @@ test('finalizes an expired vote when the room reopens without an admin', async (
   const result = await saved.getYDoc(docName);
   assert.equal(result.getMap('items').get('zone').get('voteTimer'), null);
   assert.ok(result.getMap('items').get('zone').get('lastResultsAt'));
-  assert.notEqual(result.getMap('items').get('note').get('x'), 80);
+  const savedNote = result.getMap('items').get('note');
+  assert.equal(savedNote.get('x'), browserPosition.x);
+  assert.equal(savedNote.get('y'), browserPosition.y);
+  assert.ok(savedNote.get('y') >= zoneHeaderClearancePx(browserItems[0]));
   result.destroy();
   await saved.destroy();
 });
