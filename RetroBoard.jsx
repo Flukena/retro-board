@@ -50,7 +50,9 @@ import { hueFromId, playerAccentColor } from './src/player-colors.js';
 import { t, useLang } from './src/i18n.js';
 import { getActiveRoomSession, roomFetch } from './src/room-session.js';
 import { useTheme, nextThemePref } from './src/theme.js';
-import { PALETTE, FONT_COLORS, STICKY_AUTO_TEXT, STICKY_AUTO_TEXT_FAINT } from './src/palette.js';
+import { PALETTE, FONT_COLORS, STICKY_AUTO_TEXT } from './src/palette.js';
+import { stickyClassName, stickyCardVars, zoneCardVars, medalLook } from './src/card-look.js';
+import './src/board-cards.css';
 import {
   MINIMAP_BOTTOM_PX, TOAST_BOTTOM_PX,
   SELECTION_TOOLBAR_GAP_PX, GRID_PITCH_PX, toolbarAnchorY, topStackHeightPx, Z,
@@ -644,8 +646,6 @@ const csvEsc = (v) => {
    and selection changes no longer re-render every other card.
    ============================================================ */
 
-const MEDAL_BY_RANK = { 1: '🥇', 2: '🥈', 3: '🥉' };
-
 const runtimeRelayBaseUrl = () => {
   if (typeof window === 'undefined') return null;
   return window.location.protocol === 'https:'
@@ -778,9 +778,6 @@ const CollaborativeTextEditor = ({
   );
 };
 
-const CARD_BADGE_Z = 2;
-const CARD_MEDAL_Z = 3;
-
 const StickyCard = React.memo(function StickyCard({
   item, selected, remoteSelected, remoteSelectionHue, isEditing, isOwner, allRevealed, dense, compact,
   voted, voteCount, voteFlash, voteRank, votingAllowedNow, showVoteCount, inZone,
@@ -833,22 +830,26 @@ const StickyCard = React.memo(function StickyCard({
   if (overview) {
     return (
       <div
-        className="rb-card-overview"
+        className="rb-card-overview rb-card-overview--shadow-flat"
         onMouseDown={e => onStartDrag(e, it)}
         onDoubleClick={e => { e.stopPropagation(); if (!hideContent) onBeginFocus(it, 'text'); }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         style={{
-          position: 'absolute', left: it.x, top: it.y, width: w, height: h,
-          background: c.bg, border: `1.5px solid ${c.border}`, borderRadius: 4,
-          padding: 12, boxSizing: 'border-box', contain: 'layout paint style',
-          transform: `rotate(${it.rotation || 0}deg)`, cursor: 'grab',
-          color: it.fontColor || STICKY_AUTO_TEXT, fontSize: it.fontSize || 15,
-          fontFamily: 'var(--font-ui)',
-          overflow: 'hidden', userSelect: 'none',
+          left: it.x,
+          top: it.y,
+          width: w,
+          height: h,
+          ...stickyCardVars(c),
+          transform: `rotate(${it.rotation || 0}deg)`,
+          color: it.fontColor || STICKY_AUTO_TEXT,
+          fontSize: it.fontSize || 15,
         }}
       >
-        <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: h - 48, overflow: 'hidden' }}>
+        <div
+          className="rb-card-overview__text"
+          style={{ maxHeight: h - 48 }}
+        >
           {hideContent ? t('sticky.hidden') : visibleText?.slice(0, 200)}
         </div>
         {showVoteCount && !hideContent && (voteCount > 0 || votingAllowedNow) && (
@@ -858,9 +859,9 @@ const StickyCard = React.memo(function StickyCard({
             onClick={e => { e.stopPropagation(); onToggleVote(it); }}
             disabled={!votingAllowedNow && !voted}
             aria-label={voted ? t('vote.tooltip.unvote') : t('vote.tooltip.vote')}
-            style={{ position: 'absolute', right: 8, bottom: 6, border: 'none', borderRadius: 12,
-              background: voted ? c.border : 'rgba(0,0,0,0.06)', color: voted ? '#fff' : '#374151',
-              padding: '3px 10px', fontSize: 12, cursor: 'pointer' }}
+            className={voted
+              ? 'rb-card-overview__vote rb-card-overview__vote--voted'
+              : 'rb-card-overview__vote'}
           >{voteCount}</button>
         )}
       </div>
@@ -868,71 +869,35 @@ const StickyCard = React.memo(function StickyCard({
   }
   return (
     <div
-      className={remoteSelected ? 'rb-remote-selected-card' : undefined}
+      className={stickyClassName({ selected, remoteSelected, winner: top3, dense })}
       onMouseDown={(e) => { if (!isEditing) onStartDrag(e, it); }}
       onDoubleClick={(e) => { e.stopPropagation(); if (!hideContent) onBeginFocus(it, 'text'); }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-        position: 'absolute',
         left: it.x,
         top: it.y,
         width: w,
         height: h,
-        background: c.bg,
-        border: `1.5px solid ${c.border}`,
-        borderRadius: 4,
-        padding: 12,
-        boxSizing: 'border-box',
+        ...stickyCardVars(c),
         transform: `rotate(${rot}deg)`,
         ['--rb-rot']: `${rot}deg`,
         ['--rb-selector-hue']: remoteSelectionHue,
-        transition: 'transform 0.18s ease, box-shadow 0.18s ease',
         animation: remoteSelected
           ? undefined
           : top3
-            ? (dense ? 'rb-glow 1.6s ease-in-out infinite' : 'rb-glow 1.6s ease-in-out infinite, rb-appear-rot 0.28s ease-out')
+            ? (dense
+              ? 'rb-glow 1.6s ease-in-out infinite'
+              : 'rb-glow 1.6s ease-in-out infinite, rb-appear-rot 0.28s ease-out')
             : (dense ? undefined : 'rb-appear-rot 0.28s ease-out'),
-        // Drop the blurred shadow in dense mode — the 1.5px border still
-        // separates cards, and overlapping blur is the main cluster paint cost.
-        // The top3 glow is kept (only ≤3 cards, meaningful highlight);
-        // the medal badge below adds the specific rank on top of it.
-        boxShadow: remoteSelected
-          ? undefined
-          : top3
-          ? `0 0 0 3px #fbbf24, 0 8px 24px rgba(251,191,36,0.6), 0 6px 14px rgba(0,0,0,0.12)`
-          : (dense ? 'none' : '0 6px 14px rgba(0,0,0,0.12)'),
-        cursor: 'grab',
-        // Sarabun (Thai) leads so a Thai cluster's consonant + สระ + วรรณยุกต์
-        // are shaped by one font — otherwise marks split to a fallback font and
-        // detach. Sarabun also covers Latin, so mixed text stays consistent.
-        fontFamily: 'var(--font-ui)',
         fontSize: it.fontSize || 15,
-        lineHeight: 1.5,
-        color: 'var(--text)',
-        userSelect: 'none',
-        outline: selected ? '2px solid #2563eb' : 'none',
-        outlineOffset: 6,
-        display: 'flex',
-        flexDirection: 'column',
-        // Keep the card's own content clipped in its inner regions, but let
-        // rank decorations sit across the edge of the physical card.
-        overflow: 'visible',
-        // Scope paint/layout to this sticky so a hover/vote on one card
-        // doesn't trigger repaints of neighbours sharing the same layer.
-        // Paint containment clips descendants at the card edge even when
-        // overflow is visible. Drop only that containment for winners so the
-        // oversized medal can deliberately protrude beyond the card.
+        // The rank badge protrudes 13px; remote auras also need unclipped paint.
         contain: top3 || remoteSelected ? 'layout style' : 'layout paint style',
       }}
     >
-      <div style={{
-        position: 'absolute', top: 6, right: 6, zIndex: CARD_BADGE_Z,
-        width: 'calc(100% - 12px)', display: 'flex', alignItems: 'center',
-        justifyContent: 'flex-end', gap: 4, pointerEvents: 'none',
-      }}>
+      <div className="rb-sticky__badges">
         {it.private && !allRevealed && isOwner && (
-          <Lock size={14} color={c.border} style={{ flexShrink: 0 }} />
+          <Lock size={14} className="rb-sticky__lock" />
         )}
         {showCommentEntry && (
           <button
@@ -942,39 +907,30 @@ const StickyCard = React.memo(function StickyCard({
             disabled={hideContent}
             title={t('comments.tooltip')}
             aria-label={t('comments.tooltip')}
+            className="rb-sticky__comment-chip"
             style={{
-              pointerEvents: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5,
-              minWidth: 28, width: showCommentPreview ? '72%' : 'auto',
-              maxWidth: showCommentPreview ? '72%' : (commentCount > 0 ? 54 : 40), height: 26,
+              width: showCommentPreview ? '72%' : 'auto',
+              maxWidth: showCommentPreview ? '72%' : (commentCount > 0 ? 54 : 40),
               padding: showCommentPreview ? '3px 6px' : '3px 7px',
-              background: 'rgba(255,255,255,0.78)', color: '#374151',
-              border: '1px solid rgba(0,0,0,0.08)', borderRadius: 8,
-              boxShadow: '0 2px 6px rgba(0,0,0,0.08)',
-              fontFamily: 'inherit', fontSize: 11, fontWeight: 600,
               cursor: hideContent ? 'not-allowed' : 'pointer',
               opacity: hideContent ? 0.45 : (commentCount > 0 ? 0.92 : 0.65),
-              overflow: 'hidden',
             }}
           >
-            <MessageSquare size={12} style={{ flexShrink: 0 }} />
+            <MessageSquare size={12} className="rb-sticky__comment-icon" />
             {showCommentPreview && (
-              <span style={{ minWidth: 0, flex: 1, overflow: 'hidden', whiteSpace: 'nowrap' }}>
+              <span className="rb-sticky__comment-preview">
                 <span
                   key={`${commentPreviewIndex}:${commentPreview}`}
-                  className={commentPreviews.length > 1 ? 'rb-comment-slide' : undefined}
-                  style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                  className={commentPreviews.length > 1
+                    ? 'rb-sticky__comment-slide rb-sticky__comment-preview-slide'
+                    : 'rb-sticky__comment-preview-slide'}
                 >
                   {commentPreview}
                 </span>
               </span>
             )}
             {commentCount > 0 && (
-              <span style={{
-                flexShrink: 0, minWidth: 16, height: 16, padding: '0 4px',
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                borderRadius: 999, background: c.border, color: '#fff',
-                fontSize: 10, lineHeight: 1,
-              }}>
+              <span className="rb-sticky__comment-count">
                 {commentCount}
               </span>
             )}
@@ -985,28 +941,19 @@ const StickyCard = React.memo(function StickyCard({
       {top3 && (
         <div
           title={t('vote.rank', { n: voteRank })}
-          style={{
-            position: 'absolute', top: -24, left: -24, zIndex: CARD_MEDAL_Z,
-            width: 64, height: 64, display: 'grid', placeItems: 'center',
-            fontSize: 56,
-            filter: 'drop-shadow(0 4px 7px rgba(0,0,0,0.38))',
-            lineHeight: 1, pointerEvents: 'none',
-          }}
+          role="img"
+          aria-label={t('vote.rank', { n: voteRank })}
+          className="rb-winner-medal"
+          style={medalLook(voteRank)}
         >
-          {MEDAL_BY_RANK[voteRank]}
+          {voteRank}
         </div>
       )}
 
       <div
         ref={contentRef}
+        className="rb-sticky__content"
         style={{
-          flex: 1,
-          overflow: 'hidden',
-          position: 'relative',
-          whiteSpace: 'pre-wrap',
-          overflowWrap: 'anywhere',
-          // Hidden private text is omitted below, not visually obscured. CSS
-          // blur would leave the secret readable in the DOM/accessibility tree.
           userSelect: hideContent ? 'none' : 'auto',
           color: it.fontColor || STICKY_AUTO_TEXT,
           paddingTop: showCommentPreview ? 24 : (top3 ? 16 : 0),
@@ -1029,84 +976,61 @@ const StickyCard = React.memo(function StickyCard({
                 onBlur={() => onTextBlur(it.id)}
                 onMouseDown={(e) => e.stopPropagation()}
                 placeholder={t('sticky.placeholder')}
+                className="rb-sticky__editor"
                 style={{
-                  width: '100%', height: '100%',
-                  background: 'transparent', border: 'none', outline: 'none',
-                  resize: 'none', fontFamily: 'inherit', fontSize: it.fontSize || 15,
-                  lineHeight: 1.5, color: it.fontColor || STICKY_AUTO_TEXT,
-                  boxSizing: 'border-box', overflowY: 'auto', overflowWrap: 'anywhere',
+                  fontSize: it.fontSize || 15,
+                  color: it.fontColor || STICKY_AUTO_TEXT,
                 }}
               />
             );
           }
           if (visibleText) return visibleText;
           return isOwner
-            ? <span style={{ color: STICKY_AUTO_TEXT_FAINT, fontStyle: 'italic' }}>{t('sticky.placeholder')}</span>
+            ? (
+              <span className="rb-sticky__placeholder">
+                {t('sticky.placeholder')}
+              </span>
+            )
             : '';
         })()}
         {contentOverflows && (
           <span
             aria-hidden="true"
+            className="rb-sticky__overflow"
             style={{
-              position: 'absolute', right: 0, bottom: 0,
-              width: 44, textAlign: 'right', paddingRight: 2,
-              background: `linear-gradient(90deg, transparent, ${c.bg} 48%)`,
-              color: it.fontColor || STICKY_AUTO_TEXT, fontWeight: 700,
-              pointerEvents: 'none',
+              color: it.fontColor || STICKY_AUTO_TEXT,
             }}
           >…</span>
         )}
       </div>
 
       {hideContent && (
-        <div
-          style={{
-            position: 'absolute',
-            inset: 0,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            pointerEvents: 'none',
-            background: 'rgba(255,255,255,0.35)',
-            fontWeight: 600,
-            color: c.border,
-            gap: 6,
-          }}
-        >
+        <div className="rb-sticky__hidden">
           <Lock size={20} />
-          <span style={{ fontSize: 13 }}>{t('sticky.hidden')}</span>
-          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t('sticky.hiddenBy', { name: it.authorName })}</span>
+          <span className="rb-sticky__hidden-title">{t('sticky.hidden')}</span>
+          <span className="rb-sticky__hidden-author">{t('sticky.hiddenBy', { name: it.authorName })}</span>
         </div>
       )}
 
-      <div
-        style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          marginTop: 4, fontSize: 11, color: 'var(--text-muted)',
-        }}
-      >
-        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 100 }}>
+      <div className="rb-sticky__footer">
+        <span className="rb-sticky__author">
           {it.authorName || 'Anon'}
         </span>
-        <div style={{ position: 'relative' }}>
+        <div className="rb-sticky__vote-wrap">
           <button
             type="button"
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => { e.stopPropagation(); if (!hideContent) onToggleVote(it); }}
             disabled={hideContent || (!votingAllowedNow && !voted)}
+            className={voted
+              ? 'rb-sticky__vote-pill rb-sticky__vote-pill--voted'
+              : 'rb-sticky__vote-pill'}
             style={{
-              display: 'inline-flex', alignItems: 'center',
               gap: votingAllowedNow ? 10 : 4,
-              background: voted ? c.border : 'rgba(0,0,0,0.06)',
-              color: voted ? '#fff' : '#374151',
-              border: 'none', borderRadius: 999,
               padding: votingAllowedNow ? '8px 25px' : '3px 10px',
               fontSize: votingAllowedNow ? 30 : 12,
-              fontWeight: 600,
               cursor: (hideContent || !votingAllowedNow) ? 'not-allowed' : 'pointer',
               opacity: hideContent ? 0.4 : (votingAllowedNow ? 1 : 0.6),
-              transition: 'background 0.15s, color 0.15s, padding 0.2s, font-size 0.2s',
             }}
             title={
               hideContent ? t('sticky.hideContent')
@@ -1119,7 +1043,7 @@ const StickyCard = React.memo(function StickyCard({
             {showVoteCount && (
               <span
                 key={voteCount}
-                style={{ display: 'inline-block', animation: 'rb-bump 0.35s ease', transformOrigin: 'center' }}
+                className="rb-sticky__vote-count"
               >
                 {voteCount}
               </span>
@@ -1128,17 +1052,7 @@ const StickyCard = React.memo(function StickyCard({
           {voteFlash && (
             <span
               key={voteFlash}
-              style={{
-                position: 'absolute',
-                left: '50%',
-                bottom: '110%',
-                pointerEvents: 'none',
-                color: c.border,
-                fontSize: 18,
-                fontWeight: 800,
-                textShadow: '0 1px 2px rgba(0,0,0,0.2)',
-                animation: 'rb-vote-float 0.9s ease-out forwards',
-              }}
+              className="rb-sticky__vote-float"
             >+1
             </span>
           )}
@@ -1160,52 +1074,24 @@ const ZoneCard = React.memo(function ZoneCard({
   const titleH = Math.max(ZONE_TITLE_H, titleFs + 18);
   return (
     <div
+      className={`rb-zone ${selected ? 'rb-zone--selected' : ''}`}
       style={{
-        position: 'absolute',
         left: it.x,
         top: it.y,
         width: it.w,
         height: it.h,
-        background: c.zoneBg,
-        border: `2px solid ${c.border}`,
-        // Square top corners — the title bar's curved top corners cover the
-        // outer shape, and a rounded zone-box top would carve a visible notch
-        // out of the seam where they meet.
-        borderRadius: '0 0 12px 12px',
-        boxSizing: 'border-box',
-        outline: selected ? '2px solid #2563eb' : 'none',
-        outlineOffset: 6,
-        pointerEvents: 'none',
-        animation: 'rb-appear 0.28s ease-out',
+        ...zoneCardVars(c),
       }}
     >
       <div
         onMouseDown={(e) => { if (!isEditingTitle) onStartZoneDrag(e, it); }}
         onDoubleClick={(e) => { e.stopPropagation(); onBeginFocus(it, 'title'); }}
+        className="rb-zone__title"
         style={{
-          position: 'absolute',
-          // Extend 2px beyond the parent's padding edge on each side to cover
-          // the zone's 2px border line — without this offset the title bar
-          // looks inset and leaves a visible step at the corners.
           top: -titleH,
-          left: -2,
-          right: -2,
           height: titleH,
-          background: c.border,
-          color: '#fff',
-          // Outer corner radius matches the zone box (12px) so the rounded
-          // top of the assembly looks like a single continuous shape.
-          borderRadius: '12px 12px 0 0',
-          display: 'flex',
-          alignItems: 'center',
-          padding: '0 14px',
-          gap: 8,
           cursor: isEditingTitle ? 'text' : (it.locked ? 'not-allowed' : 'grab'),
-          fontWeight: 600,
           fontSize: titleFs,
-          userSelect: 'none',
-          boxShadow: '0 -1px 4px rgba(0,0,0,0.08)',
-          pointerEvents: 'auto',
         }}
       >
         {isEditingTitle ? (
@@ -1218,33 +1104,24 @@ const ZoneCard = React.memo(function ZoneCard({
             onKeyDown={(e) => onTextKeyDown(e, { singleLine: true })}
             onBlur={() => onTextBlur(it.id)}
             onMouseDown={(e) => e.stopPropagation()}
+            className="rb-zone__editor"
             style={{
-              flex: 1, background: 'rgba(255,255,255,0.25)',
-              border: 'none', outline: 'none', color: '#fff',
-              fontSize: titleFs, fontWeight: 600,
+              fontSize: titleFs,
             }}
           />
         ) : (
           <>
             {it.locked && <Lock size={13} />}
-            <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            <span className="rb-zone__label">
               {it.title}
             </span>
-            <span
-              style={{
-                background: 'rgba(255,255,255,0.25)',
-                padding: '2px 8px',
-                borderRadius: 999,
-                fontSize: 12,
-                fontWeight: 600,
-              }}
-            >
+            <span className="rb-zone__count">
               {childCount}
             </span>
           </>
         )}
       </div>
-      <div data-surface="1" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} />
+      <div data-surface="1" className="rb-zone__surface" />
     </div>
   );
 });
@@ -5774,7 +5651,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
               0 0 34px 12px hsl(var(--rb-selector-hue) 90% 62% / 0.28);
           }
         }
-        @keyframes rb-vote-float {
+        @keyframes rb-sticky__vote-float {
           0%   { opacity: 0; transform: translate(-50%, 0) scale(0.6); }
           20%  { opacity: 1; transform: translate(-50%, -10px) scale(1.1); }
           100% { opacity: 0; transform: translate(-50%, -55px) scale(1.1); }
@@ -5788,17 +5665,17 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           100% { opacity: 1; transform: scale(1); }
         }
         @keyframes rb-glow {
-          0%, 100% { box-shadow: 0 0 0 3px rgba(251,191,36,0.7), 0 0 18px rgba(251,191,36,0.6), 0 6px 14px rgba(0,0,0,0.12); }
-          50%      { box-shadow: 0 0 0 3px rgba(251,191,36,1.0), 0 0 28px rgba(251,191,36,1.0), 0 6px 14px rgba(0,0,0,0.12); }
+          0%, 100% { box-shadow: var(--shadow-winner); }
+          50%      { box-shadow: var(--shadow-winner-peak); }
         }
-        @keyframes rb-comment-slide {
+        @keyframes rb-sticky__comment-slide {
           0%   { opacity: 0; transform: translateX(10px); }
           18%  { opacity: 1; transform: translateX(0); }
           82%  { opacity: 1; transform: translateX(0); }
           100% { opacity: 0; transform: translateX(-10px); }
         }
-        .rb-comment-slide {
-          animation: rb-comment-slide ${COMMENT_CAROUSEL_MS}ms ease-in-out both;
+        .rb-sticky__comment-slide {
+          animation: rb-sticky__comment-slide ${COMMENT_CAROUSEL_MS}ms ease-in-out both;
         }
         .rb-editing-dot {
           animation: rb-editing-pulse 1.1s ease-in-out infinite;
@@ -5822,7 +5699,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           }
         }
         @media (prefers-reduced-motion: reduce) {
-          .rb-comment-slide { animation: none !important; }
+          .rb-sticky__comment-slide { animation: none !important; }
           .rb-minimap { transition: none !important; }
           .rb-player-cursor { transition: none !important; }
           .rb-editing-dot { animation: none !important; }

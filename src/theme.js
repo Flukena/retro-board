@@ -30,6 +30,23 @@ export function defineTokens(light, dark) {
 }
 
 const MODE_INDEPENDENT_TOKENS = Object.freeze({
+  '--sticky-ink': '#2b2118',
+  '--sticky-vote-text': '#ffffff',
+  '--sticky-vote-idle-bg': 'rgba(43,33,24,0.08)',
+  '--sticky-vote-idle-text': '#374151',
+  '--sticky-placeholder': '#9ca3af',
+  '--zone-border-alpha': '0.5',
+  '--selection': '#2563eb',
+  '--radius-sticky': '3px',
+  '--radius-zone': '24px',
+  '--zone-title-shadow': '0 2px 0 rgba(0,0,0,0.08)',
+  '--shadow-winner': '0 0 0 3px #fbbf24, 0 16px 22px -12px rgba(194,120,3,0.65)',
+  '--shadow-winner-peak': '0 0 0 3px #fbbf24, 0 16px 22px -12px rgba(194,120,3,0.9)',
+  '--shadow-medal': '0 0 0 2px #fffcf6, 0 4px 10px rgba(0,0,0,0.18)',
+  '--comment-chip-bg': 'rgba(255,255,255,0.65)',
+  '--comment-chip-shadow': '0 2px 6px rgba(0,0,0,0.08)',
+  '--hidden-sticky-bg': 'rgba(255,255,255,0.35)',
+  '--vote-float-shadow': '0 1px 2px rgba(0,0,0,0.2)',
   '--radius-xl': '22px',
   '--radius-icon-tile': '9px',
   '--radius-banner': '18px',
@@ -56,6 +73,9 @@ const LIGHT_RAISED_SHADOW = '0 2px 0 #e2d5bf, 0 12px 24px -14px rgba(110,80,40,0
 const DARK_RAISED_SHADOW = '0 2px 0 #0f0d0a, 0 14px 28px -14px rgba(0,0,0,0.7)';
 
 export const TOKENS = defineTokens({
+    '--zone-fill-alpha': '0.13',
+    '--shadow-sticky': '0 1px 1px rgba(110,80,40,0.12), 0 16px 18px -14px rgba(110,80,40,0.55)',
+    '--shadow-sticky-flat': '0 1px 0 rgba(110,80,40,0.22)',
     '--bg': '#f5efe4',
     '--bg-panel': '#fffcf6',
     '--bg-panel-2': '#f6eee1',
@@ -91,6 +111,9 @@ export const TOKENS = defineTokens({
     '--ok-text': '#166534',
     ...MODE_INDEPENDENT_TOKENS,
   }, {
+    '--zone-fill-alpha': '0.10',
+    '--shadow-sticky': '0 1px 1px rgba(0,0,0,0.4), 0 18px 20px -14px rgba(0,0,0,0.9)',
+    '--shadow-sticky-flat': '0 1px 0 rgba(0,0,0,0.5)',
     '--bg': '#1b1814',
     '--bg-panel': '#26211b',
     '--bg-panel-2': '#312a22',

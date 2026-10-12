@@ -1,0 +1,331 @@
+.rb-sticky,
+.rb-card-overview {
+  position: absolute;
+  background: var(--rb-card-bg);
+  border: none;
+  border-radius: var(--radius-sticky);
+  padding: 12px;
+  box-sizing: border-box;
+  cursor: grab;
+  font-family: var(--font-ui);
+  user-select: none;
+}
+
+.rb-card-overview {
+  contain: layout paint style;
+  overflow: hidden;
+}
+
+.rb-card-overview__text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow: hidden;
+}
+
+.rb-card-overview__vote {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  border-radius: var(--radius-md);
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: var(--font-display);
+}
+
+.rb-sticky {
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+  line-height: 1.5;
+  color: var(--text);
+  outline-offset: 6px;
+  display: flex;
+  flex-direction: column;
+  overflow: visible;
+}
+
+.rb-sticky__badges {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2; /* Intra-card badges sit below the rank medal (3). */
+  width: calc(100% - 12px);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.rb-sticky__lock {
+  color: var(--rb-card-ink);
+}
+
+.rb-sticky__comment-chip {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 28px;
+  height: 26px;
+  background: var(--comment-chip-bg);
+  color: var(--sticky-vote-idle-text);
+  border: none;
+  border-radius: var(--radius-pill);
+  box-shadow: var(--comment-chip-shadow);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  overflow: hidden;
+}
+
+.rb-sticky__lock,
+.rb-sticky__comment-icon {
+  flex-shrink: 0;
+}
+
+.rb-sticky__comment-preview {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.rb-sticky__comment-preview-slide {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rb-sticky__comment-count {
+  flex-shrink: 0;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-pill);
+  background: var(--rb-card-ink);
+  color: var(--sticky-vote-text);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.rb-sticky__content {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.rb-sticky__editor {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: none;
+  font-family: inherit;
+  line-height: 1.5;
+  box-sizing: border-box;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+
+.rb-sticky__placeholder {
+  color: var(--sticky-placeholder);
+  font-style: italic;
+}
+
+.rb-sticky__overflow {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 44px;
+  text-align: right;
+  padding-right: 2px;
+  background: linear-gradient(90deg, transparent, var(--rb-card-bg) 48%);
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.rb-sticky__hidden {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  background: var(--hidden-sticky-bg);
+  font-weight: 600;
+  color: var(--rb-card-ink);
+  gap: 6px;
+}
+
+.rb-sticky__hidden-title {
+  font-size: 13px;
+}
+
+.rb-sticky__hidden-author {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.rb-sticky__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.rb-sticky__author {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100px;
+}
+
+.rb-sticky__vote-wrap {
+  position: relative;
+}
+
+.rb-sticky__vote-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-pill);
+  font-weight: 600;
+  transition: background 0.15s, color 0.15s, padding 0.2s, font-size 0.2s;
+}
+
+.rb-sticky__vote-count {
+  display: inline-block;
+  animation: rb-bump 0.35s ease;
+  transform-origin: center;
+  font-family: var(--font-display);
+}
+
+.rb-sticky__vote-float {
+  position: absolute;
+  left: 50%;
+  bottom: 110%;
+  pointer-events: none;
+  color: var(--rb-card-ink);
+  font-size: 18px;
+  font-weight: 800;
+  text-shadow: var(--vote-float-shadow);
+  animation: rb-sticky__vote-float 0.9s ease-out forwards;
+}
+
+/* Square top corners meet the pastel strip; both outer radii are 24px. */
+.rb-zone {
+  position: absolute;
+  background: rgba(var(--rb-zone-rgb), var(--zone-fill-alpha));
+  border: var(--rb-zone-border-w) dashed rgba(var(--rb-zone-rgb), var(--zone-border-alpha));
+  border-radius: 0 0 var(--radius-zone) var(--radius-zone);
+  box-sizing: border-box;
+  outline-offset: 6px;
+  pointer-events: none;
+  animation: rb-appear 0.28s ease-out;
+}
+
+/* Negate the dashed border width on each side to keep the title seam flush. */
+.rb-zone__title {
+  position: absolute;
+  left: calc(-1 * var(--rb-zone-border-w));
+  right: calc(-1 * var(--rb-zone-border-w));
+  background: var(--rb-zone-bg);
+  color: var(--rb-zone-ink);
+  border-radius: var(--radius-zone) var(--radius-zone) 0 0;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  gap: 8px;
+  font-family: var(--font-display);
+  font-weight: 500;
+  user-select: none;
+  box-shadow: var(--zone-title-shadow);
+  pointer-events: auto;
+}
+
+.rb-zone__editor {
+  flex: 1;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  border: none;
+  outline: none;
+  color: var(--rb-zone-ink);
+  font-family: var(--font-display);
+  font-weight: 500;
+}
+
+.rb-zone__label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rb-zone__count {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.rb-zone__surface {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.rb-sticky--selected,
+.rb-zone--selected { outline: 2px solid var(--selection); }
+
+/* Only one shadow modifier is emitted. Remote selection owns its own shadow. */
+.rb-sticky--shadow-default { box-shadow: var(--shadow-sticky); }
+.rb-sticky--shadow-flat,
+.rb-card-overview--shadow-flat { box-shadow: var(--shadow-sticky-flat); }
+.rb-sticky--shadow-winner { box-shadow: var(--shadow-winner); }
+
+/* Protrudes 13px, so winners must not use paint containment. */
+.rb-winner-medal {
+  position: absolute;
+  top: -13px;
+  left: -13px;
+  z-index: 3; /* Intra-card rank medal sits above badges (2). */
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-round);
+  background: var(--rb-medal-bg);
+  color: var(--rb-medal-fg);
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: var(--shadow-medal);
+  line-height: 1;
+  pointer-events: none;
+}
+
+.rb-card-overview__vote,
+.rb-sticky__vote-pill {
+  border: none;
+}
+
+/* Idle and voted paint selectors are disjoint, independent of rule order. */
+.rb-card-overview__vote:not(.rb-card-overview__vote--voted),
+.rb-sticky__vote-pill:not(.rb-sticky__vote-pill--voted) {
+  background: var(--sticky-vote-idle-bg);
+  color: var(--sticky-vote-idle-text);
+}
+
+.rb-card-overview__vote--voted,
+.rb-sticky__vote-pill--voted {
+  background: var(--sticky-ink);
+  color: var(--sticky-vote-text);
+}

@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
+import { stickyCardVars, zoneCardVars, medalLook } from './card-look.js';
+import { PALETTE } from './palette.js';
 import { defineTokens, TOKENS } from './theme.js';
 import { compositeOver, contrastRatio } from './color-contrast.js';
 
@@ -8,6 +10,7 @@ const MIN_NORMAL_TEXT_CONTRAST_RATIO = 4.5; // WCAG 2.2 SC 1.4.3.
 const COMPONENT_LOCAL_TOKEN_PREFIX = '--rb-';
 const TOKEN_REFERENCE_PATTERN = /var\(\s*(--[\w-]+)/g;
 const TEXT_BACKGROUND_PAIRS = [
+  ['--sticky-vote-text', '--sticky-ink'],
   ['--brand-tile-fg', '--brand-tile-bg'],
   ['--text', '--bg'],
   ['--text', '--bg-panel'],
@@ -80,4 +83,50 @@ test('JSX, HTML and CSS token references resolve in both theme modes', () => {
     }
   }
   assert.deepEqual(unresolved, [], `Unresolved theme tokens:\n${unresolved.join('\n')}`);
+});
+
+const CARD_MODE_TOKENS = ['--zone-fill-alpha', '--shadow-sticky', '--shadow-sticky-flat'];
+const CARD_SHARED_TOKENS = [
+  '--sticky-ink', '--sticky-vote-text', '--sticky-vote-idle-bg', '--sticky-vote-idle-text',
+  '--sticky-placeholder', '--zone-border-alpha',
+  '--selection', '--radius-sticky', '--radius-zone', '--zone-title-shadow',
+  '--shadow-winner', '--shadow-winner-peak', '--shadow-medal',
+  '--comment-chip-bg', '--comment-chip-shadow', '--hidden-sticky-bg', '--vote-float-shadow',
+];
+
+test('board card tokens exist in both modes with fixed selection and mode-specific fill', () => {
+  for (const tokens of Object.values(TOKENS)) {
+    for (const name of [...CARD_MODE_TOKENS, ...CARD_SHARED_TOKENS]) {
+      assert.ok(tokens[name], `Missing card token ${name}`);
+    }
+    assert.equal(tokens['--selection'], '#2563eb');
+    assert.equal(tokens['--radius-sticky'], '3px');
+    assert.equal(tokens['--radius-zone'], '24px');
+  }
+  assert.equal(TOKENS.light['--zone-fill-alpha'], '0.13');
+  assert.equal(TOKENS.dark['--zone-fill-alpha'], '0.10');
+  for (const name of CARD_SHARED_TOKENS) assert.equal(TOKENS.light[name], TOKENS.dark[name]);
+});
+
+test('every component-local board CSS variable has an inline producer', () => {
+  const css = readFileSync(new URL('./board-cards.css', import.meta.url), 'utf8');
+  const supplied = {
+    ...stickyCardVars(PALETTE[0]), ...zoneCardVars(PALETTE[0]), ...medalLook(1),
+  };
+  for (const [, name] of css.matchAll(TOKEN_REFERENCE_PATTERN)) {
+    if (name.startsWith(COMPONENT_LOCAL_TOKEN_PREFIX)) {
+      assert.ok(Object.hasOwn(supplied, name), `Missing inline producer for ${name}`);
+    }
+  }
+});
+
+test('idle vote text meets AA contrast on its composited background over each pastel', () => {
+  for (const [mode, tokens] of Object.entries(TOKENS)) {
+    for (const { name, bg } of PALETTE) {
+      const background = compositeOver(tokens['--sticky-vote-idle-bg'], bg);
+      const ratio = contrastRatio(tokens['--sticky-vote-idle-text'], background);
+      assert.ok(ratio >= MIN_NORMAL_TEXT_CONTRAST_RATIO,
+        `${mode}: idle vote text on ${name} contrast ${ratio} < ${MIN_NORMAL_TEXT_CONTRAST_RATIO}`);
+    }
+  }
 });
