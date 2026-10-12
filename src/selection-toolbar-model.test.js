@@ -5,12 +5,13 @@ import {
   clampFontSize, canDecreaseFontSize, canIncreaseFontSize,
 } from './selection-toolbar-model.js';
 import { toolbarAnchorY, SELECTION_TOOLBAR_GAP_PX } from './chrome-layout.js';
+import { zoneTitleHeight } from './zone-title.js';
 
 test('selection anchors preserve world-to-screen centres and zone title clearance', () => {
   const viewport = { x: 20, y: 30, zoom: 2 };
   const base = { x: 100, y: 300 };
   for (const [type, width, offset] of [
-    ['zone', 240, 80], ['sticky', 200, 0], ['image', 200, 0], ['text', null, 0],
+    ['zone', 240, zoneTitleHeight({}) * viewport.zoom], ['sticky', 200, 0], ['image', 200, 0], ['text', null, 0],
   ]) {
     const item = { ...base, type, ...(type === 'zone' ? { w: width } : {}) };
     const expectedX = base.x * viewport.zoom + viewport.x + (width ? width * viewport.zoom / 2 : 60);
@@ -35,7 +36,7 @@ test('single and group anchors clear the complete top stack', () => {
 });
 
 test('font sizes retain type defaults, bounded steps and permissions', () => {
-  for (const [type, size] of [['text', 40], ['zone', 14], ['sticky', 15]]) {
+  for (const [type, size] of [['text', 40], ['zone', 24], ['sticky', 15]]) {
     assert.equal(fontSizeForItem({ type }), size);
     assert.equal(fontSizeForItem({ type, fontSize: 22 }), 22);
   }
@@ -48,4 +49,18 @@ test('font sizes retain type defaults, bounded steps and permissions', () => {
   assert.equal(canIncreaseFontSize(94, true), true);
   assert.equal(canDecreaseFontSize(40, false), false);
   assert.equal(canIncreaseFontSize(40, false), false);
+});
+
+test('zone toolbar moves above the full header as explicit font sizes grow', () => {
+  const viewport = { x: 20, y: 30, zoom: 2 };
+  const base = { type: 'zone', x: 100, y: 500, w: 240 };
+  let previousY = Infinity;
+  for (const fontSize of [16, 24, 48, 96]) {
+    const item = { ...base, fontSize };
+    const anchor = selectionToolbarAnchor(item, viewport, 0);
+    assert.equal(anchor.y, item.y * viewport.zoom + viewport.y
+      - zoneTitleHeight(item) * viewport.zoom - SELECTION_TOOLBAR_GAP_PX);
+    assert.ok(anchor.y < previousY);
+    previousY = anchor.y;
+  }
 });

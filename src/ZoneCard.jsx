@@ -4,11 +4,9 @@ import { t } from './i18n.js';
 import { PALETTE } from './palette.js';
 import { zoneCardVars } from './card-look.js';
 import { ZONE_TITLE_MAX_LENGTH } from './security-boundaries.js';
+import { zoneTitleFontSize, zoneTitleHeight } from './zone-title.js';
 import './board-cards.css';
 
-export const ZONE_TITLE_H = 40;
-const ZONE_TITLE_FONT_SIZE_PX = 16;
-const ZONE_TITLE_EXTRA_HEIGHT_PX = 18;
 const SINGLE_CARD_COUNT = 1;
 
 export const ZoneCard = React.memo(function ZoneCard({
@@ -19,8 +17,8 @@ export const ZoneCard = React.memo(function ZoneCard({
   void lang;
   const it = item;
   const c = PALETTE[it.color] || PALETTE[0];
-  const titleFs = it.fontSize || ZONE_TITLE_FONT_SIZE_PX;
-  const titleH = Math.max(ZONE_TITLE_H, titleFs + ZONE_TITLE_EXTRA_HEIGHT_PX);
+  const titleFs = zoneTitleFontSize(it);
+  const titleH = zoneTitleHeight(it);
   return (
     <div
       className={selected ? 'rb-zone rb-zone--selected' : 'rb-zone'}

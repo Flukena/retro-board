@@ -254,6 +254,7 @@
   box-sizing: border-box;
   padding: var(--zone-chip-padding);
   gap: var(--zone-chip-gap);
+  line-height: var(--zone-title-line-height);
   background: var(--rb-zone-bg);
   color: var(--rb-zone-ink);
   border-radius: var(--radius-zone-chip);
@@ -273,6 +274,8 @@
 }
 
 .rb-zone__editor {
+  line-height: inherit;
+  padding: 0;
   flex: 1;
   min-width: 0;
   width: 100%;

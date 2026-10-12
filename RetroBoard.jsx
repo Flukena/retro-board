@@ -46,7 +46,8 @@ import { TopCenterStack } from './src/TopCenterStack.jsx';
 import { templateRows, followBannerModel } from './src/chrome-model.js';
 import { SelectionToolbar, GroupSelectionToolbar } from './src/SelectionToolbar.jsx';
 import { selectionToolbarAnchor, groupSelectionToolbarAnchor } from './src/selection-toolbar-model.js';
-import { ZoneCard, ZONE_TITLE_H } from './src/ZoneCard.jsx';
+import { ZoneCard } from './src/ZoneCard.jsx';
+import { zoneTitleHeight } from './src/zone-title.js';
 import { Toast } from './src/Toast.jsx';
 import { TopBar } from './src/TopBar.jsx';
 import { adminPillModel, playerRows, shareLinkModel } from './src/topbar-model.js';
@@ -1714,7 +1715,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       const ih = it.h || (it.type === 'sticky' ? STICKY_H : it.type === 'text' ? TEXT_H : 200);
       // Zones host a title bar that hangs above their box — extend the AABB
       // upward by a conservative title height so the bar isn't clipped first.
-      const topPad = it.type === 'zone' ? Math.max(ZONE_TITLE_H, (it.fontSize || 14) + 18) : 0;
+      const topPad = it.type === 'zone' ? zoneTitleHeight(it) : 0;
       return it.x + iw >= wx0 - margin
         && it.x <= wx1 + margin
         && it.y + ih >= wy0 - margin
@@ -5332,9 +5333,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
             const zoom = Math.max(viewport.zoom, 0.01);
             const width = item.w || (item.type === 'sticky' ? STICKY_W : item.type === 'text' ? TEXT_W : 200);
             const height = item.h || (item.type === 'sticky' ? STICKY_H : item.type === 'text' ? TEXT_H : 200);
-            const titleHeight = item.type === 'zone'
-              ? Math.max(ZONE_TITLE_H, (item.fontSize || 16) + 18)
-              : 0;
+            const titleHeight = item.type === 'zone' ? zoneTitleHeight(item) : 0;
             const boxTop = item.y - titleHeight;
             const boxHeight = height + titleHeight;
             const editorHue = hueFromId(editor.userId);

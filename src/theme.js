@@ -4,6 +4,10 @@
 
 import { useEffect, useState } from 'react';
 import { GRID_PITCH_PX, MINIMAP_GRID_PITCH_PX, Z } from './chrome-layout.js';
+import {
+  ZONE_TITLE_LINE_HEIGHT_RATIO, ZONE_CHIP_PADDING_VERTICAL_EM,
+  ZONE_CHIP_PADDING_HORIZONTAL_EM, ZONE_TITLE_BODY_GAP_EM,
+} from './zone-title.js';
 
 const STORAGE_KEY = 'rb_theme';
 
@@ -46,13 +50,14 @@ const MODE_INDEPENDENT_TOKENS = Object.freeze({
   '--radius-sticky': '3px',
   '--radius-zone': '24px',
   // The chip sits just above the zone body so cards never cover it.
-  '--zone-header-padding': '0 14px 6px',
-  '--zone-chip-padding': '6px 14px',
+  '--zone-header-padding': `0 ${ZONE_CHIP_PADDING_HORIZONTAL_EM}em ${ZONE_TITLE_BODY_GAP_EM}em`,
+  '--zone-chip-padding': `${ZONE_CHIP_PADDING_VERTICAL_EM}em ${ZONE_CHIP_PADDING_HORIZONTAL_EM}em`,
   '--radius-zone-chip': '12px',
   '--zone-title-font-weight': '500',
-  '--zone-count-font-size': '0.6875em', // 11px relative to the default 16px title.
-  '--zone-chip-gap': '8px',
-  '--zone-lock-size': '13px',
+  '--zone-title-line-height': String(ZONE_TITLE_LINE_HEIGHT_RATIO),
+  '--zone-count-font-size': '0.6875em', // 11px at 16px; 16.5px at the default 24px title.
+  '--zone-chip-gap': '0.5em',
+  '--zone-lock-size': '0.8125em',
   '--zone-title-shadow': '0 2px 0 rgba(0,0,0,0.08)',
   '--shadow-winner': '0 0 0 3px #fbbf24, 0 16px 22px -12px rgba(194,120,3,0.65)',
   '--shadow-winner-peak': '0 0 0 3px #fbbf24, 0 16px 22px -12px rgba(194,120,3,0.9)',

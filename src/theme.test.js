@@ -155,3 +155,14 @@ test('minimap grid and viewport highlight tokens resolve in both modes', () => {
   }
   assert.notEqual(TOKENS.light['--minimap-viewport-highlight'], TOKENS.dark['--minimap-viewport-highlight']);
 });
+
+test('zone chip dimensions scale with font size in both themes', () => {
+  for (const tokens of Object.values(TOKENS)) {
+    assert.equal(tokens['--zone-header-padding'], '0 0.875em 0.5em');
+    assert.equal(tokens['--zone-chip-padding'], '0.375em 0.875em');
+    assert.equal(tokens['--zone-chip-gap'], '0.5em');
+    assert.equal(tokens['--zone-title-line-height'], '1.25');
+    assert.equal(tokens['--zone-count-font-size'], '0.6875em');
+    assert.equal(tokens['--zone-lock-size'], '0.8125em');
+  }
+});

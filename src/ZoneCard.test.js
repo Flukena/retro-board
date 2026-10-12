@@ -5,9 +5,9 @@ import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { withChromeModule } from './chrome-test-helper.js';
 import { TOKENS } from './theme.js';
+import { zoneTitleHeight } from './zone-title.js';
 
 const ITEM = { id: 'zone-a', title: 'Ideas', x: 10, y: 20, w: 300, h: 200, color: 0 };
-const LARGE_TITLE_FONT_SIZE_PX = 64;
 function Editor({ value, className }) {
   return React.createElement('input', { value, className, readOnly: true });
 }
@@ -96,8 +96,11 @@ test('whole header dispatches drag except while editing and double click begins 
 
 test('header geometry remains directly above the unchanged body for default and large titles', async () => {
   await withChromeModule('/src/ZoneCard.jsx', ({ ZoneCard }) => {
-    for (const [fontSize, height] of [[undefined, 40], [LARGE_TITLE_FONT_SIZE_PX, 82]]) {
-      const tree = cardTree(ZoneCard, { item: { ...ITEM, fontSize } });
+    for (const fontSize of [undefined, 16, 24, 48, 96]) {
+      const item = { ...ITEM, fontSize };
+      const height = zoneTitleHeight(item);
+      const tree = cardTree(ZoneCard, { item });
+      assert.equal(header(tree).props.style.fontSize, fontSize || 24);
       assert.equal(header(tree).props.style.top, -height);
       assert.equal(header(tree).props.style.height, height);
       for (const [field, expected] of [['left', ITEM.x], ['top', ITEM.y], ['width', ITEM.w], ['height', ITEM.h]]) {
@@ -134,6 +137,10 @@ test('tab appearance uses tokens, an auto-width chip and a fully rounded body', 
   assert.equal(tab['box-shadow'], 'var(--zone-title-shadow)');
   assert.equal(tab['font-family'], 'var(--font-display)');
   assert.equal(tab['font-weight'], 'var(--zone-title-font-weight)');
+  assert.equal(tab['line-height'], 'var(--zone-title-line-height)');
+  const editor = declarations(css, '.rb-zone__editor');
+  assert.equal(editor['line-height'], 'inherit');
+  assert.equal(editor.padding, '0');
   assert.equal(tab['max-width'], '100%');
   assert.equal(tab['box-sizing'], 'border-box');
   assert.equal(tab['flex-shrink'], '1');
@@ -144,8 +151,8 @@ test('tab appearance uses tokens, an auto-width chip and a fully rounded body', 
   assert.equal(count['font-size'], 'var(--zone-count-font-size)');
   assert.equal(count.color, 'inherit');
   for (const tokens of Object.values(TOKENS)) {
-    assert.equal(tokens['--zone-header-padding'], '0 14px 6px');
-    assert.equal(tokens['--zone-chip-padding'], '6px 14px');
+    assert.equal(tokens['--zone-header-padding'], '0 0.875em 0.5em');
+    assert.equal(tokens['--zone-chip-padding'], '0.375em 0.875em');
     assert.equal(tokens['--radius-zone-chip'], '12px');
     assert.equal(tokens['--zone-title-font-weight'], '500');
     assert.equal(tokens['--zone-count-font-size'], '0.6875em');
