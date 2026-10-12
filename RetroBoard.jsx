@@ -9,7 +9,7 @@ import {
   AlertCircle,
   MousePointer2, RotateCcw,
   Upload,
-  MessageSquare, Map as MapIcon,
+  MessageSquare,
 } from 'lucide-react';
 import {
   IMPORT_MAX_BUNDLE_BYTES,
@@ -59,7 +59,7 @@ import { PALETTE, STICKY_AUTO_TEXT } from './src/palette.js';
 import { stickyClassName, stickyCardVars, zoneCardVars, medalLook } from './src/card-look.js';
 import './src/board-cards.css';
 import {
-  MINIMAP_BOTTOM_PX, GRID_PITCH_PX, topStackHeightPx, Z,
+  MINIMAP_W_PX, MINIMAP_H_PX, GRID_PITCH_PX, topStackHeightPx, Z,
 } from './src/chrome-layout.js';
 import { useUserIdentity } from './src/useUserIdentity.js';
 import { useAdminRole } from './src/useAdminRole.js';
@@ -77,6 +77,7 @@ import {
   centerViewportOnWorld,
   minimapPointToWorld,
   minimapViewportRect,
+  minimapZoomPercent,
 } from './src/minimap.js';
 import {
   cursorScreenPosition,
@@ -90,7 +91,7 @@ import {
   mapSelectionIndexThroughReplacement,
 } from './src/collaborative-text.js';
 import { copyTextToClipboard } from './src/clipboard.js';
-import { MinimapCanvas } from './src/MinimapCanvas.jsx';
+import { MinimapPanel } from './src/MinimapPanel.jsx';
 import { ZOOM_STEP_FACTOR, wheelZoomFactor, viewportNeedsCullRefresh } from './src/viewport-zoom.js';
 import { centerOf, insideZone, resolveOwnerZone, effectiveOwnerZone } from './src/board-ownership.js';
 import {
@@ -133,8 +134,6 @@ const ZONE_TITLE_H = 40;
 const DRAG_THRESHOLD = 4;
 const ZOOM_MIN = 0.15;
 const ZOOM_MAX = 3.0;
-const MINIMAP_W = 220;
-const MINIMAP_H = 132;
 const MINIMAP_IDLE_MS = 1100;
 const CURSOR_BROADCAST_MS = 24;
 const FOLLOW_VIEWPORT_COMMIT_MS = 96;
@@ -1686,8 +1685,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     items: sortedItems,
     viewport,
     viewportSize,
-    width: MINIMAP_W,
-    height: MINIMAP_H,
+    width: MINIMAP_W_PX,
+    height: MINIMAP_H_PX,
   }), [sortedItems, viewport, viewportSize]);
   minimapModelRef.current = minimapModel;
 
@@ -5274,79 +5273,18 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     />
   );
 
-  const renderMinimap = () => {
-    return (
-      <aside
-        ref={minimapPanelRef}
-        className="rb-minimap"
-        aria-label={t('minimap.title')}
-        onPointerEnter={revealMinimap}
-        onPointerLeave={revealMinimap}
-        onFocusCapture={revealMinimap}
-        onBlurCapture={revealMinimap}
-        style={{
-          position: 'fixed', right: 16, bottom: MINIMAP_BOTTOM_PX, zIndex: Z.DOCK,
-          width: MINIMAP_W + 16,
-          padding: '8px 8px 9px', boxSizing: 'border-box',
-          background: 'var(--bg-overlay)',
-          border: '1px solid var(--border-soft)', borderRadius: 14,
-          boxShadow: '0 12px 30px rgba(0,0,0,0.14)',
-          backdropFilter: 'blur(12px)',
-          opacity: 0, pointerEvents: 'none',
-          transition: 'opacity 220ms ease',
-        }}
-      >
-        <div style={{
-          height: 25, display: 'flex', alignItems: 'center', gap: 7,
-          padding: '0 3px 6px', color: 'var(--text-mid)',
-        }}
-        >
-          <MapIcon size={15} aria-hidden="true" />
-          <span style={{ fontSize: 14, lineHeight: 1, fontWeight: 700, flex: 1 }}>
-            {t('minimap.title')}
-          </span>
-          <span style={{ fontSize: 12, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
-            {Math.round(viewport.zoom * 100)}%
-          </span>
-        </div>
-        <div
-          className="rb-minimap-surface"
-          role="button"
-          tabIndex={0}
-          aria-label={t('minimap.navigate')}
-          title={t('minimap.navigate')}
-          onPointerDown={startMinimapNavigation}
-          onKeyDown={onMinimapKeyDown}
-          style={{
-            position: 'relative', width: MINIMAP_W, height: MINIMAP_H,
-            overflow: 'hidden', cursor: 'crosshair', touchAction: 'none',
-            border: '1px solid var(--border)', borderRadius: 9,
-            backgroundColor: 'var(--bg)',
-            backgroundImage: 'radial-gradient(circle, var(--grid-dot) 1px, transparent 1px)',
-            backgroundSize: '10px 10px', boxSizing: 'border-box',
-            outline: 'none',
-          }}
-        >
-          <MinimapCanvas model={minimapModel} colors={PALETTE} />
-          <div
-            ref={minimapViewportRef}
-            aria-hidden="true"
-            style={{
-              position: 'absolute', left: 0, top: 0,
-              width: minimapModel.viewport.w,
-              height: minimapModel.viewport.h,
-              minWidth: 6, minHeight: 6,
-              transform: `translate3d(${minimapModel.viewport.x}px, ${minimapModel.viewport.y}px, 0)`,
-              boxSizing: 'border-box', border: '2px solid var(--accent)',
-              borderRadius: 4, background: 'var(--minimap-viewport-bg)',
-              boxShadow: '0 0 0 1px rgba(255,255,255,0.5) inset',
-              pointerEvents: 'none', willChange: 'transform, width, height',
-            }}
-          />
-        </div>
-      </aside>
-    );
-  };
+  const renderMinimap = () => (
+    <MinimapPanel
+      panelRef={minimapPanelRef}
+      viewportRef={minimapViewportRef}
+      model={minimapModel}
+      zoomPercent={minimapZoomPercent(viewport.zoom)}
+      colors={PALETTE}
+      onReveal={revealMinimap}
+      onNavigatePointerDown={startMinimapNavigation}
+      onNavigateKeyDown={onMinimapKeyDown}
+    />
+  );
 
   const toolHandlers = {
     [TOOL_ID.SELECT]: () => {
@@ -5460,19 +5398,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
             0 0 24px 7px hsl(var(--rb-selector-hue) 86% 60% / 0.18);
           animation: rb-selection-aura 1.8s ease-in-out infinite;
         }
-        .rb-minimap-surface:focus-visible {
-          outline: 3px solid var(--accent) !important;
-          outline-offset: 2px;
-        }
-        @media (max-width: 700px) {
-          .rb-minimap {
-            transform: scale(0.82);
-            transform-origin: bottom right;
-          }
-        }
         @media (prefers-reduced-motion: reduce) {
           .rb-sticky__comment-slide { animation: none !important; }
-          .rb-minimap { transition: none !important; }
           .rb-player-cursor { transition: none !important; }
           .rb-editing-dot { animation: none !important; }
           .rb-remote-selected-card { animation: none !important; }

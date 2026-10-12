@@ -144,3 +144,14 @@ test('modal appearance tokens resolve in both themes', () => {
     }
   }
 });
+
+
+test('minimap grid and viewport highlight tokens resolve in both modes', () => {
+  for (const tokens of Object.values(TOKENS)) {
+    assert.equal(tokens['--minimap-grid-pitch'], '10px');
+    assert.equal(tokens['--minimap-panel-blur'], '12px');
+    assert.equal(tokens['--radius-minimap-viewport'], '4px');
+    assert.ok(tokens['--minimap-viewport-highlight']);
+  }
+  assert.notEqual(TOKENS.light['--minimap-viewport-highlight'], TOKENS.dark['--minimap-viewport-highlight']);
+});

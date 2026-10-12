@@ -91,7 +91,7 @@ test('confirmation and name report events without adding dismissal or keyboard b
   });
 });
 
-const COMPONENT_CLASS_PATTERN = /^rb-(?:dialog|help|timer-setup|selection-toolbar|landing)__/;
+const COMPONENT_CLASS_PATTERN = /^rb-(?:dialog|help|timer-setup|selection-toolbar|landing|minimap)__/;
 test('selector contract distinguishes target compounds from ancestors and incompatible classes', () => {
   const heading = new Set(['rb-dialog__heading']);
   assert.equal(targetsClass('.rb-input.rb-dialog__heading', 'rb-dialog__heading', heading), false);
@@ -106,6 +106,7 @@ test('every scoped component class has a compatible stylesheet selector targetin
   for (const [component, stylesheet] of [
     ['Modals.jsx', 'modals.css'], ['TimerSetup.jsx', 'timer-setup.css'],
     ['SelectionToolbar.jsx', 'selection-toolbar.css'], ['Landing.jsx', 'landing.css'],
+    ['MinimapPanel.jsx', 'minimap.css'],
   ]) {
     const source = readFileSync(new URL(component, import.meta.url), 'utf8');
     const css = readFileSync(new URL(stylesheet, import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');

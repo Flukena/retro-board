@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import * as layout from './chrome-layout.js';
 import {
   Z, toolbarAnchorY, TOPBAR_BOTTOM_PX, TOPBAR_INSET_PX, TOPBAR_H_PX, TOOLBAR_TOPBAR_CLEARANCE_PX,
   TOP_STACK_GAP_PX, MINIMAP_BOTTOM_PX, DOCK_H_PX, DOCK_INSET_PX, TOAST_BOTTOM_PX,
@@ -56,4 +57,11 @@ test('stack height sums fixed item heights and gaps, and toolbar clears its bott
       assert.equal(toolbarAnchorY(minimum + 1, height), minimum + 1);
     }
   }
+});
+
+
+test('minimap dimensions preserve the model surface and panel padding', () => {
+  assert.equal(layout.MINIMAP_W_PX, 220);
+  assert.equal(layout.MINIMAP_H_PX, 132);
+  assert.equal(layout.MINIMAP_PANEL_PADDING_TOTAL_PX, 16);
 });

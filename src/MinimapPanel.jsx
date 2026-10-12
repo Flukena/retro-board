@@ -1,0 +1,61 @@
+import React from 'react';
+import { Map as MapIcon } from 'lucide-react';
+import { MinimapCanvas } from './MinimapCanvas.jsx';
+import {
+  MINIMAP_W_PX, MINIMAP_H_PX, MINIMAP_PANEL_PADDING_TOTAL_PX,
+  MINIMAP_BOTTOM_PX, DOCK_INSET_PX, CHROME_BORDER_PX, TOPBAR_ICON_SIZE_PX, Z,
+} from './chrome-layout.js';
+import { t } from './i18n.js';
+import './minimap.css';
+
+export function MinimapPanel({
+  panelRef, viewportRef, model, zoomPercent, colors,
+  onReveal, onNavigatePointerDown, onNavigateKeyDown,
+}) {
+  return (
+    <aside
+      ref={panelRef}
+      className="rb-minimap"
+      aria-label={t('minimap.title')}
+      onPointerEnter={onReveal}
+      onPointerLeave={onReveal}
+      onFocusCapture={onReveal}
+      onBlurCapture={onReveal}
+      style={{
+        right: DOCK_INSET_PX, bottom: MINIMAP_BOTTOM_PX, zIndex: Z.DOCK,
+        width: MINIMAP_W_PX + MINIMAP_PANEL_PADDING_TOTAL_PX,
+        '--rb-minimap-padding': `${MINIMAP_PANEL_PADDING_TOTAL_PX / 2}px`,
+        '--rb-minimap-width': `${MINIMAP_W_PX}px`,
+        '--rb-minimap-height': `${MINIMAP_H_PX}px`,
+        '--rb-minimap-border': `${CHROME_BORDER_PX}px`,
+      }}
+    >
+      <div className="rb-minimap__header">
+        <MapIcon size={TOPBAR_ICON_SIZE_PX.MENU} aria-hidden="true" />
+        <span className="rb-minimap__title">{t('minimap.title')}</span>
+        <span className="rb-minimap__zoom">{zoomPercent}%</span>
+      </div>
+      <div
+        className="rb-minimap-surface rb-minimap__surface"
+        role="button"
+        tabIndex={0}
+        aria-label={t('minimap.navigate')}
+        title={t('minimap.navigate')}
+        onPointerDown={onNavigatePointerDown}
+        onKeyDown={onNavigateKeyDown}
+      >
+        <MinimapCanvas model={model} colors={colors} />
+        <div
+          ref={viewportRef}
+          className="rb-minimap__viewport"
+          aria-hidden="true"
+          style={{
+            width: model.viewport.w,
+            height: model.viewport.h,
+            transform: `translate3d(${model.viewport.x}px, ${model.viewport.y}px, 0)`,
+          }}
+        />
+      </div>
+    </aside>
+  );
+}

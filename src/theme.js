@@ -3,7 +3,7 @@
 // 'auto' follows prefers-color-scheme and updates live.
 
 import { useEffect, useState } from 'react';
-import { GRID_PITCH_PX, Z } from './chrome-layout.js';
+import { GRID_PITCH_PX, MINIMAP_GRID_PITCH_PX, Z } from './chrome-layout.js';
 
 const STORAGE_KEY = 'rb_theme';
 
@@ -31,6 +31,9 @@ export function defineTokens(light, dark) {
 }
 
 const MODE_INDEPENDENT_TOKENS = Object.freeze({
+  '--minimap-grid-pitch': `${MINIMAP_GRID_PITCH_PX}px`,
+  '--minimap-panel-blur': '12px',
+  '--radius-minimap-viewport': '4px',
   '--grid-pitch': `${GRID_PITCH_PX}px`,
   '--landing-corner-layer': String(Z.TOPBAR),
   '--sticky-ink': '#2b2118',
@@ -79,6 +82,7 @@ const LIGHT_RAISED_SHADOW = '0 2px 0 #e2d5bf, 0 12px 24px -14px rgba(110,80,40,0
 const DARK_RAISED_SHADOW = '0 2px 0 #0f0d0a, 0 14px 28px -14px rgba(0,0,0,0.7)';
 
 export const TOKENS = defineTokens({
+    '--minimap-viewport-highlight': '0 0 0 1px rgba(255,255,255,0.5) inset',
     '--zone-fill-alpha': '0.13',
     '--shadow-sticky': '0 1px 1px rgba(110,80,40,0.12), 0 16px 18px -14px rgba(110,80,40,0.55)',
     '--shadow-sticky-flat': '0 1px 0 rgba(110,80,40,0.22)',
@@ -117,6 +121,7 @@ export const TOKENS = defineTokens({
     '--ok-text': '#166534',
     ...MODE_INDEPENDENT_TOKENS,
   }, {
+    '--minimap-viewport-highlight': '0 0 0 1px rgba(255,236,210,0.18) inset',
     '--zone-fill-alpha': '0.10',
     '--shadow-sticky': '0 1px 1px rgba(0,0,0,0.4), 0 18px 20px -14px rgba(0,0,0,0.9)',
     '--shadow-sticky-flat': '0 1px 0 rgba(0,0,0,0.5)',
