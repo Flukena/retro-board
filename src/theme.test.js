@@ -173,6 +173,16 @@ test('zone chip keeps design screen dimensions in both themes', () => {
   }
 });
 
+test('inline zone tools keep only used geometry tokens in both themes', () => {
+  for (const tokens of Object.values(TOKENS)) {
+    assert.equal(tokens['--zone-chip-min-width'], '80px');
+    assert.equal(tokens['--zone-strip-swatch-size'], '18px');
+    for (const name of ['--zone-strip-padding', '--zone-strip-border-width', '--zone-strip-swatch-gap']) {
+      assert.equal(Object.hasOwn(tokens, name), false, name + ' is obsolete');
+    }
+  }
+});
+
 test('design C sticky tokens preserve geometry, typography, signals and mode-specific vote paint', () => {
   const shared = {
     '--sticky-padding': '14px', '--radius-sticky': '3px', '--sticky-line-height': '1.5',

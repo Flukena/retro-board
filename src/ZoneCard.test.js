@@ -201,7 +201,7 @@ test('header width, inset, icon sizing and narrow breakpoints use world coordina
   assert.equal(row['container-type'], 'inline-size');
   assert.equal(row['overflow-x'], undefined);
   assert.ok(css.includes(`@container rb-zone-header (max-width: ${ZONE_HEADER_MENU_BREAKPOINT_PX}px)`));
-  assert.match(css, /\.rb-zone__actions\s*\{[^}]*flex-wrap: wrap;[^}]*justify-content: flex-end;/);
+  assert.match(css, /\.rb-zone__actions\s*\{[^}]*flex-wrap: wrap-reverse;[^}]*justify-content: flex-end;/);
   assert.ok(css.includes(`@container rb-zone-header (max-width: ${ZONE_HEADER_ICONS_BREAKPOINT_PX}px)`));
   const button = declarations(css, '.rb-zone__icon');
   assert.equal(button['pointer-events'], 'auto');
@@ -213,15 +213,48 @@ test('header width, inset, icon sizing and narrow breakpoints use world coordina
   }
 });
 
-test('zone header strip wraps within its width using theme tokens; narrow queries preserve menu access', () => {
-  const css = readFileSync(new URL('./board-cards.css', import.meta.url), 'utf8');
+test('zone header extends the icon row without a panel and wraps actions only after the chip shrinks', () => {
+  const css = readFileSync(new URL('./board-cards.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
   const strip = declarations(css, '.rb-zone__tool-strip');
   assert.equal(strip['flex-wrap'], 'wrap');
   assert.equal(strip['max-width'], '100%');
   assert.equal(strip['box-sizing'], 'border-box');
-  for (const field of ['padding', 'gap', 'border', 'border-radius', 'background', 'box-shadow']) {
-    assert.match(strip[field], /^var\(--/);
+  assert.equal(strip.display, 'inline-flex');
+  assert.equal(strip.gap, 'var(--zone-icon-gap)');
+  assert.equal(strip['align-items'], 'center');
+  for (const field of ['padding', 'border', 'border-radius', 'background', 'box-shadow']) {
+    assert.equal(strip[field], undefined, field + ' must not create a panel');
   }
+  const row = declarations(css, '.rb-zone__title');
+  const chip = declarations(css, '.rb-zone__chip');
+  const actions = declarations(css, '.rb-zone__actions');
+  assert.equal(row['flex-wrap'], 'nowrap');
+  assert.equal(chip['min-width'], 'min(var(--zone-chip-min-width), 50%)');
+  assert.equal(chip['flex-shrink'], '1');
+  assert.equal(actions['flex-shrink'], '0');
+  assert.equal(actions['max-width'], 'calc(100% - min(var(--zone-chip-min-width), 50%) - var(--zone-chip-gap))');
+  // Overflowing tools wrap below so ⋯ stays on the top row.
+  assert.equal(actions['flex-wrap'], 'wrap-reverse');
+  assert.equal(actions['justify-content'], 'flex-end');
+  assert.equal(actions['margin-left'], 'auto');
+  assert.equal(actions['align-items'], 'center');
+  assert.equal(declarations(css, '.rb-zone__count')['flex-shrink'], '0');
+  const swatches = declarations(css, '.rb-zone__tool-strip .rb-selection-toolbar__swatches');
+  assert.equal(swatches['align-items'], 'center');
+  assert.equal(swatches.gap, 'var(--zone-icon-gap)');
+  const font = declarations(css, '.rb-zone__tool-strip .rb-selection-toolbar__font-size');
+  assert.equal(font['border-left'], 'none');
+  assert.equal(font['padding-left'], '0');
+  assert.equal(font['margin-left'], '0');
+  assert.equal(font.gap, 'var(--zone-icon-gap)');
+  const button = declarations(css, '.rb-zone__tool-strip .rb-icon-btn');
+  assert.equal(button.width, 'var(--zone-icon-button-size)');
+  assert.equal(button.height, 'var(--zone-icon-button-size)');
+  assert.equal(button.padding, '0');
+  assert.equal(button.background, 'transparent');
+  assert.equal(button.color, 'var(--text-muted)');
+  assert.equal(button['font-size'], 'var(--zone-icon-size)');
+  assert.equal(declarations(css, '.rb-zone__tool-strip .rb-icon-btn:hover:not(:disabled)').background, 'var(--zone-icon-hover-bg)');
   const icons = css.match(/@container rb-zone-header \(max-width: 180px\)\s*\{([^}]+)\}/)[1];
   assert.match(icons, /\.rb-zone__admin-action, \.rb-zone__popover-anchor/);
   assert.doesNotMatch(icons, /rb-zone__menu|rb-zone__actions/);
