@@ -15,8 +15,9 @@ test('PIN accepts only four through eight digits and setting requires matching c
 });
 
 test('relative comment time switches units at minute, hour and day boundaries', () => {
+  assert.deepEqual(relativeTime(0, 59999), { key: 'common.justNow' });
   for (const [elapsed, key, n] of [
-    [59999, 'common.justNow', undefined], [60000, 'common.minutesAgo', 1],
+    [60000, 'common.minutesAgo', 1],
     [3600000, 'common.hoursAgo', 1], [86400000, 'common.daysAgo', 1],
   ]) {
     assert.deepEqual(relativeTime(0, elapsed), { key, n });

@@ -12,7 +12,6 @@ import {
 import './timer-setup.css';
 
 const SETUP_ICON_SIZE_PX = 16;
-const UNLIMITED_INPUT_OPACITY = 0.4;
 
 function SetupCheckbox({ checked, onChange, label }) {
   return (
@@ -36,9 +35,11 @@ function SetupNumber({ label, unlimitedLabel, unlimited, onUnlimited, value, onV
         <span>{label}</span>
         <SetupCheckbox checked={unlimited} onChange={onUnlimited} label={unlimitedLabel} />
       </div>
-      <div className="rb-timer-setup__presets" style={{
-        opacity: unlimited ? UNLIMITED_INPUT_OPACITY : 1, pointerEvents: unlimited ? 'none' : 'auto',
-      }}>
+      <div
+        className={unlimited
+          ? 'rb-timer-setup__presets rb-timer-setup__presets--disabled'
+          : 'rb-timer-setup__presets'}
+      >
         {presets.map((preset) => (
           <ChoiceChip key={preset} selected={value === preset} onClick={() => onValue(preset)}>
             {formatPreset(preset)}

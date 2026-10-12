@@ -139,13 +139,13 @@
   line-height: 1.5;
 }
 
-.rb-input.rb-dialog__pin-input, .rb-input.rb-dialog__heading {
+.rb-dialog__heading {
   display: flex;
   align-items: center;
   gap: 10px;
   margin-bottom: 12px;
 }
-.rb-dialog__header.rb-dialog__heading {
+.rb-dialog__header .rb-dialog__heading {
   margin-bottom: 0;
 }
 .rb-dialog__body {

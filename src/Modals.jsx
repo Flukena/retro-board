@@ -11,7 +11,7 @@ import './modals.css';
 
 function fmtAgo(timestamp) {
   const { key, n } = relativeTime(timestamp, Date.now());
-  return t(key, { n });
+  return t(key, n === undefined ? undefined : { n });
 }
 
 export function CommentsDialog({ item, comments, editingAllowed, onAdd, onDelete, onClose }) {
@@ -95,7 +95,7 @@ export function CommentsDialog({ item, comments, editingAllowed, onAdd, onDelete
           />
           <div className="rb-dialog__send-actions">
             <Button
-            variant={BUTTON_VARIANT.PRIMARY}
+              variant={BUTTON_VARIANT.PRIMARY}
               onClick={submit}
               disabled={!editingAllowed || !draft.trim()}
             >{t('comments.send')}
@@ -284,7 +284,7 @@ export function HelpDialog({ sections, onClose }) {
 }
 
 export function ConfirmDialog({
-  icon, title, body, note, notes = [], cancelLabel, confirmLabel,
+  icon, title, body, notes = [], cancelLabel, confirmLabel,
   confirmVariant = BUTTON_VARIANT.PRIMARY, busy, onCancel, onConfirm,
   size = MODAL_SIZE.SM,
 }) {
@@ -299,7 +299,6 @@ export function ConfirmDialog({
         <div className="rb-dialog__title">{title}</div>
       </div>
       <div className="rb-dialog__body">{body}</div>
-      {note && <div role="note" className="rb-dialog__note">{note}</div>}
       {notes.map((text) => <div key={text} role="note" className="rb-dialog__note">{text}</div>)}
       <div className="rb-dialog__actions">
         <Button
