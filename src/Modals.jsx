@@ -5,14 +5,10 @@ import { Button, IconButton } from './UiPrimitives.jsx';
 import { BUTTON_VARIANT, MODAL_SIZE, MODAL_LAYER } from './ui-variants.js';
 import { COMMENT_MAX_LEN } from './comment-schema.js';
 import { DISPLAY_NAME_MAX_LENGTH, TEMPLATE_NAME_MAX_LENGTH } from './security-boundaries.js';
-import { pinValidity, sanitizePin, relativeTime } from './modal-model.js';
+import { pinValidity, sanitizePin } from './modal-model.js';
+import { formatRelativeTime } from './relative-time.js';
 import { t } from './i18n.js';
 import './modals.css';
-
-function fmtAgo(timestamp) {
-  const { key, n } = relativeTime(timestamp, Date.now());
-  return t(key, n === undefined ? undefined : { n });
-}
 
 export function CommentsDialog({ item, comments, editingAllowed, onAdd, onDelete, onClose }) {
   const [draft, setDraft] = useState('');
@@ -61,7 +57,7 @@ export function CommentsDialog({ item, comments, editingAllowed, onAdd, onDelete
                 <span className="rb-dialog__author">
                   {comment.authorName || t('comments.anonymous')}
                 </span>
-                <span className="rb-dialog__timestamp">{fmtAgo(comment.createdAt)}</span>
+                <span className="rb-dialog__timestamp">{formatRelativeTime(comment.createdAt)}</span>
                 <div className="rb-dialog__spacer" />
                 {editingAllowed && (
                   <IconButton

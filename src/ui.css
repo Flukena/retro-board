@@ -259,3 +259,5 @@
 }
 
 .rb-input.rb-input--mono { font-family: var(--font-mono); }
+
+.rb-surface.rb-surface--card { box-shadow: var(--shadow-card); }

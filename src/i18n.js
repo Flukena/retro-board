@@ -319,6 +319,8 @@ const dict = {
 
     // settings
     'settings.lang': 'Language',
+    'settings.lang.th': 'TH',
+    'settings.lang.en': 'EN',
     'settings.theme': 'Theme',
     'settings.scrollWheelZoom': 'ใช้ล้อเมาส์เพื่อซูม',
     'settings.theme.light': 'Light',
@@ -632,6 +634,8 @@ const dict = {
     'selection.byMany': '{name} and {n} more are selecting',
 
     'settings.lang': 'Language',
+    'settings.lang.th': 'TH',
+    'settings.lang.en': 'EN',
     'settings.theme': 'Theme',
     'settings.scrollWheelZoom': 'Use scroll wheel zoom',
     'settings.theme.light': 'Light',

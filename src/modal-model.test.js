@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pinValidity, sanitizePin, relativeTime, importWarningNotes } from './modal-model.js';
+import { pinValidity, sanitizePin, importWarningNotes } from './modal-model.js';
 
 test('PIN accepts only four through eight digits and setting requires matching confirmation', () => {
   for (const pin of ['123', '123456789', 'abcd', '123a', '１２３４']) {
@@ -12,16 +12,6 @@ test('PIN accepts only four through eight digits and setting requires matching c
     assert.equal(pinValidity(pin, '', false).matches, true);
   }
   assert.equal(sanitizePin('1a234567890'), '12345678');
-});
-
-test('relative comment time switches units at minute, hour and day boundaries', () => {
-  assert.deepEqual(relativeTime(0, 59999), { key: 'common.justNow' });
-  for (const [elapsed, key, n] of [
-    [60000, 'common.minutesAgo', 1],
-    [3600000, 'common.hoursAgo', 1], [86400000, 'common.daysAgo', 1],
-  ]) {
-    assert.deepEqual(relativeTime(0, elapsed), { key, n });
-  }
 });
 
 test('import warnings independently describe CSV loss and geometry repairs', () => {

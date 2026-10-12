@@ -7,9 +7,10 @@ export const DIVIDER_ORIENTATION = Object.freeze({ VERTICAL: 'vertical', HORIZON
 export const ICON_BUTTON_VARIANT = Object.freeze({ DEFAULT: 'default', DANGER: 'danger' });
 export const CHOICE_CHIP_STATE = Object.freeze({ DEFAULT: 'default', SELECTED: 'selected' });
 export const SURFACE_KIND = Object.freeze({
-  POPOVER: 'popover', TOOLBAR: 'toolbar', TOAST: 'toast', TOAST_WARN: 'toast-warn',
+  CARD: 'card', POPOVER: 'popover', TOOLBAR: 'toolbar', TOAST: 'toast', TOAST_WARN: 'toast-warn',
 });
 const SURFACE_CLASSES = Object.freeze({
+  [SURFACE_KIND.CARD]: 'rb-surface rb-surface--card',
   [SURFACE_KIND.POPOVER]: 'rb-surface rb-surface--popover',
   [SURFACE_KIND.TOOLBAR]: 'rb-surface rb-surface--toolbar',
   [SURFACE_KIND.TOAST]: 'rb-surface rb-surface--toast',

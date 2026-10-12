@@ -3,6 +3,7 @@
 // 'auto' follows prefers-color-scheme and updates live.
 
 import { useEffect, useState } from 'react';
+import { GRID_PITCH_PX, Z } from './chrome-layout.js';
 
 const STORAGE_KEY = 'rb_theme';
 
@@ -30,6 +31,8 @@ export function defineTokens(light, dark) {
 }
 
 const MODE_INDEPENDENT_TOKENS = Object.freeze({
+  '--grid-pitch': `${GRID_PITCH_PX}px`,
+  '--landing-corner-layer': String(Z.TOPBAR),
   '--sticky-ink': '#2b2118',
   '--sticky-vote-text': '#ffffff',
   '--sticky-vote-idle-bg': 'rgba(43,33,24,0.08)',

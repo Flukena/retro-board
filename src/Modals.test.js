@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { withChromeModule } from './chrome-test-helper.js';
+import { classGroups, targetsClass } from './scoped-class-test-helper.js';
 
 test('confirmation contract keeps cancel focus, busy buttons, danger and warning semantics', async () => {
   await withChromeModule('/src/Modals.jsx', ({ ConfirmDialog }) => {
@@ -90,24 +91,7 @@ test('confirmation and name report events without adding dismissal or keyboard b
   });
 });
 
-const COMPONENT_CLASS_PATTERN = /^rb-(?:dialog|help|timer-setup|selection-toolbar)__/;
-const CLASS_NAME_PATTERN = /className=(?:"([^"]+)"|\{([^}]+)\})/g;
-const STRING_LITERAL_PATTERN = /['"]([^'"]+)['"]/g;
-const CSS_CLASS_PATTERN = /\.([a-z][\w-]*)/g;
-
-function classGroups(source) {
-  return [...source.matchAll(CLASS_NAME_PATTERN)].flatMap((match) => {
-    const values = match[1] ? [match[1]] : [...match[2].matchAll(STRING_LITERAL_PATTERN)].map((literal) => literal[1]);
-    return values.map((value) => new Set(value.split(/\s+/)));
-  });
-}
-
-function targetsClass(selector, className, elementClasses) {
-  const lastCompound = selector.trim().split(/[\s>+~]+/).at(-1);
-  const requiredClasses = [...lastCompound.matchAll(CSS_CLASS_PATTERN)].map((match) => match[1]);
-  return requiredClasses.includes(className) && requiredClasses.every((required) => elementClasses.has(required));
-}
-
+const COMPONENT_CLASS_PATTERN = /^rb-(?:dialog|help|timer-setup|selection-toolbar|landing)__/;
 test('selector contract distinguishes target compounds from ancestors and incompatible classes', () => {
   const heading = new Set(['rb-dialog__heading']);
   assert.equal(targetsClass('.rb-input.rb-dialog__heading', 'rb-dialog__heading', heading), false);
@@ -121,7 +105,7 @@ test('selector contract distinguishes target compounds from ancestors and incomp
 test('every scoped component class has a compatible stylesheet selector targeting its last compound', () => {
   for (const [component, stylesheet] of [
     ['Modals.jsx', 'modals.css'], ['TimerSetup.jsx', 'timer-setup.css'],
-    ['SelectionToolbar.jsx', 'selection-toolbar.css'],
+    ['SelectionToolbar.jsx', 'selection-toolbar.css'], ['Landing.jsx', 'landing.css'],
   ]) {
     const source = readFileSync(new URL(component, import.meta.url), 'utf8');
     const css = readFileSync(new URL(stylesheet, import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
