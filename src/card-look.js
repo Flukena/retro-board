@@ -46,3 +46,8 @@ export function medalLook(rank) {
   const { bg, fg } = MEDAL_COLORS[rank];
   return { '--rb-medal-bg': bg, '--rb-medal-fg': fg };
 }
+
+export function stickyVoteClassName(baseClass, voted, votingAllowedNow) {
+  return [baseClass, voted && `${baseClass}--voted`,
+    votingAllowedNow && !voted && 'rb-sticky-vote--open'].filter(Boolean).join(' ');
+}

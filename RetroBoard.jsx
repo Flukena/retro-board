@@ -56,6 +56,7 @@ import { getActiveRoomSession, roomFetch } from './src/room-session.js';
 import { useTheme, nextThemePref } from './src/theme.js';
 import { PALETTE } from './src/palette.js';
 import { COMMENT_CAROUSEL_STYLE } from './src/card-look.js';
+import { stickyCreationFontSize } from './src/sticky-font.js';
 import { StickyCard } from './src/StickyCard.jsx';
 import { useBrowserLayoutEffect } from './src/use-browser-layout-effect.js';
 import { DEFAULT_STICKY_WIDTH_PX as STICKY_W, DEFAULT_STICKY_HEIGHT_PX as STICKY_H } from './src/board-geometry.js';
@@ -2059,8 +2060,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       const targetW = Math.sqrt(targetArea * ratio);
       w = Math.round(Math.max(STICKY_MIN_W, Math.min(600, targetW)));
       h = Math.round(w / ratio);
-      // Default sticky font is 15px at STICKY_W=200; scale linearly with width.
-      fontSize = Math.max(11, Math.round(15 * (w / STICKY_W)));
+      fontSize = stickyCreationFontSize(w);
     }
     const it = {
       id: uid(),
@@ -2075,7 +2075,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       text: '',
       color,
       parentZoneId: enclosingZone?.id ?? null,
-      rotation: (Math.random() * 3 - 1.5),
       private: true,
       ...(fontSize ? { fontSize } : {}),
     };
@@ -4790,11 +4789,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           0%   { opacity: 0; transform: scale(0.78); }
           60%  { opacity: 1; transform: scale(1.04); }
           100% { opacity: 1; transform: scale(1); }
-        }
-        @keyframes rb-appear-rot {
-          0%   { opacity: 0; transform: scale(0.78) rotate(var(--rb-rot, 0deg)); }
-          60%  { opacity: 1; transform: scale(1.04) rotate(var(--rb-rot, 0deg)); }
-          100% { opacity: 1; transform: scale(1) rotate(var(--rb-rot, 0deg)); }
         }
         @keyframes rb-bump {
           0%   { transform: scale(1); }

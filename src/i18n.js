@@ -208,7 +208,7 @@ const dict = {
 
     // sticky
     'sticky.placeholder': 'ดับเบิลคลิกเพื่อแก้ไข',
-    'sticky.hidden': '🔒 ซ่อนอยู่',
+    'sticky.hidden': 'ซ่อนอยู่',
     'sticky.hiddenBy': 'โดย {name}',
     'sticky.hideContent': 'ปลดล็อกก่อนถึงโหวตได้',
     'sticky.privacyToggle.on': 'เปิด: แสดงเนื้อหาในหน้าจอปกติ',
@@ -531,7 +531,7 @@ const dict = {
     'tmpl.saveFailed': 'Could not update the template. Please try again.',
 
     'sticky.placeholder': 'Double-click to edit',
-    'sticky.hidden': '🔒 Hidden',
+    'sticky.hidden': 'Hidden',
     'sticky.hiddenBy': 'by {name}',
     'sticky.hideContent': 'Unlock first to vote',
     'sticky.privacyToggle.on': 'On: show content in the normal UI',

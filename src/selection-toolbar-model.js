@@ -1,4 +1,5 @@
 import { toolbarAnchorY, SELECTION_TOOLBAR_GAP_PX } from './chrome-layout.js';
+import { stickyFontSize } from './sticky-font.js';
 import { zoneTitleFontSize } from './zone-title.js';
 
 const DEFAULT_STICKY_WIDTH_PX = 200;
@@ -8,7 +9,7 @@ const CENTRE_DIVISOR = 2;
 export const FONT_SIZE_MIN_PX = 10;
 export const FONT_SIZE_MAX_PX = 96;
 export const FONT_SIZE_STEP_PX = 2;
-const FONT_SIZE_DEFAULT_PX = Object.freeze({ text: 40, sticky: 15 });
+const FONT_SIZE_DEFAULT_PX = Object.freeze({ text: 40 });
 
 export function selectionToolbarAnchor(item, viewport, stackHeightPx) {
   let offsetX = TEXT_ANCHOR_OFFSET_PX;
@@ -34,6 +35,7 @@ export function groupSelectionToolbarAnchor(groupBBox, viewport, stackHeightPx) 
 }
 
 export function fontSizeForItem(item) {
+  if (item.type === 'sticky') return stickyFontSize(item);
   return item.type === 'zone' ? zoneTitleFontSize(item) : item.fontSize || FONT_SIZE_DEFAULT_PX[item.type];
 }
 export function clampFontSize(size) { return Math.max(FONT_SIZE_MIN_PX, Math.min(FONT_SIZE_MAX_PX, size)); }

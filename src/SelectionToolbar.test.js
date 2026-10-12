@@ -48,7 +48,7 @@ test('toolbar event contracts preserve native disabled, permission guards and po
       sizeControls[0].props.onClick();
       sizeControls[2].props.onClick();
     }
-    assert.deepEqual(received, [2, 13, 17]);
+    assert.deepEqual(received, [2, 18, 22]);
     const group = GroupSelectionToolbar({ anchor: { x: 1, y: 2 }, lockedCount: 2,
       canUnlock: false, onUnlockAll: () => record('unlock') });
     assert.equal(group.props.children[0].props.disabled, true);

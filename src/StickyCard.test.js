@@ -50,6 +50,8 @@ test('text and private visibility follow owner/reveal props in th/en', async () 
           assert.equal(Boolean(byClass(tree, 'rb-sticky__hidden')), hidden);
           if (hidden) {
             assert.equal(byClass(tree, 'rb-sticky__hidden-title').props.children, t('sticky.hidden'));
+            assert.ok(!t('sticky.hidden').includes('🔒'));
+            assert.ok(byClass(tree, 'rb-sticky__hidden-icon'));
             assert.equal(byClass(tree, 'rb-sticky__hidden-author').props.children,
               t('sticky.hiddenBy', { name: ITEM.authorName }));
             assert.equal(byClass(tree, 'rb-sticky__vote-pill').props.disabled, true);
@@ -145,5 +147,32 @@ test('editing injects the editor and forwards value, keyboard, blur and overflow
     let stopped = false;
     editor.props.onMouseDown({ stopPropagation: () => { stopped = true; } });
     assert.ok(stopped);
+  });
+});
+
+test('stickies never rotate and voting open keeps a fixed pill size in full, dense and compact paths', async () => {
+  await withChromeModule('/src/StickyCard.jsx', ({ StickyCard }) => {
+    for (const props of [{}, { dense: true }, { compact: true }]) {
+      for (const [votingAllowedNow, voted] of [[false, false], [false, true], [true, false], [true, true]]) {
+        const { tree, html } = renderCard(StickyCard, { ...props, votingAllowedNow, voted, showVoteCount: true, voteCount: 1 });
+        assert.ok(!html.includes('rotate'));
+        assert.equal(tree.props.style.fontSize, 20);
+        const button = findElement(tree, (node) => node.type === 'button');
+        for (const property of ['padding', 'gap', 'fontSize']) assert.equal(button.props.style?.[property], undefined);
+        assert.equal(button.props.className.includes('rb-sticky-vote--open'), votingAllowedNow && !voted);
+      }
+      const { tree } = renderCard(StickyCard, { ...props, item: { ...ITEM, fontSize: 27 } });
+      assert.equal(tree.props.style.fontSize, 27);
+    }
+  });
+});
+
+test('the injected editor shares the sticky font default and preserves explicit sizes', async () => {
+  await withChromeModule('/src/StickyCard.jsx', ({ StickyCard }) => {
+    function Editor() { return null; }
+    for (const [fontSize, expected] of [[undefined, 20], [27, 27]]) {
+      const { tree } = renderCard(StickyCard, { item: { ...ITEM, fontSize }, isEditing: true, TextEditor: Editor });
+      assert.equal(findElement(tree, (node) => node.type === Editor).props.style.fontSize, expected);
+    }
   });
 });

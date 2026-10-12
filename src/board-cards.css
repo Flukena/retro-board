@@ -4,7 +4,8 @@
   background: var(--rb-card-bg);
   border: none;
   border-radius: var(--radius-sticky);
-  padding: 12px;
+  padding: var(--sticky-padding);
+  line-height: var(--sticky-line-height);
   box-sizing: border-box;
   cursor: grab;
   font-family: var(--font-ui);
@@ -26,16 +27,11 @@
   position: absolute;
   right: 8px;
   bottom: 6px;
-  border-radius: var(--radius-md);
-  padding: 3px 10px;
-  font-size: 12px;
   cursor: pointer;
-  font-family: var(--font-display);
 }
 
 .rb-sticky {
   transition: transform 0.18s ease, box-shadow 0.18s ease;
-  line-height: 1.5;
   color: var(--text);
   outline-offset: 6px;
   display: flex;
@@ -66,15 +62,17 @@
   align-items: center;
   gap: 5px;
   min-width: 28px;
-  height: 26px;
+  height: var(--sticky-chip-height);
+  padding: var(--comment-chip-padding);
+  box-sizing: border-box;
   background: var(--comment-chip-bg);
-  color: var(--sticky-vote-idle-text);
+  color: var(--comment-chip-text);
   border: none;
   border-radius: var(--radius-pill);
   box-shadow: var(--comment-chip-shadow);
   font-family: inherit;
-  font-size: 11px;
-  font-weight: 600;
+  font-size: var(--comment-chip-font-size);
+  font-weight: var(--comment-chip-font-weight);
   overflow: hidden;
 }
 
@@ -106,7 +104,7 @@
   justify-content: center;
   border-radius: var(--radius-pill);
   background: var(--rb-card-ink);
-  color: var(--sticky-vote-text);
+  color: var(--comment-count-text);
   font-size: 10px;
   line-height: 1;
 }
@@ -127,7 +125,7 @@
   outline: none;
   resize: none;
   font-family: inherit;
-  line-height: 1.5;
+  line-height: var(--sticky-line-height);
   box-sizing: border-box;
   overflow-y: auto;
   overflow-wrap: anywhere;
@@ -160,17 +158,24 @@
   pointer-events: none;
   background: var(--hidden-sticky-bg);
   font-weight: 600;
-  color: var(--rb-card-ink);
+  color: var(--sticky-hidden-text);
   gap: 6px;
 }
 
+.rb-sticky__hidden-icon {
+  width: var(--sticky-hidden-icon-size);
+  height: var(--sticky-hidden-icon-size);
+}
+
 .rb-sticky__hidden-title {
-  font-size: 13px;
+  font-size: var(--sticky-hidden-title-size);
+  font-weight: var(--sticky-hidden-title-weight);
 }
 
 .rb-sticky__hidden-author {
-  font-size: 11px;
-  color: var(--text-muted);
+  font-size: var(--sticky-hidden-author-size);
+  font-weight: var(--sticky-hidden-author-weight);
+  color: inherit;
 }
 
 .rb-sticky__footer {
@@ -183,6 +188,8 @@
 }
 
 .rb-sticky__author {
+  font-size: var(--sticky-author-font-size);
+  color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -194,11 +201,7 @@
 }
 
 .rb-sticky__vote-pill {
-  display: inline-flex;
-  align-items: center;
-  border-radius: var(--radius-pill);
-  font-weight: 600;
-  transition: background 0.15s, color 0.15s, padding 0.2s, font-size 0.2s;
+  transition: background 0.15s, color 0.15s;
 }
 
 .rb-sticky__vote-count {
@@ -370,19 +373,19 @@
 /* Protrudes 13px, so winners must not use paint containment. */
 .rb-winner-medal {
   position: absolute;
-  top: -13px;
-  left: -13px;
+  top: var(--sticky-medal-offset);
+  left: var(--sticky-medal-offset);
   z-index: 3; /* Intra-card rank medal sits above badges (2). */
-  width: 28px;
-  height: 28px;
+  width: var(--sticky-medal-size);
+  height: var(--sticky-medal-size);
   display: grid;
   place-items: center;
   border-radius: var(--radius-round);
   background: var(--rb-medal-bg);
   color: var(--rb-medal-fg);
   font-family: var(--font-display);
-  font-size: 13px;
-  font-weight: 700;
+  font-size: var(--sticky-medal-font-size);
+  font-weight: var(--sticky-medal-font-weight);
   box-shadow: var(--shadow-medal);
   line-height: 1;
   pointer-events: none;
@@ -390,6 +393,18 @@
 
 .rb-card-overview__vote,
 .rb-sticky__vote-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sticky-vote-gap);
+  height: var(--sticky-chip-height);
+  min-width: var(--sticky-vote-min-width);
+  padding: var(--sticky-vote-padding);
+  box-sizing: border-box;
+  font-family: var(--font-display);
+  font-size: var(--sticky-vote-font-size);
+  font-weight: var(--sticky-vote-font-weight);
+  border-radius: var(--radius-pill);
   border: none;
 }
 
@@ -402,6 +417,15 @@
 
 .rb-card-overview__vote--voted,
 .rb-sticky__vote-pill--voted {
-  background: var(--sticky-ink);
+  background: var(--sticky-vote-bg);
   color: var(--sticky-vote-text);
+}
+
+.rb-sticky-vote--open {
+  box-shadow: var(--sticky-vote-open-ring);
+}
+
+.rb-sticky__vote-icon {
+  width: var(--sticky-vote-icon-size);
+  height: var(--sticky-vote-icon-size);
 }

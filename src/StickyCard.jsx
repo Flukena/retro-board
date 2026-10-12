@@ -2,9 +2,10 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Lock, ThumbsUp, MessageSquare } from 'lucide-react';
 import { BOARD_TEXT_MAX_LENGTH, stickyTextForDom } from './security-boundaries.js';
 import { PALETTE, STICKY_AUTO_TEXT } from './palette.js';
-import { stickyClassName, stickyCardVars, medalLook, COMMENT_CAROUSEL_MS } from './card-look.js';
+import { stickyClassName, stickyCardVars, medalLook, stickyVoteClassName, COMMENT_CAROUSEL_MS } from './card-look.js';
 import { DEFAULT_STICKY_WIDTH_PX as STICKY_W, DEFAULT_STICKY_HEIGHT_PX as STICKY_H } from './board-geometry.js';
 import { useBrowserLayoutEffect } from './use-browser-layout-effect.js';
+import { stickyFontSize } from './sticky-font.js';
 import { t } from './i18n.js';
 
 // Let notes grow while typing, but keep a pasted essay from turning into a
@@ -59,7 +60,6 @@ export const StickyCard = React.memo(function StickyCard({
   const visibleText = stickyTextForDom(it, hideContent);
   const w = it.w || STICKY_W;
   const h = it.h || STICKY_H;
-  const rot = selected ? 0 : it.rotation;
   const top3 = voteRank != null;
   const [hovered, setHovered] = useState(false);
   const [commentPreviewIndex, setCommentPreviewIndex] = useState(0);
@@ -79,7 +79,7 @@ export const StickyCard = React.memo(function StickyCard({
   const [contentRef, contentOverflows] = useContentOverflow(
     visibleText,
     !hideContent && !isEditing && !overview,
-    `${it.fontSize || 15}:${h}:${showCommentPreview ? 1 : 0}:${top3 ? 1 : 0}`,
+    `${stickyFontSize(it)}:${h}:${showCommentPreview ? 1 : 0}:${top3 ? 1 : 0}`,
     growToFit,
   );
   useEffect(() => {
@@ -104,9 +104,8 @@ export const StickyCard = React.memo(function StickyCard({
           width: w,
           height: h,
           ...stickyCardVars(c),
-          transform: `rotate(${it.rotation || 0}deg)`,
           color: it.fontColor || STICKY_AUTO_TEXT,
-          fontSize: it.fontSize || 15,
+          fontSize: stickyFontSize(it),
         }}
       >
         <div
@@ -122,9 +121,7 @@ export const StickyCard = React.memo(function StickyCard({
             onClick={e => { e.stopPropagation(); onToggleVote(it); }}
             disabled={!votingAllowedNow && !voted}
             aria-label={voted ? t('vote.tooltip.unvote') : t('vote.tooltip.vote')}
-            className={voted
-              ? 'rb-card-overview__vote rb-card-overview__vote--voted'
-              : 'rb-card-overview__vote'}
+            className={stickyVoteClassName('rb-card-overview__vote', voted, votingAllowedNow)}
           >{voteCount}</button>
         )}
       </div>
@@ -143,17 +140,15 @@ export const StickyCard = React.memo(function StickyCard({
         width: w,
         height: h,
         ...stickyCardVars(c),
-        transform: `rotate(${rot}deg)`,
-        ['--rb-rot']: `${rot}deg`,
         ['--rb-selector-hue']: remoteSelectionHue,
         animation: remoteSelected
           ? undefined
           : top3
             ? (dense
               ? 'rb-glow 1.6s ease-in-out infinite'
-              : 'rb-glow 1.6s ease-in-out infinite, rb-appear-rot 0.28s ease-out')
-            : (dense ? undefined : 'rb-appear-rot 0.28s ease-out'),
-        fontSize: it.fontSize || 15,
+              : 'rb-glow 1.6s ease-in-out infinite, rb-appear 0.28s ease-out')
+            : (dense ? undefined : 'rb-appear 0.28s ease-out'),
+        fontSize: stickyFontSize(it),
         // The rank badge protrudes 13px; remote auras also need unclipped paint.
         contain: top3 || remoteSelected ? 'layout style' : 'layout paint style',
       }}
@@ -174,7 +169,6 @@ export const StickyCard = React.memo(function StickyCard({
             style={{
               width: showCommentPreview ? '72%' : 'auto',
               maxWidth: showCommentPreview ? '72%' : (commentCount > 0 ? 54 : 40),
-              padding: showCommentPreview ? '3px 6px' : '3px 7px',
               cursor: hideContent ? 'not-allowed' : 'pointer',
               opacity: hideContent ? 0.45 : (commentCount > 0 ? 0.92 : 0.65),
             }}
@@ -241,7 +235,7 @@ export const StickyCard = React.memo(function StickyCard({
                 placeholder={t('sticky.placeholder')}
                 className="rb-sticky__editor"
                 style={{
-                  fontSize: it.fontSize || 15,
+                  fontSize: stickyFontSize(it),
                   color: it.fontColor || STICKY_AUTO_TEXT,
                 }}
               />
@@ -269,7 +263,7 @@ export const StickyCard = React.memo(function StickyCard({
 
       {hideContent && (
         <div className="rb-sticky__hidden">
-          <Lock size={20} />
+          <Lock className="rb-sticky__hidden-icon" />
           <span className="rb-sticky__hidden-title">{t('sticky.hidden')}</span>
           <span className="rb-sticky__hidden-author">{t('sticky.hiddenBy', { name: it.authorName })}</span>
         </div>
@@ -285,13 +279,8 @@ export const StickyCard = React.memo(function StickyCard({
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => { e.stopPropagation(); if (!hideContent) onToggleVote(it); }}
             disabled={hideContent || (!votingAllowedNow && !voted)}
-            className={voted
-              ? 'rb-sticky__vote-pill rb-sticky__vote-pill--voted'
-              : 'rb-sticky__vote-pill'}
+            className={stickyVoteClassName('rb-sticky__vote-pill', voted, votingAllowedNow && !hideContent)}
             style={{
-              gap: votingAllowedNow ? 10 : 4,
-              padding: votingAllowedNow ? '8px 25px' : '3px 10px',
-              fontSize: votingAllowedNow ? 30 : 12,
               cursor: (hideContent || !votingAllowedNow) ? 'not-allowed' : 'pointer',
               opacity: hideContent ? 0.4 : (votingAllowedNow ? 1 : 0.6),
             }}
@@ -302,7 +291,7 @@ export const StickyCard = React.memo(function StickyCard({
               : voted ? t('vote.tooltip.unvote') : t('vote.tooltip.vote')
             }
           >
-            <ThumbsUp size={votingAllowedNow ? 30 : 12} />
+            <ThumbsUp className="rb-sticky__vote-icon" />
             {showVoteCount && (
               <span
                 key={voteCount}
