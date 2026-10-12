@@ -39,3 +39,50 @@ test('zone strip isolates events and forwards each action with its zone id', asy
       ...['toggleLock', 'exportCsv', 'saveTemplate', 'bringToFront', 'sendToBack', 'remove'].map((name) => [name, ITEM.id])]);
   });
 });
+
+test('popup has labelled buttons in th/en, admin-only reveal/vote and the strip permission guards', async () => {
+  await withChromeModule('/src/ZoneToolStrip.jsx', ({ ZoneToolPopup }, { setLang, t }) => {
+    for (const lang of ['th', 'en']) {
+      setLang(lang);
+      for (const isAdmin of [false, true]) {
+        const html = renderToStaticMarkup(React.createElement(ZoneToolPopup, {
+          item: ITEM, canEdit: false, canDelete: false, isAdmin, actions: {}, state: 'open',
+        }));
+        assert.match(html, /role="group"/);
+        assert.ok(html.includes(`aria-label="${t('zone.options')}"`));
+        for (const key of ['zone.lockToggle.on', 'zone.exportCsvTitle', 'selection.saveTemplate',
+          'selection.bringToFront', 'selection.sendToBack', 'common.delete']) {
+          assert.ok(html.includes(`>${t(key)}</span>`));
+        }
+        assert.equal(html.includes(`>${t('zone.revealCards')}</span>`), isAdmin);
+        assert.equal(html.includes(`>${t('zone.startVote')}</span>`), isAdmin);
+        assert.equal((html.match(/disabled=""/g) || []).length, 12);
+        assert.match(html, /data-state="open"/);
+        const locked = renderToStaticMarkup(React.createElement(ZoneToolPopup, {
+          item: { ...ITEM, locked: true }, canEdit: true, canDelete: true, isAdmin,
+          revealed: true, hasVoteTimer: true, actions: {},
+        }));
+        assert.ok(locked.includes(`>${t('zone.lockToggle.off')}</span>`));
+        assert.equal(locked.includes(`>${t('zone.hideCards')}</span>`), isAdmin);
+        assert.equal(locked.includes(`>${t('topbar.stopVote')}</span>`), isAdmin);
+        assert.doesNotMatch(locked, /disabled=""/);
+      }
+    }
+  });
+});
+
+
+test('popup isolates pointer/click events and disabled mutations cannot dispatch', async () => {
+  await withChromeModule('/src/ZoneToolStrip.jsx', ({ ZoneToolPopup }) => {
+    const calls = [];
+    const actions = Object.fromEntries(['color', 'fontSize', 'toggleLock', 'exportCsv', 'saveTemplate',
+      'bringToFront', 'sendToBack', 'remove', 'toggleReveal', 'vote'].map((name) => [name, (...args) => calls.push([name, ...args])]));
+    const tree = ZoneToolPopup({ item: ITEM, canEdit: false, canDelete: false, isAdmin: true, actions });
+    for (const name of ['onMouseDown', 'onDoubleClick', 'onClick']) tree.props[name]({ stopPropagation: () => calls.push('stop') });
+    assert.deepEqual(calls.splice(0), ['stop', 'stop', 'stop']);
+    for (const child of React.Children.toArray(tree.props.children)) {
+      if (child.type === 'button') child.props.onClick();
+    }
+    assert.deepEqual(calls, [['toggleReveal', ITEM.id], ['vote', ITEM.id], ['exportCsv', ITEM.id], ['saveTemplate', ITEM.id]]);
+  });
+});

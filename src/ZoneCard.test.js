@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { withChromeModule } from './chrome-test-helper.js';
 import { TOKENS } from './theme.js';
-import { ZONE_HEADER_ICONS_BREAKPOINT_PX, ZONE_HEADER_MENU_BREAKPOINT_PX } from './zone-title.js';
+import { ZONE_HEADER_MENU_BREAKPOINT_PX } from './zone-title.js';
 
 const ITEM = { id: 'zone-a', type: 'zone', title: 'Ideas', x: 10, y: 20, w: 300, h: 200, color: 0 };
 function Editor({ value, className }) {
@@ -175,7 +175,8 @@ test('zone header owns its local menu, admin icons and timer setup in th/en', as
         }));
         assert.ok(html.includes(`aria-expanded="${menuOpen}"`));
         assert.equal(html.includes('rb-zone__tool-strip'), menuOpen);
-        assert.ok(html.includes(t('zone.options')));
+        assert.ok(html.includes(t(menuOpen ? 'zone.closeOptions' : 'zone.options')));
+        assert.equal(html.includes('rb-zone__tool-popup'), menuOpen);
         assert.doesNotMatch(html, /lucide-eye|lucide-thumbs-up|rb-timer-setup/);
       }
       for (const timerSetupOpen of [false, true]) {
@@ -201,8 +202,7 @@ test('header width, inset, icon sizing and narrow breakpoints use world coordina
   assert.equal(row['container-type'], 'inline-size');
   assert.equal(row['overflow-x'], undefined);
   assert.ok(css.includes(`@container rb-zone-header (max-width: ${ZONE_HEADER_MENU_BREAKPOINT_PX}px)`));
-  assert.match(css, /\.rb-zone__actions\s*\{[^}]*flex-wrap: wrap-reverse;[^}]*justify-content: flex-end;/);
-  assert.ok(css.includes(`@container rb-zone-header (max-width: ${ZONE_HEADER_ICONS_BREAKPOINT_PX}px)`));
+  assert.match(css, /\.rb-zone__actions\s*\{[^}]*flex-wrap: nowrap;[^}]*justify-content: flex-end;/);
   const button = declarations(css, '.rb-zone__icon');
   assert.equal(button['pointer-events'], 'auto');
   assert.equal(button.color, 'var(--text-muted)');
@@ -213,10 +213,10 @@ test('header width, inset, icon sizing and narrow breakpoints use world coordina
   }
 });
 
-test('zone header extends the icon row without a panel and wraps actions only after the chip shrinks', () => {
+test('zone header keeps inline tools on one row without a panel', () => {
   const css = readFileSync(new URL('./board-cards.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
   const strip = declarations(css, '.rb-zone__tool-strip');
-  assert.equal(strip['flex-wrap'], 'wrap');
+  assert.equal(strip['flex-wrap'], 'nowrap');
   assert.equal(strip['max-width'], '100%');
   assert.equal(strip['box-sizing'], 'border-box');
   assert.equal(strip.display, 'inline-flex');
@@ -233,51 +233,65 @@ test('zone header extends the icon row without a panel and wraps actions only af
   assert.equal(chip['flex-shrink'], '1');
   assert.equal(actions['flex-shrink'], '0');
   assert.equal(actions['max-width'], 'calc(100% - min(var(--zone-chip-min-width), 50%) - var(--zone-chip-gap))');
-  // Overflowing tools wrap below so ⋯ stays on the top row.
-  assert.equal(actions['flex-wrap'], 'wrap-reverse');
+  // Narrow headers switch to the popup instead of wrapping tools.
+  assert.equal(actions['flex-wrap'], 'nowrap');
   assert.equal(actions['justify-content'], 'flex-end');
   assert.equal(actions['margin-left'], 'auto');
   assert.equal(actions['align-items'], 'center');
   assert.equal(declarations(css, '.rb-zone__count')['flex-shrink'], '0');
-  const swatches = declarations(css, '.rb-zone__tool-strip .rb-selection-toolbar__swatches');
+  const swatches = declarations(css, '.rb-zone__tools .rb-selection-toolbar__swatches');
   assert.equal(swatches['align-items'], 'center');
   assert.equal(swatches.gap, 'var(--zone-icon-gap)');
-  const font = declarations(css, '.rb-zone__tool-strip .rb-selection-toolbar__font-size');
+  const font = declarations(css, '.rb-zone__tools .rb-selection-toolbar__font-size');
   assert.equal(font['border-left'], 'none');
   assert.equal(font['padding-left'], '0');
   assert.equal(font['margin-left'], '0');
   assert.equal(font.gap, 'var(--zone-icon-gap)');
-  const button = declarations(css, '.rb-zone__tool-strip .rb-icon-btn');
+  const button = declarations(css, '.rb-zone__tools .rb-icon-btn');
   assert.equal(button.width, 'var(--zone-icon-button-size)');
   assert.equal(button.height, 'var(--zone-icon-button-size)');
   assert.equal(button.padding, '0');
   assert.equal(button.background, 'transparent');
   assert.equal(button.color, 'var(--text-muted)');
   assert.equal(button['font-size'], 'var(--zone-icon-size)');
-  assert.equal(declarations(css, '.rb-zone__tool-strip .rb-icon-btn:hover:not(:disabled)').background, 'var(--zone-icon-hover-bg)');
-  const icons = css.match(/@container rb-zone-header \(max-width: 180px\)\s*\{([^}]+)\}/)[1];
-  assert.match(icons, /\.rb-zone__admin-action, \.rb-zone__popover-anchor/);
-  assert.doesNotMatch(icons, /rb-zone__menu|rb-zone__actions/);
+  assert.equal(declarations(css, '.rb-zone__tools .rb-icon-btn:hover:not(:disabled)').background, 'var(--zone-icon-hover-bg)');
   const menu = css.match(/@container rb-zone-header \(max-width: 72px\)\s*\{([^}]+)\}/)[1];
   assert.match(menu, /\.rb-zone__menu/);
 });
 
-test('header menu and vote events stay isolated and timer callbacks target the zone', async () => {
-  await withChromeModule('/src/ZoneCard.jsx', ({ ZoneHeader }) => {
+test('header isolates events, closes vote menu and anchors timer at the header right edge', async () => {
+  await withChromeModule('/src/ZoneCard.jsx', ({ ZoneHeader }, { t }) => {
     const calls = [];
-    const tree = ZoneHeader({ item: ITEM, isAdmin: true, menuOpen: false, timerSetupOpen: true,
+    const tree = ZoneHeader({ item: ITEM, isAdmin: true, menuOpen: true, timerSetupOpen: true,
       actions: { toggleReveal: (id) => calls.push(['reveal', id]), vote: (id) => calls.push(['vote', id]),
-        closeTimerSetup: () => calls.push(['close']), startTimer: (...args) => calls.push(['start', ...args]) },
-      onToggleMenu: () => calls.push(['menu']) });
+        closeTimerSetup: () => calls.push(['closeTimer']), startTimer: (...args) => calls.push(['start', ...args]) },
+      onCloseMenu: () => calls.push(['closeMenu']), onToggleMenu: () => calls.push(['menu']) });
     const event = { stopPropagation: () => calls.push(['stop']) };
-    const children = tree.props.children;
-    children[1].props.children.props.onClick(event);
-    const anchor = children[2];
-    anchor.props.children[0].props.onClick(event);
-    anchor.props.children[1].props.onClose();
-    anchor.props.children[1].props.onStart(5, 3, true, false);
-    children[3].props.onClick(event);
-    assert.deepEqual(calls, [['stop'], ['reveal', ITEM.id], ['stop'], ['vote', ITEM.id],
-      ['close'], ['start', ITEM.id, 5, 3, true, false], ['stop'], ['menu']]);
+    const children = React.Children.toArray(tree.props.children);
+    const admin = children.filter((child) => child.props.className === 'rb-zone__admin-action');
+    assert.equal(admin.length, 2);
+    admin[0].props.children.props.onClick(event);
+    admin[1].props.children.props.onClick(event);
+    const timer = children.find((child) => child.props.className === 'rb-zone__popover-anchor');
+    assert.ok(timer, 'timer must be a direct header child, independent of hidden admin icons');
+    timer.props.children.props.onClose();
+    timer.props.children.props.onStart(5, 3, true, false);
+    const menu = children.find((child) => child.props.className?.includes('rb-zone__menu'));
+    assert.equal(menu.props['aria-label'], t('zone.closeOptions'));
+    menu.props.onClick(event);
+    assert.deepEqual(calls, [['stop'], ['reveal', ITEM.id], ['stop'], ['closeMenu'], ['vote', ITEM.id],
+      ['closeTimer'], ['start', ITEM.id, 5, 3, true, false], ['stop'], ['menu']]);
+  });
+});
+
+test('presence retains both menu structures during exit while the toggle is closed', async () => {
+  await withChromeModule('/src/ZoneCard.jsx', ({ ZoneHeader }, { t }) => {
+    const html = renderToStaticMarkup(React.createElement(ZoneHeader, {
+      item: ITEM, actions: {}, menuOpen: false, presence: { mounted: true, state: 'exit' },
+    }));
+    assert.ok(html.includes(t('zone.options')));
+    assert.match(html, /aria-expanded="false"/);
+    assert.equal((html.match(/data-state="exit"/g) || []).length, 2);
+    assert.equal((html.match(/inert=""/g) || []).length, 2);
   });
 });
