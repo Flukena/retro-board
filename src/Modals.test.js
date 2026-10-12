@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { withChromeModule } from './chrome-test-helper.js';
+import { COMMENT_CAROUSEL_STYLE } from './card-look.js';
 import { classGroups, targetsClass } from './scoped-class-test-helper.js';
 
 test('confirmation contract keeps cancel focus, busy buttons, danger and warning semantics', async () => {
@@ -91,7 +92,7 @@ test('confirmation and name report events without adding dismissal or keyboard b
   });
 });
 
-const COMPONENT_CLASS_PATTERN = /^(?:rb-(?:dialog|help|timer-setup|selection-toolbar|landing|minimap)__|rb-(?:tool-dock|dock-tile|template|zone)(?:$|[-_]))/;
+const COMPONENT_CLASS_PATTERN = /^(?:rb-(?:dialog|help|timer-setup|selection-toolbar|landing|minimap)__|rb-(?:tool-dock|dock-tile|template|zone|sticky|card-overview|winner-medal)(?:$|[-_]))/;
 test('selector contract distinguishes target compounds from ancestors and incompatible classes', () => {
   const heading = new Set(['rb-dialog__heading']);
   assert.equal(targetsClass('.rb-input.rb-dialog__heading', 'rb-dialog__heading', heading), false);
@@ -107,11 +108,15 @@ test('every scoped component class has a compatible stylesheet selector targetin
     ['Modals.jsx', 'modals.css'], ['TimerSetup.jsx', 'timer-setup.css'],
     ['SelectionToolbar.jsx', 'selection-toolbar.css'], ['Landing.jsx', 'landing.css'],
     ['MinimapPanel.jsx', 'minimap.css'], ['ToolDock.jsx', 'tool-dock.css'],
-    ['ZoneCard.jsx', 'board-cards.css'], ['TemplateThumbnail.jsx', 'template-thumbnail.css'],
+    ['ZoneCard.jsx', 'board-cards.css'], ['StickyCard.jsx', 'board-cards.css'], ['TemplateThumbnail.jsx', 'template-thumbnail.css'],
   ]) {
     const source = readFileSync(new URL(component, import.meta.url), 'utf8');
     const css = readFileSync(new URL(stylesheet, import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
-    const selectors = [...css.matchAll(/([^{}]+)\{/g)].flatMap((rule) => rule[1].split(','));
+    // StickyCard's carousel selector still lives in the board's inline stylesheet.
+    const inlineCss = component === 'StickyCard.jsx'
+      ? COMMENT_CAROUSEL_STYLE
+      : '';
+    const selectors = [...(css + inlineCss).matchAll(/([^{}]+)\{/g)].flatMap((rule) => rule[1].split(','));
     for (const elementClasses of classGroups(source)) {
       for (const className of [...elementClasses].filter((name) => COMPONENT_CLASS_PATTERN.test(name))) {
         assert.ok(selectors.some((selector) => targetsClass(selector, className, elementClasses)),

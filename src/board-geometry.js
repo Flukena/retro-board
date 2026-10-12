@@ -8,8 +8,11 @@ export const GEOMETRY_SOURCE = Object.freeze({
   STORED_ROOM: 'stored-room',
 });
 
+export const DEFAULT_STICKY_WIDTH_PX = 200;
+export const DEFAULT_STICKY_HEIGHT_PX = 180;
+
 const ITEM_SIZE = Object.freeze({
-  sticky: Object.freeze({ w: 200, h: 180 }),
+  sticky: Object.freeze({ w: DEFAULT_STICKY_WIDTH_PX, h: DEFAULT_STICKY_HEIGHT_PX }),
   zone: Object.freeze({ w: 1200, h: 1080 }),
   text: Object.freeze({ w: 400, h: 80 }),
   image: Object.freeze({ w: 200, h: 200 }),

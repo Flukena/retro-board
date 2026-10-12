@@ -1,5 +1,12 @@
 import { MEDAL_COLORS } from './palette.js';
 
+export const COMMENT_CAROUSEL_MS = 3600;
+export const COMMENT_CAROUSEL_STYLE = `
+  .rb-sticky__comment-slide {
+    animation: rb-sticky__comment-slide ${COMMENT_CAROUSEL_MS}ms ease-in-out both;
+  }
+`;
+
 // The header's negative side offsets align its row with the body's outer edges.
 export const ZONE_BORDER_W_PX = 2;
 
