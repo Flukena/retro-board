@@ -1,7 +1,3 @@
-const ZOOM_PERCENT_SCALE = 100;
-
-export const minimapZoomPercent = (zoom) => Math.round(zoom * ZOOM_PERCENT_SCALE);
-
 const finite = (value, fallback = 0) => (
   Number.isFinite(Number(value)) ? Number(value) : fallback
 );

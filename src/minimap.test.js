@@ -106,10 +106,3 @@ test('live viewport rectangle can be remapped without rebuilding item geometry',
   assert.equal(moved.w, first.w);
   assert.equal(moved.h, first.h);
 });
-
-
-test('zoom percentage rounds on either side of half-percent boundaries', () => {
-  for (const [zoom, percentage] of [[0.0049, 0], [0.005, 1], [0.9949, 99], [0.995, 100], [1.2349, 123], [1.235, 124], [2, 200]]) {
-    assert.equal(minimap.minimapZoomPercent(zoom), percentage);
-  }
-});

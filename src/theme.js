@@ -36,7 +36,8 @@ export function defineTokens(light, dark) {
 
 const MODE_INDEPENDENT_TOKENS = Object.freeze({
   '--minimap-grid-pitch': `${MINIMAP_GRID_PITCH_PX}px`,
-  '--minimap-panel-blur': '12px',
+  '--radius-dock-tile': '14px',
+  '--dock-label-gap': '4px',
   '--radius-minimap-viewport': '4px',
   '--grid-pitch': `${GRID_PITCH_PX}px`,
   '--landing-corner-layer': String(Z.TOPBAR),

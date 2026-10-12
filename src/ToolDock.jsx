@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutTemplate, MousePointer2, Type, Image, Trash2, Pencil } from 'lucide-react';
+import { LayoutTemplate, MousePointer2, Type, Image, Trash2, Pencil, ChevronDown } from 'lucide-react';
 import { Button, Divider, MenuItem, Surface } from './UiPrimitives.jsx';
 import { DIVIDER_ORIENTATION } from './ui-variants.js';
 import { PALETTE, DOCK_TILE_INDEX } from './palette.js';
@@ -20,24 +20,28 @@ const TOOL_ICONS = Object.freeze({
   [TOOL_ID.IMAGE]: Image,
 });
 
-function DockTile({ toolId, icon: Icon, label, ...props }) {
+function DockTile({ toolId, icon: Icon, label, chevron = false, ...props }) {
   return (
     <button type="button" className="rb-dock-tile" data-tool={toolId} {...props}>
       <span className="rb-dock-tile__icon" style={{ background: PALETTE[DOCK_TILE_INDEX[toolId]].bg }}>
         <Icon size={CHROME_ICON_SIZE_PX.TOOL} />
       </span>
-      <span>{label}</span>
+      <span className="rb-dock-tile__label">
+        {label}
+        {chevron && <ChevronDown size={CHROME_ICON_SIZE_PX.SMALL} aria-hidden="true" />}
+      </span>
     </button>
   );
 }
 
 export function ToolTile({ toolId, active, onTool }) {
+  const activeCreation = active && toolId !== TOOL_ID.SELECT;
   return (
     <DockTile
       toolId={toolId}
-      icon={active ? MousePointer2 : TOOL_ICONS[toolId]}
-      label={t(active ? `tool.${toolId}.placeholder` : `tool.${toolId}`)}
-      title={t(active ? `tool.${toolId}.active` : `tool.${toolId}.title`)}
+      icon={activeCreation ? MousePointer2 : TOOL_ICONS[toolId]}
+      label={t(activeCreation ? `tool.${toolId}.placeholder` : `tool.${toolId}`)}
+      title={t(activeCreation ? `tool.${toolId}.active` : `tool.${toolId}.title`)}
       aria-pressed={active}
       onClick={() => onTool(toolId)}
     />
@@ -115,6 +119,7 @@ export function ToolDock({
           toolId={TEMPLATE_TOOL_ID}
           icon={LayoutTemplate}
           label={t('tmpl.btn')}
+          chevron
           aria-expanded={templatesOpen}
           onClick={() => onTemplatesOpenChange(!templatesOpen)}
         />
@@ -123,7 +128,7 @@ export function ToolDock({
           <ToolTile
             key={toolId}
             toolId={toolId}
-            active={creationMode === toolId}
+            active={creationMode === toolId || (toolId === TOOL_ID.SELECT && creationMode == null)}
             onTool={onTool}
           />
         ))}

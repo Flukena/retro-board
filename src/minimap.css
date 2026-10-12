@@ -1,38 +1,14 @@
 .rb-minimap {
   position: fixed;
-  padding: var(--rb-minimap-padding) var(--rb-minimap-padding) 9px;
+  padding: var(--rb-minimap-padding);
   box-sizing: border-box;
-  background: var(--bg-overlay);
+  background: var(--bg-panel);
   border: var(--rb-minimap-border) solid var(--border);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-pop);
-  backdrop-filter: blur(var(--minimap-panel-blur));
+  box-shadow: var(--shadow-card);
   opacity: 0;
   pointer-events: none;
   transition: opacity 220ms ease;
-}
-
-.rb-minimap__header {
-  height: 25px;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 0 3px 6px;
-  color: var(--text-mid);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.rb-minimap__title {
-  flex: 1;
-  line-height: 1;
-}
-
-.rb-minimap__zoom {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
 }
 
 .rb-minimap__surface {

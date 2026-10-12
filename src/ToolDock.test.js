@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
+import { readFileSync } from 'node:fs';
+import { TOKENS } from './theme.js';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { withChromeModule } from './chrome-test-helper.js';
 
@@ -66,4 +68,64 @@ test('each template row has a thumbnail; custom rename emits its id with localiz
       assert.ok(html.includes(`aria-label="${t('tmpl.rename')}"`));
     }
   });
+});
+
+const dockButton = (markup, toolId) => markup.match(new RegExp(`<button[^>]*data-tool="${toolId}"[^>]*>[\\s\\S]*?</button>`))?.[0];
+
+test('Select is pressed at rest with its normal label and icon; creation tools retain placeholder semantics', async () => {
+  await withChromeModule('/src/ToolDock.jsx', ({ ToolDock, TOOL_ID }, { t, getLang, setLang }) => {
+    const originalLang = getLang();
+    try {
+      for (const language of ['th', 'en']) {
+        setLang(language);
+        const resting = renderToStaticMarkup(React.createElement(ToolDock, { creationMode: null }));
+        const select = dockButton(resting, TOOL_ID.SELECT);
+        assert.match(select, /aria-pressed="true"/);
+        assert.ok(select.includes(`>${t('tool.select')}</span>`));
+        assert.ok(select.includes(`title="${t('tool.select.title')}"`));
+        assert.match(select, /lucide-mouse-pointer2/);
+        const selecting = renderToStaticMarkup(React.createElement(ToolDock, { creationMode: TOOL_ID.SELECT }));
+        const explicitSelect = dockButton(selecting, TOOL_ID.SELECT);
+        assert.match(explicitSelect, /aria-pressed="true"/);
+        assert.ok(explicitSelect.includes(`>${t('tool.select')}</span>`));
+        assert.ok(explicitSelect.includes(`title="${t('tool.select.title')}"`));
+        for (const toolId of [TOOL_ID.TEXT, TOOL_ID.ZONE, TOOL_ID.IMAGE]) {
+          assert.match(dockButton(resting, toolId), /aria-pressed="false"/);
+          const creating = renderToStaticMarkup(React.createElement(ToolDock, { creationMode: toolId }));
+          assert.match(dockButton(creating, TOOL_ID.SELECT), /aria-pressed="false"/);
+          const active = dockButton(creating, toolId);
+          assert.match(active, /aria-pressed="true"/);
+          assert.ok(active.includes(t(`tool.${toolId}.placeholder`)));
+          assert.match(active, /lucide-mouse-pointer2/);
+        }
+      }
+    } finally {
+      setLang(originalLang);
+    }
+  });
+});
+
+test('Templates places a decorative chevron after its label and reflects popover state', async () => {
+  await withChromeModule('/src/ToolDock.jsx', ({ ToolDock }) => {
+    for (const templatesOpen of [false, true]) {
+      const markup = renderToStaticMarkup(React.createElement(ToolDock, {
+        creationMode: null, templatesOpen, rows: { builtin: [], custom: [] },
+      }));
+      const templates = dockButton(markup, 'templates');
+      assert.match(templates, new RegExp(`aria-expanded="${templatesOpen}"`));
+      assert.match(templates, /<span[^>]*>[^<]+<svg[^>]*lucide-chevron-down[^>]*aria-hidden="true"/);
+      assert.match(templates, /width="14" height="14"/);
+    }
+  });
+});
+
+test('dock tiles reserve the design border and radius and use theme colors when pressed', () => {
+  const css = readFileSync(new URL('./tool-dock.css', import.meta.url), 'utf8');
+  assert.match(css, /border: var\(--rb-chrome-border\) solid transparent;/);
+  assert.match(css, /border-radius: var\(--radius-dock-tile\);/);
+  assert.match(css, /\.rb-dock-tile\[aria-pressed="true"\]\s*\{\s*border-color: var\(--border\);/);
+  assert.match(css, /\.rb-dock-tile\[aria-pressed="true"\]\s*\{\s*background: var\(--bg-panel-2\);\s*color: var\(--text\);/);
+  for (const tokens of Object.values(TOKENS)) {
+    assert.equal(tokens['--radius-dock-tile'], '14px');
+  }
 });

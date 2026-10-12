@@ -83,7 +83,6 @@ import {
   centerViewportOnWorld,
   minimapPointToWorld,
   minimapViewportRect,
-  minimapZoomPercent,
 } from './src/minimap.js';
 import {
   cursorScreenPosition,
@@ -4735,7 +4734,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       panelRef={minimapPanelRef}
       viewportRef={minimapViewportRef}
       model={minimapModel}
-      zoomPercent={minimapZoomPercent(viewport.zoom)}
       colors={PALETTE}
       onReveal={revealMinimap}
       onNavigatePointerDown={startMinimapNavigation}

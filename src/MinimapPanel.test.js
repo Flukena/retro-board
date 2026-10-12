@@ -16,7 +16,7 @@ test('panel attaches owner refs, forwards events and leaves visibility to impera
     const onReveal = (event) => calls.push(event);
     const onNavigatePointerDown = (event) => calls.push(event);
     const onNavigateKeyDown = (event) => calls.push(event);
-    const panel = MinimapPanel({ panelRef, viewportRef, model: MODEL, colors: [], zoomPercent: 100,
+    const panel = MinimapPanel({ panelRef, viewportRef, model: MODEL, colors: [],
       onReveal, onNavigatePointerDown, onNavigateKeyDown });
     assert.equal(panel.ref, panelRef);
     assert.equal(Object.hasOwn(panel.props.style, 'opacity'), false);
@@ -25,7 +25,7 @@ test('panel attaches owner refs, forwards events and leaves visibility to impera
       assert.equal(panel.props[name], onReveal);
       panel.props[name](name);
     }
-    const surface = panel.props.children[1];
+    const surface = panel.props.children;
     assert.equal(surface.props.onPointerDown, onNavigatePointerDown);
     assert.equal(surface.props.onKeyDown, onNavigateKeyDown);
     surface.props.onPointerDown('pointer');
@@ -40,23 +40,22 @@ test('panel attaches owner refs, forwards events and leaves visibility to impera
   });
 });
 
-test('navigation surface retains localized accessible controls and helper-derived zoom in th and en', async () => {
-  await withChromeModule('/src/MinimapPanel.jsx', async ({ MinimapPanel }, { getLang, setLang, t }) => {
-    const { minimapZoomPercent } = await import('./minimap.js');
+test('headerless minimap retains localized aside and navigation labels in th and en', async () => {
+  await withChromeModule('/src/MinimapPanel.jsx', ({ MinimapPanel }, { getLang, setLang, t }) => {
     const originalLang = getLang();
     try {
       for (const language of ['th', 'en']) {
         setLang(language);
-        const panel = MinimapPanel({ model: MODEL, colors: [], zoomPercent: minimapZoomPercent(1.235) });
-        const surface = panel.props.children[1];
+        const panel = MinimapPanel({ model: MODEL, colors: [] });
+        const surface = panel.props.children;
         assert.equal(surface.props.role, 'button');
         assert.equal(surface.props.tabIndex, 0);
         assert.equal(surface.props['aria-label'], t('minimap.navigate'));
         assert.equal(surface.props.title, t('minimap.navigate'));
         assert.equal(panel.props['aria-label'], t('minimap.title'));
-        const header = renderToStaticMarkup(panel.props.children[0]);
-        assert.ok(header.includes(t('minimap.title')));
-        assert.match(header, />124%<\/span>/);
+        const markup = renderToStaticMarkup(panel);
+        assert.doesNotMatch(markup, /rb-minimap__(?:header|title|zoom)|lucide-map|%/);
+        assert.ok(markup.includes(`aria-label="${t('minimap.title')}"`));
       }
     } finally {
       setLang(originalLang);
@@ -75,6 +74,12 @@ test('frame CSS preserves geometry ownership and uses a more specific focus rule
     assert.doesNotMatch(declarations, /(?:^|;)\s*(?:transform|width|height)\s*:/);
   }
   const panelRule = rules.find(([, selector]) => selector.trim() === '.rb-minimap');
+  assert.match(panelRule[2], /background: var\(--bg-panel\);/);
+  assert.match(panelRule[2], /border: var\(--rb-minimap-border\) solid var\(--border\);/);
+  assert.match(panelRule[2], /border-radius: var\(--radius-lg\);/);
+  assert.match(panelRule[2], /box-shadow: var\(--shadow-card\);/);
+  assert.match(panelRule[2], /padding: var\(--rb-minimap-padding\);/);
+  assert.doesNotMatch(css, /rb-minimap__(?:header|title|zoom)|backdrop-filter/);
   assert.match(panelRule[2], /opacity:\s*0\s*;/);
   assert.match(panelRule[2], /pointer-events:\s*none\s*;/);
   assert.match(css, /\.rb-minimap-surface:focus-visible\s*\{\s*outline:\s*3px solid var\(--accent\);/);

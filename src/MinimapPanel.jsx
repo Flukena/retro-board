@@ -1,15 +1,14 @@
 import React from 'react';
-import { Map as MapIcon } from 'lucide-react';
 import { MinimapCanvas } from './MinimapCanvas.jsx';
 import {
   MINIMAP_W_PX, MINIMAP_H_PX, MINIMAP_PANEL_PADDING_TOTAL_PX,
-  MINIMAP_BOTTOM_PX, DOCK_INSET_PX, CHROME_BORDER_PX, TOPBAR_ICON_SIZE_PX, Z,
+  MINIMAP_BOTTOM_PX, DOCK_INSET_PX, CHROME_BORDER_PX, Z,
 } from './chrome-layout.js';
 import { t } from './i18n.js';
 import './minimap.css';
 
 export function MinimapPanel({
-  panelRef, viewportRef, model, zoomPercent, colors,
+  panelRef, viewportRef, model, colors,
   onReveal, onNavigatePointerDown, onNavigateKeyDown,
 }) {
   return (
@@ -30,11 +29,6 @@ export function MinimapPanel({
         '--rb-minimap-border': `${CHROME_BORDER_PX}px`,
       }}
     >
-      <div className="rb-minimap__header">
-        <MapIcon size={TOPBAR_ICON_SIZE_PX.MENU} aria-hidden="true" />
-        <span className="rb-minimap__title">{t('minimap.title')}</span>
-        <span className="rb-minimap__zoom">{zoomPercent}%</span>
-      </div>
       <div
         className="rb-minimap-surface rb-minimap__surface"
         role="button"
