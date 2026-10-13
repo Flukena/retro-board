@@ -5,11 +5,11 @@
 import { useEffect, useState } from 'react';
 import { GRID_PITCH_PX, MINIMAP_GRID_PITCH_PX, Z } from './chrome-layout.js';
 import {
-  ZONE_TITLE_DEFAULT_FONT_PX, ZONE_COUNT_FONT_PX, ZONE_TITLE_LINE_HEIGHT_RATIO, ZONE_CHIP_PADDING_VERTICAL_PX,
+  ZONE_AUTO_TITLE_MAX_FONT_PX, ZONE_COUNT_FONT_PX, ZONE_TITLE_LINE_HEIGHT_RATIO, ZONE_CHIP_PADDING_VERTICAL_PX,
   ZONE_CHIP_PADDING_HORIZONTAL_PX, ZONE_HEADER_INSET_PX, ZONE_HEADER_Z_INDEX, ZONE_HEADER_GAP_PX,
   ZONE_CHIP_MIN_WIDTH_PX, ZONE_ICON_BUTTON_SIZE_PX, ZONE_ICON_GLYPH_SIZE_PX, ZONE_ICON_GAP_PX,
 } from './zone-title.js';
-import { ZONE_STRIP_SWATCH_SIZE_PX, ZONE_FONT_VALUE_WIDTH_PX, ZONE_POPUP_ICON_GLYPH_SIZE_PX } from './zone-header-layout.js';
+import { ZONE_STRIP_SWATCH_SIZE_PX, ZONE_FONT_VALUE_WIDTH_PX, ZONE_POPUP_ICON_GLYPH_SIZE_PX, ZONE_HEADER_TOOLS_BASE_FONT_PX } from './zone-header-layout.js';
 import { ZONE_TOOLS_EXIT_DURATION_MS, ZONE_POPUP_MOTION_DURATION_MS } from './usePresence.js';
 import { ZONE_BORDER_W_PX, ZONE_EDGE_HIT_WIDTH_PX } from './card-look.js';
 
@@ -38,7 +38,23 @@ export function defineTokens(light, dark) {
   return Object.freeze({ light: Object.freeze({ ...light }), dark: Object.freeze({ ...dark }) });
 }
 
+function zoneHeaderSizeToken(sizePx) {
+  return `calc(var(--rb-zone-title-size) * ${sizePx / ZONE_HEADER_TOOLS_BASE_FONT_PX})`;
+}
+
+// Apply locally on each header so the title-size variable resolves in that zone.
+export const ZONE_HEADER_SIZE_TOKENS = Object.freeze({
+  '--zone-icon-button-size': zoneHeaderSizeToken(ZONE_ICON_BUTTON_SIZE_PX),
+  '--zone-icon-size': zoneHeaderSizeToken(ZONE_ICON_GLYPH_SIZE_PX),
+  '--zone-icon-gap': zoneHeaderSizeToken(ZONE_ICON_GAP_PX),
+  '--zone-font-value-width': zoneHeaderSizeToken(ZONE_FONT_VALUE_WIDTH_PX),
+  '--zone-strip-swatch-size': zoneHeaderSizeToken(ZONE_STRIP_SWATCH_SIZE_PX),
+  '--zone-chip-gap': zoneHeaderSizeToken(ZONE_HEADER_GAP_PX),
+  '--zone-chip-min-width': zoneHeaderSizeToken(ZONE_CHIP_MIN_WIDTH_PX),
+});
+
 const MODE_INDEPENDENT_TOKENS = Object.freeze({
+  ...ZONE_HEADER_SIZE_TOKENS,
   '--minimap-grid-pitch': `${MINIMAP_GRID_PITCH_PX}px`,
   '--radius-dock-tile': '14px',
   '--dock-label-gap': '4px',
@@ -119,11 +135,7 @@ const MODE_INDEPENDENT_TOKENS = Object.freeze({
   '--zone-edge-hit-width': `${ZONE_EDGE_HIT_WIDTH_PX}px`,
   '--zone-edge-hit-offset': `calc(-1 * (${ZONE_BORDER_W_PX}px + var(--zone-edge-hit-width) / 2))`,
   '--z-zone-header': String(ZONE_HEADER_Z_INDEX),
-  '--zone-icon-button-size': `${ZONE_ICON_BUTTON_SIZE_PX}px`,
-  '--zone-icon-size': `${ZONE_ICON_GLYPH_SIZE_PX}px`,
   '--zone-popup-icon-size': `${ZONE_POPUP_ICON_GLYPH_SIZE_PX}px`,
-  '--zone-icon-gap': `${ZONE_ICON_GAP_PX}px`,
-  '--zone-font-value-width': `${ZONE_FONT_VALUE_WIDTH_PX}px`,
   '--zone-tools-motion-duration': `${ZONE_TOOLS_EXIT_DURATION_MS}ms`,
   '--zone-popup-motion-duration': `${ZONE_POPUP_MOTION_DURATION_MS}ms`,
   '--zone-tools-slide-distance': '8px',
@@ -139,17 +151,14 @@ const MODE_INDEPENDENT_TOKENS = Object.freeze({
   '--zone-popup-shadow': '0 8px 24px rgba(0,0,0,0.14)',
   '--zone-popup-row-padding': '6px 8px',
   '--zone-tool-disabled-opacity': '0.4',
-  '--zone-strip-swatch-size': `${ZONE_STRIP_SWATCH_SIZE_PX}px`,
   '--radius-zone-icon': '10px',
   '--zone-icon-hover-bg': 'color-mix(in srgb, var(--text-muted) 12%, transparent)',
   '--zone-chip-padding': `${ZONE_CHIP_PADDING_VERTICAL_PX}px ${ZONE_CHIP_PADDING_HORIZONTAL_PX}px`,
   '--radius-zone-chip': '12px',
-  '--zone-title-font-size': `${ZONE_TITLE_DEFAULT_FONT_PX}px`,
+  '--zone-title-font-size': `${ZONE_AUTO_TITLE_MAX_FONT_PX}px`,
   '--zone-title-font-weight': '500',
   '--zone-title-line-height': String(ZONE_TITLE_LINE_HEIGHT_RATIO),
   '--zone-count-font-size': `${ZONE_COUNT_FONT_PX}px`,
-  '--zone-chip-gap': `${ZONE_HEADER_GAP_PX}px`,
-  '--zone-chip-min-width': `${ZONE_CHIP_MIN_WIDTH_PX}px`,
   '--zone-lock-size': '0.8125em',
   '--zone-title-shadow': '0 2px 0 rgba(0,0,0,0.08)',
   '--shadow-winner': '0 0 0 3px #fbbf24, 0 16px 22px -12px rgba(194,120,3,0.65)',

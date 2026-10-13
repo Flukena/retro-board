@@ -5,6 +5,7 @@ import { PALETTE } from './palette.js';
 import { zoneCardVars } from './card-look.js';
 import { ZONE_TITLE_MAX_LENGTH } from './security-boundaries.js';
 import { zoneTitleFontSize } from './zone-title.js';
+import { ZONE_HEADER_SIZE_TOKENS } from './theme.js';
 import { ZoneToolStrip, ZoneToolPopup } from './ZoneToolStrip.jsx';
 import { TimerSetup } from './TimerSetup.jsx';
 import { usePresence } from './usePresence.js';
@@ -83,7 +84,7 @@ export const ZoneCard = React.memo(function ZoneCard({
         ...zoneCardVars(c),
       }}
     >
-      <div ref={headerRef} className="rb-zone__title" style={{ fontSize: titleFs }}>
+      <div ref={headerRef} className="rb-zone__title" style={{ ...ZONE_HEADER_SIZE_TOKENS, fontSize: titleFs, '--rb-zone-title-size': `${titleFs}px` }}>
         <div className={isEditingTitle ? 'rb-zone__chip rb-zone__chip--editing' : 'rb-zone__chip'}
           onMouseDown={(e) => { if (!isEditingTitle) onStartZoneDrag(e, it); }}
           onDoubleClick={(e) => { e.stopPropagation(); onBeginFocus(it, 'title'); }}

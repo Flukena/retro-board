@@ -6,6 +6,8 @@ import {
 } from './selection-toolbar-model.js';
 import { toolbarAnchorY, SELECTION_TOOLBAR_GAP_PX } from './chrome-layout.js';
 
+const REQUIRED_FONT_SIZE_STEP_PX = 2;
+
 test('selection anchors preserve world-to-screen centres and zone body clearance', () => {
   const viewport = { x: 20, y: 30, zoom: 2 };
   const base = { x: 100, y: 300 };
@@ -67,4 +69,15 @@ test('zones have no floating toolbar sections', () => {
   assert.deepEqual(selectionToolbarSections('zone'), {
     palette: false, fontSize: false, fontColor: false, privacy: false,
   });
+});
+
+test('zone font controls start at auto size and keep the chosen step pinned after resizing', () => {
+  for (const [w, h, expectedFontPx] of [[600, 400, 24], [960, 220, 22], [300, 400, 20]]) {
+    const zone = { type: 'zone', w, h };
+    assert.equal(fontSizeForItem(zone), expectedFontPx);
+    for (const stepPx of [-REQUIRED_FONT_SIZE_STEP_PX, REQUIRED_FONT_SIZE_STEP_PX]) {
+      const fontSize = clampFontSize(fontSizeForItem(zone) + stepPx);
+      assert.equal(fontSizeForItem({ ...zone, w: 960, h: 400, fontSize }), expectedFontPx + stepPx);
+    }
+  }
 });

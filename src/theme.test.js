@@ -175,7 +175,7 @@ test('zone chip keeps design screen dimensions in both themes', () => {
     assert.equal(tokens['--zone-header-inset'], '14px');
     assert.equal(tokens['--zone-title-font-size'], '32px');
     assert.equal(tokens['--zone-chip-padding'], '6px 14px');
-    assert.equal(tokens['--zone-chip-gap'], '8px');
+    assert.equal(tokens['--zone-chip-gap'], 'calc(var(--rb-zone-title-size) * 0.25)');
     assert.equal(tokens['--zone-title-line-height'], '1.35');
     assert.equal(tokens['--zone-count-font-size'], '11px');
     assert.equal(tokens['--zone-lock-size'], '0.8125em');
@@ -184,8 +184,8 @@ test('zone chip keeps design screen dimensions in both themes', () => {
 
 test('inline zone tools keep only used geometry tokens in both themes', () => {
   for (const tokens of Object.values(TOKENS)) {
-    assert.equal(tokens['--zone-chip-min-width'], '80px');
-    assert.equal(tokens['--zone-strip-swatch-size'], '18px');
+    assert.equal(tokens['--zone-chip-min-width'], 'calc(var(--rb-zone-title-size) * 2.5)');
+    assert.equal(tokens['--zone-strip-swatch-size'], 'calc(var(--rb-zone-title-size) * 0.5625)');
     for (const name of ['--zone-strip-padding', '--zone-strip-border-width', '--zone-strip-swatch-gap']) {
       assert.equal(Object.hasOwn(tokens, name), false, name + ' is obsolete');
     }

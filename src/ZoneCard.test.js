@@ -7,7 +7,7 @@ import { withChromeModule } from './chrome-test-helper.js';
 import { TOKENS } from './theme.js';
 import { ZONE_HEADER_MENU_BREAKPOINT_PX } from './zone-title.js';
 
-const DEFAULT_ZONE_TITLE_FONT_PX = 32;
+const AUTO_ITEM_TITLE_FONT_PX = 20;
 
 const ITEM = { id: 'zone-a', type: 'zone', title: 'Ideas', x: 10, y: 20, w: 300, h: 200, color: 0 };
 function Editor({ value, className }) {
@@ -132,10 +132,26 @@ test('header is inside the unchanged body for default and large titles', async (
     for (const fontSize of [undefined, 10, 16, 24, 48, 96]) {
       const item = { ...ITEM, fontSize };
       const tree = cardTree(ZoneCard, { item });
-      assert.equal(header(tree).props.style.fontSize, fontSize || DEFAULT_ZONE_TITLE_FONT_PX);
+      assert.equal(header(tree).props.style.fontSize, fontSize ?? AUTO_ITEM_TITLE_FONT_PX);
+      assert.equal(header(tree).props.style['--rb-zone-title-size'], `${fontSize ?? AUTO_ITEM_TITLE_FONT_PX}px`);
+      assert.equal(header(tree).props.style['--zone-icon-size'], TOKENS.light['--zone-icon-size']);
       assert.equal(header(tree).props.style.top, undefined);
       for (const [field, expected] of [['left', ITEM.x], ['top', ITEM.y], ['width', ITEM.w], ['height', ITEM.h]]) {
         assert.equal(tree.props.style[field], expected);
+      }
+    }
+  });
+});
+
+test('auto headers bind scaling tokens locally for each effective title size', async () => {
+  await withChromeModule('/src/ZoneCard.jsx', ({ ZoneCard }) => {
+    for (const [w, h, expectedFontPx] of [[300, 400, 20], [600, 400, 24], [960, 220, 22], [960, 400, 32]]) {
+      const style = header(cardTree(ZoneCard, { item: { ...ITEM, w, h } })).props.style;
+      assert.equal(style.fontSize, expectedFontPx);
+      assert.equal(style['--rb-zone-title-size'], `${expectedFontPx}px`);
+      for (const key of ['--zone-icon-button-size', '--zone-icon-size', '--zone-strip-swatch-size',
+        '--zone-font-value-width', '--zone-icon-gap', '--zone-chip-min-width', '--zone-chip-gap']) {
+        assert.equal(style[key], TOKENS.light[key]);
       }
     }
   });
@@ -270,7 +286,9 @@ test('header width, inset, icon sizing and narrow breakpoints use world coordina
   assert.equal(button.color, 'var(--text-muted)');
   for (const tokens of Object.values(TOKENS)) {
     for (const [key, value] of Object.entries({ '--zone-header-inset': '14px', '--zone-title-line-height': '1.35',
-      '--zone-icon-button-size': '36px', '--zone-icon-size': '24px', '--zone-icon-gap': '2px',
+      '--zone-icon-button-size': 'calc(var(--rb-zone-title-size) * 1.125)',
+      '--zone-icon-size': 'calc(var(--rb-zone-title-size) * 0.75)',
+      '--zone-icon-gap': 'calc(var(--rb-zone-title-size) * 0.0625)',
       '--radius-zone-icon': '10px', '--z-zone-header': '4' })) assert.equal(tokens[key], value);
   }
 });

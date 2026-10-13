@@ -1,5 +1,9 @@
 // Screen geometry shared by theme, browser and relay vote finalization.
-export const ZONE_TITLE_DEFAULT_FONT_PX = 32;
+export const ZONE_AUTO_TITLE_MIN_FONT_PX = 20;
+export const ZONE_AUTO_TITLE_MAX_FONT_PX = 32;
+export const ZONE_AUTO_TITLE_WIDTH_PER_FONT_PX = 24;
+export const ZONE_AUTO_TITLE_HEIGHT_PER_FONT_PX = 10;
+export const ZONE_AUTO_TITLE_FONT_STEP_PX = 2;
 export const ZONE_COUNT_FONT_PX = 11;
 export const ZONE_TITLE_LINE_HEIGHT_RATIO = 1.35;
 export const ZONE_CHIP_PADDING_VERTICAL_PX = 6;
@@ -15,7 +19,14 @@ export const ZONE_HEADER_Z_INDEX = 4; // Above intra-card badge/medal layers (2/
 const CHIP_VERTICAL_SIDES = 2;
 
 export function zoneTitleFontSize(item) {
-  return item.fontSize || ZONE_TITLE_DEFAULT_FONT_PX;
+  if (item.fontSize) return item.fontSize;
+  if (!Number.isFinite(item.w) || !Number.isFinite(item.h)) return ZONE_AUTO_TITLE_MAX_FONT_PX;
+  const fittingFontPx = Math.min(
+    item.w / ZONE_AUTO_TITLE_WIDTH_PER_FONT_PX,
+    item.h / ZONE_AUTO_TITLE_HEIGHT_PER_FONT_PX,
+  );
+  const steppedFontPx = Math.floor(fittingFontPx / ZONE_AUTO_TITLE_FONT_STEP_PX) * ZONE_AUTO_TITLE_FONT_STEP_PX;
+  return Math.max(ZONE_AUTO_TITLE_MIN_FONT_PX, Math.min(ZONE_AUTO_TITLE_MAX_FONT_PX, steppedFontPx));
 }
 
 export function zoneHeaderClearancePx(zone) {
