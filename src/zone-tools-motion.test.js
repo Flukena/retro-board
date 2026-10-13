@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { TOKENS } from './theme.js';
-import * as layout from './zone-title.js';
+import * as layout from './zone-header-layout.js';
 import { PALETTE } from './palette.js';
 import { ZONE_TOOLS_EXIT_DURATION_MS, ZONE_POPUP_MOTION_DURATION_MS } from './usePresence.js';
 

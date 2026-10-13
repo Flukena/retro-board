@@ -35,7 +35,7 @@ test('single and group anchors clear the complete top stack', () => {
 });
 
 test('font sizes retain type defaults, bounded steps and permissions', () => {
-  for (const [type, size] of [['text', 40], ['zone', 16], ['sticky', 20]]) {
+  for (const [type, size] of [['text', 40], ['zone', 32], ['sticky', 20]]) {
     assert.equal(fontSizeForItem({ type }), size);
     assert.equal(fontSizeForItem({ type, fontSize: 22 }), 22);
   }

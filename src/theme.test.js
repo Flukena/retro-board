@@ -164,7 +164,7 @@ test('minimap grid and viewport highlight tokens resolve in both modes', () => {
 test('zone chip keeps design screen dimensions in both themes', () => {
   for (const tokens of Object.values(TOKENS)) {
     assert.equal(tokens['--zone-header-inset'], '14px');
-    assert.equal(tokens['--zone-title-font-size'], '16px');
+    assert.equal(tokens['--zone-title-font-size'], '32px');
     assert.equal(tokens['--zone-chip-padding'], '6px 14px');
     assert.equal(tokens['--zone-chip-gap'], '8px');
     assert.equal(tokens['--zone-title-line-height'], '1.35');

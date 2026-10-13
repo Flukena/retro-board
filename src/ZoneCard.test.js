@@ -7,6 +7,8 @@ import { withChromeModule } from './chrome-test-helper.js';
 import { TOKENS } from './theme.js';
 import { ZONE_HEADER_MENU_BREAKPOINT_PX } from './zone-title.js';
 
+const DEFAULT_ZONE_TITLE_FONT_PX = 32;
+
 const ITEM = { id: 'zone-a', type: 'zone', title: 'Ideas', x: 10, y: 20, w: 300, h: 200, color: 0 };
 function Editor({ value, className }) {
   return React.createElement('input', { value, className, readOnly: true });
@@ -102,7 +104,7 @@ test('header is inside the unchanged body for default and large titles', async (
     for (const fontSize of [undefined, 10, 16, 24, 48, 96]) {
       const item = { ...ITEM, fontSize };
       const tree = cardTree(ZoneCard, { item });
-      assert.equal(header(tree).props.style.fontSize, fontSize || 16);
+      assert.equal(header(tree).props.style.fontSize, fontSize || DEFAULT_ZONE_TITLE_FONT_PX);
       assert.equal(header(tree).props.style.top, undefined);
       for (const [field, expected] of [['left', ITEM.x], ['top', ITEM.y], ['width', ITEM.w], ['height', ITEM.h]]) {
         assert.equal(tree.props.style[field], expected);
@@ -208,7 +210,7 @@ test('header width, inset, icon sizing and narrow breakpoints use world coordina
   assert.equal(button.color, 'var(--text-muted)');
   for (const tokens of Object.values(TOKENS)) {
     for (const [key, value] of Object.entries({ '--zone-header-inset': '14px', '--zone-title-line-height': '1.35',
-      '--zone-icon-button-size': '26px', '--zone-icon-size': '14px', '--zone-icon-gap': '2px',
+      '--zone-icon-button-size': '40px', '--zone-icon-size': '22px', '--zone-icon-gap': '2px',
       '--radius-zone-icon': '10px', '--z-zone-header': '4' })) assert.equal(tokens[key], value);
   }
 });
@@ -294,4 +296,14 @@ test('presence retains both menu structures during exit while the toggle is clos
     assert.equal((html.match(/data-state="exit"/g) || []).length, 2);
     assert.equal((html.match(/inert=""/g) || []).length, 2);
   });
+});
+
+test('labelled popup row glyphs retain their compact size', () => {
+  const css = readFileSync(new URL('./board-cards.css', import.meta.url), 'utf8');
+  const glyph = declarations(css, '.rb-zone__tool-popup .rb-zone__icon svg');
+  assert.equal(glyph.width, 'var(--zone-popup-icon-size)');
+  assert.equal(glyph.height, 'var(--zone-popup-icon-size)');
+  for (const tokens of Object.values(TOKENS)) {
+    assert.equal(tokens['--zone-popup-icon-size'], '14px');
+  }
 });

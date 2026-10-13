@@ -519,7 +519,11 @@
   color: var(--text);
   font: inherit;
 }
-.rb-zone__tool-popup .rb-zone__icon svg { flex-shrink: 0; }
+.rb-zone__tool-popup .rb-zone__icon svg {
+  width: var(--zone-popup-icon-size);
+  height: var(--zone-popup-icon-size);
+  flex-shrink: 0;
+}
 .rb-zone__tool-divider { border-top: var(--zone-popup-border-width) solid var(--border-soft); }
 .rb-zone__menu-dots, .rb-zone__menu-close {
   position: absolute;
@@ -529,8 +533,8 @@
 .rb-zone__menu-close { opacity: 0; transform: rotate(calc(-1 * var(--zone-menu-turn))); }
 .rb-zone__menu[aria-expanded="true"] .rb-zone__menu-dots { opacity: 0; transform: rotate(var(--zone-menu-turn)); }
 .rb-zone__menu[aria-expanded="true"] .rb-zone__menu-close { opacity: 1; transform: rotate(0); }
-/* ZONE_HEADER_INLINE_TOOLS_MIN_PX = chip + gap + strip + admin/menu icons. */
-@container rb-zone-header (width < 548px) {
+/* ZONE_HEADER_INLINE_TOOLS_MIN_PX in zone-header-layout.js: 702px with 40px buttons. */
+@container rb-zone-header (width < 702px) {
   .rb-zone__tool-strip, .rb-zone__admin-action { display: none; }
   .rb-zone__tool-popup { display: flex; }
 }
