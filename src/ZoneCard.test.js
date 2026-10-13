@@ -270,7 +270,7 @@ test('header width, inset, icon sizing and narrow breakpoints use world coordina
   assert.equal(button.color, 'var(--text-muted)');
   for (const tokens of Object.values(TOKENS)) {
     for (const [key, value] of Object.entries({ '--zone-header-inset': '14px', '--zone-title-line-height': '1.35',
-      '--zone-icon-button-size': '44px', '--zone-icon-size': '32px', '--zone-icon-gap': '2px',
+      '--zone-icon-button-size': '36px', '--zone-icon-size': '24px', '--zone-icon-gap': '2px',
       '--radius-zone-icon': '10px', '--z-zone-header': '4' })) assert.equal(tokens[key], value);
   }
 });
