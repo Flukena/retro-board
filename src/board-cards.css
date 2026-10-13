@@ -563,7 +563,7 @@
 .rb-zone__menu[aria-expanded="true"] .rb-zone__menu-dots { opacity: 0; transform: rotate(var(--zone-menu-turn)); }
 .rb-zone__menu[aria-expanded="true"] .rb-zone__menu-close { opacity: 1; transform: rotate(0); }
 /* ZONE_HEADER_INLINE_TOOLS_MIN_EM in zone-header-layout.js; follows the header font. */
-@container rb-zone-header (width < 20.5625em) {
+@container rb-zone-header (width < 19.1875em) {
   .rb-zone__tool-strip, .rb-zone__admin-action { display: none; }
   .rb-zone__tool-popup { display: flex; }
 }

@@ -17,7 +17,7 @@ test('inline breakpoint fits the chip, palette, size value, tools and admin icon
       return Number(match[1]) * REQUIRED_TOOLS_BASE_FONT_PX;
     };
     for (const [key, expectedPx] of Object.entries({
-      '--zone-icon-button-size': 36, '--zone-icon-size': 24, '--zone-strip-swatch-size': 18,
+      '--zone-icon-button-size': 32, '--zone-icon-size': 20, '--zone-strip-swatch-size': 18,
       '--zone-font-value-width': 32, '--zone-icon-gap': 2, '--zone-chip-min-width': 80, '--zone-chip-gap': 8,
     })) assert.equal(px(key), expectedPx);
     const gap = px('--zone-icon-gap');
