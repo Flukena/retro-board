@@ -1,10 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
-import { stickyCardVars, zoneCardVars, medalLook } from './card-look.js';
+import { stickyCardVars, zoneCardVars, medalLook, ZONE_EDGE_HIT_WIDTH_PX } from './card-look.js';
 import { PALETTE } from './palette.js';
 import { defineTokens, TOKENS } from './theme.js';
 import { compositeOver, contrastRatio } from './color-contrast.js';
+
+const REQUIRED_ZONE_EDGE_HIT_WIDTH_PX = 16;
+
+test('both themes expose the 16 world-pixel zone edge hit width from card-look', () => {
+  assert.equal(ZONE_EDGE_HIT_WIDTH_PX, REQUIRED_ZONE_EDGE_HIT_WIDTH_PX);
+  for (const tokens of Object.values(TOKENS)) {
+    assert.equal(tokens['--zone-edge-hit-width'], `${ZONE_EDGE_HIT_WIDTH_PX}px`);
+  }
+});
 
 const MIN_NORMAL_TEXT_CONTRAST_RATIO = 4.5; // WCAG 2.2 SC 1.4.3.
 const COMPONENT_LOCAL_TOKEN_PREFIX = '--rb-';

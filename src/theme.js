@@ -11,6 +11,7 @@ import {
 } from './zone-title.js';
 import { ZONE_STRIP_SWATCH_SIZE_PX, ZONE_FONT_VALUE_WIDTH_PX, ZONE_POPUP_ICON_GLYPH_SIZE_PX } from './zone-header-layout.js';
 import { ZONE_TOOLS_EXIT_DURATION_MS, ZONE_POPUP_MOTION_DURATION_MS } from './usePresence.js';
+import { ZONE_BORDER_W_PX, ZONE_EDGE_HIT_WIDTH_PX } from './card-look.js';
 
 const STORAGE_KEY = 'rb_theme';
 
@@ -115,6 +116,8 @@ const MODE_INDEPENDENT_TOKENS = Object.freeze({
   '--sticky-author-font-size': '11px',
   '--radius-zone': '24px',
   '--zone-header-inset': `${ZONE_HEADER_INSET_PX}px`,
+  '--zone-edge-hit-width': `${ZONE_EDGE_HIT_WIDTH_PX}px`,
+  '--zone-edge-hit-offset': `calc(-1 * (${ZONE_BORDER_W_PX}px + var(--zone-edge-hit-width) / 2))`,
   '--z-zone-header': String(ZONE_HEADER_Z_INDEX),
   '--zone-icon-button-size': `${ZONE_ICON_BUTTON_SIZE_PX}px`,
   '--zone-icon-size': `${ZONE_ICON_GLYPH_SIZE_PX}px`,

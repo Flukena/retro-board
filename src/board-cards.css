@@ -232,7 +232,7 @@
   pointer-events: none;
 }
 
-/* Only the chip and buttons receive input; transparent space passes through. */
+/* The header and hollow edge band receive input; the interior passes through. */
 .rb-zone__title {
   position: absolute;
   left: calc(var(--zone-header-inset) - var(--rb-zone-border-w));
@@ -323,6 +323,35 @@
   box-sizing: border-box;
   animation: rb-appear 0.28s ease-out;
 }
+
+.rb-zone__edge {
+  position: absolute;
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.rb-zone__edge[data-locked="true"] {
+  cursor: not-allowed;
+}
+
+.rb-zone__edge[data-edge="top"],
+.rb-zone__edge[data-edge="bottom"] {
+  left: var(--zone-edge-hit-offset);
+  right: var(--zone-edge-hit-offset);
+  height: var(--zone-edge-hit-width);
+}
+
+.rb-zone__edge[data-edge="left"],
+.rb-zone__edge[data-edge="right"] {
+  top: var(--zone-edge-hit-offset);
+  bottom: var(--zone-edge-hit-offset);
+  width: var(--zone-edge-hit-width);
+}
+
+.rb-zone__edge[data-edge="top"] { top: var(--zone-edge-hit-offset); }
+.rb-zone__edge[data-edge="bottom"] { bottom: var(--zone-edge-hit-offset); }
+.rb-zone__edge[data-edge="left"] { left: var(--zone-edge-hit-offset); }
+.rb-zone__edge[data-edge="right"] { right: var(--zone-edge-hit-offset); }
 
 .rb-zone__actions {
   position: relative;

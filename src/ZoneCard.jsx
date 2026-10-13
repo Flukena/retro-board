@@ -13,6 +13,7 @@ import { useDismiss } from './useDismiss.js';
 import './board-cards.css';
 
 const SINGLE_CARD_COUNT = 1;
+const ZONE_EDGE_SIDES = ['top', 'bottom', 'left', 'right'];
 
 const stopHeaderEvent = (event) => event.stopPropagation();
 function headerButton(label, Icon, action, id) {
@@ -121,6 +122,11 @@ export const ZoneCard = React.memo(function ZoneCard({
           timerSetupOpen={timerSetupOpen} nestedZoneCount={nestedZoneCount} />
       </div>
       <div data-surface="1" className="rb-zone__surface" />
+      {ZONE_EDGE_SIDES.map((side) => (
+        <div key={side} className="rb-zone__edge" data-edge={side} data-locked={!!it.locked}
+          onMouseDown={(event) => onStartZoneDrag(event, it)}
+          onDoubleClick={stopHeaderEvent} />
+      ))}
     </div>
   );
 });

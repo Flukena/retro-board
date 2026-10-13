@@ -22,6 +22,34 @@ function cardTree(ZoneCard, props = {}) {
 function header(tree) { return tree.props.children[0]; }
 function chip(tree) { return header(tree).props.children[0]; }
 
+test('four zone edges dispatch the chip drag action and stop double click without title focus', async () => {
+  await withChromeModule('/src/ZoneCard.jsx', ({ ZoneCard }) => {
+    for (const locked of [false, true]) {
+      const item = { ...ITEM, locked };
+      const calls = [];
+      const tree = cardTree(ZoneCard, {
+        item,
+        onStartZoneDrag: (...args) => calls.push(['drag', ...args]),
+        onBeginFocus: (...args) => calls.push(['focus', ...args]),
+      });
+      const edges = React.Children.toArray(tree.props.children)
+        .filter((child) => child.props.className?.split(' ').includes('rb-zone__edge'));
+      assert.deepEqual(edges.map((edge) => edge.props['data-edge']).sort(), ['bottom', 'left', 'right', 'top']);
+      assert.equal((renderToStaticMarkup(tree).match(/class="rb-zone__edge"/g) || []).length, edges.length);
+      for (const edge of edges) {
+        assert.equal(edge.props['data-locked'], locked);
+        const event = { stopPropagation: () => calls.push(['stop']) };
+        edge.props.onMouseDown(event);
+        assert.deepEqual(calls, [['drag', event, item]]);
+        calls.length = 0;
+        edge.props.onDoubleClick(event);
+        assert.deepEqual(calls, [['stop']]);
+        calls.length = 0;
+      }
+    }
+  });
+});
+
 test('chip contains title and localized count for one and three cards in both languages', async () => {
   await withChromeModule('/src/ZoneCard.jsx', ({ ZoneCard }, { getLang, setLang }) => {
     const previous = getLang();
@@ -121,6 +149,38 @@ function declarations(css, selector) {
     return [entry.slice(0, separator).trim(), entry.slice(separator + 1).trim()];
   }));
 }
+
+test('zone edges form a hollow world-space band with pass-through interior and unchanged stacking', () => {
+  const css = readFileSync(new URL('./board-cards.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const edge = declarations(css, '.rb-zone__edge');
+  assert.equal(edge.position, 'absolute');
+  assert.equal(edge['pointer-events'], 'auto');
+  assert.equal(edge.cursor, 'grab');
+  assert.equal(declarations(css, '.rb-zone__edge[data-locked="true"]').cursor, 'not-allowed');
+  // Absolute children originate inside the transparent body border. Subtract
+  // that border and half the hit width to reach 8px outside the zone geometry.
+  for (const tokens of Object.values(TOKENS)) {
+    assert.equal(tokens['--zone-edge-hit-offset'], 'calc(-1 * (2px + var(--zone-edge-hit-width) / 2))');
+  }
+  const horizontal = declarations(css, '.rb-zone__edge[data-edge="top"],\n.rb-zone__edge[data-edge="bottom"]');
+  const vertical = declarations(css, '.rb-zone__edge[data-edge="left"],\n.rb-zone__edge[data-edge="right"]');
+  assert.equal(horizontal.height, 'var(--zone-edge-hit-width)');
+  assert.equal(horizontal.width, undefined);
+  assert.equal(vertical.width, 'var(--zone-edge-hit-width)');
+  assert.equal(vertical.height, undefined);
+  for (const side of ['left', 'right']) assert.equal(horizontal[side], 'var(--zone-edge-hit-offset)');
+  for (const side of ['top', 'bottom']) assert.equal(vertical[side], 'var(--zone-edge-hit-offset)');
+  for (const side of ['top', 'bottom', 'left', 'right']) {
+    assert.equal(declarations(css, `.rb-zone__edge[data-edge="${side}"]`)[side], 'var(--zone-edge-hit-offset)');
+  }
+  for (const rule of [edge, horizontal, vertical]) {
+    for (const property of ['z-index', 'background', 'border', 'box-shadow', 'inset']) assert.equal(rule[property], undefined);
+    assert.doesNotMatch(Object.values(rule).join(' '), /--rb-zoom\b/);
+  }
+  assert.equal(declarations(css, '.rb-zone')['pointer-events'], 'none');
+  assert.equal(declarations(css, '.rb-zone__surface')['pointer-events'], 'none');
+  assert.equal(declarations(css, '.rb-zone__title')['z-index'], 'var(--z-zone-header)');
+});
 
 test('tab appearance uses tokens, an auto-width chip and a fully rounded body', () => {
   const css = readFileSync(new URL('./board-cards.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');

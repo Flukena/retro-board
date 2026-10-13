@@ -9,6 +9,7 @@ export const COMMENT_CAROUSEL_STYLE = `
 
 // The header's negative side offsets align its row with the body's outer edges.
 export const ZONE_BORDER_W_PX = 2;
+export const ZONE_EDGE_HIT_WIDTH_PX = 16;
 
 export function stickyShadowClass({ remoteSelected, winner, dense }) {
   if (remoteSelected) return '';
