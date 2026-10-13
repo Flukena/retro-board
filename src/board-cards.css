@@ -562,8 +562,8 @@
 .rb-zone__menu-close { opacity: 0; transform: rotate(calc(-1 * var(--zone-menu-turn))); }
 .rb-zone__menu[aria-expanded="true"] .rb-zone__menu-dots { opacity: 0; transform: rotate(var(--zone-menu-turn)); }
 .rb-zone__menu[aria-expanded="true"] .rb-zone__menu-close { opacity: 1; transform: rotate(0); }
-/* ZONE_HEADER_INLINE_TOOLS_MIN_PX in zone-header-layout.js: 702px with 40px buttons. */
-@container rb-zone-header (width < 702px) {
+/* ZONE_HEADER_INLINE_TOOLS_MIN_PX in zone-header-layout.js: 746px with 44px buttons. */
+@container rb-zone-header (width < 746px) {
   .rb-zone__tool-strip, .rb-zone__admin-action { display: none; }
   .rb-zone__tool-popup { display: flex; }
 }
