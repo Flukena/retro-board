@@ -99,6 +99,7 @@ import { copyTextToClipboard } from './src/clipboard.js';
 import { MinimapPanel } from './src/MinimapPanel.jsx';
 import { zoomViewportAt, fitViewportToItems } from './src/viewport-framing.js';
 import { ZOOM_STEP_FACTOR, wheelZoomFactor, viewportNeedsCullRefresh } from './src/viewport-zoom.js';
+import { cardOverviewAtZoom } from './src/viewport-limits.js';
 import { centerOf, insideZone, resolveOwnerZone, effectiveOwnerZone } from './src/board-ownership.js';
 import {
   normalizeDisplayName,
@@ -1126,12 +1127,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         timer = setTimeout(settleDetails, 120);
         return;
       }
-      setCompactRender(denseRender && viewportRef.current.zoom < 0.4);
+      setCompactRender(cardOverviewAtZoom(viewportRef.current.zoom));
     };
     settleDetails();
     return () => clearTimeout(timer);
-  }, [denseRender, viewport.zoom]);
-
+  }, [viewport.zoom]);
   // Viewport size — tracked so we can cull off-screen items at render time.
   // Initialised lazily to handle SSR-style first paint with no window.
   const [viewportSize, setViewportSize] = useState(() => ({

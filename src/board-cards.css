@@ -180,6 +180,7 @@
 
 .rb-sticky__footer {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: space-between;
   margin-top: 4px;
@@ -188,6 +189,7 @@
 }
 
 .rb-sticky__author {
+  min-width: 0;
   font-size: var(--sticky-author-font-size);
   color: var(--text-muted);
   white-space: nowrap;
@@ -198,10 +200,7 @@
 
 .rb-sticky__vote-wrap {
   position: relative;
-}
-
-.rb-sticky__vote-pill {
-  transition: background 0.15s, color 0.15s;
+  flex-shrink: 0;
 }
 
 .rb-sticky__vote-count {
@@ -488,6 +487,7 @@
   font-weight: var(--sticky-vote-font-weight);
   border-radius: var(--radius-pill);
   border: none;
+  transition: height var(--sticky-vote-size-transition), font-size var(--sticky-vote-size-transition), min-width var(--sticky-vote-size-transition), padding var(--sticky-vote-size-transition), gap var(--sticky-vote-size-transition), background var(--sticky-vote-size-transition), color var(--sticky-vote-size-transition);
 }
 
 /* Idle and voted paint selectors are disjoint, independent of rule order. */
@@ -504,12 +504,23 @@
 }
 
 .rb-sticky-vote--open {
+  height: var(--sticky-vote-open-height);
+  font-size: var(--sticky-vote-open-font-size);
+  min-width: var(--sticky-vote-open-min-width);
+  padding: var(--sticky-vote-open-padding);
+  gap: var(--sticky-vote-open-gap);
   box-shadow: var(--sticky-vote-open-ring);
 }
 
 .rb-sticky__vote-icon {
   width: var(--sticky-vote-icon-size);
   height: var(--sticky-vote-icon-size);
+  transition: width var(--sticky-vote-size-transition), height var(--sticky-vote-size-transition);
+}
+
+.rb-sticky-vote--open .rb-sticky__vote-icon {
+  width: var(--sticky-vote-open-icon-size);
+  height: var(--sticky-vote-open-icon-size);
 }
 
 .rb-zone__tools { pointer-events: auto; }
@@ -568,5 +579,8 @@
   .rb-zone__tool-popup { display: flex; }
 }
 @media (prefers-reduced-motion: reduce) {
+  .rb-card-overview__vote,
+  .rb-sticky__vote-pill,
+  .rb-sticky__vote-icon { transition: none; }
   .rb-zone__tool-strip, .rb-zone__tool-popup, .rb-zone__menu-dots, .rb-zone__menu-close { transition: none; }
 }

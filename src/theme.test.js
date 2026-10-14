@@ -236,7 +236,7 @@ function cardDeclarations(selector) {
   }));
 }
 
-test('sticky CSS consumes design tokens in full and overview paths without resizing states', () => {
+test('sticky CSS consumes design tokens in full and overview paths', () => {
   const contracts = [
     ['.rb-sticky,\n.rb-card-overview', { padding: 'var(--sticky-padding)', 'line-height': 'var(--sticky-line-height)', 'font-family': 'var(--font-ui)' }],
     ['.rb-sticky__comment-chip', { height: 'var(--sticky-chip-height)', padding: 'var(--comment-chip-padding)', border: 'none', 'border-radius': 'var(--radius-pill)', 'font-size': 'var(--comment-chip-font-size)', 'font-weight': 'var(--comment-chip-font-weight)', color: 'var(--comment-chip-text)' }],
@@ -255,8 +255,55 @@ test('sticky CSS consumes design tokens in full and overview paths without resiz
   }
   assert.equal(cardDeclarations('.rb-sticky__editor')['line-height'], 'var(--sticky-line-height)');
   assert.equal(cardDeclarations('.rb-sticky__comment-preview-slide')['text-overflow'], 'ellipsis');
-  assert.ok(!cardDeclarations('.rb-sticky__vote-pill').transition.includes('padding'));
-  assert.ok(!cardDeclarations('.rb-sticky__vote-pill').transition.includes('font-size'));
+});
+
+const OPEN_VOTE_SIZE_TOKENS = {
+  height: ['--sticky-vote-open-height', '32px'],
+  'font-size': ['--sticky-vote-open-font-size', '16px'],
+  'min-width': ['--sticky-vote-open-min-width', '44px'],
+  padding: ['--sticky-vote-open-padding', '0 12px'],
+  gap: ['--sticky-vote-open-gap', '6px'],
+};
+const VOTE_PILL_SELECTOR = '.rb-card-overview__vote,\n.rb-sticky__vote-pill';
+const VOTE_SIZE_TRANSITION_TOKEN = '--sticky-vote-size-transition';
+
+test('both themes provide the owner-specified open vote sizes and motion', () => {
+  for (const tokens of Object.values(TOKENS)) {
+    for (const [name, value] of Object.values(OPEN_VOTE_SIZE_TOKENS)) {
+      assert.equal(tokens[name], value, name);
+    }
+    assert.equal(tokens['--sticky-vote-open-icon-size'], '16px');
+    assert.equal(tokens[VOTE_SIZE_TRANSITION_TOKEN], '160ms ease-out');
+  }
+});
+
+test('open vote pills and icons resize via tokens and animate in both directions', () => {
+  const open = cardDeclarations('.rb-sticky-vote--open');
+  const pill = cardDeclarations(VOTE_PILL_SELECTOR);
+  for (const [property, [token]] of Object.entries(OPEN_VOTE_SIZE_TOKENS)) {
+    assert.equal(open[property], `var(${token})`, property);
+    assert.ok(pill.transition.includes(`${property} var(${VOTE_SIZE_TRANSITION_TOKEN})`), property);
+  }
+  const icon = cardDeclarations('.rb-sticky-vote--open .rb-sticky__vote-icon');
+  const idleIcon = cardDeclarations('.rb-sticky__vote-icon');
+  for (const property of ['width', 'height']) {
+    assert.equal(icon[property], 'var(--sticky-vote-open-icon-size)');
+    assert.ok(idleIcon.transition.includes(`${property} var(${VOTE_SIZE_TRANSITION_TOKEN})`));
+  }
+});
+
+test('vote size motion is disabled for reduced motion', () => {
+  const css = readFileSync(new URL('./board-cards.css', import.meta.url), 'utf8');
+  const reducedMotion = css.match(/@media \(prefers-reduced-motion: reduce\) \{([\s\S]*)\}/)?.[1];
+  assert.ok(reducedMotion);
+  assert.match(reducedMotion, /\.rb-card-overview__vote,\s*\.rb-sticky__vote-pill,\s*\.rb-sticky__vote-icon\s*\{\s*transition: none;/);
+});
+
+test('sticky footer reserves vote space and lets author names ellipsize', () => {
+  assert.equal(cardDeclarations('.rb-sticky__footer')['flex-shrink'], '0');
+  assert.equal(cardDeclarations('.rb-sticky__author')['min-width'], '0');
+  assert.equal(cardDeclarations('.rb-sticky__author')['text-overflow'], 'ellipsis');
+  assert.equal(cardDeclarations('.rb-sticky__vote-wrap')['flex-shrink'], '0');
 });
 
 
