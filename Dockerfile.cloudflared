@@ -2,7 +2,7 @@
 # commit. The vendor image for 2026.8.3 was published before fixes for the Go
 # toolchain, x/crypto, x/net, and gRPC vulnerabilities used by this binary. Keep the
 # release source fixed while applying only those security dependency updates.
-FROM golang:1.26.9-alpine@sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade AS build
+FROM golang:1.27.2-alpine@sha256:f92b6ef800e499660581efdabdf25d9d817a9d124eaf900924f0504e7e27e12d AS build
 
 ARG TARGETOS=linux
 ARG TARGETARCH
