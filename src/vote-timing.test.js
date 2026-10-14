@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { voteTimerIsOpen, voteTimerPhaseSignature } from './vote-timing.js';
+import { boardVoteIsOpen, voteTimerIsOpen, voteTimerPhaseSignature } from './vote-timing.js';
 
 test('timer phase changes at its deadline even when board data does not change', () => {
   const items = [{
@@ -31,5 +31,20 @@ test('setup inputs clamp at contract boundaries and invalid numeric input uses t
     for (const [input, expected] of [[0, 1], [1, 1], [3, 3], [maximum, maximum], [maximum + 1, maximum], [NaN, 1]]) {
       assert.equal(clamp(input), expected);
     }
+  }
+});
+
+const VOTE_NOW_MS = 2_000;
+const OPEN_TIMER = { endsAt: VOTE_NOW_MS + 1 };
+
+test('board voting is open only when any zone has an open timer', () => {
+  for (const timer of [OPEN_TIMER, { endsAt: null }, { endsAt: 0 }]) {
+    assert.equal(boardVoteIsOpen([{ type: 'zone' }, { type: 'zone', voteTimer: timer }], VOTE_NOW_MS), true);
+  }
+  for (const items of [[], [{ type: 'zone' }], [{ type: 'zone', voteTimer: null }],
+    [{ type: 'zone', voteTimer: { endsAt: VOTE_NOW_MS } }],
+    [{ type: 'zone', voteTimer: { endsAt: VOTE_NOW_MS - 1 } }],
+    [{ type: 'sticky', voteTimer: OPEN_TIMER }]]) {
+    assert.equal(boardVoteIsOpen(items, VOTE_NOW_MS), false);
   }
 });

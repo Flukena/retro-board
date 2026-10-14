@@ -62,7 +62,7 @@ import { useBrowserLayoutEffect } from './src/use-browser-layout-effect.js';
 import { DEFAULT_STICKY_WIDTH_PX as STICKY_W, DEFAULT_STICKY_HEIGHT_PX as STICKY_H } from './src/board-geometry.js';
 import './src/board-cards.css';
 import {
-  MINIMAP_W_PX, MINIMAP_H_PX, GRID_PITCH_PX, topStackHeightPx, Z,
+  MINIMAP_W_PX, MINIMAP_H_PX, topStackHeightPx, Z,
 } from './src/chrome-layout.js';
 import { useUserIdentity } from './src/useUserIdentity.js';
 import { getTemplates } from './src/builtin-templates.js';
@@ -100,13 +100,14 @@ import { MinimapPanel } from './src/MinimapPanel.jsx';
 import { zoomViewportAt, fitViewportToItems } from './src/viewport-framing.js';
 import { ZOOM_STEP_FACTOR, wheelZoomFactor, viewportNeedsCullRefresh } from './src/viewport-zoom.js';
 import { cardOverviewAtZoom } from './src/viewport-limits.js';
+import { gridBackgroundForZoom } from './src/grid-background.js';
 import { centerOf, insideZone, resolveOwnerZone, effectiveOwnerZone } from './src/board-ownership.js';
 import {
   normalizeDisplayName,
   normalizeStoredUserId,
   normalizeViewport,
 } from './src/local-preferences.js';
-import { timerDockModel, voteTimerIsOpen, voteTimerPhaseSignature } from './src/vote-timing.js';
+import { boardVoteIsOpen, timerDockModel, voteTimerIsOpen, voteTimerPhaseSignature } from './src/vote-timing.js';
 import { planVoteFinalization } from './src/vote-finalization.js';
 
 const loadBoardArchive = () => import('./src/board-archive.js');
@@ -1053,10 +1054,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     [remoteEditingItems],
   );
 
-  const remoteSelectorsByItem = useMemo(
-    () => summarizeRemoteSelectors(remoteSelectedItems),
-    [remoteSelectedItems],
-  );
+  // Boolean dependency: the per-second clock tick must not rebuild selector maps.
+  const voteOpenNow = boardVoteIsOpen(board.items, now);
+  const remoteSelectorsByItem = useMemo(() => summarizeRemoteSelectors(remoteSelectedItems, voteOpenNow), [remoteSelectedItems, voteOpenNow]);
 
   const editingIndicators = useMemo(() => board.items.flatMap((item) => {
     const editor = remoteEditorsByItem.get(item.id);
@@ -2351,8 +2351,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       worldRef.current.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.zoom})`;
     }
     if (gridRef.current) {
-      const s = GRID_PITCH_PX * v.zoom;
-      gridRef.current.style.backgroundSize = `${s}px ${s}px`;
+      Object.assign(gridRef.current.style, gridBackgroundForZoom(v.zoom));
       gridRef.current.style.backgroundPosition = `${v.x}px ${v.y}px`;
     }
     if (cursorLayerRef.current) {
@@ -4798,7 +4797,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         style={{
           position: 'absolute', inset: 0, zIndex: Z.GRID,
           backgroundColor: 'var(--bg)',
-          backgroundImage: 'radial-gradient(circle, var(--grid-dot) 1px, transparent 1px)',
+          ...gridBackgroundForZoom(viewport.zoom),
         }}
       />
 

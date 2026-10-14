@@ -1,4 +1,4 @@
-import { voteTimerIsOpen } from './vote-timing.js';
+import { boardVoteIsOpen } from './vote-timing.js';
 import { VIEWPORT_ZOOM_MIN, VIEWPORT_ZOOM_MAX } from './viewport-limits.js';
 
 export const DEFAULT_PLAYER_NAME = 'Guest';
@@ -93,7 +93,7 @@ export const visiblePlayerCursors = ({
   items = [],
   staleMs = PLAYER_CURSOR_STALE_MS,
 }) => {
-  if (items.some((item) => item?.type === 'zone' && voteTimerIsOpen(item.voteTimer, now))) return [];
+  if (boardVoteIsOpen(items, now)) return [];
   return Object.values(presence || {}).flatMap((player) => {
     if (!player || player.userId === currentUserId) return [];
     const cursor = normalizePlayerCursor(player.cursor);
