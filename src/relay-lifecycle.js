@@ -3,6 +3,7 @@ const EXIT_FAILURE_CODE = 1;
 const DRAIN_TIMEOUT_LOG = '[yjs] drain timed out — exiting';
 const DRAIN_FAILED_LOG = '[yjs] drain failed';
 const FATAL_LOG = '[yjs] fatal process error';
+const ERROR_ID_FALLBACK = 'unidentified-error';
 export const STORAGE_FAILURE_LOG = '[yjs] storage degraded — restarting after drain';
 export const STORAGE_FAILURE_REASON = 'storage failure';
 export const UNHANDLED_REJECTION_EVENT = 'unhandledRejection';
@@ -10,27 +11,42 @@ export const UNCAUGHT_EXCEPTION_EVENT = 'uncaughtException';
 
 export const isRelayReady = (storageFailure, shuttingDown) => !storageFailure && !shuttingDown;
 
-export const createRelayLifecycle = ({ drain, onStart, timeoutMs, log, errorId, exit }) => {
+const identifyError = (errorId, err) => {
+  try {
+    const id = errorId(err);
+    return typeof id === 'string' ? id : ERROR_ID_FALLBACK;
+  } catch {
+    return ERROR_ID_FALLBACK;
+  }
+};
+
+const writeDiagnostic = (log, ...args) => {
+  try { log.error(...args); }
+  catch { /* Diagnostic sink failures must not interrupt shutdown. */ }
+};
+
+export const createRelayLifecycle = ({ drain, onStart, timeoutMs, log, errorId, exit, setExitCode }) => {
   let started = false;
   let failed = false;
   let fatalLogged = false;
   let completion;
   const shutdown = (reason, failure = false) => {
     failed ||= failure;
+    if (failed) setExitCode(EXIT_FAILURE_CODE);
     if (started) return completion;
     started = true;
     const hardStop = setTimeout(() => {
-      log.error(DRAIN_TIMEOUT_LOG);
+      writeDiagnostic(log, DRAIN_TIMEOUT_LOG);
       exit(EXIT_FAILURE_CODE);
     }, timeoutMs);
-    hardStop.unref();
     completion = (async () => {
       try {
         onStart(reason);
         await drain();
       } catch (err) {
         failed = true;
-        log.error(DRAIN_FAILED_LOG, { errorId: errorId(err) });
+        setExitCode(EXIT_FAILURE_CODE);
+        writeDiagnostic(log, DRAIN_FAILED_LOG, { errorId: identifyError(errorId, err) });
       }
       clearTimeout(hardStop);
       exit(failed ? EXIT_FAILURE_CODE : EXIT_SUCCESS_CODE);
@@ -40,7 +56,7 @@ export const createRelayLifecycle = ({ drain, onStart, timeoutMs, log, errorId, 
   const fatal = (reason, err) => {
     if (!fatalLogged) {
       fatalLogged = true;
-      log.error(FATAL_LOG, { reason, errorId: errorId(err) });
+      writeDiagnostic(log, FATAL_LOG, { reason, errorId: identifyError(errorId, err) });
     }
     return shutdown(reason, true);
   };

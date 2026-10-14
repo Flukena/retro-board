@@ -8,6 +8,8 @@ import { join } from 'node:path';
 const CHILD_TIMEOUT_MS = 3_000;
 const TEST_SESSION_SECRET = 'relay-resilience-test-secret-00000000';
 const PRIVATE_ERROR_MESSAGE = 'raw-room-token-must-stay-private';
+const NULL_PROTOTYPE_REJECTION_SOURCE = 'Object.create(null)';
+const THROWING_COERCION_REJECTION_SOURCE = `({ toString() { throw new Error('${PRIVATE_ERROR_MESSAGE}'); } })`;
 
 const runRelay = (root, preload, overrides = {}) => new Promise((resolve, reject) => {
   const child = spawn(process.execPath, [
@@ -32,13 +34,13 @@ const runRelay = (root, preload, overrides = {}) => new Promise((resolve, reject
   });
 });
 
-const fatalPreload = (event) => `
+const fatalPreload = (event, rejectionSource = `new Error('${PRIVATE_ERROR_MESSAGE}')`) => `
   import { Server } from 'node:http';
   const listen = Server.prototype.listen;
   Server.prototype.listen = function (...args) {
     this.once('listening', () => setImmediate(() => {
       ${event === 'unhandledRejection'
-        ? `Promise.reject(new Error('${PRIVATE_ERROR_MESSAGE}'));`
+        ? `Promise.reject(${rejectionSource});`
         : `throw new Error('${PRIVATE_ERROR_MESSAGE}');`}
     }));
     return listen.apply(this, args);
@@ -53,6 +55,24 @@ for (const event of ['unhandledRejection', 'uncaughtException']) {
     assert.equal(result.code, 1, result.output);
     assert.equal(result.signal, null, result.output);
     assert.match(result.output, /\[yjs\] drained/);
+    assert.equal((result.output.match(/\[yjs\] draining/g) || []).length, 1);
+    assert.equal(result.output.includes(PRIVATE_ERROR_MESSAGE), false);
+  });
+}
+
+for (const [name, rejectionSource] of [
+  ['null prototype', NULL_PROTOTYPE_REJECTION_SOURCE],
+  ['throwing toString', THROWING_COERCION_REJECTION_SOURCE],
+]) {
+  test(`non-Error rejection (${name}) drains a real relay without leaking coercion failures`, async (t) => {
+    const root = await mkdtemp(join(tmpdir(), 'relay-non-error-'));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const result = await runRelay(root, fatalPreload('unhandledRejection', rejectionSource));
+    assert.equal(result.code, 1, result.output);
+    assert.equal(result.signal, null, result.output);
+    assert.match(result.output, /\[yjs\] drained/);
+    assert.match(result.output, /\[yjs\] fatal process error/);
+    assert.match(result.output, /reason: 'unhandledRejection'/);
     assert.equal((result.output.match(/\[yjs\] draining/g) || []).length, 1);
     assert.equal(result.output.includes(PRIVATE_ERROR_MESSAGE), false);
   });

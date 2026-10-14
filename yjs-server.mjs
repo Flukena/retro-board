@@ -2809,6 +2809,7 @@ const lifecycle = createRelayLifecycle({
   log: console,
   errorId: (err) => roomLogId(String(err)),
   exit: (code) => process.exit(code),
+  setExitCode: (code) => { process.exitCode = code; },
   onStart: (signal) => {
     shuttingDown = true;
     clearInterval(maintenanceTimer);
