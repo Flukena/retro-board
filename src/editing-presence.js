@@ -29,4 +29,7 @@ const summarizeRemoteParticipants = (editingItems) => {
 };
 
 export const summarizeRemoteEditors = summarizeRemoteParticipants;
-export const summarizeRemoteSelectors = summarizeRemoteParticipants;
+// Selection reveals where someone is looking, so it is hidden while a vote is open.
+export const summarizeRemoteSelectors = (selectedItems, voteOpen = false) => (
+  voteOpen ? new Map() : summarizeRemoteParticipants(selectedItems)
+);

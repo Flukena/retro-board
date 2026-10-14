@@ -2,6 +2,10 @@ export const voteTimerIsOpen = (timer, now) => (
   !!timer && (!timer.endsAt || timer.endsAt > now)
 );
 
+export const boardVoteIsOpen = (items, now) => (
+  items.some((item) => item?.type === 'zone' && voteTimerIsOpen(item.voteTimer, now))
+);
+
 // This signature stays stable while clocks tick and changes only when a timer
 // crosses its deadline. Card rendering can depend on it without rebuilding the
 // entire board every second during a meeting.

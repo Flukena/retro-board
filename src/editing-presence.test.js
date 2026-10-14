@@ -41,3 +41,15 @@ test('selection presence uses the same multi-player deduplication', () => {
     extraCount: 1,
   });
 });
+
+const REMOTE_SELECTOR = { userId: 'alice', name: 'Alice' };
+
+test('an open vote hides remote selection but not remote editing', () => {
+  const selected = new Map([['card-a', new Map([[1, REMOTE_SELECTOR]])]]);
+  const expected = new Map([['card-a', { ...REMOTE_SELECTOR, extraCount: 0 }]]);
+  assert.deepEqual(summarizeRemoteSelectors(selected, true), new Map());
+  assert.deepEqual(summarizeRemoteEditors(selected), expected);
+  assert.deepEqual(summarizeRemoteSelectors(selected, false), expected);
+  assert.deepEqual(summarizeRemoteSelectors(selected), expected);
+  assert.equal(selected.get('card-a').size, 1);
+});
