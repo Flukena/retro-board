@@ -130,3 +130,44 @@ test('live awareness membership survives clock skew and renewals, and removes de
     docs.forEach((doc) => doc.destroy());
   }
 });
+
+
+test('Follow Player accepts five percent views and rejects views below the zoom limit', () => {
+  assert.deepEqual(normalizePlayerView({ x: 400, y: 200, zoom: 0.05, updatedAt: 5000 }), {
+    x: 400, y: 200, zoom: 0.05, updatedAt: 5000,
+  });
+  assert.equal(normalizePlayerView({ zoom: 0.04, updatedAt: 5000 }), null);
+  assert.deepEqual(playerViewFromViewport({ x: 0, y: 0, zoom: 0.05 }, { w: 1200, h: 800 }), {
+    x: 12000, y: 8000, zoom: 0.05,
+  });
+  assert.equal(playerViewFromViewport({ x: 0, y: 0, zoom: 0.04 }, { w: 1200, h: 800 }), null);
+});
+
+
+test('an open vote in any zone hides every remote cursor until its exact deadline', () => {
+  const nowMs = 10_000;
+  const presence = {
+    alice: { userId: 'alice', name: 'Alice', cursor: { x: 30, y: 40, updatedAt: nowMs } },
+    bob: { userId: 'bob', name: 'Bob', cursor: { x: 50, y: 60, updatedAt: nowMs } },
+  };
+  const options = { presence, currentUserId: 'me', now: nowMs };
+  const expected = [
+    { userId: 'alice', name: 'Alice', cursor: { x: 30, y: 40, updatedAt: nowMs } },
+    { userId: 'bob', name: 'Bob', cursor: { x: 50, y: 60, updatedAt: nowMs } },
+  ];
+  const timedItems = [
+    { type: 'zone' },
+    { type: 'zone', voteTimer: { endsAt: nowMs - 1 } },
+    { type: 'zone', voteTimer: { endsAt: nowMs + 1 } },
+  ];
+  assert.deepEqual(visiblePlayerCursors({ ...options, items: timedItems }), []);
+  assert.deepEqual(visiblePlayerCursors({ ...options, items: timedItems, now: nowMs + 1 }), expected);
+  assert.deepEqual(visiblePlayerCursors({ ...options, items: [{ type: 'zone', voteTimer: { endsAt: null } }] }), []);
+  assert.deepEqual(visiblePlayerCursors({ ...options, items: [{ type: 'zone', voteTimer: { endsAt: 0 } }] }), []);
+  for (const items of [[], [{ type: 'zone' }], [{ type: 'zone', voteTimer: null }],
+    [{ type: 'zone', voteTimer: { endsAt: nowMs } }],
+    [{ type: 'zone', voteTimer: { endsAt: nowMs - 1 } }],
+    [{ type: 'sticky', voteTimer: { endsAt: nowMs + 1 } }]]) {
+    assert.deepEqual(visiblePlayerCursors({ ...options, items }), expected);
+  }
+});

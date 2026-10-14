@@ -18,7 +18,7 @@ test('normalizes stored identity values before they reach awareness', () => {
 
 test('repairs malformed viewport records and clamps valid extremes', () => {
   assert.deepEqual(normalizeViewport('bad'), DEFAULT_VIEWPORT);
-  assert.deepEqual(normalizeViewport({ x: 1, y: 2, zoom: 0 }), { x: 1, y: 2, zoom: 0.15 });
+  assert.deepEqual(normalizeViewport({ x: 1, y: 2, zoom: 0 }), { x: 1, y: 2, zoom: 0.05 });
   assert.deepEqual(normalizeViewport({ x: 99_000_000, y: -99_000_000, zoom: 9 }), {
     x: 10_000_000,
     y: -10_000_000,

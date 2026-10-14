@@ -1,9 +1,10 @@
+import { voteTimerIsOpen } from './vote-timing.js';
+import { VIEWPORT_ZOOM_MIN, VIEWPORT_ZOOM_MAX } from './viewport-limits.js';
+
 export const DEFAULT_PLAYER_NAME = 'Guest';
 
 export const PLAYER_CURSOR_STALE_MS = 10_000;
 export const PLAYER_CURSOR_MAX_WORLD_COORD = 10_000_000;
-export const PLAYER_VIEW_ZOOM_MIN = 0.15;
-export const PLAYER_VIEW_ZOOM_MAX = 3;
 
 export const normalizePlayerCursor = (cursor) => {
   if (!cursor || typeof cursor !== 'object') return null;
@@ -21,7 +22,7 @@ export const normalizePlayerView = (view) => {
   const zoom = Number(view.zoom);
   const updatedAt = Number(view.updatedAt);
   if (!Number.isFinite(zoom) || !Number.isFinite(updatedAt)) return null;
-  if (zoom < PLAYER_VIEW_ZOOM_MIN || zoom > PLAYER_VIEW_ZOOM_MAX || updatedAt <= 0) return null;
+  if (zoom < VIEWPORT_ZOOM_MIN || zoom > VIEWPORT_ZOOM_MAX || updatedAt <= 0) return null;
   const normalized = { zoom, updatedAt };
   const x = Number(view.x);
   const y = Number(view.y);
@@ -40,7 +41,7 @@ export const playerViewFromViewport = (viewport, viewportSize) => {
   const offsetY = Number(viewport?.y);
   const width = Number(viewportSize?.w);
   const height = Number(viewportSize?.h);
-  if (!Number.isFinite(zoom) || zoom < PLAYER_VIEW_ZOOM_MIN || zoom > PLAYER_VIEW_ZOOM_MAX) return null;
+  if (!Number.isFinite(zoom) || zoom < VIEWPORT_ZOOM_MIN || zoom > VIEWPORT_ZOOM_MAX) return null;
   if (!Number.isFinite(offsetX) || !Number.isFinite(offsetY)) return null;
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
   const x = (width / 2 - offsetX) / zoom;
@@ -89,17 +90,21 @@ export const visiblePlayerCursors = ({
   presence,
   currentUserId,
   now,
+  items = [],
   staleMs = PLAYER_CURSOR_STALE_MS,
-}) => Object.values(presence || {}).flatMap((player) => {
-  if (!player || player.userId === currentUserId) return [];
-  const cursor = normalizePlayerCursor(player.cursor);
-  if (!cursor || now - cursor.updatedAt >= staleMs) return [];
-  return [{
-    userId: player.userId,
-    name: String(player.name || DEFAULT_PLAYER_NAME),
-    cursor,
-  }];
-});
+}) => {
+  if (items.some((item) => item?.type === 'zone' && voteTimerIsOpen(item.voteTimer, now))) return [];
+  return Object.values(presence || {}).flatMap((player) => {
+    if (!player || player.userId === currentUserId) return [];
+    const cursor = normalizePlayerCursor(player.cursor);
+    if (!cursor || now - cursor.updatedAt >= staleMs) return [];
+    return [{
+      userId: player.userId,
+      name: String(player.name || DEFAULT_PLAYER_NAME),
+      cursor,
+    }];
+  });
+};
 
 export const cursorScreenPosition = (cursor, viewport) => ({
   x: Number(cursor.x) * Number(viewport.zoom) + Number(viewport.x),

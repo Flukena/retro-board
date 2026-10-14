@@ -1,3 +1,4 @@
+import { VIEWPORT_ZOOM_MIN, VIEWPORT_ZOOM_MAX } from './viewport-limits.js';
 import { isSafeId } from './comment-schema.js';
 import {
   DISPLAY_NAME_MAX_LENGTH,
@@ -5,8 +6,6 @@ import {
 } from './security-boundaries.js';
 
 export const DEFAULT_VIEWPORT = Object.freeze({ x: 0, y: 0, zoom: 1 });
-export const VIEWPORT_ZOOM_MIN = 0.15;
-export const VIEWPORT_ZOOM_MAX = 3;
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 

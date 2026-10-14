@@ -97,6 +97,7 @@ import {
 } from './src/collaborative-text.js';
 import { copyTextToClipboard } from './src/clipboard.js';
 import { MinimapPanel } from './src/MinimapPanel.jsx';
+import { zoomViewportAt, fitViewportToItems } from './src/viewport-framing.js';
 import { ZOOM_STEP_FACTOR, wheelZoomFactor, viewportNeedsCullRefresh } from './src/viewport-zoom.js';
 import { centerOf, insideZone, resolveOwnerZone, effectiveOwnerZone } from './src/board-ownership.js';
 import {
@@ -131,8 +132,6 @@ const TEXT_MIN_H = 30;
 // before this check (see sanitizeImportedImages), but this is the
 // belt-and-suspenders net for anything that still doesn't fit.
 const DRAG_THRESHOLD = 4;
-const ZOOM_MIN = 0.15;
-const ZOOM_MAX = 3.0;
 const MINIMAP_IDLE_MS = 1100;
 const CURSOR_BROADCAST_MS = 24;
 const FOLLOW_VIEWPORT_COMMIT_MS = 96;
@@ -282,47 +281,6 @@ const readScrollWheelZoomEnabled = () => {
     return typeof window !== 'undefined'
       && window.localStorage?.getItem(SCROLL_WHEEL_ZOOM_KEY) === 'true';
   } catch { return false; }
-};
-
-const zoomViewportAt = (viewport, targetZoom, screenAnchor) => {
-  const zoom = clamp(targetZoom, ZOOM_MIN, ZOOM_MAX);
-  const worldX = (screenAnchor.x - viewport.x) / viewport.zoom;
-  const worldY = (screenAnchor.y - viewport.y) / viewport.zoom;
-  return {
-    zoom,
-    x: screenAnchor.x - worldX * zoom,
-    y: screenAnchor.y - worldY * zoom,
-  };
-};
-
-const fitViewportToItems = (items, width, height) => {
-  if (items.length === 0) return { x: width / 2, y: height / 2, zoom: 1 };
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  items.forEach((it) => {
-    if (it.type === 'zone') {
-      minX = Math.min(minX, it.x); minY = Math.min(minY, it.y);
-      maxX = Math.max(maxX, it.x + it.w); maxY = Math.max(maxY, it.y + it.h);
-    } else if (it.type === 'sticky' || it.type === 'image') {
-      const iw = it.w || (it.type === 'sticky' ? STICKY_W : 200);
-      const ih = it.h || (it.type === 'sticky' ? STICKY_H : 200);
-      minX = Math.min(minX, it.x); minY = Math.min(minY, it.y);
-      maxX = Math.max(maxX, it.x + iw); maxY = Math.max(maxY, it.y + ih);
-    } else {
-      minX = Math.min(minX, it.x); minY = Math.min(minY, it.y);
-      maxX = Math.max(maxX, it.x + 200); maxY = Math.max(maxY, it.y + 60);
-    }
-  });
-  const pad = 80;
-  const contentWidth = (maxX - minX) + pad * 2;
-  const contentHeight = (maxY - minY) + pad * 2;
-  const zoom = clamp(Math.min(width / contentWidth, height / contentHeight), ZOOM_MIN, ZOOM_MAX);
-  const cx = (minX + maxX) / 2;
-  const cy = (minY + maxY) / 2;
-  return {
-    zoom,
-    x: width / 2 - cx * zoom,
-    y: height / 2 - cy * zoom,
-  };
 };
 
 // Thin wrapper over window.storage with an in-memory fallback for dev/preview.
@@ -1070,8 +1028,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const playerCursors = useMemo(() => visiblePlayerCursors({
     presence,
     currentUserId: userId,
-    now,
-  }), [presence, userId, now]);
+    items: board.items, now,
+  }), [presence, userId, board.items, now]);
 
   const followedPlayer = followedUserId
     ? onlineUsers.find((player) => player.userId === followedUserId) || null

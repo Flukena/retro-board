@@ -37,7 +37,7 @@ test('zoom inside loaded overscan keeps the existing cards mounted', () => {
 
 test('pan refreshes before reaching uncovered space, including low zoom and snapped positions', () => {
   const size = {w:1280,h:720};
-  for (const zoom of [.15,.35,1,3]) {
+  for (const zoom of [.05,.15,.35,1,3]) {
     const rendered = {x:199,y:199,zoom};
     assert.equal(viewportNeedsCullRefresh(rendered,rendered,size),false);
     assert.equal(viewportNeedsCullRefresh(rendered,{...rendered,x:rendered.x-800},size),true);

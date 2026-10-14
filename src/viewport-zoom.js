@@ -1,3 +1,5 @@
+import { VIEWPORT_ZOOM_MIN } from './viewport-limits.js';
+
 export const ZOOM_STEP_FACTOR = 1.2;
 
 // Trackpad pinch emits small pixel deltas; mouse wheels emit much larger
@@ -13,7 +15,7 @@ export const wheelZoomFactor = (deltaY, pinch = false) => {
 // Zooming inside that coverage only needs a transform; rebuilding the item
 // list on every 10% scale change creates avoidable layout/paint stalls.
 export const viewportNeedsCullRefresh = (rendered, next, size) => {
-  const z = Math.max(0.15, Math.round(rendered.zoom * 20) / 20);
+  const z = Math.max(VIEWPORT_ZOOM_MIN, Math.round(rendered.zoom * 20) / 20);
   const x = Math.floor(rendered.x / 200) * 200;
   const y = Math.floor(rendered.y / 200) * 200;
   const margin = (z < 0.4 ? 320 : 600) / z;
