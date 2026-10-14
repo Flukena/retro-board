@@ -7,6 +7,18 @@ const STORAGE_KEY = 'rb_lang';
 
 const dict = {
   th: {
+    'resilience.error.title': 'ไม่สามารถแสดงบอร์ดได้',
+    'resilience.error.body': 'โหลดใหม่เพื่อลองอีกครั้ง การเปลี่ยนแปลงที่ยังไม่ซิงก์อาจสูญหาย',
+    'resilience.reload': 'โหลดใหม่',
+    'resilience.connected': 'เชื่อมต่อแล้ว',
+    'resilience.connecting': 'กำลังเชื่อมต่อห้อง…',
+    'resilience.disconnected': 'ขาดการเชื่อมต่อ กำลังเชื่อมต่อใหม่…',
+    'resilience.session-lost': 'ไม่สามารถต่ออายุเซสชันห้องได้',
+    'resilience.pending': 'มีการเปลี่ยนแปลงที่ยังไม่ซิงก์ — โปรดเปิดแท็บนี้ไว้',
+    'resilience.reenter': 'เข้าห้องอีกครั้ง',
+    'resilience.reopen': 'เปิดลิงก์ห้องเดิมอีกครั้งเพื่อเชื่อมต่อ',
+    'resilience.retryFailed': 'เชื่อมต่อไม่สำเร็จ ระบบจะลองใหม่อัตโนมัติ',
+
     'selection.bringToFront': 'นำไปด้านหน้า',
     'selection.sendToBack': 'ส่งไปด้านหลัง',
     'font.decreaseGlyph': 'A−',
@@ -339,6 +351,18 @@ const dict = {
     'loading': 'กำลังโหลด…',
   },
   en: {
+    'resilience.error.title': 'The board could not be displayed',
+    'resilience.error.body': 'Reload to try again. Changes that have not synced may be lost.',
+    'resilience.reload': 'Reload',
+    'resilience.connected': 'Connected',
+    'resilience.connecting': 'Connecting to the room…',
+    'resilience.disconnected': 'Disconnected. Reconnecting…',
+    'resilience.session-lost': 'Room session could not be renewed.',
+    'resilience.pending': 'Unsynced changes — keep this tab open.',
+    'resilience.reenter': 'Re-enter room',
+    'resilience.reopen': 'Reopen the original room link to reconnect.',
+    'resilience.retryFailed': 'Could not reconnect. Automatic retries will continue.',
+
     'selection.bringToFront': 'Bring to front',
     'selection.sendToBack': 'Send to back',
     'font.decreaseGlyph': 'A−',

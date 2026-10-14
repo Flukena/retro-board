@@ -29,3 +29,25 @@ export const normalizeViewport = (value) => {
     zoom: clamp(zoom, VIEWPORT_ZOOM_MIN, VIEWPORT_ZOOM_MAX),
   };
 };
+
+export const LOCAL_ONLY_KEYS = new Set(['viewport']);
+
+export function readLocalPreference(key, storage) {
+  try {
+    const raw = (storage ?? globalThis.localStorage).getItem(key);
+    return raw === null ? null : JSON.parse(raw);
+  } catch {
+    // Missing, corrupt or unavailable storage means use the initial viewport.
+    return null;
+  }
+}
+
+export function writeLocalPreference(key, value, storage) {
+  try {
+    (storage ?? globalThis.localStorage).setItem(key, JSON.stringify(value));
+    return true;
+  } catch {
+    // A device preference is expendable; never fall back to the shared room.
+    return false;
+  }
+}

@@ -8,7 +8,16 @@ const ROOM_HANDLE_RE = /^[A-Za-z0-9_-]{32}$/;
 const RESPONSE_MAX_CHARS = 4_096;
 const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
+const RETRY_AFTER_MAX_SECONDS = 3_600;
+const RETRY_AFTER_MIN_SECONDS = 1;
+const SESSION_RETRY_MIN_MS = 1_000;
+const SESSION_RETRY_MAX_MS = 30_000;
+const SESSION_RETRY_GROWTH_FACTOR = 2;
+const MS_PER_SECOND = 1_000;
+const REFRESH_SKEW_FRACTION = 0.2;
 const REFRESH_SKEW_MS = 5 * 60 * 1_000;
+
+export const ROOM_SESSION_HEALTH = Object.freeze({ ACTIVE: 'active', LOST: 'session-lost' });
 
 export const ROOM_SESSION_ERROR = Object.freeze({
   INVALID: 'invalid',
@@ -117,11 +126,11 @@ const parseRetryAfter = (response) => {
   if (!raw) return null;
   const seconds = Number(raw);
   if (Number.isFinite(seconds) && seconds >= 0) {
-    return Math.min(3_600, Math.max(1, Math.ceil(seconds)));
+    return Math.min(RETRY_AFTER_MAX_SECONDS, Math.max(RETRY_AFTER_MIN_SECONDS, Math.ceil(seconds)));
   }
   const at = Date.parse(raw);
   if (!Number.isFinite(at)) return null;
-  return Math.min(3_600, Math.max(1, Math.ceil((at - Date.now()) / 1_000)));
+  return Math.min(RETRY_AFTER_MAX_SECONDS, Math.max(RETRY_AFTER_MIN_SECONDS, Math.ceil((at - Date.now()) / MS_PER_SECOND)));
 };
 
 const errorForResponse = (response, { invalidStatuses = [] } = {}) => {
@@ -133,7 +142,7 @@ const errorForResponse = (response, { invalidStatuses = [] } = {}) => {
   if (invalidStatuses.includes(response.status)) {
     return new RoomSessionError(ROOM_SESSION_ERROR.INVALID);
   }
-  return new RoomSessionError(ROOM_SESSION_ERROR.UNAVAILABLE);
+  return new RoomSessionError(ROOM_SESSION_ERROR.UNAVAILABLE, { retryAfterSeconds: parseRetryAfter(response) });
 };
 
 const cancelResponseBody = async (response) => {
@@ -234,6 +243,18 @@ let activeCredentials = null;
 let refreshTimer = null;
 let sessionRequest = null;
 let requestGeneration = 0;
+let retryDelayMs = SESSION_RETRY_MIN_MS;
+let sessionHealth = ROOM_SESSION_HEALTH.ACTIVE;
+const sessionHealthListeners = new Set();
+export const getRoomSessionHealth = () => sessionHealth;
+export const onRoomSessionHealth = (listener) => {
+  sessionHealthListeners.add(listener);
+  return () => sessionHealthListeners.delete(listener);
+};
+const setSessionHealth = (health) => {
+  sessionHealth = health;
+  sessionHealthListeners.forEach((listener) => listener());
+};
 
 const publicSession = (session) => (
   session ? Object.freeze({ roomHandle: session.roomHandle, expiresAt: session.expiresAt }) : null
@@ -252,23 +273,25 @@ const clearRefreshTimer = () => {
   refreshTimer = null;
 };
 
-const scheduleRefreshRetry = (session) => {
+const scheduleRefreshRetry = (session, error) => {
   if (activeSession !== session) return;
-  const remaining = session.expiresAt - Date.now();
-  if (remaining <= 1_000) return;
+  setSessionHealth(ROOM_SESSION_HEALTH.LOST);
   clearRefreshTimer();
+  const retryAfterMs = (error?.retryAfterSeconds || 0) * MS_PER_SECOND;
+  const delayMs = Math.max(retryDelayMs, retryAfterMs);
+  retryDelayMs = Math.min(SESSION_RETRY_MAX_MS, retryDelayMs * SESSION_RETRY_GROWTH_FACTOR);
   refreshTimer = setTimeout(() => {
-    refreshActiveRoomSession().catch(() => scheduleRefreshRetry(session));
-  }, Math.min(30_000, Math.max(1_000, Math.floor(remaining / 2))));
+    refreshActiveRoomSession().catch((failure) => scheduleRefreshRetry(session, failure));
+  }, delayMs);
 };
 
 const scheduleRefresh = (session) => {
   clearRefreshTimer();
   const remaining = session.expiresAt - Date.now();
-  const skew = Math.min(REFRESH_SKEW_MS, Math.floor(remaining * 0.2));
-  const delay = Math.max(1_000, remaining - skew);
+  const skew = Math.min(REFRESH_SKEW_MS, Math.floor(remaining * REFRESH_SKEW_FRACTION));
+  const delay = Math.max(SESSION_RETRY_MIN_MS, remaining - skew);
   refreshTimer = setTimeout(() => {
-    refreshActiveRoomSession().catch(() => scheduleRefreshRetry(session));
+    refreshActiveRoomSession().catch((error) => scheduleRefreshRetry(session, error));
   }, delay);
 };
 
@@ -299,7 +322,9 @@ const exchangeSession = async (code, token, { expectedHandle = null } = {}) => {
     if (generation !== requestGeneration) fail(ROOM_SESSION_ERROR.UNAVAILABLE);
     activeCredentials = Object.freeze({ code, token });
     activeSession = session;
+    retryDelayMs = SESSION_RETRY_MIN_MS;
     scheduleRefresh(session);
+    setSessionHealth(ROOM_SESSION_HEALTH.ACTIVE);
     return publicSession(session);
   })();
 
@@ -323,11 +348,18 @@ export async function establishRoomSession(code, token) {
   return exchangeSession(code, token, { expectedHandle });
 }
 
+export const canRefreshRoomSession = () => activeCredentials !== null;
+
 export async function refreshActiveRoomSession() {
   if (!activeCredentials) fail(ROOM_SESSION_ERROR.UNAVAILABLE);
-  return exchangeSession(activeCredentials.code, activeCredentials.token, {
-    expectedHandle: activeSession?.roomHandle || null,
-  });
+  try {
+    return await exchangeSession(activeCredentials.code, activeCredentials.token, {
+      expectedHandle: activeSession?.roomHandle || null,
+    });
+  } catch (error) {
+    setSessionHealth(ROOM_SESSION_HEALTH.LOST);
+    throw error;
+  }
 }
 
 export async function roomFetch(path, init = {}) {

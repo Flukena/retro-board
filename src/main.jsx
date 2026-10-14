@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client';
 import './theme.js'; // apply CSS variables on <html> before first paint
 import RetroBoard from '../RetroBoard.jsx';
 import Landing from './Landing.jsx';
+import { BoardErrorBoundary } from './BoardErrorBoundary.jsx';
+import { SyncBanner } from './SyncBanner.jsx';
 import { t } from './i18n.js';
 import {
   isBoardCreatedByMe, gotoLanding, parseRoute, rememberRecent,
@@ -129,7 +131,7 @@ function BoardBootstrap({ code, token }) {
   }, [attempt, code, token]);
 
   if (state.status === 'ready') {
-    return <RetroBoard boardCode={code} boardToken={token} />;
+    return <><SyncBanner /><RetroBoard boardCode={code} boardToken={token} /></>;
   }
   return (
     <RoomBootstrapScreen
@@ -145,5 +147,5 @@ const App = route.kind === 'board'
   : <Landing />;
 
 createRoot(document.getElementById('root')).render(
-  <React.StrictMode>{App}</React.StrictMode>,
+  <React.StrictMode><BoardErrorBoundary>{App}</BoardErrorBoundary></React.StrictMode>,
 );

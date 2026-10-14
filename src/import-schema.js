@@ -231,6 +231,12 @@ const normalizeBoardItem = (item, index, importedAt, zLimit) => {
   return normalized;
 };
 
+// Remote reads reuse the strict item contract without import's geometry repair.
+// The caller retains original valid values instead of applying import defaults.
+export const validateBoardItem = (item) => {
+  normalizeBoardItem(item, 0, 0, Number.MAX_SAFE_INTEGER);
+};
+
 const normalizeBoardMeta = (board) => ({
   timer: null,
   editingLocked: board.editingLocked === true,
