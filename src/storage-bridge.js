@@ -2,7 +2,7 @@
 //
 // Two storage layers live on the same Y.Doc:
 //
-//   1. ymap  ('kv')    — flat Y.Map for client-scoped keys (userId, viewport,
+//   1. ymap  ('kv')    — flat Y.Map for client-scoped keys (userId,
 //                        presence heartbeats) plus the per-vote keys
 //                        `s||vote:<itemId>:<userId>`. Each value is a CRDT-safe
 //                        scalar/blob LWW write, but since keys are independent
@@ -31,6 +31,9 @@
 //   state, so the UI code stays unchanged.
 
 import * as Y from 'yjs';
+import { attachClientSync } from './client-sync.js';
+import { decodeRemoteBoard } from './remote-board-decoder.js';
+import { LOCAL_ONLY_KEYS, readLocalPreference, writeLocalPreference } from './local-preferences.js';
 import { WebsocketProvider } from 'y-websocket';
 import { createMotionPublisher, sendOnlyLocalAwareness } from './awareness-transport.js';
 import { parseRoute } from './router.js';
@@ -159,6 +162,7 @@ if (route.kind === 'board') {
   sendOnlyLocalAwareness(provider);
   provider.connect();
 }
+const syncStatus = provider ? attachClientSync(provider, ydoc, window) : null;
 const motionPublisher = provider ? createMotionPublisher(provider.awareness) : null;
 ydoc.on('destroy', () => motionPublisher?.destroy());
 
@@ -236,6 +240,7 @@ const setItemField = (yItem, field, value) => {
 
 const readItemSnapshot = (yItem, id) => {
   if (!(yItem instanceof Y.Map)) return null;
+  if (yItem.has('id') && yItem.get('id') !== id) return null;
   const item = Object.assign(Object.create(null), { id });
   yItem.forEach((value, key) => { item[key] = collaborativeTextToString(value); });
   return item;
@@ -254,7 +259,12 @@ const readBoardSnapshot = () => {
     if (key.startsWith(META_INTERNAL_PREFIX)) return;
     meta[key] = val;
   });
-  return { items, ...meta };
+  return { ...meta, items };
+};
+
+const readRemoteBoardSnapshot = () => {
+  const { items, ...meta } = readBoardSnapshot();
+  return decodeRemoteBoard(items, meta);
 };
 
 const writeBoardSnapshot = (newBoard, origin = 'local') => {
@@ -462,7 +472,7 @@ const fireBoardChange = (origin) => {
   // remote (provider as origin) and undoRedo: dispatch.
   if (origin === 'local' && !isUndoRedo) return;
   emitter.dispatchEvent(new CustomEvent('change', {
-    detail: { scope: 's', key: 'boardState', value: readBoardSnapshot(), isUndoRedo },
+    detail: { scope: 's', key: 'boardState', value: readRemoteBoardSnapshot(), isUndoRedo },
   }));
 };
 
@@ -752,76 +762,85 @@ const waitForSyncBounded = () => {
   return syncWaitPromise;
 };
 
+const writeLegacyPresence = (value) => {
+  // Backward-compat shim: callers still pass the FULL pmap. The only
+  // entry we actually own is the one with the freshest lastSeen — that's
+  // the one this client just refreshed in its heartbeat. Lift it into
+  // our awareness slot so peers see it without LWW-trampling.
+  if (provider) {
+    let mine = null;
+    Object.values(value).forEach((p) => {
+      if (!p || typeof p !== 'object') return;
+      if (!mine || (p.lastSeen || 0) > (mine.lastSeen || 0)) mine = p;
+    });
+    if (mine) provider.awareness.setLocalStateField('user', mine);
+  }
+};
+
+// Recover durable identity preferences; viewport bypasses this shared path.
+const readUserPreference = async (key) => {
+  const lk = localStorageKeyFor(key);
+  const uKey = keyOf('u', key, clientId);
+  try {
+    const raw = localStorage.getItem(lk);
+    if (raw !== null) {
+      const cached = JSON.parse(raw);
+      // Write-through: seed this board's durable copy if it has none yet.
+      // Needed because userId's localStorage key is global (shared across
+      // boards), so entering a second board hits the cache and never calls
+      // set() — its Yjs copy would otherwise never exist on that board.
+      // Also retro-seeds users whose value predates durable storage.
+      // origin 'system' keeps it off the undo stack; it's a local echo, so
+      // ymap.observe's own-write guard suppresses any change event.
+      if (ymap.get(uKey) == null) {
+        try { ydoc.transact(() => { ymap.set(uKey, cached); }, 'system'); }
+        catch { /* transact refused — cache is still returned below */ }
+      }
+      return { value: cached };
+    }
+  } catch { /* corrupted entry — ignore */ }
+  // Cache miss — the durable copy may still be in flight over the socket.
+  // Wait (bounded) for the initial sync before reading Yjs so a returning
+  // client with a cleared cache can recover. Bounded so a dead relay can't
+  // hang the init effect's first await (which gates the loading screen).
+  await waitForSyncBounded();
+  const v = ymap.get(uKey);
+  if (v != null) {
+    try { localStorage.setItem(lk, JSON.stringify(v)); }
+    catch { /* quota / private mode — non-fatal */ }
+    return { value: v };
+  }
+  return { value: null };
+};
+
 if (provider) {
   window.storage = {
     async get(key, shared) {
+      if (!shared && LOCAL_ONLY_KEYS.has(key)) {
+        return { value: readLocalPreference(localStorageKeyFor(key)) };
+      }
       if (key === 'boardState' && shared) {
-        return { value: readBoardSnapshot() };
+        return { value: readRemoteBoardSnapshot() };
       }
       if (key === 'presence' && shared) {
         return { value: readPresenceMap() };
       }
-      // User-scope keys (userName, viewport, userId) are per-device preferences.
-      // localStorage is a fast local cache in front of a durable per-client copy
-      // in Yjs (key `u|<clientId>|<key>`), which is synced + persisted server-
-      // side. localStorage stays the hot path; Yjs is the recovery path when the
-      // cache is missing/cleared (as long as clientId itself survives).
-      if (!shared) {
-        const lk = localStorageKeyFor(key);
-        const uKey = keyOf('u', key, clientId);
-        try {
-          const raw = localStorage.getItem(lk);
-          if (raw !== null) {
-            const cached = JSON.parse(raw);
-            // Write-through: seed this board's durable copy if it has none yet.
-            // Needed because userId's localStorage key is global (shared across
-            // boards), so entering a second board hits the cache and never calls
-            // set() — its Yjs copy would otherwise never exist on that board.
-            // Also retro-seeds users whose value predates durable storage.
-            // origin 'system' keeps it off the undo stack; it's a local echo, so
-            // ymap.observe's own-write guard suppresses any change event.
-            if (ymap.get(uKey) == null) {
-              try { ydoc.transact(() => { ymap.set(uKey, cached); }, 'system'); }
-              catch { /* transact refused — cache is still returned below */ }
-            }
-            return { value: cached };
-          }
-        } catch { /* corrupted entry — ignore */ }
-        // Cache miss — the durable copy may still be in flight over the socket.
-        // Wait (bounded) for the initial sync before reading Yjs so a returning
-        // client with a cleared cache can recover. Bounded so a dead relay can't
-        // hang the init effect's first await (which gates the loading screen).
-        await waitForSyncBounded();
-        const v = ymap.get(uKey);
-        if (v != null) {
-          try { localStorage.setItem(lk, JSON.stringify(v)); }
-          catch { /* quota / private mode — non-fatal */ }
-          return { value: v };
-        }
-        return { value: null };
-      }
+      if (!shared) return readUserPreference(key);
       const ck = keyOf('s', key, '');
       const v = ymap.get(ck);
       return { value: v ?? null };
     },
     async set(key, value, shared, opts) {
+      if (!shared && LOCAL_ONLY_KEYS.has(key)) {
+        writeLocalPreference(localStorageKeyFor(key), value);
+        return;
+      }
       // `opts.silent` forces origin='system' so the write skips the undo stack.
       // Use it for automatic/derived changes the user didn't explicitly trigger
       // (e.g. timer-end auto-sort of cards by vote count).
       const silent = !!(opts && opts.silent);
       if (key === 'presence' && shared && value && typeof value === 'object') {
-        // Backward-compat shim: callers still pass the FULL pmap. The only
-        // entry we actually own is the one with the freshest lastSeen — that's
-        // the one this client just refreshed in its heartbeat. Lift it into
-        // our awareness slot so peers see it without LWW-trampling.
-        if (provider) {
-          let mine = null;
-          Object.values(value).forEach((p) => {
-            if (!p || typeof p !== 'object') return;
-            if (!mine || (p.lastSeen || 0) > (mine.lastSeen || 0)) mine = p;
-          });
-          if (mine) provider.awareness.setLocalStateField('user', mine);
-        }
+        writeLegacyPresence(value);
         return;
       }
       // User-scope: dual-write. localStorage is the fast local cache; the Yjs
@@ -1192,6 +1211,8 @@ if (provider) {
     // client doesn't claim the role during cold start before learning who
     // the real current admin is — split-brain prevention.
     synced() { return !!(provider && provider.synced); },
+    getSyncStatus: syncStatus.getSnapshot,
+    onSyncStatus: syncStatus.subscribe,
     // Read the live admin userId straight from yMeta, bypassing the React
     // render queue. boardRef.current updates only after applyRemoteBoard
     // runs AND React re-renders — there's a tick of lag in between, and a

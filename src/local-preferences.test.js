@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 
 import {
   DEFAULT_VIEWPORT,
+  readLocalPreference,
+  writeLocalPreference,
   normalizeDisplayName,
   normalizeStoredUserId,
   normalizeViewport,
@@ -24,4 +26,11 @@ test('repairs malformed viewport records and clamps valid extremes', () => {
     y: -10_000_000,
     zoom: 3,
   });
+});
+
+test('corrupt or inaccessible device storage falls back without throwing', () => {
+  assert.equal(readLocalPreference('viewport', { getItem: () => '{' }), null);
+  const unavailable = { getItem() { throw new Error('blocked'); }, setItem() { throw new Error('blocked'); } };
+  assert.equal(readLocalPreference('viewport', unavailable), null);
+  assert.equal(writeLocalPreference('viewport', {}, unavailable), false);
 });
