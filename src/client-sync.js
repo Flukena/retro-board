@@ -17,7 +17,7 @@ export function attachClientSync(provider, doc, browser) {
   const onSync = (synced) => { if (synced) state.synced(provider.wsconnected); };
   const onClose = (event) => {
     state.transport(SYNC_STATE.DISCONNECTED);
-    if (event?.code === SESSION_POLICY_CLOSE_CODE && event.reason === SESSION_EXPIRED_REASON) state.sessionLost(true);
+    if (event?.code === SESSION_POLICY_CLOSE_CODE && event.reason === SESSION_EXPIRED_REASON) state.socketExpired();
   };
   const onTransaction = (transaction) => {
     if (hasSharedLocalChange(doc, transaction)) state.localChange(provider.wsconnected && provider.synced);

@@ -1,10 +1,20 @@
 import { validateBoardItem } from './import-schema.js';
-import { isSafeId } from './comment-schema.js';
+import { COMMENT_AUTHOR_NAME_MAX_LEN, isSafeId } from './comment-schema.js';
+import { DISPLAY_NAME_MAX_LENGTH } from './security-boundaries.js';
 
-const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+// hashAdminPin uses SHA-256, represented as two hexadecimal characters per byte.
+const ADMIN_PIN_HASH_HEX_LENGTH = 64;
+const isRecord = (value) => {
+  if (value === null || typeof value !== 'object') return false;
+  const prototype = Object.getPrototypeOf(value);
+  return (prototype === Object.prototype || prototype === null) && !Object.hasOwn(value, '__proto__');
+};
 const isTimestamp = (value) => Number.isSafeInteger(value) && value >= 0;
 const isBoolean = (value) => typeof value === 'boolean';
-const isString = (value) => typeof value === 'string';
+const boundedString = (maxLength) => (value) => typeof value === 'string' && value.length <= maxLength;
+const isAuthorId = (value) => value === '' || isSafeId(value);
+const isPinHash = (value) => value === '' || (typeof value === 'string'
+  && value.length === ADMIN_PIN_HASH_HEX_LENGTH && /^[0-9a-f]+$/i.test(value));
 const nullable = (validate) => (value) => value == null || validate(value);
 const TIMER_FIELDS = {
   startedAt: isTimestamp, endsAt: nullable(isTimestamp),
@@ -12,16 +22,16 @@ const TIMER_FIELDS = {
   hideResults: isBoolean, showNonVoters: isBoolean,
 };
 const fieldsMatch = (record, fields) => Object.entries(fields).every(([key, validate]) => (
-  !Object.hasOwn(record, key) || validate(record[key])
+  !(key in record) || validate(record[key])
 ));
 const isTimer = (value) => isRecord(value) && fieldsMatch(value, TIMER_FIELDS);
 const ITEM_RUNTIME_FIELDS = {
-  authorName: nullable(isString), authorId: nullable(isString),
+  authorName: nullable(boundedString(COMMENT_AUTHOR_NAME_MAX_LEN)), authorId: nullable(isAuthorId),
   createdAt: nullable(isTimestamp), parentZoneId: nullable(isSafeId),
   voteTimer: nullable(isTimer), lastResultsAt: nullable(isTimestamp), votingLocked: isBoolean,
 };
 const META_FIELDS = {
-  adminUserId: nullable(isSafeId), adminName: nullable(isString), adminPinHash: nullable(isString),
+  adminUserId: nullable(isSafeId), adminName: nullable(boundedString(DISPLAY_NAME_MAX_LENGTH)), adminPinHash: nullable(isPinHash),
   editingLocked: isBoolean, votingLocked: isBoolean, allRevealed: isBoolean,
   timer: nullable(isTimer), lastResultsAt: nullable(isTimestamp),
 };
@@ -41,7 +51,7 @@ export function decodeRemoteItem(item) {
 export function decodeRemoteBoard(items, meta) {
   const safeMeta = {};
   for (const [key, validate] of Object.entries(META_FIELDS)) {
-    if (Object.hasOwn(meta, key) && validate(meta[key])) safeMeta[key] = meta[key];
+    if (isRecord(meta) && Object.hasOwn(meta, key) && validate(meta[key])) safeMeta[key] = meta[key];
   }
   return { ...safeMeta, items: items.map(decodeRemoteItem).filter(Boolean) };
 }

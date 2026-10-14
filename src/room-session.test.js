@@ -164,3 +164,43 @@ test('refresh failure surfaces session loss, caps backoff and recovers with in-m
     else globalThis.window = oldWindow;
   }
 });
+
+const HTTP_DATE_RETRY_DELAY_MS = 90_000;
+const FALLBACK_RETRY_DELAY_MS = 1_000;
+
+async function assertRefreshRetryDelay(context, header, expectedDelayMs, moduleSuffix) {
+  context.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: TEST_NOW_MS });
+  const oldWindow = globalThis.window;
+  globalThis.window = { location: new URL('http://localhost:5181') };
+  context.after(() => {
+    if (oldWindow === undefined) delete globalThis.window;
+    else globalThis.window = oldWindow;
+  });
+  let requests = 0;
+  context.mock.method(globalThis, 'fetch', async () => {
+    requests += 1;
+    if (requests > 1) return new Response('', { status: 429, headers: { 'retry-after': header } });
+    return new Response(JSON.stringify({ roomHandle: HANDLE, expiresAt: Date.now() + TEST_SESSION_TTL_MS }),
+      { headers: { 'content-type': 'application/json' } });
+  });
+  const session = await import(`./room-session.js?${moduleSuffix}`);
+  await session.establishRoomSession('TEST', TOKEN);
+  context.mock.timers.tick(TEST_REFRESH_DELAY_MS);
+  await flushRequests();
+  assert.equal(requests, 2);
+  context.mock.timers.tick(expectedDelayMs - 1);
+  await flushRequests();
+  assert.equal(requests, 2, 'no request before the required delay');
+  context.mock.timers.tick(1);
+  await flushRequests();
+  assert.equal(requests, 3, 'retry resumes at the required deadline');
+}
+
+test('refresh honours HTTP-date Retry-After', async (context) => {
+  const retryAt = new Date(TEST_NOW_MS + TEST_REFRESH_DELAY_MS + HTTP_DATE_RETRY_DELAY_MS).toUTCString();
+  await assertRefreshRetryDelay(context, retryAt, HTTP_DATE_RETRY_DELAY_MS, 'date-header-test');
+});
+
+test('garbage Retry-After falls back to the initial backoff', async (context) => {
+  await assertRefreshRetryDelay(context, 'not-a-date-or-delay', FALLBACK_RETRY_DELAY_MS, 'garbage-header-test');
+});

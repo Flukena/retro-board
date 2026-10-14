@@ -45,3 +45,18 @@ test('online changes do not claim missing acknowledgements; subscriptions clean 
   state.transport('disconnected');
   assert.equal(updates, 1);
 });
+
+test('socket recovery does not hide a concurrent HTTP session-refresh failure', () => {
+  const state = new SyncStatus();
+  state.synced(true);
+  state.sessionLost(true);
+  state.socketExpired();
+  state.transport('disconnected');
+  state.localChange(false);
+  state.synced(false);
+  assert.equal(shouldGuardUnload(state.getSnapshot()), true);
+  state.synced(true);
+  assert.equal(state.getSnapshot().status, 'session-lost');
+  state.sessionLost(false);
+  assert.deepEqual(state.getSnapshot(), { status: 'connected', hasUnsyncedLocalChanges: false });
+});
