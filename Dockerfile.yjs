@@ -17,7 +17,7 @@ RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
 
 # Server entrypoint and its shared pure domain modules.
 COPY --chown=node:node yjs-server.mjs ./
-COPY --chown=node:node src/board-geometry.js src/security-boundaries.js src/vote-finalization.js src/zone-title.js ./src/
+COPY --chown=node:node src/board-geometry.js src/security-boundaries.js src/vote-finalization.js src/zone-title.js src/relay-lifecycle.js src/relay-vote-maintenance.js src/relay-rejection-counters.js ./src/
 
 # Named volumes inherit these ownership bits on first creation, allowing the
 # runtime to persist data without retaining root inside the container.
@@ -28,6 +28,9 @@ ENV YJS_PORT=1234
 ENV YJS_HOST=0.0.0.0
 ENV YJS_DB_DIR=/data
 ENV YJS_UPLOADS_DIR=/uploads
+ENV YJS_HEAP_LIMIT_MIB=384
+ENV YJS_SEMI_SPACE_LIMIT_MIB=16
+ENV NODE_OPTIONS="--max-old-space-size=${YJS_HEAP_LIMIT_MIB} --max-semi-space-size=${YJS_SEMI_SPACE_LIMIT_MIB}"
 
 EXPOSE 1234
 

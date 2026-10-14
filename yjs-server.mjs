@@ -11,8 +11,12 @@ import { fileURLToPath } from 'url';
 import { dirname, resolve, join } from 'path';
 import { Transform } from 'stream';
 import { pipeline } from 'stream/promises';
-import { geometryErrorForPatch } from './src/board-geometry.js';
-import { planVoteFinalization } from './src/vote-finalization.js';
+import {
+  createRelayLifecycle, drainRelay, isRelayReady, STORAGE_FAILURE_LOG, STORAGE_FAILURE_REASON,
+  UNHANDLED_REJECTION_EVENT, UNCAUGHT_EXCEPTION_EVENT,
+} from './src/relay-lifecycle.js';
+import { finalizeRelayVotes, maintainRoomVotes } from './src/relay-vote-maintenance.js';
+import { createRejectionCounters } from './src/relay-rejection-counters.js';
 
 // yjs, y-leveldb, and y-websocket must all resolve to the SAME yjs module
 // instance. y-websocket's bin/utils.js (below) is CJS and does
@@ -927,17 +931,10 @@ let storageFailure = null;
 // upgrade path so a draining process stops taking on new rooms.
 let shuttingDown = false;
 const markStorageFailure = (err) => {
-  if (!storageFailure) {
-    console.error('[yjs] storage degraded', { err: err.message });
-    setImmediate(() => {
-      for (const doc of docs.values()) {
-        for (const conn of doc.conns.keys()) {
-          try { conn.close(1011, 'storage unavailable'); } catch { /* already closing */ }
-        }
-      }
-    });
-  }
+  if (storageFailure) return;
   storageFailure = err;
+  console.error(STORAGE_FAILURE_LOG, { errorId: roomLogId(String(err)) });
+  shutdown(STORAGE_FAILURE_REASON, true);
 };
 
 const reconcileUploadUsage = async () => {
@@ -960,10 +957,6 @@ const reconcileUploadUsage = async () => {
     });
   }
 };
-
-if (dbUsageBytes > MAX_DB_BYTES) {
-  markStorageFailure(new Error('configured database quota exceeded'));
-}
 
 // `upperBytes` is a conservative in-memory document bound. It starts at the
 // exact hydrated size and grows by each accepted update until a separately
@@ -1212,47 +1205,9 @@ const queueStoreUpdate = (docName, update, ydoc) => {
 // creator is gone and a room reopened after everyone was offline.
 const finalizeExpiredVotes = (docName, ydoc, atTime = Date.now()) => {
   if (storageFailure || shuttingDown || isRoomBlocked(docName)) return;
-  const yItems = ydoc.getMap('items');
-  const items = [];
-  yItems.forEach((yItem, id) => {
-    if (!(yItem instanceof Y.Map)) return;
-    const item = { id };
-    yItem.forEach((value, key) => { item[key] = value instanceof Y.Text ? value.toString() : value; });
-    items.push(item);
+  finalizeRelayVotes(ydoc, Y, atTime, () => {
+    console.warn('[yjs] vote finalization skipped invalid geometry', { docName: roomLogId(docName) });
   });
-  const expired = items.filter((item) => (
-    item.type === 'zone' && Number.isFinite(item.voteTimer?.endsAt)
-    && item.voteTimer.endsAt <= atTime
-  ));
-  if (!expired.length) return;
-  const votesByItem = new Map();
-  ydoc.getMap('kv').forEach((value, key) => {
-    if (!value) return;
-    const match = /^s\|\|vote:([^:]+):([^:]+)$/.exec(key);
-    if (!match) return;
-    let voters = votesByItem.get(match[1]);
-    if (!voters) { voters = new Set(); votesByItem.set(match[1], voters); }
-    voters.add(match[2]);
-  });
-  for (const zone of expired) {
-    const plan = planVoteFinalization(items, votesByItem, zone.id, atTime);
-    if (!plan || plan.entries.some((entry) => {
-      const current = items.find((item) => item.id === entry.id);
-      return !current || geometryErrorForPatch(current, entry.patch);
-    })) {
-      console.warn('[yjs] vote finalization skipped invalid geometry', { docName: roomLogId(docName) });
-      continue;
-    }
-    ydoc.transact(() => {
-      const liveTimer = yItems.get(zone.id)?.get('voteTimer');
-      if (!liveTimer?.endsAt || liveTimer.endsAt > atTime) return;
-      plan.entries.forEach(({ id, patch }) => {
-        const yItem = yItems.get(id);
-        if (!(yItem instanceof Y.Map)) return;
-        Object.entries(patch).forEach(([key, value]) => yItem.set(key, value));
-      });
-    }, 'timer-expiry');
-  }
 };
 
 const voteExpiryTimers = new WeakMap();
@@ -1353,8 +1308,7 @@ setPersistence({
     });
     // y-websocket calls bindState as a floating promise (bin/utils.js:149) with
     // no .catch(), so anything thrown here becomes an unhandled rejection and
-    // kills the process. Contain it: record the failure, leave the room empty,
-    // and let the readiness check refuse further traffic.
+    // kills the process. Contain it: latch the failure and drain for restart.
     const ready = (async () => {
       try {
         const persisted = await checkedGetYDoc(docName);
@@ -2326,7 +2280,9 @@ const reserveHttpRequest = (ip) => {
   };
 };
 
+const rejectionCounters = createRejectionCounters((message, counts) => console.log(message, counts));
 const rejectUpgrade = (socket, status) => {
+  rejectionCounters.upgrade(status);
   const reason = status === 400 ? 'Bad Request'
     : status === 401 ? 'Unauthorized'
     : status === 403 ? 'Forbidden'
@@ -2364,7 +2320,9 @@ const runMaintenance = async () => {
         scheduleRoomCompaction(docName, { remeasure: true });
       }
     }
-    for (const [docName, ydoc] of docs) finalizeExpiredVotes(docName, ydoc, now);
+    maintainRoomVotes(docs, finalizeExpiredVotes, now, (docName, err) => {
+      console.error('[yjs] vote finalization failed', { docName: roomLogId(docName), errorId: roomLogId(String(err)) });
+    });
     for (const [name, expiresAt] of blockedRooms) {
       if (expiresAt <= now) blockedRooms.delete(name);
     }
@@ -2403,6 +2361,7 @@ const runMaintenance = async () => {
     if (err?.code === 'STORAGE_FAILURE') markStorageFailure(err);
     console.error('[yjs] maintenance failed', { err: err.message });
   } finally {
+    rejectionCounters.flush();
     maintenanceRunning = false;
   }
 };
@@ -2410,6 +2369,7 @@ const maintenanceTimer = setInterval(runMaintenance, 60_000);
 maintenanceTimer.unref();
 
 const server = http.createServer({ maxHeaderSize: MAX_HEADER_BYTES }, (req, res) => {
+  rejectionCounters.observeResponse(res);
   const clientIp = clientIpFromRequest(req);
   const reservation = reserveHttpRequest(clientIp);
   if (reservation.status) {
@@ -2447,7 +2407,7 @@ const server = http.createServer({ maxHeaderSize: MAX_HEADER_BYTES }, (req, res)
   // way. An orchestrator polling this stops routing new traffic here instead
   // of accepting work the relay can no longer persist.
   if (req.method === 'GET' && routePath === '/readyz') {
-    const ok = !storageFailure;
+    const ok = isRelayReady(storageFailure, shuttingDown);
     res.writeHead(ok ? 200 : 503, { 'content-type': 'text/plain' });
     res.end(ok ? 'ready' : 'not ready');
     return;
@@ -2646,6 +2606,7 @@ wss.on('connection', (conn, req) => {
         || pendingStoreOps >= MAX_PENDING_STORE_OPS
         || pendingStoreBytes >= MAX_PENDING_STORE_BYTES) {
       limited = true;
+      rejectionCounters.observeBacklog(pendingStoreOps, pendingStoreBytes, MAX_PENDING_STORE_OPS, MAX_PENDING_STORE_BYTES);
       console.warn('[yjs] rate-limit close', { docName: roomLogId(docName), origin: req.headers.origin, size });
       try { conn.close(1008, 'rate-limit'); } catch { /* already closing */ }
       return;
@@ -2664,6 +2625,7 @@ wss.on('connection', (conn, req) => {
         const estimatedStoreBytes = inspection.updateBytes + 256;
         if (pendingStoreOps >= MAX_PENDING_STORE_OPS
             || pendingStoreBytes + estimatedStoreBytes > MAX_PENDING_STORE_BYTES) {
+          rejectionCounters.storageBacklog();
           throw new Error('persistence backlog');
         }
         if (dbUsageBytes + pendingStoreBytes + estimatedStoreBytes > MAX_DB_BYTES) {
@@ -2842,81 +2804,32 @@ server.on('upgrade', (req, socket, head) => {
 // Graceful drain. Without this, `docker stop` kills the process while
 // storeUpdate calls are still in flight, so the last edits before a deploy
 // can be lost even though every client saw them.
-const shutdown = async (signal) => {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  clearInterval(maintenanceTimer);
-  console.log('[yjs] draining', { signal, rooms: docs.size });
-  // Force exit if a stuck LevelDB call would otherwise hold us past the
-  // orchestrator's grace period and earn a SIGKILL mid-write.
-  const hardStop = setTimeout(() => {
-    console.error('[yjs] drain timed out — exiting');
-    process.exit(1);
-  }, SHUTDOWN_TIMEOUT_MS);
-  hardStop.unref();
-  let drainFailed = false;
-  try {
-    // Stop admission immediately, but do not await this yet: Node's HTTP
-    // close callback also waits for upgraded TCP sockets. Awaiting it before
-    // closing WebSockets deadlocks every shutdown with an active room.
-    const httpClosed = new Promise((resolveClose, rejectClose) => {
-      server.close((err) => (err ? rejectClose(err) : resolveClose()));
+const lifecycle = createRelayLifecycle({
+  timeoutMs: SHUTDOWN_TIMEOUT_MS,
+  log: console,
+  errorId: (err) => roomLogId(String(err)),
+  exit: (code) => process.exit(code),
+  onStart: (signal) => {
+    shuttingDown = true;
+    clearInterval(maintenanceTimer);
+    console.log('[yjs] draining', { signal, rooms: docs.size });
+  },
+  drain: async () => {
+    const roomCount = docs.size;
+    await drainRelay({
+      server, clients: wss.clients, httpGraceMs: HTTP_SHUTDOWN_GRACE_MS,
+      isBusy: () => maintenanceRunning || pendingRoomCreations > 0 || activeUploads > 0 || pendingStoreOps > 0,
+      compactions: () => [...roomPersistenceChurn.values()].map((churn) => churn.compactionPromise).filter(Boolean),
+      destroyStorage: () => ldb.destroy(),
     });
-    // An admitted slow body may legally outlive the global drain deadline
-    // (`requestTimeout` is intentionally longer). Give normal requests a
-    // bounded grace period, then abort remaining ordinary HTTP connections.
-    // Upload publication is atomic, and the operation counters below keep us
-    // from destroying storage while an aborted handler is unwinding.
-    const forceHttpTimer = setTimeout(() => {
-      server.closeAllConnections();
-    }, HTTP_SHUTDOWN_GRACE_MS);
-    forceHttpTimer.unref();
-    // Snapshot before closing sockets: y-websocket deletes each room from
-    // `docs` as its last connection goes away.
-    const roomNames = [...docs.keys()];
-    const socketClosures = [...wss.clients].map((conn) => new Promise((resolveSocket) => {
-      if (conn.readyState === 3) { resolveSocket(); return; }
-      let forceTimer;
-      const done = () => {
-        clearTimeout(forceTimer);
-        resolveSocket();
-      };
-      conn.once('close', done);
-      forceTimer = setTimeout(() => {
-        try { conn.terminate(); } catch { /* already closed */ }
-      }, 5_000);
-      forceTimer.unref();
-      try { conn.close(1001, 'server shutting down'); }
-      catch {
-        try { conn.terminate(); } catch { /* already closed */ }
-      }
-    }));
-    // This now waits for ordinary HTTP work and the just-closed upgraded
-    // sockets without allowing LevelDB to be destroyed underneath handlers.
-    await Promise.all([httpClosed, ...socketClosures]);
-    clearTimeout(forceHttpTimer);
-    while (maintenanceRunning || pendingRoomCreations > 0 || activeUploads > 0 || pendingStoreOps > 0) {
-      await new Promise((resolveWait) => setTimeout(resolveWait, 10));
-    }
-    // Every accepted edit is durable through storeUpdate, which the counters
-    // above have drained. Consolidation is optional and can process an entire
-    // near-limit document, so never force it into the fixed shutdown window.
-    // Only let work that was already admitted finish before closing LevelDB.
-    const inFlightCompactions = [...roomPersistenceChurn.values()]
-      .map((churn) => churn.compactionPromise)
-      .filter(Boolean);
-    await Promise.all(inFlightCompactions);
-    if (storageFailure) drainFailed = true;
-    await ldb.destroy();
-    console.log('[yjs] drained', { rooms: roomNames.length });
-  } catch (err) {
-    drainFailed = true;
-    console.error('[yjs] drain failed', { err: err.message });
-  }
-  process.exit(drainFailed ? 1 : 0);
-};
+    console.log('[yjs] drained', { rooms: roomCount });
+  },
+});
+const shutdown = lifecycle.shutdown;
 process.on('SIGTERM', () => { shutdown('SIGTERM'); });
 process.on('SIGINT', () => { shutdown('SIGINT'); });
+process.on(UNHANDLED_REJECTION_EVENT, (err) => { lifecycle.fatal(UNHANDLED_REJECTION_EVENT, err); });
+process.on(UNCAUGHT_EXCEPTION_EVENT, (err) => { lifecycle.fatal(UNCAUGHT_EXCEPTION_EVENT, err); });
 
 server.listen(PORT, HOST, () => {
   const address = server.address();
@@ -2933,4 +2846,5 @@ server.listen(PORT, HOST, () => {
   if (ALLOW_LEGACY_ROOMS) console.warn('[yjs] legacy tokenless rooms enabled');
   if (ALLOW_LEGACY_URL_TOKENS) console.warn('[yjs] legacy URL-token WebSockets enabled');
   if (TRUST_PROXY) console.warn('[yjs] trusted proxy headers enabled; block direct origin access');
+  if (dbUsageBytes > MAX_DB_BYTES) markStorageFailure(new Error('configured database quota exceeded'));
 });
