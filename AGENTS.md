@@ -22,7 +22,7 @@ Release gate (full list, run from a clean checkout): `DEPLOYMENT.md` §Release g
 
 ## Code structure (all new code)
 
-- `RetroBoard.jsx` (~7.9k lines) and `yjs-server.mjs` (~2.9k lines) are frozen in size: do not add logic to them. They only wire. Put new behaviour in a focused module under `src/` (pure `.js` for logic, `.jsx` for components) with a paired `src/<module>.test.js`; relay changes get a module plus `*.test.mjs`. Moving existing logic out of the two big files is welcome; growing them is not.
+- `RetroBoard.jsx` (4505 lines) and `yjs-server.mjs` (2241 lines) are frozen in size: do not add logic to them. They only wire. Put new behaviour in a focused module under `src/` (pure `.js` for logic, `.jsx` for components) with a paired `src/<module>.test.js`; relay changes get a module plus `*.test.mjs`. Moving existing logic out of the two big files is welcome; growing them is not. `src/rule-ratchets.test.js` enforces the ceilings and colour-literal rule; ceilings may only be lowered.
 - Pure logic stays out of components: geometry, voting, ownership, import/export, schema decoding are plain functions the component calls (see `board-geometry.js`, `vote-finalization.js`, `board-ownership.js`).
 - UI follows the Warm Studio direction, token-first: colours, radii, fonts and shadows come from `src/theme.js` CSS-variable tokens (extend them there) and shared UI primitives extracted into `src/` as they are needed, never new inline literals. No tape on stickies; keep functional signals (selection `#2563eb`, gold top-3 glow, zone colours). Reference tokens: `warmLook()` in https://claude.ai/artifact/Y62Xiyyi6a6zN2sYtY8aMF
 - Every user-visible string goes through `t()` with keys added to **both** `th` and `en` in `src/i18n.js`.
