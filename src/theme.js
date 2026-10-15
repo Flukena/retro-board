@@ -55,6 +55,22 @@ export const ZONE_HEADER_SIZE_TOKENS = Object.freeze({
 
 const MODE_INDEPENDENT_TOKENS = Object.freeze({
   ...ZONE_HEADER_SIZE_TOKENS,
+  '--font-handwriting': '"Caveat", "Sarabun", cursive',
+  '--image-card-filter': 'drop-shadow(0 3px 6px rgba(0,0,0,0.18))',
+  '--collaboration-foreground': '#ffffff',
+  '--shadow-remote-selection-label': '0 3px 10px rgba(0,0,0,0.22)',
+  '--shadow-remote-editor-label': '0 3px 10px rgba(0,0,0,0.24)',
+  '--zone-preview-border': '#0ea5e9',
+  '--cursor-filter': 'drop-shadow(0 1px 2px rgba(0,0,0,0.38))',
+  '--radius-cursor-label': '4px 9px 9px 9px',
+  '--shadow-cursor-label': '0 2px 7px rgba(0,0,0,0.2)',
+  '--radius-text-card': '6px',
+  '--radius-selection-outline': '4px',
+  '--radius-marquee': '2px',
+  '--minimap-text-fallback': '#64748b',
+  '--minimap-image': '#a78bfa',
+  '--font-swatch-white': '#ffffff',
+
   '--minimap-grid-pitch': `${MINIMAP_GRID_PITCH_PX}px`,
   '--radius-dock-tile': '14px',
   '--dock-label-gap': '4px',

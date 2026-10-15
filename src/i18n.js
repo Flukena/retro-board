@@ -7,6 +7,9 @@ const STORAGE_KEY = 'rb_lang';
 
 const dict = {
   th: {
+    'image.tooLarge': 'รูปภาพมีขนาดใหญ่เกินไป (สูงสุด {mb} MB)',
+    'image.unsupportedFormat': 'ไม่รองรับรูปแบบรูปภาพนี้ (รองรับเฉพาะ PNG, JPEG, WEBP หรือ GIF)',
+    'image.uploadFailed': 'อัปโหลดรูปภาพไม่สำเร็จ',
     'resilience.error.title': 'ไม่สามารถแสดงบอร์ดได้',
     'resilience.error.body': 'โหลดใหม่เพื่อลองอีกครั้ง การเปลี่ยนแปลงที่ยังไม่ซิงก์อาจสูญหาย',
     'resilience.reload': 'โหลดใหม่',
@@ -351,6 +354,9 @@ const dict = {
     'loading': 'กำลังโหลด…',
   },
   en: {
+    'image.tooLarge': 'Image too large (max {mb} MB)',
+    'image.unsupportedFormat': 'Unsupported image format (PNG, JPEG, WEBP, or GIF only)',
+    'image.uploadFailed': 'Image upload failed',
     'resilience.error.title': 'The board could not be displayed',
     'resilience.error.body': 'Reload to try again. Changes that have not synced may be lost.',
     'resilience.reload': 'Reload',

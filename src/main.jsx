@@ -58,7 +58,7 @@ function RoomBootstrapScreen({ status, retryAfterSeconds, onRetry }) {
         role={checking ? 'status' : 'alert'}
         style={{
           width: '100%', maxWidth: 440, padding: 28, boxSizing: 'border-box',
-          border: '1px solid var(--border)', borderRadius: 16,
+          border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)',
           background: 'var(--bg-panel)', boxShadow: 'var(--shadow-card)', textAlign: 'center',
         }}
       >
@@ -70,7 +70,7 @@ function RoomBootstrapScreen({ status, retryAfterSeconds, onRetry }) {
               type="button"
               onClick={gotoLanding}
               style={{
-                padding: '9px 15px', border: '1px solid var(--border-strong)', borderRadius: 9,
+                padding: '9px 15px', border: '1px solid var(--border-strong)', borderRadius: 'var(--radius-icon-tile)',
                 background: 'var(--bg-panel-2)', color: 'var(--text)', cursor: 'pointer', fontWeight: 700,
               }}
             >
@@ -80,7 +80,7 @@ function RoomBootstrapScreen({ status, retryAfterSeconds, onRetry }) {
               type="button"
               onClick={onRetry}
               style={{
-                padding: '9px 15px', border: 'none', borderRadius: 9,
+                padding: '9px 15px', border: 'none', borderRadius: 'var(--radius-icon-tile)',
                 background: 'var(--accent)', color: 'var(--accent-fg)', cursor: 'pointer', fontWeight: 700,
               }}
             >
