@@ -1,6 +1,11 @@
 // Yjs WebSocket relay with LevelDB persistence.
 // Single source of truth for collaborative state.
 
+import { envInt, envBool, readRelayConfig, MILLISECONDS_PER_SECOND, MILLISECONDS_PER_HOUR, MILLISECONDS_PER_DAY, ROOM_ID_ALLOCATION_ATTEMPTS, ROOM_BLOCK_TTL_MS, BLOCKED_ROOM_ENTRIES_PER_ACTIVE_ROOM, ROOM_HANDLE_RE, LARGE_UPDATE_LOG_THRESHOLD_BYTES, VOTE_EXPIRY_RETRY_INTERVAL_MS, MAINTENANCE_INTERVAL_MS, STORE_OPERATION_OVERHEAD_BYTES, MAX_HTTP_TARGET_CHARACTERS, CORS_PREFLIGHT_MAX_AGE_SECONDS, MAX_REQUESTS_PER_SOCKET, RETRY_AFTER_SHORT_SECONDS, RETRY_AFTER_LONG_SECONDS } from './src/relay-config.js';
+import { evictOldestBucket, refillTokens, takeTrafficTokens, takeTrafficBudget, createTrafficBucket } from './src/relay-rate-bucket.js';
+import { isExactAllowedOrigin, acceptCredentialOrigin, readJsonBody, sendJson, sendIfWritable, sendUpgradeRejection } from './src/relay-http.js';
+import { roomLogId } from './src/relay-log-id.js';
+import { createUploadState, scanUploadUsage, createRelayUploads, createImageReadBudgets, MIME_EXT, matchesMagicBytes, isStoredImageFilename, UPLOAD_STORAGE_FAILURE_EVENT, ROOM_UPLOAD_USAGE_META } from './src/relay-uploads.js';
 import http from 'http';
 import fs from 'fs';
 import { createRequire } from 'module';
@@ -9,8 +14,6 @@ import { isIP } from 'net';
 import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'url';
 import { dirname, resolve, join } from 'path';
-import { Transform } from 'stream';
-import { pipeline } from 'stream/promises';
 import {
   createRelayLifecycle, drainRelay, isRelayReady, STORAGE_FAILURE_LOG, STORAGE_FAILURE_REASON,
   UNHANDLED_REJECTION_EVENT, UNCAUGHT_EXCEPTION_EVENT,
@@ -33,29 +36,8 @@ const Y = require('yjs');
 const { LeveldbPersistence } = require('y-leveldb');
 const decoding = require('lib0/decoding');
 
-const ROOM_LOG_KEY = randomBytes(32);
-const roomLogId = (docName) => createHmac('sha256', ROOM_LOG_KEY)
-  .update(String(docName))
-  .digest('hex')
-  .slice(0, 12);
 
-const envInt = (name, fallback, { min = 1, max = Number.MAX_SAFE_INTEGER } = {}) => {
-  const raw = process.env[name];
-  if (raw == null || raw === '') return fallback;
-  const value = Number(raw);
-  if (!Number.isSafeInteger(value) || value < min || value > max) {
-    throw new Error(`${name} must be an integer between ${min} and ${max}`);
-  }
-  return value;
-};
 
-const envBool = (name, fallback = false) => {
-  const raw = process.env[name];
-  if (raw == null || raw === '') return fallback;
-  if (/^(1|true|yes)$/i.test(raw)) return true;
-  if (/^(0|false|no)$/i.test(raw)) return false;
-  throw new Error(`${name} must be one of: 1, 0, true, false, yes, no`);
-};
 
 const PORT = envInt('YJS_PORT', 1234, { min: 0, max: 65535 });
 const HOST = process.env.YJS_HOST || '127.0.0.1';
@@ -70,7 +52,6 @@ const TRUST_PROXY = envBool('YJS_TRUST_PROXY');
 
 const BOARD_CODE_RE = /^[A-Za-z0-9_-]{3,32}$/;
 const ROOM_TOKEN_RE = /^[A-Za-z0-9_-]{8,64}$/;
-const ROOM_HANDLE_RE = /^[A-Za-z0-9_-]{32}$/;
 const TOKENIZED_ROOM_RE = /^board-[A-Za-z0-9_-]{3,32}-[A-Za-z0-9_-]{8,64}$/;
 const LEGACY_ROOM_RE = /^board-[A-Za-z0-9_-]{3,32}$/;
 const canonicalDocName = (code, token) => `yjs/board-${code}-${token}`;
@@ -221,556 +202,113 @@ for (const origin of ALLOWED_ORIGINS) {
   }
 }
 
-// Per-connection token-bucket limits. Sustained 60 msg/s and 200 KB/s with
-// a short burst, then the WS is closed with code 1008 (Policy Violation).
-// Stops a malicious or runaway client from saturating yjs / LevelDB.
-const RL_MAX_MSGS = envInt('YJS_WS_BURST_MESSAGES', 120);
-const RL_REFILL_MSGS_PER_SEC = envInt('YJS_WS_MESSAGES_PER_SECOND', 60);
-const RL_MAX_BYTES = envInt('YJS_MAX_WS_MESSAGE_BYTES', 2_000_000, { min: 64 * 1024, max: 8 * 1024 * 1024 });
-const RL_REFILL_BYTES_PER_SEC = envInt('YJS_WS_BYTES_PER_SECOND', 200_000);
-const GLOBAL_RL_MAX_MSGS = envInt('YJS_GLOBAL_WS_BURST_MESSAGES', 1_000);
-const GLOBAL_RL_REFILL_MSGS_PER_SEC = envInt('YJS_GLOBAL_WS_MESSAGES_PER_SECOND', 500);
-const GLOBAL_RL_MAX_BYTES = envInt('YJS_GLOBAL_WS_BURST_BYTES', 20 * 1024 * 1024);
-const GLOBAL_RL_REFILL_BYTES_PER_SEC = envInt('YJS_GLOBAL_WS_BYTES_PER_SECOND', 5 * 1024 * 1024);
-const ROOM_RL_MAX_MSGS = envInt('YJS_ROOM_WS_BURST_MESSAGES', 300);
-const ROOM_RL_REFILL_MSGS_PER_SEC = envInt('YJS_ROOM_WS_MESSAGES_PER_SECOND', 150);
-const ROOM_RL_MAX_BYTES = envInt('YJS_ROOM_WS_BURST_BYTES', 8 * 1024 * 1024);
-const ROOM_RL_REFILL_BYTES_PER_SEC = envInt('YJS_ROOM_WS_BYTES_PER_SECOND', 1024 * 1024);
-
-const MAX_CONNECTIONS = envInt('YJS_MAX_CONNECTIONS', 512);
-const MAX_CONNECTIONS_PER_IP = envInt('YJS_MAX_CONNECTIONS_PER_IP', 32);
-const MAX_CONNECTIONS_PER_ROOM = envInt('YJS_MAX_CONNECTIONS_PER_ROOM', 64);
-const MAX_ACTIVE_ROOMS = envInt('YJS_MAX_ACTIVE_ROOMS', 128);
-const MAX_DOCUMENT_BYTES = envInt('YJS_MAX_DOCUMENT_BYTES', 32 * 1024 * 1024, {
-  min: 64 * 1024,
-  max: 64 * 1024 * 1024,
-});
-// A decoded Y.Doc can occupy several times its wire size on the JS heap.
-// Bound all active rooms together instead of allowing MAX_ACTIVE_ROOMS
-// individually-full documents to compete inside one container.
-const MAX_ACTIVE_DOCUMENT_BYTES = envInt(
-  'YJS_MAX_ACTIVE_DOCUMENT_BYTES',
-  96 * 1024 * 1024,
-  { min: MAX_DOCUMENT_BYTES, max: 512 * 1024 * 1024 },
-);
-const MAX_UPDATE_BYTES = envInt('YJS_MAX_UPDATE_BYTES', RL_MAX_BYTES, { min: 64 * 1024, max: RL_MAX_BYTES });
-const MAX_PENDING_STORE_OPS = envInt('YJS_MAX_PENDING_STORE_OPS', 512);
-const MAX_PENDING_STORE_BYTES = envInt('YJS_MAX_PENDING_STORE_BYTES', 32 * 1024 * 1024);
-const MAX_DB_BYTES = envInt('YJS_MAX_DB_BYTES', 2 * 1024 * 1024 * 1024);
-// A permitted full-document sync must fit this queue; otherwise the relay
-// would send it and immediately classify that same recipient as slow. Global
-// egress buckets still cap aggregate queued bytes across connections.
-const MAX_WS_BUFFERED_BYTES = envInt(
-  'YJS_MAX_WS_BUFFERED_BYTES',
-  MAX_DOCUMENT_BYTES + 8 * 1024 * 1024,
-  { min: MAX_DOCUMENT_BYTES, max: 72 * 1024 * 1024 },
-);
-const ROOM_COMPACT_AFTER_BYTES = envInt('YJS_ROOM_COMPACT_AFTER_BYTES', 8 * 1024 * 1024, {
-  min: 64 * 1024,
-  max: MAX_DB_BYTES,
-});
-const ROOM_COMPACT_AFTER_UPDATES = envInt('YJS_ROOM_COMPACT_AFTER_UPDATES', 128, { min: 2 });
-const ROOM_MAX_UNCOMPACTED_UPDATES = envInt('YJS_ROOM_MAX_UNCOMPACTED_UPDATES', 4096, {
-  min: ROOM_COMPACT_AFTER_UPDATES,
-  max: 100_000,
-});
-const ROOM_COMPACTION_MIN_INTERVAL_MS = envInt(
-  'YJS_ROOM_COMPACTION_MIN_INTERVAL_MS',
-  60_000,
-  { min: 1_000, max: 60 * 60 * 1000 },
-);
-const DOCUMENT_REMEASURE_MIN_INTERVAL_MS = envInt(
-  'YJS_DOCUMENT_REMEASURE_MIN_INTERVAL_MS',
-  60_000,
-  { min: 1_000, max: 60 * 60 * 1000 },
-);
-const ROOM_MAX_UNCOMPACTED_BYTES = envInt('YJS_ROOM_MAX_UNCOMPACTED_BYTES', 24 * 1024 * 1024, {
-  min: ROOM_COMPACT_AFTER_BYTES,
-  max: MAX_DB_BYTES,
-});
-const MAX_STATE_VECTOR_BYTES = envInt('YJS_MAX_STATE_VECTOR_BYTES', 256 * 1024, {
-  min: 1024,
-  max: RL_MAX_BYTES,
-});
-const MAX_AWARENESS_MESSAGE_BYTES = envInt('YJS_MAX_AWARENESS_MESSAGE_BYTES', 128 * 1024, {
-  min: 1024,
-  max: RL_MAX_BYTES,
-});
-const MAX_AWARENESS_STATE_BYTES = envInt('YJS_MAX_AWARENESS_STATE_BYTES', 64 * 1024, {
-  min: 256,
-  max: MAX_AWARENESS_MESSAGE_BYTES,
-});
-const MAX_AWARENESS_IDS_PER_CONNECTION = envInt('YJS_MAX_AWARENESS_IDS_PER_CONNECTION', 1, {
-  max: 4,
-});
-const MAX_AWARENESS_CLIENTS_PER_ROOM = envInt(
-  'YJS_MAX_AWARENESS_CLIENTS_PER_ROOM',
+const relayConfig = readRelayConfig();
+const {
+  RL_MAX_MSGS,
+  RL_REFILL_MSGS_PER_SEC,
+  RL_MAX_BYTES,
+  RL_REFILL_BYTES_PER_SEC,
+  GLOBAL_RL_MAX_MSGS,
+  GLOBAL_RL_REFILL_MSGS_PER_SEC,
+  GLOBAL_RL_MAX_BYTES,
+  GLOBAL_RL_REFILL_BYTES_PER_SEC,
+  ROOM_RL_MAX_MSGS,
+  ROOM_RL_REFILL_MSGS_PER_SEC,
+  ROOM_RL_MAX_BYTES,
+  ROOM_RL_REFILL_BYTES_PER_SEC,
+  MAX_CONNECTIONS,
+  MAX_CONNECTIONS_PER_IP,
   MAX_CONNECTIONS_PER_ROOM,
-  { min: 1, max: MAX_CONNECTIONS_PER_ROOM },
-);
-// The server sends every active awareness state to a newly-connected client.
-// Standard y-websocket clients echo that snapshot, so every server-produced
-// snapshot must also fit the inbound awareness envelope. Reserve conservative
-// framing space for the count, client IDs, clocks, and length prefixes.
-const AWARENESS_FRAME_OVERHEAD_BYTES = 32 + MAX_AWARENESS_CLIENTS_PER_ROOM * 20;
-const MAX_AWARENESS_ROOM_PAYLOAD_BYTES = MAX_AWARENESS_MESSAGE_BYTES
-  - AWARENESS_FRAME_OVERHEAD_BYTES;
-if (MAX_AWARENESS_ROOM_PAYLOAD_BYTES < MAX_AWARENESS_STATE_BYTES) {
-  throw new Error(
-    'YJS_MAX_AWARENESS_MESSAGE_BYTES is too small for the configured awareness state/client limits',
-  );
-}
-const MAX_AWARENESS_ROOM_BYTES = envInt('YJS_MAX_AWARENESS_ROOM_BYTES', Math.min(
-  120 * 1024,
-  MAX_AWARENESS_ROOM_PAYLOAD_BYTES,
-), {
-  min: MAX_AWARENESS_STATE_BYTES,
-  max: Math.min(32 * 1024 * 1024, MAX_AWARENESS_ROOM_PAYLOAD_BYTES),
-});
-const SYNC_RESPONSE_MIN_CHARGE_BYTES = envInt('YJS_SYNC_RESPONSE_MIN_CHARGE_BYTES', 64 * 1024, {
-  min: 1024,
-  max: MAX_DOCUMENT_BYTES,
-});
-const SYNC_RESPONSE_CONNECTION_BURST_BYTES = envInt(
-  'YJS_SYNC_RESPONSE_CONNECTION_BURST_BYTES',
-  Math.max(2 * MAX_DOCUMENT_BYTES, 8 * 1024 * 1024),
-  { min: MAX_DOCUMENT_BYTES, max: 256 * 1024 * 1024 },
-);
-const SYNC_RESPONSE_ROOM_BURST_BYTES = envInt(
-  'YJS_SYNC_RESPONSE_ROOM_BURST_BYTES',
-  Math.max(2 * MAX_DOCUMENT_BYTES, 32 * 1024 * 1024),
-  { min: MAX_DOCUMENT_BYTES, max: 512 * 1024 * 1024 },
-);
-const SYNC_RESPONSE_GLOBAL_BURST_BYTES = envInt(
-  'YJS_SYNC_RESPONSE_GLOBAL_BURST_BYTES',
-  Math.max(2 * MAX_DOCUMENT_BYTES, 64 * 1024 * 1024),
-  { min: MAX_DOCUMENT_BYTES, max: 1024 * 1024 * 1024 },
-);
-const SYNC_RESPONSE_CONNECTION_BYTES_PER_SECOND = envInt(
-  'YJS_SYNC_RESPONSE_CONNECTION_BYTES_PER_SECOND',
-  1024 * 1024,
-);
-const SYNC_RESPONSE_ROOM_BYTES_PER_SECOND = envInt(
-  'YJS_SYNC_RESPONSE_ROOM_BYTES_PER_SECOND',
-  2 * 1024 * 1024,
-);
-const SYNC_RESPONSE_GLOBAL_BYTES_PER_SECOND = envInt(
-  'YJS_SYNC_RESPONSE_GLOBAL_BYTES_PER_SECOND',
-  8 * 1024 * 1024,
-);
-const SYNC_RESPONSE_CONNECTION_BURST_MESSAGES = envInt(
-  'YJS_SYNC_RESPONSE_CONNECTION_BURST_MESSAGES', 2, { max: 32 },
-);
-const SYNC_RESPONSES_PER_CONNECTION_PER_MINUTE = envInt(
-  'YJS_SYNC_RESPONSES_PER_CONNECTION_PER_MINUTE', 6, { max: 600 },
-);
-const WS_EGRESS_CONNECTION_BURST_BYTES = envInt(
-  'YJS_WS_EGRESS_CONNECTION_BURST_BYTES',
-  Math.max(MAX_DOCUMENT_BYTES + MAX_AWARENESS_ROOM_BYTES, 16 * 1024 * 1024),
-  { min: MAX_DOCUMENT_BYTES, max: 256 * 1024 * 1024 },
-);
-const WS_EGRESS_ROOM_BURST_BYTES = envInt(
-  'YJS_WS_EGRESS_ROOM_BURST_BYTES',
-  Math.max(2 * MAX_DOCUMENT_BYTES, 32 * 1024 * 1024),
-  { min: MAX_DOCUMENT_BYTES, max: 512 * 1024 * 1024 },
-);
-const WS_EGRESS_GLOBAL_BURST_BYTES = envInt(
-  'YJS_WS_EGRESS_GLOBAL_BURST_BYTES',
-  Math.max(2 * MAX_DOCUMENT_BYTES, 64 * 1024 * 1024),
-  { min: MAX_DOCUMENT_BYTES, max: 1024 * 1024 * 1024 },
-);
-const WS_EGRESS_CONNECTION_BYTES_PER_SECOND = envInt(
-  'YJS_WS_EGRESS_CONNECTION_BYTES_PER_SECOND',
-  2 * 1024 * 1024,
-);
-const WS_EGRESS_ROOM_BYTES_PER_SECOND = envInt(
-  'YJS_WS_EGRESS_ROOM_BYTES_PER_SECOND',
-  8 * 1024 * 1024,
-);
-const WS_EGRESS_GLOBAL_BYTES_PER_SECOND = envInt(
-  'YJS_WS_EGRESS_GLOBAL_BYTES_PER_SECOND',
-  32 * 1024 * 1024,
-);
-const WS_EGRESS_CONNECTION_BURST_MESSAGES = envInt('YJS_WS_EGRESS_CONNECTION_BURST_MESSAGES', 256);
-const WS_EGRESS_CONNECTION_MESSAGES_PER_SECOND = envInt('YJS_WS_EGRESS_CONNECTION_MESSAGES_PER_SECOND', 128);
-const WS_EGRESS_ROOM_BURST_MESSAGES = envInt('YJS_WS_EGRESS_ROOM_BURST_MESSAGES', 1024);
-const WS_EGRESS_ROOM_MESSAGES_PER_SECOND = envInt('YJS_WS_EGRESS_ROOM_MESSAGES_PER_SECOND', 512);
-const WS_EGRESS_GLOBAL_BURST_MESSAGES = envInt('YJS_WS_EGRESS_GLOBAL_BURST_MESSAGES', 4096);
-const WS_EGRESS_GLOBAL_MESSAGES_PER_SECOND = envInt('YJS_WS_EGRESS_GLOBAL_MESSAGES_PER_SECOND', 2048);
-const MAX_REGISTERED_ROOMS = envInt('YJS_MAX_REGISTERED_ROOMS', 10_000);
-const ROOM_SESSION_TTL_MS = envInt('YJS_ROOM_SESSION_TTL_SECONDS', 8 * 60 * 60, { min: 60, max: 7 * 24 * 60 * 60 }) * 1000;
-const MAX_API_BODY_BYTES = envInt('YJS_MAX_API_BODY_BYTES', 1024, { min: 64, max: 16 * 1024 });
-const MAX_COOKIE_HEADER_BYTES = envInt('YJS_MAX_COOKIE_HEADER_BYTES', 4096, { min: 256, max: 16 * 1024 });
-const MAX_HEADER_BYTES = envInt('YJS_MAX_HEADER_BYTES', 8192, { min: 1024, max: 64 * 1024 });
-const ROOM_CREATE_BURST = envInt('YJS_ROOM_CREATE_BURST', 3);
-const ROOM_CREATES_PER_HOUR = envInt('YJS_ROOM_CREATES_PER_HOUR', 6);
-const GLOBAL_ROOM_CREATE_BURST = envInt('YJS_GLOBAL_ROOM_CREATE_BURST', 30);
-const GLOBAL_ROOM_CREATES_PER_MINUTE = envInt('YJS_GLOBAL_ROOM_CREATES_PER_MINUTE', 30);
-const SESSION_EXCHANGE_BURST = envInt('YJS_SESSION_EXCHANGE_BURST', 30);
-const SESSION_EXCHANGES_PER_MINUTE = envInt('YJS_SESSION_EXCHANGES_PER_MINUTE', 60);
-const GLOBAL_SESSION_EXCHANGE_BURST = envInt('YJS_GLOBAL_SESSION_EXCHANGE_BURST', 300);
-const GLOBAL_SESSION_EXCHANGES_PER_MINUTE = envInt('YJS_GLOBAL_SESSION_EXCHANGES_PER_MINUTE', 600);
-const SESSION_FAILURE_BURST = envInt('YJS_SESSION_FAILURE_BURST', 10);
-const SESSION_FAILURES_PER_HOUR = envInt('YJS_SESSION_FAILURES_PER_HOUR', 60);
-const WS_UPGRADE_IP_BURST = envInt('YJS_WS_UPGRADE_IP_BURST', 40);
-const WS_UPGRADES_PER_IP_PER_MINUTE = envInt('YJS_WS_UPGRADES_PER_IP_PER_MINUTE', 60);
-const WS_UPGRADE_ROOM_BURST = envInt('YJS_WS_UPGRADE_ROOM_BURST', 20);
-const WS_UPGRADES_PER_ROOM_PER_MINUTE = envInt('YJS_WS_UPGRADES_PER_ROOM_PER_MINUTE', 30);
-const GLOBAL_WS_UPGRADE_BURST = envInt('YJS_GLOBAL_WS_UPGRADE_BURST', 200);
-const GLOBAL_WS_UPGRADES_PER_MINUTE = envInt('YJS_GLOBAL_WS_UPGRADES_PER_MINUTE', 300);
-// Opening a cold room decodes its full persisted CRDT, so it receives a much
-// tighter budget than a warm peer joining an already-resident room.
-const COLD_ROOM_OPEN_IP_BURST = envInt('YJS_COLD_ROOM_OPEN_IP_BURST', 4);
-const COLD_ROOM_OPENS_PER_IP_PER_MINUTE = envInt('YJS_COLD_ROOM_OPENS_PER_IP_PER_MINUTE', 6);
-const COLD_ROOM_OPEN_ROOM_BURST = envInt('YJS_COLD_ROOM_OPEN_ROOM_BURST', 2);
-const COLD_ROOM_OPENS_PER_ROOM_PER_MINUTE = envInt('YJS_COLD_ROOM_OPENS_PER_ROOM_PER_MINUTE', 4);
-const GLOBAL_COLD_ROOM_OPEN_BURST = envInt('YJS_GLOBAL_COLD_ROOM_OPEN_BURST', 16);
-const GLOBAL_COLD_ROOM_OPENS_PER_MINUTE = envInt('YJS_GLOBAL_COLD_ROOM_OPENS_PER_MINUTE', 30);
-
-const MAX_HTTP_REQUESTS = envInt('YJS_MAX_HTTP_REQUESTS', 128);
-const MAX_HTTP_REQUESTS_PER_IP = envInt('YJS_MAX_HTTP_REQUESTS_PER_IP', 16);
-const REQUEST_TIMEOUT_MS = envInt('YJS_REQUEST_TIMEOUT_MS', 30_000, { min: 1_000 });
-const HEADERS_TIMEOUT_MS = envInt('YJS_HEADERS_TIMEOUT_MS', 10_000, { min: 1_000, max: REQUEST_TIMEOUT_MS });
-const KEEP_ALIVE_TIMEOUT_MS = envInt('YJS_KEEP_ALIVE_TIMEOUT_MS', 5_000, { min: 1_000 });
-const UPGRADE_TIMEOUT_MS = envInt('YJS_UPGRADE_TIMEOUT_MS', 10_000, { min: 1_000 });
-const SHUTDOWN_TIMEOUT_MS = 20_000;
-const HTTP_SHUTDOWN_GRACE_MS = envInt('YJS_HTTP_SHUTDOWN_GRACE_MS', 5_000, {
-  min: 100,
-  max: 15_000,
-});
-
-// Image uploads: bytes never touch the Yjs WS sync channel (which is what
-// the token bucket above protects) — items reference an uploaded file by
-// URL instead of embedding it, so a large image can't blow past RL_MAX_BYTES
-// on every sync the way an embedded base64 data URL used to.
-const UPLOADS_DIR = process.env.YJS_UPLOADS_DIR || './uploads';
+  MAX_ACTIVE_ROOMS,
+  MAX_DOCUMENT_BYTES,
+  MAX_ACTIVE_DOCUMENT_BYTES,
+  MAX_UPDATE_BYTES,
+  MAX_PENDING_STORE_OPS,
+  MAX_PENDING_STORE_BYTES,
+  MAX_DB_BYTES,
+  MAX_WS_BUFFERED_BYTES,
+  ROOM_COMPACT_AFTER_BYTES,
+  ROOM_COMPACT_AFTER_UPDATES,
+  ROOM_MAX_UNCOMPACTED_UPDATES,
+  ROOM_COMPACTION_MIN_INTERVAL_MS,
+  DOCUMENT_REMEASURE_MIN_INTERVAL_MS,
+  ROOM_MAX_UNCOMPACTED_BYTES,
+  MAX_STATE_VECTOR_BYTES,
+  MAX_AWARENESS_MESSAGE_BYTES,
+  MAX_AWARENESS_STATE_BYTES,
+  MAX_AWARENESS_IDS_PER_CONNECTION,
+  MAX_AWARENESS_CLIENTS_PER_ROOM,
+  MAX_AWARENESS_ROOM_BYTES,
+  SYNC_RESPONSE_MIN_CHARGE_BYTES,
+  SYNC_RESPONSE_CONNECTION_BURST_BYTES,
+  SYNC_RESPONSE_ROOM_BURST_BYTES,
+  SYNC_RESPONSE_GLOBAL_BURST_BYTES,
+  SYNC_RESPONSE_CONNECTION_BYTES_PER_SECOND,
+  SYNC_RESPONSE_ROOM_BYTES_PER_SECOND,
+  SYNC_RESPONSE_GLOBAL_BYTES_PER_SECOND,
+  SYNC_RESPONSE_CONNECTION_BURST_MESSAGES,
+  SYNC_RESPONSES_PER_CONNECTION_PER_MINUTE,
+  WS_EGRESS_CONNECTION_BURST_BYTES,
+  WS_EGRESS_ROOM_BURST_BYTES,
+  WS_EGRESS_GLOBAL_BURST_BYTES,
+  WS_EGRESS_CONNECTION_BYTES_PER_SECOND,
+  WS_EGRESS_ROOM_BYTES_PER_SECOND,
+  WS_EGRESS_GLOBAL_BYTES_PER_SECOND,
+  WS_EGRESS_CONNECTION_BURST_MESSAGES,
+  WS_EGRESS_CONNECTION_MESSAGES_PER_SECOND,
+  WS_EGRESS_ROOM_BURST_MESSAGES,
+  WS_EGRESS_ROOM_MESSAGES_PER_SECOND,
+  WS_EGRESS_GLOBAL_BURST_MESSAGES,
+  WS_EGRESS_GLOBAL_MESSAGES_PER_SECOND,
+  MAX_REGISTERED_ROOMS,
+  ROOM_SESSION_TTL_MS,
+  MAX_API_BODY_BYTES,
+  MAX_COOKIE_HEADER_BYTES,
+  MAX_HEADER_BYTES,
+  ROOM_CREATE_BURST,
+  ROOM_CREATES_PER_HOUR,
+  GLOBAL_ROOM_CREATE_BURST,
+  GLOBAL_ROOM_CREATES_PER_MINUTE,
+  SESSION_EXCHANGE_BURST,
+  SESSION_EXCHANGES_PER_MINUTE,
+  GLOBAL_SESSION_EXCHANGE_BURST,
+  GLOBAL_SESSION_EXCHANGES_PER_MINUTE,
+  SESSION_FAILURE_BURST,
+  SESSION_FAILURES_PER_HOUR,
+  WS_UPGRADE_IP_BURST,
+  WS_UPGRADES_PER_IP_PER_MINUTE,
+  WS_UPGRADE_ROOM_BURST,
+  WS_UPGRADES_PER_ROOM_PER_MINUTE,
+  GLOBAL_WS_UPGRADE_BURST,
+  GLOBAL_WS_UPGRADES_PER_MINUTE,
+  COLD_ROOM_OPEN_IP_BURST,
+  COLD_ROOM_OPENS_PER_IP_PER_MINUTE,
+  COLD_ROOM_OPEN_ROOM_BURST,
+  COLD_ROOM_OPENS_PER_ROOM_PER_MINUTE,
+  GLOBAL_COLD_ROOM_OPEN_BURST,
+  GLOBAL_COLD_ROOM_OPENS_PER_MINUTE,
+  MAX_HTTP_REQUESTS,
+  MAX_HTTP_REQUESTS_PER_IP,
+  REQUEST_TIMEOUT_MS,
+  HEADERS_TIMEOUT_MS,
+  KEEP_ALIVE_TIMEOUT_MS,
+  UPGRADE_TIMEOUT_MS,
+  SHUTDOWN_TIMEOUT_MS,
+  HTTP_SHUTDOWN_GRACE_MS,
+  UPLOADS_DIR,
+  MAX_UPLOAD_BYTES,
+  MAX_UPLOAD_STORAGE_BYTES,
+  MAX_UPLOAD_FILES,
+  MAX_ROOM_UPLOAD_BYTES,
+  MAX_ROOM_UPLOAD_FILES,
+  UPLOAD_RETENTION_DAYS,
+  BUCKET_TTL_MS,
+  MAX_BUCKETS,
+} = relayConfig;
 fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-const MAX_UPLOAD_BYTES = envInt('YJS_MAX_UPLOAD_BYTES', 5 * 1024 * 1024, { min: 1024, max: 20 * 1024 * 1024 });
-const MAX_ACTIVE_UPLOADS = envInt('YJS_MAX_ACTIVE_UPLOADS', 8);
-const MAX_ACTIVE_UPLOADS_PER_IP = envInt('YJS_MAX_ACTIVE_UPLOADS_PER_IP', 2);
-const MAX_UPLOAD_STORAGE_BYTES = envInt('YJS_MAX_UPLOAD_STORAGE_BYTES', 512 * 1024 * 1024, { min: MAX_UPLOAD_BYTES });
-const MAX_UPLOAD_FILES = envInt('YJS_MAX_UPLOAD_FILES', 10_000);
-const MAX_ROOM_UPLOAD_BYTES = envInt('YJS_MAX_ROOM_UPLOAD_BYTES', 64 * 1024 * 1024, { min: MAX_UPLOAD_BYTES, max: MAX_UPLOAD_STORAGE_BYTES });
-const MAX_ROOM_UPLOAD_FILES = envInt('YJS_MAX_ROOM_UPLOAD_FILES', 1_000, { max: MAX_UPLOAD_FILES });
-const UPLOAD_RETENTION_DAYS = envInt('YJS_UPLOAD_RETENTION_DAYS', 0, { min: 0, max: 3650 });
-const IMAGE_READ_BURST = envInt('YJS_IMAGE_READ_BURST', 64);
-const IMAGE_READS_PER_SECOND = envInt('YJS_IMAGE_READS_PER_SECOND', 16);
-const IMAGE_READ_BURST_BYTES = envInt('YJS_IMAGE_READ_BURST_BYTES', 256 * 1024 * 1024);
-const IMAGE_READ_BYTES_PER_SECOND = envInt('YJS_IMAGE_READ_BYTES_PER_SECOND', 32 * 1024 * 1024);
-const ROOM_IMAGE_READ_BURST = envInt('YJS_ROOM_IMAGE_READ_BURST', 128);
-const ROOM_IMAGE_READS_PER_SECOND = envInt('YJS_ROOM_IMAGE_READS_PER_SECOND', 32);
-const ROOM_IMAGE_READ_BURST_BYTES = envInt('YJS_ROOM_IMAGE_READ_BURST_BYTES', 512 * 1024 * 1024);
-const ROOM_IMAGE_READ_BYTES_PER_SECOND = envInt('YJS_ROOM_IMAGE_READ_BYTES_PER_SECOND', 64 * 1024 * 1024);
-const GLOBAL_IMAGE_READ_BURST = envInt('YJS_GLOBAL_IMAGE_READ_BURST', 512);
-const GLOBAL_IMAGE_READS_PER_SECOND = envInt('YJS_GLOBAL_IMAGE_READS_PER_SECOND', 128);
-const GLOBAL_IMAGE_READ_BURST_BYTES = envInt('YJS_GLOBAL_IMAGE_READ_BURST_BYTES', 1024 * 1024 * 1024);
-const GLOBAL_IMAGE_READ_BYTES_PER_SECOND = envInt('YJS_GLOBAL_IMAGE_READ_BYTES_PER_SECOND', 128 * 1024 * 1024);
-const BUCKET_TTL_MS = envInt('YJS_BUCKET_TTL_MS', 10 * 60 * 1000, { min: 10_000 });
-const MAX_BUCKETS = envInt('YJS_MAX_RATE_LIMIT_BUCKETS', 10_000);
-// SVG is intentionally excluded — same-origin user-uploaded SVG can embed
-// <script>, a stored-XSS vector this stack has no sanitizer for.
-const MIME_EXT = {
-  'image/png': 'png',
-  'image/jpeg': 'jpg',
-  'image/webp': 'webp',
-  'image/gif': 'gif',
-};
-const EXT_CONTENT_TYPE = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif' };
-const IMAGE_ID_RE = /^[a-f0-9-]+\.(png|jpe?g|webp|gif)$/;
-const LEGACY_IMAGE_FILENAME_RE = IMAGE_ID_RE;
-const ROOM_IMAGE_FILENAME_RE = /^[A-Za-z0-9_-]{32}\.[a-f0-9-]+\.(png|jpe?g|webp|gif)$/;
-const isStoredImageFilename = (name) => (
-  LEGACY_IMAGE_FILENAME_RE.test(name) || ROOM_IMAGE_FILENAME_RE.test(name)
-);
-
-// Cheap magic-byte sniff — Content-Type is client-supplied and spoofable, so
-// this guards against a mislabeled/malicious body before it's written to disk.
-const matchesMagicBytes = (buf, mime) => {
-  if (mime === 'image/png') return buf.length >= 8 && buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
-  if (mime === 'image/jpeg') return buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
-  if (mime === 'image/gif') return buf.length >= 6 && ['GIF87a', 'GIF89a'].includes(buf.toString('ascii', 0, 6));
-  if (mime === 'image/webp') return buf.length >= 12 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP';
-  return false;
-};
-
-// Separate per-IP token bucket for the upload route — the WS bucket above
-// only covers traffic already inside a WS connection, not a plain HTTP POST.
-const uploadBuckets = new Map();
-const UPLOAD_RL_MAX = envInt('YJS_UPLOAD_BURST', 10);
-const UPLOAD_RL_REFILL_PER_SEC = envInt('YJS_UPLOADS_PER_SECOND', 1);
-const takeUploadToken = (ip) => {
-  const now = Date.now();
-  let b = uploadBuckets.get(ip);
-  if (!b) {
-    if (uploadBuckets.size >= MAX_BUCKETS) {
-      let oldestKey;
-      let oldest = Infinity;
-      for (const [key, value] of uploadBuckets) {
-        if (value.lastSeen < oldest) { oldest = value.lastSeen; oldestKey = key; }
-      }
-      if (oldestKey !== undefined) uploadBuckets.delete(oldestKey);
-    }
-    b = { tokens: UPLOAD_RL_MAX, last: now, lastSeen: now };
-    uploadBuckets.set(ip, b);
-  }
-  b.tokens = Math.min(UPLOAD_RL_MAX, b.tokens + (now - b.last) * UPLOAD_RL_REFILL_PER_SEC / 1000);
-  b.last = now;
-  b.lastSeen = now;
-  if (b.tokens < 1) return false;
-  b.tokens -= 1;
-  return true;
-};
-
-const isExactAllowedOrigin = (origin) => {
-  if (!origin) return false;
-  if (ALLOWED_ORIGINS.length) return ALLOWED_ORIGINS.includes(origin);
-  return ALLOW_INSECURE_HTTP
-    && /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?$/.test(origin);
-};
-
-const setCredentialCors = (origin, res) => {
-  res.setHeader('access-control-allow-origin', origin);
-  res.setHeader('access-control-allow-credentials', 'true');
-  res.setHeader('vary', 'Origin');
-};
-
-const scanUploadUsage = () => {
-  let bytes = 0;
-  let files = 0;
-  let complete = true;
-  const roomsByHandle = new Map();
-  let entries = [];
-  try { entries = fs.readdirSync(UPLOADS_DIR, { withFileTypes: true }); }
-  catch (err) {
-    console.error('[yjs] upload usage scan failed', { err: err.message });
-    return { bytes: MAX_UPLOAD_STORAGE_BYTES, files: MAX_UPLOAD_FILES, roomsByHandle, complete: false };
-  }
-  for (const entry of entries) {
-    if (!entry.isFile()) continue;
-    try {
-      const size = fs.statSync(join(UPLOADS_DIR, entry.name)).size;
-      bytes += size;
-      if (!isStoredImageFilename(entry.name)) continue;
-      files += 1;
-      if (ROOM_IMAGE_FILENAME_RE.test(entry.name)) {
-        const handle = entry.name.slice(0, 32);
-        const room = roomsByHandle.get(handle) || { bytes: 0, files: 0 };
-        room.bytes += size;
-        room.files += 1;
-        roomsByHandle.set(handle, room);
-      }
-    } catch (err) {
-      complete = false;
-      console.error('[yjs] upload file stat failed', { fileId: roomLogId(entry.name), err: err.message });
-    }
-  }
-  if (!complete) {
-    return { bytes: MAX_UPLOAD_STORAGE_BYTES, files: MAX_UPLOAD_FILES, roomsByHandle, complete: false };
-  }
-  return { bytes, files, roomsByHandle, complete: true };
-};
-
-const initialUploadUsage = scanUploadUsage();
-let { bytes: uploadUsageBytes, files: uploadFileCount } = initialUploadUsage;
-let uploadReservedBytes = 0;
-let activeUploads = 0;
-const activeUploadsByIp = new Map();
-
-const releaseUpload = (ip, reservedBytes, docName) => {
-  activeUploads = Math.max(0, activeUploads - 1);
-  uploadReservedBytes = Math.max(0, uploadReservedBytes - reservedBytes);
-  const next = (activeUploadsByIp.get(ip) || 1) - 1;
-  if (next > 0) activeUploadsByIp.set(ip, next);
-  else activeUploadsByIp.delete(ip);
-  const room = roomUploadUsage.get(docName);
-  if (room) {
-    room.active = Math.max(0, room.active - 1);
-    room.reservedBytes = Math.max(0, room.reservedBytes - reservedBytes);
-  }
-};
-
-const uploadError = (code, message) => Object.assign(new Error(message), { code });
-
-const handleUpload = async (req, res, clientIp, docName, roomHandle) => {
-  const origin = req.headers.origin || '';
-  if (!isExactAllowedOrigin(origin)) { res.writeHead(403); res.end(); return; }
-  // The client and yjs-server run on different ports in dev, so this is a
-  // cross-origin POST with a non-safelisted Content-Type — the browser
-  // preflights it and also requires this header on the actual response.
-  setCredentialCors(origin, res);
-  if (!takeUploadToken(clientIp)) { res.writeHead(429); res.end(); return; }
-  const contentType = (req.headers['content-type'] || '').split(';')[0].trim();
-  const ext = MIME_EXT[contentType];
-  if (!ext) { res.writeHead(415, { 'content-type': 'text/plain' }); res.end('unsupported media type'); return; }
-  const rawLength = req.headers['content-length'];
-  if (rawLength != null && !/^\d+$/.test(String(rawLength))) { res.writeHead(400); res.end(); return; }
-  const declaredLength = rawLength == null ? null : Number(rawLength);
-  if (declaredLength != null && declaredLength > MAX_UPLOAD_BYTES) { res.writeHead(413); res.end(); return; }
-
-  if (activeUploads >= MAX_ACTIVE_UPLOADS
-      || (activeUploadsByIp.get(clientIp) || 0) >= MAX_ACTIVE_UPLOADS_PER_IP) {
-    res.writeHead(429, { 'retry-after': '2' });
-    res.end();
-    return;
-  }
-  const reservedBytes = declaredLength ?? MAX_UPLOAD_BYTES;
-  const room = roomUploadUsage.get(docName);
-  if (!room) { res.writeHead(404); res.end(); return; }
-  if (uploadFileCount + activeUploads >= MAX_UPLOAD_FILES
-      || uploadUsageBytes + uploadReservedBytes + reservedBytes > MAX_UPLOAD_STORAGE_BYTES) {
-    res.writeHead(507, { 'content-type': 'text/plain' });
-    res.end('upload capacity reached');
-    return;
-  }
-  if (room.files + room.active >= MAX_ROOM_UPLOAD_FILES
-      || room.bytes + room.reservedBytes + reservedBytes > MAX_ROOM_UPLOAD_BYTES) {
-    res.writeHead(507, { 'content-type': 'text/plain' });
-    res.end('room upload capacity reached');
-    return;
-  }
-
-  activeUploads += 1;
-  activeUploadsByIp.set(clientIp, (activeUploadsByIp.get(clientIp) || 0) + 1);
-  uploadReservedBytes += reservedBytes;
-  room.active += 1;
-  room.reservedBytes += reservedBytes;
-
-  const id = randomUUID();
-  const imageId = `${id}.${ext}`;
-  const filename = `${roomHandle}.${imageId}`;
-  const tempPath = join(UPLOADS_DIR, `.upload-${id}.tmp`);
-  const finalPath = join(UPLOADS_DIR, filename);
-  let total = 0;
-  let prefix = Buffer.alloc(0);
-  let published = false;
-  let accounted = false;
-  const meter = new Transform({
-    transform(chunk, _encoding, callback) {
-      total += chunk.length;
-      if (total > MAX_UPLOAD_BYTES) {
-        callback(uploadError('UPLOAD_TOO_LARGE', 'upload too large'));
-        return;
-      }
-      if (prefix.length < 12) {
-        prefix = Buffer.concat([prefix, chunk.subarray(0, 12 - prefix.length)]);
-      }
-      callback(null, chunk);
-    },
-  });
-
-  let timedOut = false;
-  const deadline = setTimeout(() => {
-    timedOut = true;
-    req.destroy(uploadError('UPLOAD_TIMEOUT', 'upload timeout'));
-  }, REQUEST_TIMEOUT_MS);
-  deadline.unref();
-
-  try {
-    await pipeline(
-      req,
-      meter,
-      fs.createWriteStream(tempPath, { flags: 'wx', mode: 0o600 }),
-    );
-    if (!matchesMagicBytes(prefix, contentType)) throw uploadError('INVALID_IMAGE', 'invalid image data');
-    // Reservation prevents concurrent uploads from racing this check. The
-    // rename stays within UPLOADS_DIR, so publication is atomic.
-    await fs.promises.rename(tempPath, finalPath);
-    published = true;
-    uploadUsageBytes += total;
-    uploadFileCount += 1;
-    room.bytes += total;
-    room.files += 1;
-    accounted = true;
-    try {
-      await checkedSetMeta(docName, ROOM_UPLOAD_USAGE_META, { bytes: room.bytes, files: room.files });
-    } catch (err) {
-      markStorageFailure(err);
-      throw uploadError('UPLOAD_META', 'upload accounting failed');
-    }
-    console.log('[yjs] upload stored', { fileId: roomLogId(filename), bytes: total });
-    res.writeHead(200, { 'content-type': 'application/json', 'x-content-type-options': 'nosniff' });
-    res.end(JSON.stringify({ url: `/rooms/${roomHandle}/images/${imageId}` }));
-  } catch (err) {
-    if (published && err.code === 'UPLOAD_META') {
-      let removed = false;
-      try {
-        await fs.promises.unlink(finalPath);
-        removed = true;
-      } catch (cleanupErr) {
-        if (cleanupErr.code === 'ENOENT') removed = true;
-        else console.error('[yjs] upload publish rollback failed', {
-          fileId: roomLogId(filename),
-          err: cleanupErr.message,
-        });
-      }
-      // Keep accounting conservative if the published file could not be
-      // removed; startup reconciliation will preserve the same usage. Only a
-      // confirmed removal is safe to subtract from the in-memory totals.
-      if (removed && accounted) {
-        uploadUsageBytes = Math.max(0, uploadUsageBytes - total);
-        uploadFileCount = Math.max(0, uploadFileCount - 1);
-        room.bytes = Math.max(0, room.bytes - total);
-        room.files = Math.max(0, room.files - 1);
-        accounted = false;
-      }
-    }
-    try { await fs.promises.unlink(tempPath); } catch (cleanupErr) {
-      if (cleanupErr.code !== 'ENOENT') console.warn('[yjs] upload temp cleanup failed', { err: cleanupErr.message });
-    }
-    if (res.destroyed || req.destroyed && timedOut) return;
-    if (err.code === 'UPLOAD_TOO_LARGE') res.writeHead(413);
-    else if (err.code === 'INVALID_IMAGE') res.writeHead(422, { 'content-type': 'text/plain' });
-    else if (err.code === 'UPLOAD_TIMEOUT' || timedOut) res.writeHead(408);
-    else {
-      console.error('[yjs] upload write failed', { err: err.message });
-      res.writeHead(500);
-    }
-    res.end(err.code === 'INVALID_IMAGE' ? 'invalid image data' : undefined);
-  } finally {
-    clearTimeout(deadline);
-    releaseUpload(clientIp, reservedBytes, docName);
-  }
-};
-
-const streamImage = (filename, req, res, cacheControl, roomKey) => {
-  const path = join(UPLOADS_DIR, filename);
-  fs.stat(path, (err, stat) => {
-    if (res.destroyed || res.writableEnded) return;
-    if (err || !stat.isFile()) { res.writeHead(404); res.end(); return; }
-    if (!takeImageReadBudget(clientIpFromRequest(req), roomKey, stat.size)) {
-      res.writeHead(429, { 'retry-after': '2', 'cache-control': 'no-store' });
-      res.end();
-      return;
-    }
-    const ext = filename.split('.').pop();
-    res.writeHead(200, {
-      'content-type': EXT_CONTENT_TYPE[ext] || 'application/octet-stream',
-      'content-length': stat.size,
-      'cache-control': cacheControl,
-      'x-content-type-options': 'nosniff',
-    });
-    const stream = fs.createReadStream(path);
-    const abortStream = () => stream.destroy();
-    res.once('close', abortStream);
-    void pipeline(stream, res)
-      .catch(() => { if (!res.destroyed) res.destroy(); })
-      .finally(() => res.off('close', abortStream));
-  });
-};
-
-const handleGetLegacyImage = (filename, req, res) => {
-  if (!LEGACY_IMAGE_FILENAME_RE.test(filename)) { res.writeHead(404); res.end(); return; }
-  streamImage(filename, req, res, 'public, max-age=31536000, immutable', 'legacy');
-};
-
-const handleGetRoomImage = (roomHandle, imageId, req, res) => {
-  if (!ROOM_HANDLE_RE.test(roomHandle) || !IMAGE_ID_RE.test(imageId)) {
-    res.writeHead(404);
-    res.end();
-    return;
-  }
-  streamImage(`${roomHandle}.${imageId}`, req, res, 'private, no-store', roomHandle);
-};
+const uploadState = createUploadState(relayConfig);
+const initialUploadUsage = uploadState.initialUsage;
+const uploadBuckets = uploadState.buckets;
 
 const ldb = new LeveldbPersistence(DB_DIR);
 let dbUsageBytes = directorySizeSync(DB_DIR);
@@ -847,7 +385,6 @@ for (const name of WIPE) {
 }
 
 const ROOM_REGISTRATION_META = 'retro-room-registration-v1';
-const ROOM_UPLOAD_USAGE_META = 'retro-room-upload-usage-v1';
 const ROOM_HANDLE_META = 'retro-room-handle-v1';
 const registeredDocs = new Set();
 const registeredDocDigests = new Map();
@@ -859,7 +396,7 @@ let pendingRoomCreations = 0;
 const existingDocNames = new Set(await checkedGetAllDocNames());
 
 const newUniqueRoomHandle = () => {
-  for (let attempt = 0; attempt < 10; attempt += 1) {
+  for (let attempt = 0; attempt < ROOM_ID_ALLOCATION_ATTEMPTS; attempt += 1) {
     const handle = randomBytes(24).toString('base64url');
     if (!registeredRoomsByHandle.has(handle) && !pendingRoomHandles.has(handle)) return handle;
   }
@@ -938,9 +475,9 @@ const markStorageFailure = (err) => {
 };
 
 const reconcileUploadUsage = async () => {
-  const scanned = scanUploadUsage();
-  uploadUsageBytes = scanned.bytes;
-  uploadFileCount = scanned.files;
+  const scanned = scanUploadUsage(relayConfig);
+  uploadState.bytes = scanned.bytes;
+  uploadState.files = scanned.files;
   if (!scanned.complete) return;
   for (const [roomHandle, docName] of registeredRoomsByHandle) {
     const room = roomUploadUsage.get(docName);
@@ -1016,8 +553,7 @@ const persistenceChurnFor = (docName) => {
   return state;
 };
 const blockedRooms = new Map();
-const ROOM_BLOCK_TTL_MS = 10 * 60 * 1000;
-const MAX_BLOCKED_ROOM_ENTRIES = MAX_ACTIVE_ROOMS * 4;
+const MAX_BLOCKED_ROOM_ENTRIES = MAX_ACTIVE_ROOMS * BLOCKED_ROOM_ENTRIES_PER_ACTIVE_ROOM;
 
 const blockRoom = (docName, ydoc, reason) => {
   const now = Date.now();
@@ -1158,7 +694,7 @@ const scheduleRoomCompaction = (docName, { remeasure = false } = {}) => {
 };
 
 const queueStoreUpdate = (docName, update, ydoc) => {
-  const estimatedBytes = update.byteLength + 256;
+  const estimatedBytes = update.byteLength + STORE_OPERATION_OVERHEAD_BYTES;
   const churn = persistenceChurnFor(docName);
   if (churn.uncompactedBytes + estimatedBytes > ROOM_MAX_UNCOMPACTED_BYTES
       || churn.uncompactedUpdates + 1 > ROOM_MAX_UNCOMPACTED_UPDATES) {
@@ -1182,7 +718,7 @@ const queueStoreUpdate = (docName, update, ydoc) => {
   checkedStoreUpdate(docName, update)
     .then(() => {
       dbUsageBytes += estimatedBytes;
-      if (update.byteLength > 100_000) {
+      if (update.byteLength > LARGE_UPDATE_LOG_THRESHOLD_BYTES) {
         console.log('[yjs] storeUpdate ok', { docName: roomLogId(docName), bytes: update.byteLength });
       }
     })
@@ -1225,7 +761,7 @@ const armVoteExpiry = (docName, ydoc, deferExpired = false) => {
   if (!Number.isFinite(earliest)) return;
   // A malformed unfinalizable room must not create a zero-delay retry loop.
   const waitMs = earliest <= Date.now()
-    ? (deferExpired ? 60_000 : 1)
+    ? (deferExpired ? VOTE_EXPIRY_RETRY_INTERVAL_MS : 1)
     : Math.max(1, Math.min(earliest - Date.now(), 2_147_483_647));
   const timer = setTimeout(() => {
     voteExpiryTimers.delete(ydoc);
@@ -1413,9 +949,9 @@ for (const name of MIGRATE) {
         const bytes = Buffer.from(m[2], 'base64');
         if (bytes.byteLength < 1 || bytes.byteLength > MAX_UPLOAD_BYTES
             || !matchesMagicBytes(bytes.subarray(0, 12), m[1])
-            || uploadUsageBytes + rewrittenBytes + bytes.byteLength > MAX_UPLOAD_STORAGE_BYTES
+            || uploadState.bytes + rewrittenBytes + bytes.byteLength > MAX_UPLOAD_STORAGE_BYTES
             || room.bytes + rewrittenBytes + bytes.byteLength > MAX_ROOM_UPLOAD_BYTES
-            || uploadFileCount + rewritten >= MAX_UPLOAD_FILES
+            || uploadState.files + rewritten >= MAX_UPLOAD_FILES
             || room.files + rewritten >= MAX_ROOM_UPLOAD_FILES) return;
         const imageId = `${randomUUID()}.${ext}`;
         const filename = `${roomHandle}.${imageId}`;
@@ -1437,8 +973,8 @@ for (const name of MIGRATE) {
       await checkedSetMeta(name, ROOM_UPLOAD_USAGE_META, { bytes: room.bytes, files: room.files });
     }
     await checkedFlushDocument(name);
-    uploadUsageBytes += rewrittenBytes;
-    uploadFileCount += rewritten;
+    uploadState.bytes += rewrittenBytes;
+    uploadState.files += rewritten;
     const after = Y.encodeStateAsUpdate(ydoc).byteLength;
     console.log('[yjs] migrated doc', roomLogId(name), { rewritten, beforeBytes: before, afterBytes: after });
   } catch (err) {
@@ -1483,7 +1019,7 @@ const createRegisteredRoom = async () => {
   try {
     let code;
     let token;
-    for (let attempt = 0; attempt < 10; attempt += 1) {
+    for (let attempt = 0; attempt < ROOM_ID_ALLOCATION_ATTEMPTS; attempt += 1) {
       code = randomBoardCode();
       token = randomRoomToken();
       docName = canonicalDocName(code, token);
@@ -1498,7 +1034,7 @@ const createRegisteredRoom = async () => {
     seed.getMap('meta').set('__roomRegistered', 1);
     const update = Y.encodeStateAsUpdate(seed);
     seed.destroy();
-    estimatedBytes = update.byteLength + 256;
+    estimatedBytes = update.byteLength + STORE_OPERATION_OVERHEAD_BYTES;
     if (pendingStoreOps >= MAX_PENDING_STORE_OPS
         || pendingStoreBytes + estimatedBytes > MAX_PENDING_STORE_BYTES
         || dbUsageBytes + pendingStoreBytes + estimatedBytes > MAX_DB_BYTES) {
@@ -1622,27 +1158,6 @@ const authenticatedDocFromRequest = (req, requestedHandle) => {
     : null;
 };
 
-const readJsonBody = async (req, { allowEmpty = false } = {}) => {
-  const contentType = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
-  if (contentType !== 'application/json') throw Object.assign(new Error('unsupported content type'), { code: 'BAD_JSON' });
-  const rawLength = req.headers['content-length'];
-  if (rawLength != null && (!/^\d+$/.test(String(rawLength)) || Number(rawLength) > MAX_API_BODY_BYTES)) {
-    throw Object.assign(new Error('invalid body length'), { code: 'BODY_TOO_LARGE' });
-  }
-  const chunks = [];
-  let total = 0;
-  for await (const chunk of req) {
-    total += chunk.byteLength;
-    if (total > MAX_API_BODY_BYTES) throw Object.assign(new Error('body too large'), { code: 'BODY_TOO_LARGE' });
-    chunks.push(chunk);
-  }
-  if (total === 0 && allowEmpty) return {};
-  let value;
-  try { value = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
-  catch { throw Object.assign(new Error('invalid json'), { code: 'BAD_JSON' }); }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw Object.assign(new Error('invalid json'), { code: 'BAD_JSON' });
-  return value;
-};
 
 const rateBuckets = {
   roomCreate: new Map(),
@@ -1661,18 +1176,11 @@ const getRateBucket = (map, key, burst, perHour) => {
   const now = Date.now();
   let bucket = map.get(key);
   if (!bucket) {
-    if (map.size >= MAX_BUCKETS) {
-      let oldestKey;
-      let oldest = Infinity;
-      for (const [candidate, value] of map) {
-        if (value.lastSeen < oldest) { oldest = value.lastSeen; oldestKey = candidate; }
-      }
-      if (oldestKey !== undefined) map.delete(oldestKey);
-    }
+    evictOldestBucket(map, MAX_BUCKETS);
     bucket = { tokens: burst, last: now, lastSeen: now };
     map.set(key, bucket);
   }
-  bucket.tokens = Math.min(burst, bucket.tokens + (now - bucket.last) * perHour / 3_600_000);
+  bucket.tokens = refillTokens(bucket.tokens, burst, now - bucket.last, perHour, MILLISECONDS_PER_HOUR);
   bucket.last = now;
   bucket.lastSeen = now;
   return bucket;
@@ -1764,35 +1272,15 @@ const takeWsUpgradeToken = (ip, docName, coldRoom) => {
   return true;
 };
 
-const sendJson = (res, status, value, extraHeaders = {}) => {
-  if (res.destroyed || res.writableEnded) return;
-  const body = JSON.stringify(value);
-  res.writeHead(status, {
-    'content-type': 'application/json',
-    'content-length': Buffer.byteLength(body),
-    'cache-control': 'no-store',
-    'x-content-type-options': 'nosniff',
-    ...extraHeaders,
-  });
-  res.end(body);
-};
-
-const sendIfWritable = (res, status, headers = {}) => {
-  if (res.destroyed || res.writableEnded) return;
-  res.writeHead(status, headers);
-  res.end();
-};
 
 const handleCreateRoom = async (req, res, clientIp) => {
-  const origin = req.headers.origin || '';
-  if (!isExactAllowedOrigin(origin)) { res.writeHead(403); res.end(); return; }
-  setCredentialCors(origin, res);
+  if (!acceptCredentialOrigin(req, res, ALLOWED_ORIGINS, ALLOW_INSECURE_HTTP)) return;
   res.setHeader('cache-control', 'no-store');
   if (shuttingDown || storageFailure) { res.writeHead(503); res.end(); return; }
-  if (!takeCreateToken(clientIp)) { res.writeHead(429, { 'retry-after': '60' }); res.end(); return; }
+  if (!takeCreateToken(clientIp)) { res.writeHead(429, { 'retry-after': RETRY_AFTER_LONG_SECONDS }); res.end(); return; }
   let body;
   try {
-    body = await readJsonBody(req, { allowEmpty: true });
+    body = await readJsonBody(req, MAX_API_BODY_BYTES, { allowEmpty: true });
   } catch (err) {
     sendIfWritable(res, err.code === 'BODY_TOO_LARGE' ? 413 : 400);
     return;
@@ -1811,15 +1299,13 @@ const handleCreateRoom = async (req, res, clientIp) => {
 };
 
 const handleRoomSession = async (req, res, clientIp, prefixed) => {
-  const origin = req.headers.origin || '';
-  if (!isExactAllowedOrigin(origin)) { res.writeHead(403); res.end(); return; }
-  setCredentialCors(origin, res);
+  if (!acceptCredentialOrigin(req, res, ALLOWED_ORIGINS, ALLOW_INSECURE_HTTP)) return;
   res.setHeader('cache-control', 'no-store');
   if (shuttingDown || storageFailure) { res.writeHead(503); res.end(); return; }
   let body;
-  try { body = await readJsonBody(req); }
+  try { body = await readJsonBody(req, MAX_API_BODY_BYTES); }
   catch (err) {
-    if (!failureAttemptAvailable(clientIp)) sendIfWritable(res, 429, { 'retry-after': '60' });
+    if (!failureAttemptAvailable(clientIp)) sendIfWritable(res, 429, { 'retry-after': RETRY_AFTER_LONG_SECONDS });
     else {
       recordSessionFailure(clientIp);
       sendIfWritable(res, err.code === 'BODY_TOO_LARGE' ? 413 : 400);
@@ -1834,7 +1320,7 @@ const handleRoomSession = async (req, res, clientIp, prefixed) => {
     && typeof body.token === 'string';
   const docName = wellFormed ? registeredDocForCapability(body.code, body.token) : null;
   if (!docName) {
-    if (!failureAttemptAvailable(clientIp)) sendIfWritable(res, 429, { 'retry-after': '60' });
+    if (!failureAttemptAvailable(clientIp)) sendIfWritable(res, 429, { 'retry-after': RETRY_AFTER_LONG_SECONDS });
     else {
       recordSessionFailure(clientIp);
       sendIfWritable(res, 404);
@@ -1842,7 +1328,7 @@ const handleRoomSession = async (req, res, clientIp, prefixed) => {
     return;
   }
   if (!takeSessionExchangeToken(clientIp)) {
-    sendIfWritable(res, 429, { 'retry-after': '2' });
+    sendIfWritable(res, 429, { 'retry-after': RETRY_AFTER_SHORT_SECONDS });
     return;
   }
   const roomHandle = roomHandleForDoc(docName);
@@ -1853,48 +1339,6 @@ const handleRoomSession = async (req, res, clientIp, prefixed) => {
   });
 };
 
-const createTrafficBucket = (messages, bytes) => ({
-  messages,
-  bytes,
-  last: Date.now(),
-  lastSeen: Date.now(),
-});
-const takeTrafficTokens = (bucket, size, limits) => {
-  const now = Date.now();
-  const elapsed = now - bucket.last;
-  bucket.messages = Math.min(limits.maxMessages, bucket.messages + elapsed * limits.messagesPerSecond / 1000);
-  bucket.bytes = Math.min(limits.maxBytes, bucket.bytes + elapsed * limits.bytesPerSecond / 1000);
-  bucket.last = now;
-  bucket.lastSeen = now;
-  if (bucket.messages < 1 || bucket.bytes < size) return false;
-  bucket.messages -= 1;
-  bucket.bytes -= size;
-  return true;
-};
-const takeTrafficBudget = (reservations) => {
-  const now = Date.now();
-  for (const { bucket, limits } of reservations) {
-    const elapsed = now - bucket.last;
-    bucket.messages = Math.min(
-      limits.maxMessages,
-      bucket.messages + elapsed * limits.messagesPerSecond / 1000,
-    );
-    bucket.bytes = Math.min(
-      limits.maxBytes,
-      bucket.bytes + elapsed * limits.bytesPerSecond / 1000,
-    );
-    bucket.last = now;
-    bucket.lastSeen = now;
-  }
-  if (reservations.some(({ bucket, size }) => bucket.messages < 1 || bucket.bytes < size)) {
-    return false;
-  }
-  for (const { bucket, size } of reservations) {
-    bucket.messages -= 1;
-    bucket.bytes -= size;
-  }
-  return true;
-};
 
 const globalTrafficLimits = {
   maxMessages: GLOBAL_RL_MAX_MSGS,
@@ -1911,58 +1355,16 @@ const roomTrafficLimits = {
 const globalTrafficBucket = createTrafficBucket(GLOBAL_RL_MAX_MSGS, GLOBAL_RL_MAX_BYTES);
 const roomTrafficBuckets = new Map();
 
-const imageReadIpLimits = {
-  maxMessages: IMAGE_READ_BURST,
-  messagesPerSecond: IMAGE_READS_PER_SECOND,
-  maxBytes: IMAGE_READ_BURST_BYTES,
-  bytesPerSecond: IMAGE_READ_BYTES_PER_SECOND,
-};
-const imageReadRoomLimits = {
-  maxMessages: ROOM_IMAGE_READ_BURST,
-  messagesPerSecond: ROOM_IMAGE_READS_PER_SECOND,
-  maxBytes: ROOM_IMAGE_READ_BURST_BYTES,
-  bytesPerSecond: ROOM_IMAGE_READ_BYTES_PER_SECOND,
-};
-const imageReadGlobalLimits = {
-  maxMessages: GLOBAL_IMAGE_READ_BURST,
-  messagesPerSecond: GLOBAL_IMAGE_READS_PER_SECOND,
-  maxBytes: GLOBAL_IMAGE_READ_BURST_BYTES,
-  bytesPerSecond: GLOBAL_IMAGE_READ_BYTES_PER_SECOND,
-};
-const imageReadIpBuckets = new Map();
-const imageReadRoomBuckets = new Map();
-const globalImageReadBucket = createTrafficBucket(
-  imageReadGlobalLimits.maxMessages,
-  imageReadGlobalLimits.maxBytes,
-);
-const trafficBucketFor = (map, key, limits) => {
-  let bucket = map.get(key);
-  if (bucket) return bucket;
-  if (map.size >= MAX_BUCKETS) {
-    let oldestKey;
-    let oldest = Infinity;
-    for (const [candidate, value] of map) {
-      if (value.lastSeen < oldest) { oldest = value.lastSeen; oldestKey = candidate; }
-    }
-    if (oldestKey !== undefined) map.delete(oldestKey);
-  }
-  bucket = createTrafficBucket(limits.maxMessages, limits.maxBytes);
-  map.set(key, bucket);
-  return bucket;
-};
-const takeImageReadBudget = (clientIp, roomKey, bytes) => takeTrafficBudget([
-  {
-    bucket: trafficBucketFor(imageReadIpBuckets, clientIp, imageReadIpLimits),
-    size: bytes,
-    limits: imageReadIpLimits,
-  },
-  {
-    bucket: trafficBucketFor(imageReadRoomBuckets, roomKey, imageReadRoomLimits),
-    size: bytes,
-    limits: imageReadRoomLimits,
-  },
-  { bucket: globalImageReadBucket, size: bytes, limits: imageReadGlobalLimits },
-]);
+const imageReads = createImageReadBudgets(relayConfig);
+const imageReadIpBuckets = imageReads.ipBuckets;
+const imageReadRoomBuckets = imageReads.roomBuckets;
+
+const uploads = createRelayUploads({
+  config: relayConfig, state: uploadState, roomUploadUsage, imageReads,
+  storage: { setMeta: checkedSetMeta },
+  allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP,
+});
+uploadState.events.on(UPLOAD_STORAGE_FAILURE_EVENT, markStorageFailure);
 
 const syncResponseConnectionLimits = {
   maxMessages: SYNC_RESPONSE_CONNECTION_BURST_MESSAGES,
@@ -2283,15 +1685,7 @@ const reserveHttpRequest = (ip) => {
 const rejectionCounters = createRejectionCounters((message, counts) => console.log(message, counts));
 const rejectUpgrade = (socket, status) => {
   rejectionCounters.upgrade(status);
-  const reason = status === 400 ? 'Bad Request'
-    : status === 401 ? 'Unauthorized'
-    : status === 403 ? 'Forbidden'
-      : status === 404 ? 'Not Found'
-      : status === 431 ? 'Request Header Fields Too Large'
-      : status === 429 ? 'Too Many Requests'
-        : 'Service Unavailable';
-  try { socket.end(`HTTP/1.1 ${status} ${reason}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`); }
-  catch { socket.destroy(); }
+  sendUpgradeRejection(socket, status);
 };
 
 let maintenanceRunning = false;
@@ -2332,7 +1726,7 @@ const runMaintenance = async () => {
     // Final image deletion is disabled by default. Operators may explicitly
     // configure retention after choosing a policy suitable for their boards.
     if (UPLOAD_RETENTION_DAYS > 0) {
-      const cutoff = now - UPLOAD_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+      const cutoff = now - UPLOAD_RETENTION_DAYS * MILLISECONDS_PER_DAY;
       let removed = 0;
       const entries = await fs.promises.readdir(UPLOADS_DIR, { withFileTypes: true });
       for (const entry of entries) {
@@ -2356,7 +1750,7 @@ const runMaintenance = async () => {
       const stat = await fs.promises.stat(path);
       if (stat.mtimeMs < tempCutoff) await fs.promises.unlink(path);
     }
-    if (activeUploads === 0) await reconcileUploadUsage();
+    if (uploadState.active === 0) await reconcileUploadUsage();
   } catch (err) {
     if (err?.code === 'STORAGE_FAILURE') markStorageFailure(err);
     console.error('[yjs] maintenance failed', { err: err.message });
@@ -2365,7 +1759,7 @@ const runMaintenance = async () => {
     maintenanceRunning = false;
   }
 };
-const maintenanceTimer = setInterval(runMaintenance, 60_000);
+const maintenanceTimer = setInterval(runMaintenance, MAINTENANCE_INTERVAL_MS);
 maintenanceTimer.unref();
 
 const server = http.createServer({ maxHeaderSize: MAX_HEADER_BYTES }, (req, res) => {
@@ -2373,7 +1767,7 @@ const server = http.createServer({ maxHeaderSize: MAX_HEADER_BYTES }, (req, res)
   const clientIp = clientIpFromRequest(req);
   const reservation = reserveHttpRequest(clientIp);
   if (reservation.status) {
-    res.writeHead(reservation.status, { 'retry-after': '2' });
+    res.writeHead(reservation.status, { 'retry-after': RETRY_AFTER_SHORT_SECONDS });
     res.end();
     return;
   }
@@ -2382,7 +1776,7 @@ const server = http.createServer({ maxHeaderSize: MAX_HEADER_BYTES }, (req, res)
   let pathname;
   let hasQueryOrFragment = false;
   try {
-    if (!req.url || req.url.length > 2048) throw new Error('invalid request target');
+    if (!req.url || req.url.length > MAX_HTTP_TARGET_CHARACTERS) throw new Error('invalid request target');
     const parsed = new URL(req.url, 'http://localhost');
     ({ pathname } = parsed);
     hasQueryOrFragment = Boolean(parsed.search || parsed.hash);
@@ -2415,14 +1809,12 @@ const server = http.createServer({ maxHeaderSize: MAX_HEADER_BYTES }, (req, res)
   if (req.method === 'OPTIONS'
       && !hasQueryOrFragment
       && (routePath === '/api/rooms' || routePath === '/api/room-session' || uploadMatch)) {
-    const origin = req.headers.origin || '';
-    if (!isExactAllowedOrigin(origin)) { res.writeHead(403); res.end(); return; }
-    setCredentialCors(origin, res);
+    if (!acceptCredentialOrigin(req, res, ALLOWED_ORIGINS, ALLOW_INSECURE_HTTP)) return;
     if (uploadMatch && !registeredRoomsByHandle.has(uploadMatch[1])) { res.writeHead(404); res.end(); return; }
     res.writeHead(204, {
       'access-control-allow-methods': 'POST, OPTIONS',
       'access-control-allow-headers': 'Content-Type',
-      'access-control-max-age': '600',
+      'access-control-max-age': String(CORS_PREFLIGHT_MAX_AGE_SECONDS),
       'cache-control': 'no-store',
     });
     res.end();
@@ -2437,26 +1829,24 @@ const server = http.createServer({ maxHeaderSize: MAX_HEADER_BYTES }, (req, res)
     return;
   }
   if (req.method === 'POST' && uploadMatch) {
-    const origin = req.headers.origin || '';
-    if (!isExactAllowedOrigin(origin)) { res.writeHead(403); res.end(); return; }
-    setCredentialCors(origin, res);
+    if (!acceptCredentialOrigin(req, res, ALLOWED_ORIGINS, ALLOW_INSECURE_HTTP)) return;
     res.setHeader('cache-control', 'no-store');
     if (shuttingDown || storageFailure) { res.writeHead(503); res.end(); return; }
     if (!registeredRoomsByHandle.has(uploadMatch[1])) { res.writeHead(404); res.end(); return; }
     const session = authenticatedDocFromRequest(req, uploadMatch[1]);
     if (!session) { res.writeHead(401); res.end(); return; }
-    void handleUpload(req, res, clientIp, session.docName, uploadMatch[1]);
+    void uploads.handleUpload(req, res, clientIp, session.docName, uploadMatch[1]);
     return;
   }
   if (req.method === 'GET' && roomImageMatch) {
     if (!registeredRoomsByHandle.has(roomImageMatch[1])) { res.writeHead(404); res.end(); return; }
     const session = authenticatedDocFromRequest(req, roomImageMatch[1]);
     if (!session) { res.writeHead(401); res.end(); return; }
-    handleGetRoomImage(roomImageMatch[1], roomImageMatch[2], req, res);
+    uploads.handleGetRoomImage(roomImageMatch[1], roomImageMatch[2], clientIp, res);
     return;
   }
   if (req.method === 'GET' && routePath.startsWith('/images/')) {
-    handleGetLegacyImage(routePath.slice('/images/'.length), req, res);
+    uploads.handleGetLegacyImage(routePath.slice('/images/'.length), clientIp, res);
     return;
   }
   if (req.method === 'GET' && routePath === '/') {
@@ -2471,7 +1861,7 @@ const server = http.createServer({ maxHeaderSize: MAX_HEADER_BYTES }, (req, res)
 server.requestTimeout = REQUEST_TIMEOUT_MS;
 server.headersTimeout = HEADERS_TIMEOUT_MS;
 server.keepAliveTimeout = KEEP_ALIVE_TIMEOUT_MS;
-server.maxRequestsPerSocket = 100;
+server.maxRequestsPerSocket = MAX_REQUESTS_PER_SOCKET;
 server.maxConnections = MAX_CONNECTIONS + MAX_HTTP_REQUESTS;
 server.on('clientError', (err, socket) => {
   const status = err.code === 'HPE_HEADER_OVERFLOW' ? 431 : 400;
@@ -2522,8 +1912,8 @@ wss.on('connection', (conn, req) => {
   const takeTokens = (size) => {
     const now = Date.now();
     const dt = now - bucket.last;
-    bucket.msgs = Math.min(RL_MAX_MSGS, bucket.msgs + dt * RL_REFILL_MSGS_PER_SEC / 1000);
-    bucket.bytes = Math.min(RL_MAX_BYTES, bucket.bytes + dt * RL_REFILL_BYTES_PER_SEC / 1000);
+    bucket.msgs = refillTokens(bucket.msgs, RL_MAX_MSGS, dt, RL_REFILL_MSGS_PER_SEC, MILLISECONDS_PER_SECOND);
+    bucket.bytes = refillTokens(bucket.bytes, RL_MAX_BYTES, dt, RL_REFILL_BYTES_PER_SEC, MILLISECONDS_PER_SECOND);
     bucket.last = now;
     if (bucket.msgs < 1 || bucket.bytes < size) return false;
     bucket.msgs -= 1;
@@ -2622,7 +2012,7 @@ wss.on('connection', (conn, req) => {
           lastMeasuredAt: Date.now(),
         };
         const churn = persistenceChurnFor(docName);
-        const estimatedStoreBytes = inspection.updateBytes + 256;
+        const estimatedStoreBytes = inspection.updateBytes + STORE_OPERATION_OVERHEAD_BYTES;
         if (pendingStoreOps >= MAX_PENDING_STORE_OPS
             || pendingStoreBytes + estimatedStoreBytes > MAX_PENDING_STORE_BYTES) {
           rejectionCounters.storageBacklog();
@@ -2644,7 +2034,7 @@ wss.on('connection', (conn, req) => {
           scheduleRoomCompaction(docName, { remeasure: true });
           throw new Error('room persistence compacting');
         }
-        if (churn.uncompactedBytes + inspection.updateBytes + 256 > ROOM_MAX_UNCOMPACTED_BYTES) {
+        if (churn.uncompactedBytes + inspection.updateBytes + STORE_OPERATION_OVERHEAD_BYTES > ROOM_MAX_UNCOMPACTED_BYTES) {
           scheduleRoomCompaction(docName, { remeasure: true });
           throw new Error('room persistence compacting');
         }
@@ -2691,7 +2081,7 @@ server.on('upgrade', (req, socket, head) => {
   // clients can spoof it but at least defeats opportunistic CSRF-style abuse
   // from a malicious site running a ws() in the user's tab.
   const origin = req.headers.origin || '';
-  if (!isExactAllowedOrigin(origin)) {
+  if (!isExactAllowedOrigin(origin, ALLOWED_ORIGINS, ALLOW_INSECURE_HTTP)) {
     rejectUpgrade(socket, 403);
     return;
   }
@@ -2819,7 +2209,7 @@ const lifecycle = createRelayLifecycle({
     const roomCount = docs.size;
     await drainRelay({
       server, clients: wss.clients, httpGraceMs: HTTP_SHUTDOWN_GRACE_MS,
-      isBusy: () => maintenanceRunning || pendingRoomCreations > 0 || activeUploads > 0 || pendingStoreOps > 0,
+      isBusy: () => maintenanceRunning || pendingRoomCreations > 0 || uploadState.active > 0 || pendingStoreOps > 0,
       compactions: () => [...roomPersistenceChurn.values()].map((churn) => churn.compactionPromise).filter(Boolean),
       destroyStorage: () => ldb.destroy(),
     });

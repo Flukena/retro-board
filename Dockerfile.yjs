@@ -17,7 +17,7 @@ RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
 
 # Server entrypoint and its shared pure domain modules.
 COPY --chown=node:node yjs-server.mjs ./
-COPY --chown=node:node src/board-geometry.js src/security-boundaries.js src/vote-finalization.js src/zone-title.js src/relay-lifecycle.js src/relay-vote-maintenance.js src/relay-rejection-counters.js ./src/
+COPY --chown=node:node src/board-geometry.js src/security-boundaries.js src/vote-finalization.js src/zone-title.js src/relay-lifecycle.js src/relay-vote-maintenance.js src/relay-rejection-counters.js src/relay-config.js src/relay-rate-bucket.js src/relay-http.js src/relay-uploads.js src/relay-log-id.js ./src/
 
 # Named volumes inherit these ownership bits on first creation, allowing the
 # runtime to persist data without retaining root inside the container.

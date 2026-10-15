@@ -79,7 +79,7 @@ test('one bad room does not skip later rooms or storage and upload maintenance',
     imageReadIpBuckets: new Map(), imageReadRoomBuckets: new Map(), roomPersistenceChurn: new Map(),
     blockedRooms: new Map(), DB_DIR: 'unused', UPLOADS_DIR: 'unused', dbUsageBytes: 0,
     MAX_DB_BYTES: Infinity, UPLOAD_RETENTION_DAYS: 0, REQUEST_TIMEOUT_MS: AT_TIME_MS,
-    activeUploads: 0, fs: { promises: { readdir: async () => [] } },
+    uploadState: { active: 0 }, fs: { promises: { readdir: async () => [] } },
     directorySizeSync: () => { scans += 1; return 0; },
     reconcileUploadUsage: async () => { reconciles += 1; },
     finalizeExpiredVotes: (name) => {
