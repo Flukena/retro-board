@@ -2,19 +2,9 @@ import {
   useState, useRef, useEffect, useCallback,
 } from 'react';
 import { t } from './i18n.js';
-import { isBoardCreatedByMe } from './router.js';
+import { ADMIN_PIN_RESULT, adminIsOnline, canUseCachedPin, adminPinSteps, adminClaimSteps, adminElectionSteps } from './admin-role-model.js';
 
 export const HEARTBEAT_MS = 5000;
-
-// Salted hash so the same PIN on different boards has different hashes,
-// blunting rainbow-table reuse. Web Crypto returns lowercase hex.
-async function hashAdminPin(boardCode, pin) {
-  const data = new TextEncoder().encode(`${boardCode || ''}:${pin}`);
-  const buf = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(buf))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-}
 
 // Admin role: election, PIN gate, manual claim, and transfer. `board`/`boardRef`,
 // `onlineUsers`, `presence`, `patchMeta`, `setToast` and `storage` are passed
@@ -24,7 +14,7 @@ async function hashAdminPin(boardCode, pin) {
 // adminClaim below).
 export function useAdminRole({
   userId, userName, board, boardRef, onlineUsers, presence,
-  boardCode, boardToken, patchMeta, setToast, storage,
+  boardCode, boardToken, patchMeta, setToast, storage, liveStorage,
 }) {
   const isAdmin = userId && board.adminUserId === userId;
 
@@ -52,61 +42,23 @@ export function useAdminRole({
     if (!userId) return undefined;
     const effectiveName = userName || 'Guest';
     const beat = async () => {
-      // Only refresh OUR own awareness slot. Peers' state arrives via the
-      // awareness 'change' event (wired in storage-bridge) which dispatches
-      // a synthetic presence update — letting heartbeat also call
-      // setPresence() would overwrite React state with a possibly-stale
-      // local snapshot and cause peers to flicker in/out.
-      const entry = { userId, name: effectiveName, lastSeen: Date.now() };
-      await storage.set('presence', { [userId]: entry }, true);
-
-      // Admin election — gated on sync to avoid claiming during cold start.
-      // We read adminUserId straight from yMeta (not boardRef) so a heartbeat
-      // firing in the gap between applyRemoteBoard and React commit doesn't
-      // see a stale `null` and re-claim the role from the true current admin.
-      if (!window.storage?.synced?.()) return;
-      const adminUserId = window.storage?.getAdminUserId?.();
-      const pmap = (await storage.get('presence', true))?.value || {};
-      const adminGone = !adminUserId || !pmap[adminUserId];
-      if (adminGone) {
-        // Only auto-claim admin in boards THIS browser created. Otherwise a
-        // guest who happens to be alone in someone else's board (e.g. admin
-        // closed their tab) would silently inherit the role — confusing when
-        // the same identity is then "admin of two boards at once". Non-creators
-        // must use the PIN-gated Transfer Admin flow to take over.
-        if (!isBoardCreatedByMe(boardCode, boardToken)) return;
-        // The creator is the only eligible claimant, so there is no election to
-        // run. Picking a winner from every online user was self-defeating: a
-        // guest whose random userId sorted first became the "winner", the
-        // creator then failed `winner === userId`, and the guest had already
-        // returned at the gate above — leaving the board with no admin at all.
-        //
-        // Re-read adminUserId from yMeta right before claiming. The await
-        // calls above let other clients (or our own remote update) write
-        // adminUserId in between; without this CAS-style guard we'd
-        // overwrite a fresh claim with our own and produce two admins
-        // diverging until the next sync round. Compare against the value we
-        // sampled before those awaits, not against our own id: in the very
-        // case this election exists for — a stale admin who left — the field
-        // still holds that departed user's id, which never equals ours, so
-        // comparing to `userId` aborted the claim every single time.
-        const latestAdmin = window.storage?.getAdminUserId?.();
-        if (latestAdmin !== adminUserId) return;
-        // Immediate flush — bypass the 200ms debounce so the claim lands
-        // in yMeta on the first tick. Otherwise a second client racing
-        // the same election can miss our write and double-claim.
-        if (!patchMeta({ adminUserId: userId, adminName: effectiveName })) return;
-        setToast({ msg: t('transfer.becomeAdmin'), type: 'info' });
-      }
+      const steps = adminElectionSteps({ userId, effectiveName, storage, liveStorage, boardCode, boardToken });
+      let step = steps.next();
+      while (!step.done) step = steps.next(await step.value);
+      if (!step.value) return;
+      // Flush immediately, bypassing the 200ms debounce: another claimant
+      // must see this write before its next election check.
+      if (!patchMeta({ adminUserId: userId, adminName: effectiveName })) return;
+      setToast({ msg: t('transfer.becomeAdmin'), type: 'info' });
     };
     beat();
     const id = setInterval(beat, HEARTBEAT_MS);
     // Run election once more right after the initial WebSocket sync. Without
     // this we'd wait up to a full HEARTBEAT_MS for the first eligible
     // election attempt — long enough for users to think admin is broken.
-    const offSynced = window.storage?.onSynced?.(beat) || (() => {});
+    const offSynced = liveStorage.onSynced?.(beat) || (() => {});
     return () => { clearInterval(id); offSynced(); };
-  }, [userId, userName, boardCode, boardToken, storage, patchMeta, setToast]);
+  }, [userId, userName, boardCode, boardToken, storage, liveStorage, patchMeta, setToast]);
 
   // Gate every destructive action behind a PIN. First call ever (no PIN on
   // the board yet) opens the modal in "set" mode and stores the hash; later
@@ -119,7 +71,7 @@ export function useAdminRole({
     }
     if (pinSessionOkRef.current) {
       // Revalidate here too: React state may lag behind the live admin role.
-      if (window.storage?.getAdminUserId?.() !== userId) {
+      if (!canUseCachedPin(userId, liveStorage.getAdminUserId?.())) {
         pinSessionOkRef.current = false;
         setToast({ msg: t('common.adminOnly'), type: 'warn' });
         return;
@@ -128,7 +80,7 @@ export function useAdminRole({
       return;
     }
     if (typeof crypto === 'undefined' || !crypto.subtle) {
-      setToast({ msg: t('pin.needsHttps') || 'Admin PIN requires HTTPS', type: 'warn' });
+      setToast({ msg: t('pin.needsHttps'), type: 'warn' });
       return;
     }
     const hasPin = !!boardRef.current.adminPinHash;
@@ -136,35 +88,25 @@ export function useAdminRole({
       isSetting: !hasPin,
       error: null,
       onSuccess: async (pin) => {
-        const hash = await hashAdminPin(boardCode, pin);
-        // Revalidate before anything is written, not just at button press.
-        // `isAdmin` was captured when this callback was built; the role can be
-        // transferred away while the modal is open or during the hash above.
-        // This has to precede the patchMeta below — otherwise someone who has
-        // just lost the role still writes adminPinHash into the shared board.
-        // adminClaim already does a live re-read before committing; this path
-        // was the asymmetric one.
-        if (window.storage?.getAdminUserId?.() !== userId) {
+        const steps = adminPinSteps({ boardCode, pin, userId, liveStorage, boardRef });
+        const decision = steps.next(await steps.next().value).value;
+        if (decision.status === ADMIN_PIN_RESULT.DENIED) {
           setPinPromptCfg(null);
           setToast({ msg: t('common.adminOnly'), type: 'warn' });
           return;
         }
-        const cur = boardRef.current.adminPinHash;
-        if (!cur) {
-          // Set mode — persist the new PIN's hash into the shared board.
-          if (!patchMeta({ adminPinHash: hash })) return;
-        } else if (cur !== hash) {
-          // Verify mode — wrong PIN, keep modal open with error.
+        if (decision.status === ADMIN_PIN_RESULT.WRONG) {
           setPinPromptCfg((cfg) => (cfg ? { ...cfg, error: 'wrong' } : cfg));
           return;
         }
+        if (decision.patch && !patchMeta(decision.patch)) return;
         pinSessionOkRef.current = true;
         setPinPromptCfg(null);
         onSuccess();
       },
       onCancel: () => setPinPromptCfg(null),
     });
-  }, [isAdmin, userId, boardCode, boardRef, patchMeta, setToast]);
+  }, [isAdmin, userId, boardCode, boardRef, patchMeta, setToast, liveStorage]);
 
   // Claim admin when there is none active. Anyone holding the PIN can take
   // over a vacant role. Without this flow a board where the creator lost
@@ -174,21 +116,21 @@ export function useAdminRole({
   // `canClaim` mirrors the exact live-admin guard adminClaim() checks below,
   // so the claim button's render check and its click handler can never
   // disagree — both read the same window.storage.getAdminUserId() value.
-  const liveAdmin = window.storage?.getAdminUserId?.() || null;
-  const adminOnline = !!liveAdmin && onlineUsers.some((u) => u.userId === liveAdmin);
+  const liveAdmin = liveStorage.getAdminUserId?.() || null;
+  const adminOnline = adminIsOnline(liveAdmin, onlineUsers);
   const canClaim = !isAdmin && !!userId && !adminOnline;
 
   const adminClaim = useCallback(() => {
     if (isAdmin || !userId) return;
-    const claimLiveAdmin = window.storage?.getAdminUserId?.() || null;
+    const claimLiveAdmin = liveStorage.getAdminUserId?.() || null;
     // Bail if there's a currently-online admin — the existing Transfer flow
     // is the right route, not a silent take-over.
-    if (claimLiveAdmin && onlineUsers.some((u) => u.userId === claimLiveAdmin)) {
+    if (adminIsOnline(claimLiveAdmin, onlineUsers)) {
       setToast({ msg: t('common.adminOnly'), type: 'warn' });
       return;
     }
     if (typeof crypto === 'undefined' || !crypto.subtle) {
-      setToast({ msg: t('pin.needsHttps') || 'Admin PIN requires HTTPS', type: 'warn' });
+      setToast({ msg: t('pin.needsHttps'), type: 'warn' });
       return;
     }
     const hasPin = !!boardRef.current.adminPinHash;
@@ -197,26 +139,23 @@ export function useAdminRole({
       error: null,
       claim: true,
       onSuccess: async (pin) => {
-        const hash = await hashAdminPin(boardCode, pin);
-        const curHash = boardRef.current.adminPinHash;
-        if (curHash && curHash !== hash) {
+        const steps = adminClaimSteps({ boardCode, pin, userId, liveStorage, storage, boardRef });
+        let step = steps.next();
+        while (!step.done) step = steps.next(await step.value);
+        const decision = step.value;
+        if (decision.status === ADMIN_PIN_RESULT.WRONG) {
           setPinPromptCfg((cfg) => (cfg ? { ...cfg, error: 'wrong' } : cfg));
           return;
         }
-        // CAS-style re-check post-await — if a peer just claimed admin in
-        // the meantime, abort rather than overwrite their fresh claim.
-        const latestPresence = (await storage.get('presence', true))?.value || {};
-        const latestAdmin = window.storage?.getAdminUserId?.();
-        if (latestAdmin && latestPresence[latestAdmin]) {
+        if (decision.status === ADMIN_PIN_RESULT.DENIED) {
           setPinPromptCfg(null);
           setToast({ msg: t('common.adminOnly'), type: 'warn' });
           return;
         }
         if (!patchMeta({
-          adminUserId: userId,
+          adminUserId: decision.patch.adminUserId,
           adminName: userName || 'Guest',
-          // First-ever claim doubles as set-PIN.
-          adminPinHash: curHash || hash,
+          adminPinHash: decision.patch.adminPinHash,
         })) return;
         pinSessionOkRef.current = true;
         setPinPromptCfg(null);
@@ -224,7 +163,7 @@ export function useAdminRole({
       },
       onCancel: () => setPinPromptCfg(null),
     });
-  }, [isAdmin, userId, userName, boardCode, onlineUsers, boardRef, patchMeta, setToast, storage]);
+  }, [isAdmin, userId, userName, boardCode, onlineUsers, boardRef, patchMeta, setToast, storage, liveStorage]);
 
   const adminTransfer = useCallback((toId) => {
     if (!isAdmin) return;

@@ -124,7 +124,7 @@ test('every component-local board CSS variable has an inline producer', () => {
   const supplied = {
     ...stickyCardVars(PALETTE[0]), ...zoneCardVars(PALETTE[0]), ...medalLook(1),
   };
-  const componentSource = ['../RetroBoard.jsx', './ZoneCard.jsx']
+  const componentSource = ['../RetroBoard.jsx', './ZoneCard.jsx', './TextCard.jsx', './ImageCard.jsx']
     .map((path) => readFileSync(new URL(path, import.meta.url), 'utf8')).join('\n');
   const inlineNames = new Set([...componentSource.matchAll(/['"](--rb-[\w-]+)['"]\s*:/g)]
     .map((match) => match[1]));

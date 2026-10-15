@@ -19,18 +19,13 @@ import {
   normalizeImportManifest,
 } from './src/import-schema.js';
 import { parseBoardCsv } from './src/csv-import.js';
-import { createCsvExportArtifact } from './src/board-backup.js';
-import { restoreBackupImages } from './src/backup-images.js';
-import { geometryErrorForItem, geometryErrorForPatch } from './src/board-geometry.js';
+import { createCsvExportArtifact, buildZoneCsv, buildBoardCsv } from './src/board-backup.js';
+import { geometryErrorForItem, geometryErrorForPatch, sizeForPlacement } from './src/board-geometry.js';
 import {
   BOARD_TEXT_MAX_LENGTH,
   IMAGE_MAX_BYTES,
-  IMAGE_OUTPUT_MAX_DIMENSION,
   ZONE_TITLE_MAX_LENGTH,
-  imageInfoIsWithinLimits,
-  inspectRasterImageBlob,
   isSafeImageMime,
-  normalizeRuntimeImageSource,
   redactBoardExportForViewer,
 } from './src/security-boundaries.js';
 import {
@@ -52,13 +47,11 @@ import { TopBar } from './src/TopBar.jsx';
 import { adminPillModel, playerRows, shareLinkModel } from './src/topbar-model.js';
 import { hueFromId, playerAccentColor } from './src/player-colors.js';
 import { t, useLang } from './src/i18n.js';
-import { getActiveRoomSession, roomFetch } from './src/room-session.js';
 import { useTheme, nextThemePref } from './src/theme.js';
 import { PALETTE } from './src/palette.js';
 import { COMMENT_CAROUSEL_STYLE } from './src/card-look.js';
 import { stickyCreationFontSize } from './src/sticky-font.js';
 import { StickyCard } from './src/StickyCard.jsx';
-import { useBrowserLayoutEffect } from './src/use-browser-layout-effect.js';
 import { DEFAULT_STICKY_WIDTH_PX as STICKY_W, DEFAULT_STICKY_HEIGHT_PX as STICKY_H } from './src/board-geometry.js';
 import './src/board-cards.css';
 import {
@@ -91,10 +84,6 @@ import {
   visiblePlayerCursors,
 } from './src/player-cursors.js';
 import { summarizeRemoteEditors, summarizeRemoteSelectors } from './src/editing-presence.js';
-import {
-  describeTextReplacement,
-  mapSelectionIndexThroughReplacement,
-} from './src/collaborative-text.js';
 import { copyTextToClipboard } from './src/clipboard.js';
 import { MinimapPanel } from './src/MinimapPanel.jsx';
 import { zoomViewportAt, fitViewportToItems } from './src/viewport-framing.js';
@@ -109,6 +98,15 @@ import {
 } from './src/local-preferences.js';
 import { boardVoteIsOpen, timerDockModel, voteTimerIsOpen, voteTimerPhaseSignature } from './src/vote-timing.js';
 import { planVoteFinalization } from './src/vote-finalization.js';
+import { DEFAULT_BOARD, storage, adminRoleStorage } from './src/room-storage.js';
+import { effectiveZIndex, compareZOrder, swapZOrderEntries } from './src/z-order.js';
+import { IMAGE_MAX_MIB_LABEL, prepareImageBlob, readBackupImage, sanitizeImportedImages } from './src/image-upload.js';
+import { CollaborativeTextEditor } from './src/CollaborativeTextEditor.jsx';
+import { TextCard } from './src/TextCard.jsx';
+import { ImageCard } from './src/ImageCard.jsx';
+import { canvasCursor } from './src/board-cursor.js';
+import { isStickyHiddenForUser } from './src/board-visibility.js';
+import { csvLabels } from './src/csv-labels.js';
 
 const loadBoardArchive = () => import('./src/board-archive.js');
 
@@ -123,8 +121,7 @@ const ZONE_MIN_W = 240;
 const ZONE_MIN_H = 200;
 const IMAGE_MIN_W = 60;
 const IMAGE_MIN_H = 40;
-const TEXT_W = 400;
-const TEXT_H = 80;
+const { w: TEXT_W, h: TEXT_H } = sizeForPlacement({ type: 'text' });
 const TEXT_MIN_W = 60;
 const TEXT_MIN_H = 30;
 // A full board import writes every item in one Yjs transaction, which the
@@ -172,27 +169,6 @@ const HELP_SECTIONS = [
   { key: 'admin', color: 5 },
 ];
 
-const DEFAULT_BOARD = {
-  items: [],
-  adminUserId: null,
-  editingLocked: false,
-  // In-session pause for voting. Voting requires an active timer session AND
-  // votingLocked === false. Default unlocked so starting a timer enables voting
-  // right away; an admin can flip this to pause voting mid-session.
-  votingLocked: false,
-  allRevealed: false,
-  // timer: { startedAt, endsAt: number|null, voteLimit: number|null, hideResults: boolean }
-  // - endsAt=null   → no time limit, admin must stop manually
-  // - voteLimit=null → unlimited votes per user
-  timer: null,
-  lastResultsAt: null,
-  // SHA-256(boardCode + ':' + pin) — required before destructive admin
-  // actions (Clear / Reset votes / Transfer admin). null until the first
-  // admin sets one; if still null, the actions just prompt the admin to set
-  // a PIN inline rather than blocking access.
-  adminPinHash: null,
-};
-
 /* ============================================================
    Helpers
    ============================================================ */
@@ -202,248 +178,11 @@ const uid = () =>
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
-const effectiveZIndex = (item) => item.zIndex ?? item.createdAt;
-const compareZOrder = (a, b) => {
-  const delta = effectiveZIndex(a) - effectiveZIndex(b);
-  if (delta) return delta;
-  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-};
-
-const swapZOrderEntries = (items, index, neighborIndex) => {
-  const itemZ = effectiveZIndex(items[index]);
-  const neighborZ = effectiveZIndex(items[neighborIndex]);
-  const lowerIndex = Math.min(index, neighborIndex);
-  const upperIndex = Math.max(index, neighborIndex);
-  const lowerGroupZ = effectiveZIndex(items[lowerIndex]);
-  const upperGroupZ = effectiveZIndex(items[upperIndex]);
-  const touchesTie = lowerGroupZ === upperGroupZ
-    || (lowerIndex > 0 && effectiveZIndex(items[lowerIndex - 1]) === lowerGroupZ)
-    || (upperIndex < items.length - 1
-      && effectiveZIndex(items[upperIndex + 1]) === upperGroupZ);
-  if (!touchesTie) {
-    return [
-      { id: items[index].id, patch: { zIndex: neighborZ } },
-      { id: items[neighborIndex].id, patch: { zIndex: itemZ } },
-    ];
-  }
-
-  // Items created in one batch can share a millisecond timestamp. A raw swap
-  // can then be a no-op or cross extra peers in that tie, so give the smallest
-  // affected tied range distinct values while preserving all other positions.
-  let first = lowerIndex;
-  let last = upperIndex;
-  while (first > 0 && effectiveZIndex(items[first - 1]) === lowerGroupZ) first -= 1;
-  while (last < items.length - 1
-    && effectiveZIndex(items[last + 1]) === upperGroupZ) last += 1;
-
-  const reordered = items.slice(first, last + 1);
-  const localIndex = index - first;
-  const localNeighborIndex = neighborIndex - first;
-  [reordered[localIndex], reordered[localNeighborIndex]] = [
-    reordered[localNeighborIndex],
-    reordered[localIndex],
-  ];
-
-  const lowerZ = first > 0 ? effectiveZIndex(items[first - 1]) : null;
-  const upperZ = last < items.length - 1 ? effectiveZIndex(items[last + 1]) : null;
-  let values;
-  if (lowerZ != null && upperZ != null) {
-    const step = (upperZ - lowerZ) / (reordered.length + 1);
-    values = reordered.map((_, i) => lowerZ + step * (i + 1));
-  } else if (lowerZ != null) {
-    values = reordered.map((_, i) => lowerGroupZ + i);
-  } else if (upperZ != null) {
-    values = reordered.map((_, i) => upperGroupZ - (reordered.length - i - 1));
-  } else {
-    values = reordered.map((_, i) => i);
-  }
-
-  const valuesAreOrdered = values.every((value, i) => (
-    Number.isFinite(value)
-    && (i === 0 || value > values[i - 1])
-    && (lowerZ == null || value > lowerZ)
-    && (upperZ == null || value < upperZ)
-  ));
-  if (valuesAreOrdered) {
-    return reordered.map((item, i) => ({ id: item.id, patch: { zIndex: values[i] } }));
-  }
-
-  // Floating-point values can theoretically leave no representable gap.
-  // Reindexing the whole already-sorted stack is the deterministic fallback.
-  const fullyReordered = [...items];
-  [fullyReordered[index], fullyReordered[neighborIndex]] = [
-    fullyReordered[neighborIndex],
-    fullyReordered[index],
-  ];
-  return fullyReordered.map((item, i) => ({ id: item.id, patch: { zIndex: i } }));
-};
-
 const readScrollWheelZoomEnabled = () => {
   try {
     return typeof window !== 'undefined'
       && window.localStorage?.getItem(SCROLL_WHEEL_ZOOM_KEY) === 'true';
   } catch { return false; }
-};
-
-// Thin wrapper over window.storage with an in-memory fallback for dev/preview.
-const memoryStore = new Map();
-const storage = {
-  async get(key, shared) {
-    try {
-      if (typeof window !== 'undefined' && window.storage?.get) {
-        const r = await window.storage.get(key, shared);
-        return r ?? null;
-      }
-    } catch { /* fall through to memory */ }
-    const k = `${shared ? 's' : 'u'}::${key}`;
-    return memoryStore.has(k) ? { value: memoryStore.get(k) } : null;
-  },
-  async set(key, value, shared) {
-    try {
-      if (typeof window !== 'undefined' && window.storage?.set) {
-        await window.storage.set(key, value, shared);
-        return;
-      }
-    } catch { /* fall through */ }
-    const k = `${shared ? 's' : 'u'}::${key}`;
-    memoryStore.set(k, value);
-  },
-  on(handler) {
-    if (typeof window !== 'undefined' && typeof window.storage?.on === 'function') {
-      window.storage.on(handler);
-    }
-  },
-  off(handler) {
-    if (typeof window !== 'undefined' && typeof window.storage?.off === 'function') {
-      window.storage.off(handler);
-    }
-  },
-  getPresenceSnapshot() {
-    try { return window.storage?.getPresenceSnapshot?.() || {}; } catch { return {}; }
-  },
-  onPresenceChange(handler) {
-    try { return window.storage?.onPresenceChange?.(handler) || (() => {}); } catch { return () => {}; }
-  },
-  offPresenceChange(handler) {
-    try { window.storage?.offPresenceChange?.(handler); } catch { /* noop fallback */ }
-  },
-  setLocalBusyItems(source, ids) {
-    try { window.storage?.setLocalBusyItems?.(source, ids); } catch { /* noop fallback */ }
-  },
-  findRemoteBusyItem(ids) {
-    try { return window.storage?.findRemoteBusyItem?.(ids) || null; } catch { return null; }
-  },
-  getRemoteBusyItems() {
-    try { return window.storage?.getRemoteBusyItems?.() || new Map(); } catch { return new Map(); }
-  },
-  onBusyChange(handler) {
-    try { return window.storage?.onBusyChange?.(handler) || (() => {}); } catch { return () => {}; }
-  },
-  offBusyChange(handler) {
-    try { window.storage?.offBusyChange?.(handler); } catch { /* noop fallback */ }
-  },
-  getRemoteEditingItems() {
-    try { return window.storage?.getRemoteEditingItems?.() || new Map(); } catch { return new Map(); }
-  },
-  onEditingChange(handler) {
-    try { return window.storage?.onEditingChange?.(handler) || (() => {}); } catch { return () => {}; }
-  },
-  offEditingChange(handler) {
-    try { window.storage?.offEditingChange?.(handler); } catch { /* noop fallback */ }
-  },
-  setLocalSelectedItems(ids) {
-    try { window.storage?.setLocalSelectedItems?.(ids); } catch { /* noop fallback */ }
-  },
-  getRemoteSelectedItems() {
-    try { return window.storage?.getRemoteSelectedItems?.() || new Map(); } catch { return new Map(); }
-  },
-  onSelectionChange(handler) {
-    try { return window.storage?.onSelectionChange?.(handler) || (() => {}); } catch { return () => {}; }
-  },
-  offSelectionChange(handler) {
-    try { window.storage?.offSelectionChange?.(handler); } catch { /* noop fallback */ }
-  },
-  // --- Granular board writes ---
-  // Pass through to the Yjs bridge when present; otherwise mutate the in-memory
-  // board so dev/preview (no relay) stays consistent. Each maps to one Yjs
-  // transaction in the bridge; `opts.silent` keeps derived writes off undo.
-  addItem(item, opts) {
-    if (window.storage?.addItem) {
-      try { return window.storage.addItem(item, opts) === true; } catch { return false; }
-    }
-    const b = memBoard(); memSetBoard({ ...b, items: [...b.items, item] });
-    return true;
-  },
-  addItems(items, opts) {
-    if (window.storage?.addItems) {
-      try { return window.storage.addItems(items, opts) === true; } catch { return false; }
-    }
-    const b = memBoard();
-    const ids = new Set(b.items.map((it) => it.id));
-    const additions = [];
-    items.forEach((it) => {
-      if (!it || !it.id || ids.has(it.id)) return;
-      ids.add(it.id);
-      additions.push(it);
-    });
-    if (additions.length !== items.length) return false;
-    memSetBoard({ ...b, items: [...b.items, ...additions] });
-    return true;
-  },
-  updateItem(id, patch, opts) {
-    if (window.storage?.updateItem) {
-      try { return window.storage.updateItem(id, patch, opts) === true; } catch { return false; }
-    }
-    const b = memBoard();
-    if (!b.items.some((it) => it.id === id)) return false;
-    memSetBoard({ ...b, items: b.items.map((it) => (it.id === id ? memMerge(it, patch) : it)) });
-    return true;
-  },
-  updateItems(entries, opts) {
-    if (window.storage?.updateItems) {
-      try { return window.storage.updateItems(entries, opts) === true; } catch { return false; }
-    }
-    const byId = new Map(entries.map((e) => [e.id, e.patch]));
-    const b = memBoard();
-    if (entries.some((entry) => !b.items.some((it) => it.id === entry.id))) return false;
-    memSetBoard({ ...b, items: b.items.map((it) => (byId.has(it.id) ? memMerge(it, byId.get(it.id)) : it)) });
-    return true;
-  },
-  removeItem(id, opts) {
-    if (window.storage?.removeItem) { window.storage.removeItem(id, opts); return; }
-    const b = memBoard(); memSetBoard({ ...b, items: b.items.filter((it) => it.id !== id) });
-  },
-  setMeta(patch, opts) {
-    if (window.storage?.setMeta) {
-      try { return window.storage.setMeta(patch, opts) === true; } catch { return false; }
-    }
-    memSetBoard(memMerge(memBoard(), patch));
-    return true;
-  },
-  replaceBoard(board, opts) {
-    if (window.storage?.replaceBoard) {
-      try { return window.storage.replaceBoard(board, opts) === true; } catch { return false; }
-    }
-    memSetBoard(board);
-    return true;
-  },
-};
-
-// In-memory board helpers for the dev/preview fallback (no Yjs relay).
-const memBoard = () => {
-  const k = 's::boardState';
-  if (!memoryStore.has(k)) memoryStore.set(k, { ...DEFAULT_BOARD, items: [] });
-  return memoryStore.get(k);
-};
-const memSetBoard = (next) => memoryStore.set('s::boardState', next);
-// Merge a patch, treating an undefined value as "delete this key".
-const memMerge = (obj, patch) => {
-  const out = { ...obj };
-  Object.entries(patch).forEach(([k, v]) => {
-    if (v === undefined) delete out[k];
-    else out[k] = v;
-  });
-  return out;
 };
 
 // Nearest zone — the item's own owner, or the nearest ancestor via the
@@ -477,334 +216,6 @@ const zoneHasActiveGovernor = (zone, allItems) => {
   }
   return false;
 };
-
-// One privacy predicate for every non-owner view (card chrome, modal, copy,
-// and exports), using shared nested-zone reveal inheritance.
-const isStickyHiddenForUser = (item, allItems, boardAllRevealed, userId) => (
-  item?.type === 'sticky'
-  && item.private
-  && item.authorId !== userId
-  && !effectiveRevealed(item, allItems, boardAllRevealed)
-);
-
-// Shared by exportZoneCsv / exportBoardCsv.
-const csvColorName = (i) => ['yellow', 'red', 'green', 'blue', 'purple', 'orange'][i] || String(i);
-const csvEsc = (v) => {
-  let s = v == null ? '' : String(v);
-  if (/^[\s]*[=+\-@\t\r]/.test(s)) s = `'${s}`;
-  return /[",\n\r]/.test(s)
-    ? `"${s.replace(/"/g, '""')}"`
-    : s;
-};
-
-/* ============================================================
-   Memoized item cards
-   ------------------------------------------------------------
-   Pulled out of RetroBoard.render so React.memo can skip items
-   whose primitive props haven't changed. Crucial when a board
-   has 100+ cards: viewport pan/zoom, voting, single-item drag,
-   and selection changes no longer re-render every other card.
-   ============================================================ */
-
-const runtimeRelayBaseUrl = () => {
-  if (typeof window === 'undefined') return null;
-  return window.location.protocol === 'https:'
-    ? `${window.location.origin}/yjs/`
-    : `http://${window.location.hostname}:${import.meta.env.VITE_YJS_PORT || '1234'}/`;
-};
-
-const safeRuntimeImageSource = (value) => {
-  if (typeof window === 'undefined') return null;
-  return normalizeRuntimeImageSource(value, {
-    pageOrigin: window.location.origin,
-    relayBaseUrl: runtimeRelayBaseUrl(),
-    roomHandle: getActiveRoomSession()?.roomHandle,
-  });
-};
-
-// A controlled input normally moves its caret when a remote value replaces
-// the DOM value. Keep a selection anchored through the minimal remote change,
-// while local keystrokes retain the browser's native selection behaviour.
-const CollaborativeTextEditor = ({
-  kind = 'textarea', editorRef, value, onValueChange, onContentOverflow, ...props
-}) => {
-  const elementRef = useRef(null);
-  const textValue = String(value ?? '');
-  const selectionRef = useRef({ start: textValue.length, end: textValue.length });
-  const selectionValueRef = useRef(textValue);
-
-  const assignRef = useCallback((node) => {
-    elementRef.current = node;
-    if (typeof editorRef === 'function') editorRef(node);
-    else if (editorRef) editorRef.current = node;
-  }, [editorRef]);
-
-  const rememberSelection = useCallback((node) => {
-    if (!node) return;
-    selectionRef.current = {
-      start: node.selectionStart ?? 0,
-      end: node.selectionEnd ?? node.selectionStart ?? 0,
-    };
-    selectionValueRef.current = node.value;
-  }, []);
-
-  useBrowserLayoutEffect(() => {
-    const node = elementRef.current;
-    const previousValue = selectionValueRef.current;
-    if (node && document.activeElement === node && previousValue !== textValue) {
-      const change = describeTextReplacement(previousValue, textValue);
-      const nextStart = Math.min(
-        textValue.length,
-        mapSelectionIndexThroughReplacement(selectionRef.current.start, change),
-      );
-      const nextEnd = Math.min(
-        textValue.length,
-        mapSelectionIndexThroughReplacement(selectionRef.current.end, change),
-      );
-      node.setSelectionRange(nextStart, nextEnd);
-      selectionRef.current = { start: nextStart, end: nextEnd };
-    }
-    selectionValueRef.current = textValue;
-  }, [textValue]);
-
-  useBrowserLayoutEffect(() => {
-    const node = elementRef.current;
-    if (!node || kind === 'input' || !onContentOverflow) return;
-    onContentOverflow(node.scrollHeight - node.clientHeight);
-  }, [kind, onContentOverflow, textValue]);
-
-  const handleChange = useCallback((event) => {
-    const node = event.currentTarget;
-    rememberSelection(node);
-    onValueChange(node.value, {
-      clientHeight: node.clientHeight,
-      scrollHeight: node.scrollHeight,
-    });
-  }, [onValueChange, rememberSelection]);
-
-  const Element = kind === 'input' ? 'input' : 'textarea';
-  return (
-    <Element
-      {...props}
-      ref={assignRef}
-      value={textValue}
-      onChange={handleChange}
-      onSelect={(event) => rememberSelection(event.currentTarget)}
-    />
-  );
-};
-
-const TextCard = React.memo(function TextCard({
-  item, selected, remoteSelected, remoteSelectionHue, isEditing, lang,
-  onStartDrag, onBeginFocus, onTextChange, onTextKeyDown, onTextBlur,
-  editAreaRef,
-}) {
-  void lang;
-  const it = item;
-  return (
-    <div
-      className={remoteSelected ? 'rb-remote-selected-card' : undefined}
-      onMouseDown={(e) => { if (!isEditing) onStartDrag(e, it); }}
-      onDoubleClick={(e) => { e.stopPropagation(); onBeginFocus(it, 'text'); }}
-      style={{
-        position: 'absolute',
-        ['--rb-selector-hue']: remoteSelectionHue,
-        left: it.x,
-        top: it.y,
-        fontFamily: '"Caveat", "Sarabun", cursive',
-        fontSize: it.fontSize || 40,
-        color: it.fontColor || 'var(--text)',
-        cursor: isEditing ? 'text' : 'grab',
-        userSelect: 'none',
-        padding: '4px 8px',
-        width: it.w || TEXT_W,
-        height: it.h || TEXT_H,
-        overflow: 'hidden',
-        whiteSpace: 'pre-wrap',
-        wordBreak: 'break-word',
-        outline: selected ? '2px dashed #2563eb' : 'none',
-        outlineOffset: 6,
-        borderRadius: 6,
-        animation: remoteSelected ? undefined : 'rb-appear 0.28s ease-out',
-      }}
-    >
-      {isEditing ? (
-        <CollaborativeTextEditor
-          editorRef={editAreaRef}
-          value={it.text || ''}
-          maxLength={BOARD_TEXT_MAX_LENGTH}
-          onValueChange={(value) => onTextChange(it.id, { text: value })}
-          onKeyDown={(e) => onTextKeyDown(e)}
-          onBlur={() => onTextBlur(it.id)}
-          onMouseDown={(e) => e.stopPropagation()}
-          style={{
-            width: '100%', height: '100%',
-            background: 'transparent', border: 'none', outline: 'none',
-            resize: 'none', fontFamily: 'inherit', fontSize: it.fontSize || 40,
-            color: it.fontColor || 'var(--text)',
-          }}
-        />
-      ) : it.text}
-    </div>
-  );
-});
-
-const ImageCard = React.memo(function ImageCard({
-  item, selected, remoteSelected, remoteSelectionHue, dense, onStartDrag,
-}) {
-  const it = item;
-  const safeSrc = safeRuntimeImageSource(it.src);
-  const w = it.w || 200;
-  const h = it.h || 200;
-  return (
-    <div
-      className={remoteSelected ? 'rb-remote-selected-card' : undefined}
-      onMouseDown={(e) => onStartDrag(e, it)}
-      style={{
-        position: 'absolute',
-        ['--rb-selector-hue']: remoteSelectionHue,
-        left: it.x,
-        top: it.y,
-        width: w,
-        height: h,
-        // drop-shadow respects PNG alpha but is GPU-expensive; a tight blur
-        // radius keeps it cheap when many images are on screen, and dense mode
-        // drops it entirely. CSS containment scopes layout/paint invalidation
-        // to this card so a change in one image doesn't repaint neighbours.
-        filter: remoteSelected || dense ? 'none' : 'drop-shadow(0 3px 6px rgba(0,0,0,0.18))',
-        outline: selected ? '2px solid #2563eb' : 'none',
-        outlineOffset: 6,
-        cursor: 'grab',
-        userSelect: 'none',
-        animation: remoteSelected || dense ? undefined : 'rb-appear 0.28s ease-out',
-        contain: remoteSelected ? 'layout style' : 'layout paint style',
-      }}
-    >
-      {safeSrc && (
-        <img
-          src={safeSrc}
-          alt=""
-          draggable={false}
-          loading="lazy"
-          decoding="async"
-          style={{ width: '100%', height: '100%', objectFit: 'fill', display: 'block' }}
-        />
-      )}
-    </div>
-  );
-});
-
-/* ============================================================
-   Image upload prep (shared by paste/drop and legacy-import sanitization)
-   ============================================================ */
-
-const canvasToBlob = (canvas, type, quality) => (
-  new Promise((resolve) => canvas.toBlob(resolve, type, quality))
-);
-
-// Inspect headers before decode so malformed/decompression-bomb inputs are
-// rejected early. PNG/JPEG/WebP are always redrawn through a bounded canvas,
-// which strips EXIF and other metadata. GIFs retain animation only after a
-// full structural/frame-budget check in inspectRasterImageBlob.
-const prepareImageBlob = async (blob) => {
-  const info = await inspectRasterImageBlob(blob);
-  if (!imageInfoIsWithinLimits(info)) return null;
-  const objectUrl = URL.createObjectURL(blob);
-  const img = new Image();
-  try {
-    await new Promise((res, rej) => {
-      img.onload = res;
-      img.onerror = rej;
-      img.src = objectUrl;
-    });
-    let nw = img.naturalWidth;
-    let nh = img.naturalHeight;
-    if (!Number.isSafeInteger(nw) || !Number.isSafeInteger(nh) || nw < 1 || nh < 1) return null;
-    // Browsers apply JPEG orientation while decoding, so a 90-degree EXIF
-    // rotation legitimately swaps the dimensions. Any other disagreement
-    // means the claimed header and decoded resource do not match.
-    const dimensionsMatch = (nw === info.width && nh === info.height)
-      || (nw === info.height && nh === info.width);
-    if (!dimensionsMatch) return null;
-
-    if (info.mime === 'image/gif') return { blob, nw, nh };
-
-    const maxEdge = Math.max(nw, nh);
-    const scale = Math.min(1, IMAGE_OUTPUT_MAX_DIMENSION / maxEdge);
-    const cw = Math.max(1, Math.round(nw * scale));
-    const ch = Math.max(1, Math.round(nh * scale));
-    const canvas = document.createElement('canvas');
-    canvas.width = cw;
-    canvas.height = ch;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return null;
-    ctx.drawImage(img, 0, 0, cw, ch);
-
-    let finalBlob = await canvasToBlob(
-      canvas,
-      info.mime,
-      info.mime === 'image/png' ? undefined : 0.85,
-    );
-    nw = cw;
-    nh = ch;
-    if (!finalBlob || !isSafeImageMime(finalBlob.type) || finalBlob.size > IMAGE_MAX_BYTES) {
-      // A lossless canvas encoding can grow beyond the input cap. Fall back
-      // to bounded JPEG output; this intentionally drops transparency.
-      finalBlob = await canvasToBlob(canvas, 'image/jpeg', 0.8);
-    }
-    if (!finalBlob || finalBlob.type !== 'image/jpeg' && finalBlob.type !== info.mime
-      || finalBlob.size < 1 || finalBlob.size > IMAGE_MAX_BYTES) return null;
-    return { blob: finalBlob, nw, nh };
-  } finally {
-    URL.revokeObjectURL(objectUrl);
-  }
-};
-
-// Read only validated image routes. Room reads refresh the authenticated
-// session through the same transport as uploads.
-const readBackupImage = async (source) => {
-  const src = safeRuntimeImageSource(source);
-  if (!src) throw new Error('image belongs to another room or server');
-  const path = new URL(src).pathname;
-  const roomImage = path.match(/^\/(?:yjs\/)?rooms\/[A-Za-z0-9_-]{32}\/(images\/[^/]+)$/);
-  for (let attempt = 0; attempt < 6; attempt += 1) {
-    const response = roomImage
-      ? await roomFetch(roomImage[1])
-      : await fetch(src, { credentials: 'include', redirect: 'error', referrerPolicy: 'no-referrer' });
-    if (response.ok) return response.blob();
-    const status = response.status;
-    await response.body?.cancel();
-    if (status !== 429 || attempt === 5) throw new Error(`image read failed: ${status}`);
-    await new Promise(resolve => { setTimeout(resolve, 1100); });
-  }
-};
-
-// Server 429s ("image upload failed: 429") when the per-IP upload bucket is
-// exhausted — re-uploading many legacy images back to back can hit this.
-// Any other failure (bad format, network) won't fix itself on retry.
-const uploadWithRetry = async (blob, attempts = 6) => {
-  for (let i = 0; i < attempts; i += 1) {
-    try {
-      // eslint-disable-next-line no-await-in-loop
-      return await window.storage.uploadImage(blob);
-    } catch (err) {
-      if (i === attempts - 1 || !/: 429$/.test(err.message)) throw err;
-      // eslint-disable-next-line no-await-in-loop
-      await new Promise((res) => { setTimeout(res, 1100); });
-    }
-  }
-  return null; // unreachable — loop always returns or throws
-};
-
-// Embedded backup images are uploaded before the board's one Yjs update,
-// keeping the update small. Do not replace live state if any image fails.
-const sanitizeImportedImages = (items, readImageBlob) => restoreBackupImages(items, {
-  readImage: readBackupImage,
-  readImageBlob,
-  prepareImage: prepareImageBlob,
-  uploadImage: uploadWithRetry,
-  resolveSource: safeRuntimeImageSource,
-});
 
 /* ============================================================
    Component
@@ -1479,7 +890,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     isAdmin, canClaim, pinPromptCfg, requireAdminPin, adminClaim, adminTransfer,
   } = useAdminRole({
     userId, userName, board, boardRef, onlineUsers, presence,
-    boardCode, boardToken, patchMeta, setToast, storage,
+    boardCode, boardToken, patchMeta, setToast, storage, liveStorage: adminRoleStorage,
   });
 
   // ---- Full board replace (import / clear) ----
@@ -2113,13 +1524,12 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const importImageFromBlob = useCallback(async (blob, worldX, worldY) => {
     if (!blob || !blob.type || !blob.type.startsWith('image/')) return;
     if (!isSafeImageMime(blob.type)) {
-      setToast({ msg: t('image.unsupportedFormat') || 'Unsupported image format (PNG, JPEG, WEBP, or GIF only)', type: 'warn' });
+      setToast({ msg: t('image.unsupportedFormat'), type: 'warn' });
       return;
     }
     if (blob.size > IMAGE_MAX_BYTES) {
       setToast({
-        msg: t('image.tooLarge', { mb: (IMAGE_MAX_BYTES / 1024 / 1024).toFixed(0) })
-          || `Image too large (max ${(IMAGE_MAX_BYTES / 1024 / 1024).toFixed(0)} MB)`,
+        msg: t('image.tooLarge', { mb: IMAGE_MAX_MIB_LABEL }),
         type: 'warn',
       });
       return;
@@ -2132,8 +1542,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     }
     if (!prepared) {
       setToast({
-        msg: t('image.tooLarge', { mb: (IMAGE_MAX_BYTES / 1024 / 1024).toFixed(0) })
-          || `Image too large (max ${(IMAGE_MAX_BYTES / 1024 / 1024).toFixed(0)} MB)`,
+        msg: t('image.tooLarge', { mb: IMAGE_MAX_MIB_LABEL }),
         type: 'warn',
       });
       return;
@@ -2142,7 +1551,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     try {
       url = await window.storage.uploadImage(prepared.blob);
     } catch {
-      setToast({ msg: t('image.uploadFailed') || 'Image upload failed', type: 'warn' });
+      setToast({ msg: t('image.uploadFailed'), type: 'warn' });
       return;
     }
     addImage(worldX, worldY, url, prepared.nw, prepared.nh);
@@ -4104,28 +3513,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     if (!zone || zone.type !== 'zone') return;
     const b = boardRef.current;
     const voteSnap = window.storage?.snapshotVotes?.() || new Map();
-    const children = b.items
-      .filter((i) => i.type === 'sticky' && effectiveOwnerZone(i, b.items)?.id === zone.id)
-      .sort((a, c) => (voteSnap.get(c.id)?.size ?? 0) - (voteSnap.get(a.id)?.size ?? 0));
-    const lines = [];
-    lines.push([
-      t('export.csv.text'),
-      t('export.csv.author'),
-      t('export.csv.votes'),
-      t('export.csv.color'),
-      t('export.csv.createdAt'),
-    ].map(csvEsc).join(','));
-    children.forEach((sticky) => {
-      const hide = isStickyHiddenForUser(sticky, b.items, b.allRevealed, userId);
-      lines.push([
-        hide ? t('export.csv.hidden') : (sticky.text || ''),
-        sticky.authorName || '',
-        voteSnap.get(sticky.id)?.size ?? 0,
-        csvColorName(sticky.color ?? 0),
-        sticky.createdAt ? new Date(sticky.createdAt).toISOString() : '',
-      ].map(csvEsc).join(','));
-    });
-    const csv = '﻿' + lines.join('\r\n'); // UTF-8 BOM for Excel
+    const csv = buildZoneCsv(zone, b, voteSnap, userId, csvLabels());
     const artifact = createCsvExportArtifact({
       csv,
       fallbackBoardCode: boardCode,
@@ -4148,50 +3536,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const exportBoardCsv = useCallback(() => {
     const b = boardRef.current;
     const voteSnap = window.storage?.snapshotVotes?.() || new Map();
-    const zones = b.items.filter((i) => i.type === 'zone');
-    const stickies = b.items.filter((i) => i.type === 'sticky');
-    const ownerByStickyId = new Map();
-    stickies.forEach((s) => {
-      const owner = effectiveOwnerZone(s, b.items);
-      if (owner) ownerByStickyId.set(s.id, owner.id);
-    });
-    const noZoneLabel = t('export.csv.unassigned');
-    const untitledZoneLabel = t('export.csv.untitledZone');
-    const byVotesDesc = (a, c) => (voteSnap.get(c.id)?.size ?? 0) - (voteSnap.get(a.id)?.size ?? 0);
-    const lines = [];
-    lines.push([
-      t('export.csv.zone'),
-      t('export.csv.text'),
-      t('export.csv.author'),
-      t('export.csv.votes'),
-      t('export.csv.color'),
-      t('export.csv.createdAt'),
-    ].map(csvEsc).join(','));
-    const pushRow = (zoneLabel, sticky) => {
-      const hide = isStickyHiddenForUser(sticky, b.items, b.allRevealed, userId);
-      lines.push([
-        zoneLabel,
-        hide ? t('export.csv.hidden') : (sticky.text || ''),
-        sticky.authorName || '',
-        voteSnap.get(sticky.id)?.size ?? 0,
-        csvColorName(sticky.color ?? 0),
-        sticky.createdAt ? new Date(sticky.createdAt).toISOString() : '',
-      ].map(csvEsc).join(','));
-    };
-    // Contiguous blocks, one per zone (in board order), then a final
-    // "(no zone)" block — not a global vote sort, so the CSV reads like the
-    // board's own columns instead of interleaving zones by vote count.
-    zones.forEach((zone) => {
-      stickies
-        .filter((s) => ownerByStickyId.get(s.id) === zone.id)
-        .sort(byVotesDesc)
-        .forEach((sticky) => pushRow(zone.title || untitledZoneLabel, sticky));
-    });
-    stickies
-      .filter((s) => !ownerByStickyId.has(s.id))
-      .sort(byVotesDesc)
-      .forEach((sticky) => pushRow(noZoneLabel, sticky));
-    const csv = '﻿' + lines.join('\r\n'); // UTF-8 BOM for Excel
+    const csv = buildBoardCsv(b, voteSnap, userId, csvLabels());
     const artifact = createCsvExportArtifact({ csv, fallbackBoardCode: boardCode });
     const blob = new Blob([artifact.contents], { type: artifact.mimeType });
     const url = URL.createObjectURL(blob);
@@ -4537,7 +3882,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
               width: w * v.zoom,
               height: h * v.zoom,
               border: '2px dashed #2563eb',
-              borderRadius: 4,
+              borderRadius: 'var(--radius-selection-outline)',
               pointerEvents: 'none',
               zIndex: Z.SELECTION_OUTLINE,
             }}
@@ -4554,7 +3899,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                 height: 14,
                 background: 'var(--bg-panel)',
                 border: '2px solid #2563eb',
-                borderRadius: '50%',
+                borderRadius: 'var(--radius-round)',
                 cursor: c.cursor,
                 zIndex: Z.SELECTION_HANDLE,
               }}
@@ -4588,7 +3933,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           height: 14,
           background: 'var(--bg-panel)',
           border: '2px solid #2563eb',
-          borderRadius: '50%',
+          borderRadius: 'var(--radius-round)',
           cursor: c.cursor,
           zIndex: Z.SELECTION_HANDLE,
         }}
@@ -4815,11 +4160,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         className="rb-no-select"
         style={{
           position: 'absolute', inset: 0, zIndex: Z.CANVAS,
-          cursor: interactionRef.current?.kind === 'pan' ? 'grabbing'
-            : spaceHeldRef.current ? 'grab'
-            : creationMode === 'zone' ? 'crosshair'
-            : creationMode === 'select' ? 'crosshair'
-            : 'default',
+          cursor: canvasCursor(interactionRef.current?.kind, spaceHeldRef.current, creationMode),
         }}
       >
         {/* Transformed world — transform applied imperatively (see
@@ -4866,8 +4207,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                     transform: `scale(${1 / zoom})`, transformOrigin: 'top left',
                     display: 'inline-flex', alignItems: 'center', gap: 7,
                     maxWidth: 240, padding: '5px 9px 5px 7px',
-                    borderRadius: 999, background: color, color: '#ffffff',
-                    boxShadow: '0 3px 10px rgba(0,0,0,0.22)',
+                    borderRadius: 'var(--radius-pill)', background: color, color: 'var(--collaboration-foreground)',
+                    boxShadow: 'var(--shadow-remote-selection-label)',
                     fontFamily: 'var(--font-ui)',
                     fontSize: 13, lineHeight: 1.2, fontWeight: 700,
                     whiteSpace: 'nowrap', pointerEvents: 'none',
@@ -4916,8 +4257,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                     transform: `scale(${1 / zoom})`, transformOrigin: 'top left',
                     display: 'inline-flex', alignItems: 'center', gap: 7,
                     maxWidth: 240, padding: '5px 9px 5px 7px',
-                    borderRadius: 999, background: color, color: '#ffffff',
-                    boxShadow: '0 3px 10px rgba(0,0,0,0.24)',
+                    borderRadius: 'var(--radius-pill)', background: color, color: 'var(--collaboration-foreground)',
+                    boxShadow: 'var(--shadow-remote-editor-label)',
                     fontFamily: 'var(--font-ui)',
                     fontSize: 13, lineHeight: 1.2, fontWeight: 700,
                     whiteSpace: 'nowrap', pointerEvents: 'none',
@@ -4927,8 +4268,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                   <span
                     className="rb-editing-dot"
                     style={{
-                      width: 7, height: 7, borderRadius: '50%',
-                      background: '#ffffff', flex: '0 0 auto',
+                      width: 7, height: 7, borderRadius: 'var(--radius-round)',
+                      background: 'var(--collaboration-foreground)', flex: '0 0 auto',
                     }}
                   />
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
@@ -4947,8 +4288,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
                 width: zonePreview.w,
                 height: zonePreview.h,
                 background: 'var(--zone-preview-bg)',
-                border: '2px dashed #0ea5e9',
-                borderRadius: 12,
+                border: '2px dashed var(--zone-preview-border)',
+                borderRadius: 'var(--radius-md)',
                 pointerEvents: 'none',
               }}
             />
@@ -5001,19 +4342,19 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
             >
               <MousePointer2
                 size={23}
-                color="#ffffff"
+                color="var(--collaboration-foreground)"
                 fill={color}
                 strokeWidth={2.6}
-                style={{ filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.38))', flex: '0 0 auto' }}
+                style={{ filter: 'var(--cursor-filter)', flex: '0 0 auto' }}
               />
               <span
                 style={{
                   marginLeft: -2, marginTop: 17,
                   maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  padding: '4px 8px', borderRadius: '4px 9px 9px 9px',
-                  background: color, color: '#ffffff',
+                  padding: '4px 8px', borderRadius: 'var(--radius-cursor-label)',
+                  background: color, color: 'var(--collaboration-foreground)',
                   fontSize: 13, lineHeight: 1.15, fontWeight: 700,
-                  boxShadow: '0 2px 7px rgba(0,0,0,0.2)',
+                  boxShadow: 'var(--shadow-cursor-label)',
                 }}
               >
                 {player.name}
@@ -5069,7 +4410,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
             height: Math.abs(marquee.y2 - marquee.y1),
             background: 'rgba(37,99,235,0.10)',
             border: '1.5px solid #2563eb',
-            borderRadius: 2,
+            borderRadius: 'var(--radius-marquee)',
             pointerEvents: 'none',
             zIndex: Z.MARQUEE,
           }}

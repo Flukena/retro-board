@@ -11,10 +11,11 @@ import {
   FONT_SIZE_STEP_PX, selectionToolbarSections,
 } from './selection-toolbar-model.js';
 import { t } from './i18n.js';
+import { TOKENS } from './theme.js';
 import './selection-toolbar.css';
 
 const TOOLBAR_ICON_SIZE_PX = 15;
-const WHITE_FONT_COLOR = '#ffffff';
+const WHITE_FONT_COLOR = TOKENS.light['--font-swatch-white'];
 
 function ToolbarSurface({ anchor, children }) {
   return (
