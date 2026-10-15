@@ -1,7 +1,7 @@
 import { isBoardCreatedByMe } from './router.js';
 
 // Decision functions read explicit snapshots; orchestration supplies fresh
-// snapshots after each awaited operation. Writes remain in the hook's patchMeta.
+// snapshots after each awaited operation. Continuations use the supplied patchMeta.
 export const ADMIN_PIN_RESULT = Object.freeze({ DENIED: 'denied', WRONG: 'wrong', READY: 'ready' });
 
 export const adminIsOnline = (adminUserId, users) => (
@@ -68,4 +68,28 @@ export function* adminElectionSteps({ userId, effectiveName, storage, liveStorag
   // Presence awaits can let a peer claim. Compare against the sampled admin,
   // not userId: a departed admin's id is legitimately still stored here.
   return liveStorage.getAdminUserId?.() === sampledAdmin;
+}
+
+export function finishAdminPin({ decision, patchMeta, markPinOk, onSuccess }) {
+  if (decision.patch && !patchMeta(decision.patch)) return;
+  markPinOk();
+  onSuccess();
+}
+
+export function finishAdminClaim({ decision, adminName, patchMeta, markPinOk, onSuccess, notify }) {
+  if (!patchMeta({
+    adminUserId: decision.patch.adminUserId,
+    adminName,
+    adminPinHash: decision.patch.adminPinHash,
+  })) return;
+  markPinOk();
+  onSuccess();
+  notify();
+}
+
+export function finishAdminElection({ decision, userId, adminName, patchMeta, notify }) {
+  if (!decision) return;
+  // Flush before notifying so the next claimant sees this write immediately.
+  if (!patchMeta({ adminUserId: userId, adminName })) return;
+  notify();
 }

@@ -48,4 +48,3 @@ export const ImageCard = React.memo(function ImageCard({
     </div>
   );
 });
-

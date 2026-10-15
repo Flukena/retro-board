@@ -8,4 +8,3 @@ export const isStickyHiddenForUser = (item, allItems, boardAllRevealed, userId) 
   && item.authorId !== userId
   && !effectiveRevealed(item, allItems, boardAllRevealed)
 );
-

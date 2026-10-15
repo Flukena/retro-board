@@ -61,4 +61,3 @@ export const TextCard = React.memo(function TextCard({
     </div>
   );
 });
-

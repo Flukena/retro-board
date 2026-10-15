@@ -146,4 +146,3 @@ export const sanitizeImportedImages = (items, readImageBlob) => restoreBackupIma
   uploadImage: uploadWithRetry,
   resolveSource: safeRuntimeImageSource,
 });
-

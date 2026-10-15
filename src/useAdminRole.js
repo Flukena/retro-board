@@ -2,7 +2,8 @@ import {
   useState, useRef, useEffect, useCallback,
 } from 'react';
 import { t } from './i18n.js';
-import { ADMIN_PIN_RESULT, adminIsOnline, canUseCachedPin, adminPinSteps, adminClaimSteps, adminElectionSteps } from './admin-role-model.js';
+import { ADMIN_PIN_RESULT, adminIsOnline, canUseCachedPin, adminPinSteps, adminClaimSteps, adminElectionSteps,
+  finishAdminPin, finishAdminClaim, finishAdminElection } from './admin-role-model.js';
 
 export const HEARTBEAT_MS = 5000;
 
@@ -45,11 +46,9 @@ export function useAdminRole({
       const steps = adminElectionSteps({ userId, effectiveName, storage, liveStorage, boardCode, boardToken });
       let step = steps.next();
       while (!step.done) step = steps.next(await step.value);
-      if (!step.value) return;
-      // Flush immediately, bypassing the 200ms debounce: another claimant
-      // must see this write before its next election check.
-      if (!patchMeta({ adminUserId: userId, adminName: effectiveName })) return;
-      setToast({ msg: t('transfer.becomeAdmin'), type: 'info' });
+      finishAdminElection({ decision: step.value, userId, adminName: effectiveName, patchMeta,
+        notify: () => setToast({ msg: t('transfer.becomeAdmin'), type: 'info' }),
+      });
     };
     beat();
     const id = setInterval(beat, HEARTBEAT_MS);
@@ -99,10 +98,10 @@ export function useAdminRole({
           setPinPromptCfg((cfg) => (cfg ? { ...cfg, error: 'wrong' } : cfg));
           return;
         }
-        if (decision.patch && !patchMeta(decision.patch)) return;
-        pinSessionOkRef.current = true;
-        setPinPromptCfg(null);
-        onSuccess();
+        finishAdminPin({ decision, patchMeta,
+          markPinOk: () => { pinSessionOkRef.current = true; },
+          onSuccess: () => { setPinPromptCfg(null); onSuccess(); },
+        });
       },
       onCancel: () => setPinPromptCfg(null),
     });
@@ -152,14 +151,11 @@ export function useAdminRole({
           setToast({ msg: t('common.adminOnly'), type: 'warn' });
           return;
         }
-        if (!patchMeta({
-          adminUserId: decision.patch.adminUserId,
-          adminName: userName || 'Guest',
-          adminPinHash: decision.patch.adminPinHash,
-        })) return;
-        pinSessionOkRef.current = true;
-        setPinPromptCfg(null);
-        setToast({ msg: t('transfer.becomeAdmin'), type: 'info' });
+        finishAdminClaim({ decision, adminName: userName || 'Guest', patchMeta,
+          markPinOk: () => { pinSessionOkRef.current = true; },
+          onSuccess: () => setPinPromptCfg(null),
+          notify: () => setToast({ msg: t('transfer.becomeAdmin'), type: 'info' }),
+        });
       },
       onCancel: () => setPinPromptCfg(null),
     });

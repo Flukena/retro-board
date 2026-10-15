@@ -80,4 +80,3 @@ export const swapZOrderEntries = (items, index, neighborIndex) => {
   ];
   return fullyReordered.map((item, i) => ({ id: item.id, patch: { zIndex: i } }));
 };
-

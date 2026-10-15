@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ADMIN_PIN_RESULT, adminIsOnline, canUseCachedPin,
   adminPinDecision, hashAdminPin, adminPinSteps,
-  adminClaimSteps, adminElectionSteps } from './admin-role-model.js';
+  adminClaimSteps, adminElectionSteps,
+  finishAdminPin, finishAdminClaim, finishAdminElection } from './admin-role-model.js';
 
 const SELF = 'creator';
 const PEER = 'peer';
@@ -14,17 +15,16 @@ const boardRef = () => ({ current: { adminPinHash: null } });
 const pending = () => Promise.withResolvers();
 
 // Drive the same explicit awaits as the hook. Record writes/success only for
-// ready decisions, and model patchMeta's boolean failure contract.
+// ready decisions through the production PIN continuation.
 async function finish(steps, writes, successes, writeOk = true) {
   let step = steps.next();
   while (!step.done) step = steps.next(await step.value);
   const decision = step.value;
   if (decision.status !== ADMIN_PIN_RESULT.READY) return decision;
-  if (decision.patch) {
-    writes.push(decision.patch);
-    if (!writeOk) return decision;
-  }
-  successes.push(SELF);
+  finishAdminPin({ decision,
+    patchMeta: (patch) => { writes.push(patch); return writeOk; },
+    markPinOk: () => {}, onSuccess: () => successes.push(SELF),
+  });
   return decision;
 }
 
@@ -44,7 +44,10 @@ function installCreatedBoards(t) {
 async function finishElection(steps, writes = [], successes = []) {
   let step = steps.next();
   while (!step.done) step = steps.next(await step.value);
-  if (step.value) { writes.push(SELF); successes.push(SELF); }
+  finishAdminElection({ decision: step.value, userId: SELF, adminName: SELF,
+    patchMeta: () => { writes.push(SELF); return true; },
+    notify: () => successes.push(SELF),
+  });
   return step.value;
 }
 
@@ -197,4 +200,57 @@ test('creator election re-reads the live admin after the awaited presence read',
   assert.equal(await completion, false);
   assert.deepEqual(writes, []);
   assert.deepEqual(successes, []);
+});
+
+const ADMIN_NAME = 'Creator';
+const PIN_CACHED_EVENT = 'pin-cached';
+const SUCCESS_EVENT = 'success';
+const TOAST_EVENT = 'toast';
+
+function continuationEffects(writeOk) {
+  const writes = [];
+  const events = [];
+  return { writes, events, options: {
+    patchMeta: (patch) => { writes.push(patch); return writeOk; },
+    markPinOk: () => events.push(PIN_CACHED_EVENT),
+    onSuccess: () => events.push(SUCCESS_EVENT),
+    notify: () => events.push(TOAST_EVENT),
+  } };
+}
+
+test('PIN continuation stops cache and success after a rejected write', () => {
+  const decision = { status: ADMIN_PIN_RESULT.READY, patch: { adminPinHash: HASH } };
+  for (const writeOk of [false, true]) {
+    const { writes, events, options } = continuationEffects(writeOk);
+    finishAdminPin({ decision, ...options });
+    assert.deepEqual(writes, [decision.patch]);
+    assert.deepEqual(events, writeOk ? [PIN_CACHED_EVENT, SUCCESS_EVENT] : []);
+  }
+  const { writes, events, options } = continuationEffects(false);
+  finishAdminPin({ decision: { status: ADMIN_PIN_RESULT.READY, patch: null }, ...options });
+  assert.deepEqual(writes, []);
+  assert.deepEqual(events, [PIN_CACHED_EVENT, SUCCESS_EVENT]);
+});
+
+test('claim continuation stops cache, success and toast after a rejected write', () => {
+  const decision = { status: ADMIN_PIN_RESULT.READY, patch: { adminUserId: SELF, adminPinHash: HASH } };
+  for (const writeOk of [false, true]) {
+    const { writes, events, options } = continuationEffects(writeOk);
+    finishAdminClaim({ decision, adminName: ADMIN_NAME, ...options });
+    assert.deepEqual(writes, [{ adminUserId: SELF, adminName: ADMIN_NAME, adminPinHash: HASH }]);
+    assert.deepEqual(events, writeOk ? [PIN_CACHED_EVENT, SUCCESS_EVENT, TOAST_EVENT] : []);
+  }
+});
+
+test('election continuation stops toast after a rejected write', () => {
+  for (const writeOk of [false, true]) {
+    const { writes, events, options } = continuationEffects(writeOk);
+    finishAdminElection({ decision: true, userId: SELF, adminName: ADMIN_NAME, ...options });
+    assert.deepEqual(writes, [{ adminUserId: SELF, adminName: ADMIN_NAME }]);
+    assert.deepEqual(events, writeOk ? [TOAST_EVENT] : []);
+  }
+  const { writes, events, options } = continuationEffects(true);
+  finishAdminElection({ decision: false, userId: SELF, adminName: ADMIN_NAME, ...options });
+  assert.deepEqual(writes, []);
+  assert.deepEqual(events, []);
 });
