@@ -4,8 +4,8 @@ import { readFileSync, readdirSync } from 'node:fs';
 
 const REPO_ROOT = new URL('../', import.meta.url);
 // AGENTS.md: frozen in size. These line ceilings may only be lowered, never raised.
-const RETRO_BOARD_MAX_LINES = 4505;
-const YJS_SERVER_MAX_LINES = 2241;
+const RETRO_BOARD_MAX_LINES = 4437;
+const YJS_SERVER_MAX_LINES = 2031;
 const LINE_CEILINGS = new Map([
   ['RetroBoard.jsx', RETRO_BOARD_MAX_LINES],
   ['yjs-server.mjs', YJS_SERVER_MAX_LINES],
