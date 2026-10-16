@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as Y from 'yjs';
-import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate, removeAwarenessStates } from 'y-protocols/awareness';
+import { Awareness, outdatedTimeout, applyAwarenessUpdate, encodeAwarenessUpdate, removeAwarenessStates } from 'y-protocols/awareness';
 
 import {
   cursorScreenPosition,
@@ -10,6 +10,7 @@ import {
   normalizePlayerView,
   playerViewFromViewport,
   readPlayerPresence,
+  PLAYER_PRESENCE_STALE_MS,
   visiblePlayerCursors,
 } from './player-cursors.js';
 
@@ -170,4 +171,16 @@ test('an open vote in any zone hides every remote cursor until its exact deadlin
     [{ type: 'sticky', voteTimer: { endsAt: nowMs + 1 } }]]) {
     assert.deepEqual(visiblePlayerCursors({ ...options, items }), expected);
   }
+});
+
+test('presence expires by local protocol receipt time, independently of sender or idle cursor timestamps', () => {
+  assert.equal(PLAYER_PRESENCE_STALE_MS, outdatedTimeout);
+  const now = 100_000;
+  const states = new Map([
+    [1, { user: { userId: 'idle', name: 'Still connected', lastSeen: 1 }, cursor: { x: 0, y: 0, updatedAt: 1 } }],
+    [2, { user: { userId: 'gone', name: 'Expired', lastSeen: now } }],
+    [3, { user: { userId: 'edge', name: 'Just fresh' } }],
+  ]);
+  const metadata = new Map([[1, { lastUpdated: now }], [2, { lastUpdated: now - PLAYER_PRESENCE_STALE_MS }], [3, { lastUpdated: now - PLAYER_PRESENCE_STALE_MS + 1 }]]);
+  assert.deepEqual(Object.keys(readPlayerPresence(states, metadata, now)), ['idle', 'edge']);
 });

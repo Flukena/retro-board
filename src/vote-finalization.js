@@ -1,3 +1,4 @@
+import { buildVoteResults } from './vote-results.js';
 import { zoneHeaderClearancePx } from './zone-title.js';
 
 // Deterministic finalization plan shared by the browser and the relay. The
@@ -57,7 +58,7 @@ const isDescendant = (zone, root, items) => {
   return false;
 };
 
-export const planVoteFinalization = (items, votesByItem, zoneId, atTime) => {
+export const planVoteFinalization = (items, votesByItem, zoneId, atTime, participants = []) => {
   const root = items.find((item) => item.id === zoneId && item.type === 'zone');
   if (!root?.voteTimer) return null;
   const zones = items.filter((item) => (
@@ -105,6 +106,8 @@ export const planVoteFinalization = (items, votesByItem, zoneId, atTime) => {
     nextZIndex += children.length;
   }
   const finalizedAt = root.voteTimer.endsAt || atTime;
-  entries.push({ id: zoneId, patch: { voteTimer: null, lastResultsAt: finalizedAt } });
+  const captured = stickies.filter((sticky) => zoneIds.has(ownerByStickyId.get(sticky.id)));
+  const voteResults = buildVoteResults(root, captured, votesByItem, participants, atTime);
+  entries.push({ id: zoneId, patch: { voteTimer: null, lastResultsAt: finalizedAt, voteResults } });
   return { entries, finalizedAt, zoneIds, stickies, ownerByStickyId };
 };

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as Y from 'yjs';
 import { createServer } from 'vite';
+import { PLAYER_PRESENCE_STALE_MS } from './player-cursors.js';
 
 const SESSION_TTL_MS = 60_000;
 const ROOM_HANDLE = 'Abcdefghijklmnopqrstuvwxyz012345';
@@ -104,5 +105,83 @@ test('offline local changes expose status and guard unload until a socket sync',
     const event = new Event('beforeunload', { cancelable: true });
     browser.dispatchEvent(event);
     assert.equal(event.defaultPrevented, true);
+  });
+});
+
+test('finalization reads canonical votes atomically, rejects stale session and second finalizer, excludes undo', async () => {
+  await withStorage(async (browser) => {
+    const storage = browser.storage;
+    putItem(browser, { id: 'zone', type: 'zone', x: 0, y: 0, w: 800, h: 600,
+      voteTimer: { startedAt: 10, endsAt: null, voteLimit: 2, showNonVoters: true } });
+    putItem(browser, { ...VALID_ITEM, parentZoneId: 'zone' });
+    browser.__rbYDoc.getMap('kv').set('s||vote:valid:alice', true);
+    assert.equal(storage.finalizeVoteSession('zone', 9, [], 100), null);
+    const origins = [];
+    browser.__rbYDoc.on('afterTransaction', (transaction) => origins.push(transaction.origin));
+    const plan = storage.finalizeVoteSession('zone', 10, [{ userId: 'alice', name: 'Alice' }], 100);
+    assert.equal(plan.entries.at(-1).patch.voteResults.totalVotes, 1);
+    assert.equal(browser.__rbYItems.get('zone').get('voteTimer'), null);
+    assert.equal(origins[0], 'system');
+    assert.equal(storage.finalizeVoteSession('zone', 10, [], 101), null);
+  });
+});
+
+test('session start clears root and descendant snapshots and undo restores them; finalize never enters undo', async () => {
+  await withStorage(async (browser) => {
+    const storage = browser.storage;
+    const root = { id: 'zone', type: 'zone', x: 0, y: 0, w: 800, h: 600, voteTimer: null,
+      voteResults: { historical: true }, lastResultsAt: 5 };
+    putItem(browser, root);
+    putItem(browser, { ...root, id: 'child', parentZoneId: 'zone', w: 400, h: 300 });
+    assert.equal(storage.canUndo(), false);
+    const timerPatch = { voteTimer: { startedAt: 10, endsAt: null, showNonVoters: false } };
+    assert.equal(storage.startVoteSession('zone', timerPatch, ['child'], []), true);
+    assert.equal(browser.__rbYItems.get('zone').get('voteResults'), null);
+    assert.equal(browser.__rbYItems.get('child').get('voteResults'), null);
+    assert.equal(storage.undo(), true);
+    assert.deepEqual(browser.__rbYItems.get('child').get('voteResults'), { historical: true });
+    assert.deepEqual(browser.__rbYItems.get('zone').get('voteResults'), { historical: true });
+    assert.equal(storage.redo(), true);
+    storage.finalizeVoteSession('zone', 10, [], 100);
+    assert.equal(browser.__rbYItems.get('zone').get('voteResults').resultId, 'zone:10');
+    storage.undo();
+    assert.equal(browser.__rbYItems.get('zone').get('voteTimer'), null);
+  });
+});
+
+test('finalized snapshot reaches existing peers and late joiners with a single document update', async () => {
+  await withStorage(async (browser) => {
+    const peer = new Y.Doc();
+    const late = new Y.Doc();
+    const source = browser.__rbYDoc;
+    try {
+      putItem(browser, { id: 'zone', type: 'zone', x: 0, y: 0, w: 800, h: 600,
+        voteTimer: { startedAt: 10, endsAt: null, showNonVoters: true } });
+      putItem(browser, { ...VALID_ITEM, parentZoneId: 'zone' });
+      source.getMap('kv').set('s||vote:valid:alice', true);
+      Y.applyUpdate(peer, Y.encodeStateAsUpdate(source));
+      let updates = 0;
+      source.on('update', (update) => { updates += 1; Y.applyUpdate(peer, update); });
+      browser.storage.finalizeVoteSession('zone', 10, [{ userId: 'alice', name: 'Alice' }], 100);
+      assert.equal(updates, 1);
+      assert.equal(peer.getMap('items').get('zone').get('voteResults').totalVotes, 1);
+      assert.equal(peer.getMap('items').get('zone').get('voteTimer'), null);
+      Y.applyUpdate(late, Y.encodeStateAsUpdate(source));
+      assert.deepEqual(late.getMap('items').get('zone').get('voteResults'), peer.getMap('items').get('zone').get('voteResults'));
+    } finally { peer.destroy(); late.destroy(); }
+  });
+});
+
+test('finalization presence snapshot re-reads protocol freshness without waiting for awareness cleanup', async () => {
+  await withStorage(async (browser) => {
+    const awareness = browser.__rbProvider.awareness;
+    const now = Date.now();
+    awareness.states.set(1001, { user: { userId: 'expired', name: 'Expired slot', lastSeen: now } });
+    awareness.meta.set(1001, { clock: 1, lastUpdated: now - PLAYER_PRESENCE_STALE_MS });
+    awareness.states.set(1002, { user: { userId: 'idle', name: 'Connected idle user', lastSeen: 1 } });
+    awareness.meta.set(1002, { clock: 1, lastUpdated: now });
+    const participants = browser.storage.getPresenceSnapshot();
+    assert.equal(Object.hasOwn(participants, 'expired'), false);
+    assert.equal(participants.idle.name, 'Connected idle user');
   });
 });

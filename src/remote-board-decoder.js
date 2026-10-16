@@ -1,3 +1,4 @@
+import { isVoteResults } from './vote-results.js';
 import { validateBoardItem } from './import-schema.js';
 import { COMMENT_AUTHOR_NAME_MAX_LEN, isSafeId } from './comment-schema.js';
 import { DISPLAY_NAME_MAX_LENGTH } from './security-boundaries.js';
@@ -40,6 +41,11 @@ export function decodeRemoteItem(item) {
   if (!isRecord(item) || !fieldsMatch(item, ITEM_RUNTIME_FIELDS)) return null;
   try {
     validateBoardItem(item);
+    if (item.voteResults != null && (item.type !== 'zone' || !isVoteResults(item.voteResults, item.id))) {
+      const safe = { ...item };
+      delete safe.voteResults;
+      return safe;
+    }
     return item;
   } catch (error) {
     // Schema rejection is isolated to this item; never repair the shared doc.

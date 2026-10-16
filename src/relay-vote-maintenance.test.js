@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { PLAYER_PRESENCE_STALE_MS } from './player-cursors.js';
 import { finalizeRelayVotes, maintainRoomVotes } from './relay-vote-maintenance.js';
 
 const require = createRequire(import.meta.url);
@@ -56,4 +57,41 @@ test('room failures report the failing room and continue the pass', () => {
   }, DEADLINE_MS, (name, err) => errors.push({ name, err }));
   assert.deepEqual(visited, ['good']);
   assert.deepEqual(errors, [{ name: 'bad', err: failure }]);
+});
+
+test('relay snapshots awareness only after expiry, missing awareness is optional', () => {
+  const doc = new Y.Doc();
+  let reads = 0;
+  doc.awareness = { getStates: () => { reads += 1; return new Map([[1, { user: { userId: 'present', name: 'Present' } }]]); } };
+  try {
+    const zone = new Y.Map(Object.entries({ type: 'zone', x: 0, y: 0, w: ZONE_WIDTH_PX, h: ZONE_HEIGHT_PX,
+      voteTimer: { startedAt: 10, endsAt: DEADLINE_MS, showNonVoters: true } }));
+    doc.getMap('items').set('zone', zone);
+    finalizeRelayVotes(doc, Y, DEADLINE_MS - 1, () => assert.fail('geometry'));
+    assert.equal(reads, 0);
+    finalizeRelayVotes(doc, Y, DEADLINE_MS, () => assert.fail('geometry'));
+    assert.equal(reads, 1);
+    assert.equal(zone.get('voteResults').presentCount, 1);
+    assert.deepEqual(zone.get('voteResults').participants, [{ userId: 'present', name: 'Present', votes: 0 }]);
+  } finally { doc.destroy(); }
+});
+
+test('relay excludes expired protocol slots and merges duplicate users by the shared presence rule', () => {
+  const doc = new Y.Doc();
+  const finalizedAt = 100_000;
+  const states = new Map([
+    [1, { user: { userId: 'stale', name: 'Expired', lastSeen: finalizedAt } }],
+    [2, { user: { userId: 'live', name: 'A older tab', lastSeen: 1 } }],
+    [3, { user: { userId: 'live', name: 'Z newest tab', lastSeen: 2 } }],
+  ]);
+  doc.awareness = { getStates: () => states,
+    meta: new Map([[1, { lastUpdated: finalizedAt - PLAYER_PRESENCE_STALE_MS }], [2, { lastUpdated: finalizedAt }], [3, { lastUpdated: finalizedAt }]]) };
+  try {
+    const zone = new Y.Map(Object.entries({ type: 'zone', x: 0, y: 0, w: ZONE_WIDTH_PX, h: ZONE_HEIGHT_PX,
+      voteTimer: { startedAt: 10, endsAt: finalizedAt, showNonVoters: true } }));
+    doc.getMap('items').set('zone', zone);
+    finalizeRelayVotes(doc, Y, finalizedAt, () => assert.fail('geometry'));
+    assert.deepEqual(zone.get('voteResults').participants, [{ userId: 'live', name: 'Z newest tab', votes: 0 }]);
+    assert.equal(zone.get('voteResults').presentCount, 1);
+  } finally { doc.destroy(); }
 });

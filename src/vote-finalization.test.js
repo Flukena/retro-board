@@ -14,9 +14,14 @@ test('expired vote finalization is deterministic without an admin client', () =>
   assert.equal(plan.finalizedAt, 500);
   assert.deepEqual([...plan.zoneIds].sort(), ['child', 'root']);
   assert.deepEqual(plan.entries.map((entry) => entry.id), ['two', 'one', 'root']);
-  assert.deepEqual(plan.entries.at(-1).patch, { voteTimer: null, lastResultsAt: 500 });
+  const { voteResults, ...legacyPatch } = plan.entries.at(-1).patch;
+  assert.deepEqual(legacyPatch, { voteTimer: null, lastResultsAt: 500 });
+  assert.equal(voteResults.totalVotes, 3);
   assert.ok(plan.entries[0].patch.y < plan.entries[1].patch.y);
-  assert.deepEqual(planVoteFinalization(items, votes, 'root', 2000).entries, plan.entries);
+  const laterPlan = planVoteFinalization(items, votes, 'root', 2000);
+  assert.equal(laterPlan.entries.at(-1).patch.voteResults.finalizedAt, 2000);
+  laterPlan.entries.at(-1).patch.voteResults.finalizedAt = voteResults.finalizedAt;
+  assert.deepEqual(laterPlan.entries, plan.entries);
 });
 
 test('another active nested session is not sorted by its ancestor', () => {

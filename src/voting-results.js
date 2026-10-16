@@ -1,3 +1,5 @@
+import { RESULT_TOP_SIZE, compareVoteRank } from './vote-ranking.js';
+
 // Derive the medal ranks displayed after a vote session finishes. Callers
 // provide the board's ownership helpers so this stays deterministic and easy
 // to exercise without mounting the collaborative React component.
@@ -27,8 +29,8 @@ export const buildTopVotedRanks = ({
     const ranked = stickies
       .filter((sticky) => groupZoneIds.has(ownerZoneForItem(sticky, items)?.id))
       .filter((sticky) => voteCountOf(sticky.id) > 0)
-      .sort((a, b) => voteCountOf(b.id) - voteCountOf(a.id))
-      .slice(0, 3);
+      .sort((a, b) => compareVoteRank(voteCountOf(a.id), voteCountOf(b.id), a.id, b.id))
+      .slice(0, RESULT_TOP_SIZE);
     ranked.forEach((sticky, index) => result.set(sticky.id, index + 1));
   });
 

@@ -170,3 +170,21 @@ test('template name dialog modes validate names, count, keyboard and initial val
     }
   });
 });
+
+test('confirm is labelled and Escape cancels; PIN requests input autofocus and Escape cancels', async () => {
+  await withChromeModule('/src/Modals.jsx', ({ ConfirmDialog, AdminPinDialog }) => {
+    let cancels = 0;
+    const onCancel = () => { cancels += 1; };
+    const confirm = ConfirmDialog({ title: 'Confirm', onCancel });
+    assert.equal(confirm.props.labelledBy, 'confirm-dialog-title');
+    confirm.props.onKeyDown({ key: 'Escape' });
+    assert.equal(cancels, 1);
+    let pin;
+    function InspectPin() { pin = AdminPinDialog({ isSetting: false, onCancel }); return pin; }
+    renderToStaticMarkup(React.createElement(InspectPin));
+    const input = pin.props.children.find((child) => child?.type === 'input');
+    assert.equal(input.props.autoFocus, true);
+    input.props.onKeyDown({ key: 'Escape' });
+    assert.equal(cancels, 2);
+  });
+});

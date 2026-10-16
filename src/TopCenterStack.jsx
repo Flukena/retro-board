@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { LocateFixed, X } from 'lucide-react';
 import { Button } from './UiPrimitives.jsx';
+import { visibleVoteResultZones, dismissResult, resultDismissalStorage } from './vote-results-dismissal.js';
+import { VoteResultsCards } from './VoteResultsCard.jsx';
 import { TimerDock } from './TimerDock.jsx';
 import {
   TOPBAR_BOTTOM_PX, TOP_STACK_GAP_PX, TOP_STACK_ITEM_GAP_PX, FOLLOW_BANNER_H_PX, CHROME_ICON_SIZE_PX, Z,
@@ -36,9 +38,15 @@ function FollowBanner({ follow, onStopFollowing }) {
 }
 
 export function TopCenterStack({
-  follow, timers, votesUsed, isAdmin, onStopFollowing, onExtendTimer, onStopTimer,
+  board = { items: [] }, roomHandle, userId, now, follow, timers, votesUsed, isAdmin, onStopFollowing, onExtendTimer, onStopTimer,
 }) {
-  if (!follow && !timers.length) return null;
+  const [, refreshDismissals] = useState(0);
+  const storage = resultDismissalStorage();
+  const zones = visibleVoteResultZones(board.items, storage, roomHandle);
+  const onDismiss = (resultId) => {
+    if (dismissResult(storage, roomHandle, resultId)) refreshDismissals((revision) => revision + 1);
+  };
+  if (!follow && !timers.length && !zones.length) return null;
   return (
     <div
       className="rb-top-center-stack"
@@ -47,6 +55,7 @@ export function TopCenterStack({
         '--rb-top-stack-item-gap': `${TOP_STACK_ITEM_GAP_PX}px`,
       }}
     >
+      <VoteResultsCards zones={zones} board={board} userId={userId} now={now} onDismiss={onDismiss} />
       {follow && <FollowBanner follow={follow} onStopFollowing={onStopFollowing} />}
       {timers.map((timer) => (
         <TimerDock

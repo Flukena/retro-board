@@ -2,6 +2,8 @@ import { boardVoteIsOpen } from './vote-timing.js';
 import { VIEWPORT_ZOOM_MIN, VIEWPORT_ZOOM_MAX } from './viewport-limits.js';
 
 export const DEFAULT_PLAYER_NAME = 'Guest';
+// y-protocols awareness.outdatedTimeout; kept pure so cursor UI does not eagerly load Yjs.
+export const PLAYER_PRESENCE_STALE_MS = 30_000;
 
 export const PLAYER_CURSOR_STALE_MS = 10_000;
 export const PLAYER_CURSOR_MAX_WORLD_COORD = 10_000_000;
@@ -73,11 +75,13 @@ export const mergePlayerPresence = (previous, user, cursorValue, viewValue) => {
   return next;
 };
 
-// Only live awareness slots are included. Yjs owns expiry and disconnects;
-// sender timestamps are used for merging tab metadata, never for liveness.
-export const readPlayerPresence = (states) => {
+// Protocol receipt times exclude expired slots between Yjs cleanup ticks.
+// Sender timestamps only merge tab metadata; idle cursors do not expire users.
+export const readPlayerPresence = (states, metadata, now = Date.now()) => {
   const out = Object.create(null);
-  states.forEach((state) => {
+  states.forEach((state, clientId) => {
+    const lastUpdated = metadata?.get(clientId)?.lastUpdated;
+    if (Number.isFinite(lastUpdated) && now - lastUpdated >= PLAYER_PRESENCE_STALE_MS) return;
     if (!state?.user?.userId) return;
     out[state.user.userId] = mergePlayerPresence(
       out[state.user.userId], state.user, state.cursor, state.view,

@@ -295,10 +295,12 @@ export function ConfirmDialog({
       size={size}
       role="dialog"
       aria-modal="true"
+      labelledBy="confirm-dialog-title"
+      onKeyDown={(event) => { if (event.key === 'Escape' && !busy) onCancel(); }}
     >
       <div className="rb-dialog__heading">
         {icon}
-        <div className="rb-dialog__title">{title}</div>
+        <div id="confirm-dialog-title" className="rb-dialog__title">{title}</div>
       </div>
       <div className="rb-dialog__body">{body}</div>
       {notes.map((text) => <div key={text} role="note" className="rb-dialog__note">{text}</div>)}
