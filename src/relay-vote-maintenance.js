@@ -5,6 +5,8 @@ import { geometryErrorForPatch } from './board-geometry.js';
 
 const ITEMS_MAP_KEY = 'items';
 const VOTES_MAP_KEY = 'kv';
+const META_MAP_KEY = 'meta';
+const ALL_REVEALED_KEY = 'allRevealed';
 const ZONE_TYPE = 'zone';
 const ITEM_TYPE_KEY = 'type';
 const VOTE_TIMER_KEY = 'voteTimer';
@@ -53,7 +55,8 @@ export const finalizeRelayVotes = (ydoc, Y, atTime, invalidGeometry) => {
   const { items, itemsById } = flattenItems(yItems, Y);
   const votesByItem = readCanonicalVotes(ydoc.getMap(VOTES_MAP_KEY));
   for (const zoneId of expired) {
-    const plan = planVoteFinalization(items, votesByItem, zoneId, atTime, participants);
+    const plan = planVoteFinalization(items, votesByItem, zoneId, atTime, participants,
+      ydoc.getMap(META_MAP_KEY).get(ALL_REVEALED_KEY) === true);
     if (!plan || plan.entries.some((entry) => {
       const current = itemsById.get(entry.id);
       return !current || geometryErrorForPatch(current, entry.patch);

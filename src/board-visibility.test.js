@@ -13,3 +13,12 @@ test('private sticky visibility respects author, board reveal and nested-zone ov
   assert.equal(isStickyHiddenForUser(sticky, [outer, { ...inner, revealed: true }, sticky], false, 'viewer'), false);
   assert.equal(isStickyHiddenForUser({ ...sticky, private: false }, items, false, 'viewer'), false);
 });
+
+test('cloning hidden content carries concealment even before a sticky override existed', async () => {
+  const { stickyCloneRevealOverride } = await import('./board-visibility.js');
+  const sticky = { id: 'private', type: 'sticky', x: 0, y: 0, private: true };
+  assert.deepEqual(stickyCloneRevealOverride(sticky, [sticky], false), { revealed: false });
+  assert.deepEqual(stickyCloneRevealOverride(sticky, [sticky], true), {});
+  assert.deepEqual(stickyCloneRevealOverride({ ...sticky, revealed: false }, [sticky], true), { revealed: false });
+  assert.deepEqual(stickyCloneRevealOverride({ ...sticky, private: false }, [sticky], false), {});
+});

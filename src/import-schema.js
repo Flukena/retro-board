@@ -37,6 +37,7 @@ export const IMPORT_MAX_COMMENTS_PER_ITEM = 500;
 export const IMPORT_MAX_VOTES = 20_000;
 export const IMPORT_MAX_RECORDS = 25_000;
 
+const ITEM_ROTATION_MAX_DEGREES = 360;
 const ITEM_TYPES = new Set(['sticky', 'zone', 'text', 'image']);
 const isPlainRecord = (value) => (
   value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -69,6 +70,14 @@ const readOptionalBoolean = (record, key, label) => {
 const readOptionalNullableBoolean = (record, key, label) => {
   if (!hasOwn(record, key) || record[key] == null) return undefined;
   return readOptionalBoolean(record, key, label);
+};
+
+const stickyRevealOverride = (item) => {
+  if (!hasOwn(item, 'revealed')) return {};
+  if (item.revealed !== false && item.revealed !== null) {
+    fail(`item ${item.id} revealed must be false or null`);
+  }
+  return { revealed: item.revealed };
 };
 
 const normalizeColor = (value, label) => {
@@ -148,6 +157,65 @@ export const normalizeCustomTemplates = (value, importedAt = Date.now()) => {
   });
 };
 
+const normalizeItemAppearance = (item, zLimit) => {
+  const normalized = {};
+  const color = normalizeColor(item.color, `item ${item.id}`);
+  if (color != null) normalized.color = color;
+  const fontColor = normalizeFontColor(item.fontColor, `item ${item.id}`);
+  if (fontColor != null) normalized.fontColor = fontColor;
+  if (item.fontSize != null) {
+    if (!positiveWithin(item.fontSize, IMPORT_FONT_SIZE_MAX)) {
+      fail(`item ${item.id} has an invalid fontSize`);
+    }
+    normalized.fontSize = item.fontSize;
+  }
+  if (item.rotation != null) {
+    if (!Number.isFinite(item.rotation) || Math.abs(item.rotation) > ITEM_ROTATION_MAX_DEGREES) {
+      fail(`item ${item.id} has an invalid rotation`);
+    }
+    normalized.rotation = item.rotation;
+  }
+  if (Number.isFinite(item.zIndex) && Math.abs(item.zIndex) <= zLimit) {
+    normalized.zIndex = item.zIndex;
+  } else if (item.zIndex != null) {
+    fail(`item ${item.id} has an invalid zIndex`);
+  }
+
+  return normalized;
+};
+
+const normalizeImageFields = (item) => {
+  const normalized = {};
+  if (!isSafeImportedImageSource(item.src)) fail(`image ${item.id} has an invalid src`);
+  normalized.src = item.src;
+  const hasNatW = item.natW != null;
+  const hasNatH = item.natH != null;
+  if (hasNatW !== hasNatH) fail(`image ${item.id} has incomplete natural dimensions`);
+  if (hasNatW) {
+    if (!positiveWithin(item.natW, IMAGE_SOURCE_MAX_DIMENSION)
+      || !positiveWithin(item.natH, IMAGE_SOURCE_MAX_DIMENSION)
+      || item.natW * item.natH > IMAGE_SOURCE_MAX_PIXELS) {
+      fail(`image ${item.id} has invalid natural dimensions`);
+    }
+    normalized.natW = item.natW;
+    normalized.natH = item.natH;
+  }
+  return normalized;
+};
+
+const normalizeZoneFields = (item) => {
+  const normalized = {};
+  normalized.title = readBoundedString(
+    item.title ?? '', ZONE_TITLE_MAX_LENGTH, `zone ${item.id} title`,
+  );
+  const locked = readOptionalBoolean(item, 'locked', `zone ${item.id} locked`);
+  // `null`/missing means inherit from the nearest ancestor zone or board.
+  const revealed = readOptionalNullableBoolean(item, 'revealed', `zone ${item.id} revealed`);
+  if (locked != null) normalized.locked = locked;
+  if (revealed != null) normalized.revealed = revealed;
+  return normalized;
+};
+
 const normalizeBoardItem = (item, index, importedAt, zLimit) => {
   if (!isPlainRecord(item)) fail(`item ${index + 1} is not an object`);
   if (!isSafeId(item.id)) fail(`item ${index + 1} has an invalid id`);
@@ -171,28 +239,7 @@ const normalizeBoardItem = (item, index, importedAt, zLimit) => {
   });
   if (hasOwn(item, 'parentZoneId')) normalized.parentZoneId = item.parentZoneId;
 
-  const color = normalizeColor(item.color, `item ${item.id}`);
-  if (color != null) normalized.color = color;
-  const fontColor = normalizeFontColor(item.fontColor, `item ${item.id}`);
-  if (fontColor != null) normalized.fontColor = fontColor;
-  if (item.fontSize != null) {
-    if (!positiveWithin(item.fontSize, IMPORT_FONT_SIZE_MAX)) {
-      fail(`item ${item.id} has an invalid fontSize`);
-    }
-    normalized.fontSize = item.fontSize;
-  }
-  if (item.rotation != null) {
-    if (!Number.isFinite(item.rotation) || Math.abs(item.rotation) > 360) {
-      fail(`item ${item.id} has an invalid rotation`);
-    }
-    normalized.rotation = item.rotation;
-  }
-  if (Number.isFinite(item.zIndex) && Math.abs(item.zIndex) <= zLimit) {
-    normalized.zIndex = item.zIndex;
-  } else if (item.zIndex != null) {
-    fail(`item ${item.id} has an invalid zIndex`);
-  }
-
+  Object.assign(normalized, normalizeItemAppearance(item, zLimit));
   if (item.type === 'sticky' || item.type === 'text') {
     normalized.text = readBoundedString(
       item.text ?? '', BOARD_TEXT_MAX_LENGTH, `item ${item.id} text`,
@@ -201,33 +248,10 @@ const normalizeBoardItem = (item, index, importedAt, zLimit) => {
   if (item.type === 'sticky') {
     const privateValue = readOptionalBoolean(item, 'private', `item ${item.id} private`);
     normalized.private = privateValue ?? false;
+    Object.assign(normalized, stickyRevealOverride(item));
   }
-  if (item.type === 'zone') {
-    normalized.title = readBoundedString(
-      item.title ?? '', ZONE_TITLE_MAX_LENGTH, `zone ${item.id} title`,
-    );
-    const locked = readOptionalBoolean(item, 'locked', `zone ${item.id} locked`);
-    // `null`/missing means inherit from the nearest ancestor zone or board.
-    const revealed = readOptionalNullableBoolean(item, 'revealed', `zone ${item.id} revealed`);
-    if (locked != null) normalized.locked = locked;
-    if (revealed != null) normalized.revealed = revealed;
-  }
-  if (item.type === 'image') {
-    if (!isSafeImportedImageSource(item.src)) fail(`image ${item.id} has an invalid src`);
-    normalized.src = item.src;
-    const hasNatW = item.natW != null;
-    const hasNatH = item.natH != null;
-    if (hasNatW !== hasNatH) fail(`image ${item.id} has incomplete natural dimensions`);
-    if (hasNatW) {
-      if (!positiveWithin(item.natW, IMAGE_SOURCE_MAX_DIMENSION)
-        || !positiveWithin(item.natH, IMAGE_SOURCE_MAX_DIMENSION)
-        || item.natW * item.natH > IMAGE_SOURCE_MAX_PIXELS) {
-        fail(`image ${item.id} has invalid natural dimensions`);
-      }
-      normalized.natW = item.natW;
-      normalized.natH = item.natH;
-    }
-  }
+  if (item.type === 'zone') Object.assign(normalized, normalizeZoneFields(item));
+  if (item.type === 'image') Object.assign(normalized, normalizeImageFields(item));
   return normalized;
 };
 

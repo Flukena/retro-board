@@ -30,6 +30,7 @@
 //   translated into a granular field-level diff against the current Yjs
 //   state, so the UI code stays unchanged.
 
+import { protectedItemEntries, concealEntriesForMove } from './move-concealment.js';
 import { readVoteResultParticipants } from './vote-result-participants.js';
 import { CLEARED_VOTE_RESULTS } from './vote-session-lifecycle.js';
 import { readCanonicalVotes } from './canonical-votes.js';
@@ -367,6 +368,16 @@ const patchExistingItem = (id, patch) => {
     setItemField(yItem, k, v);
   });
   return true;
+};
+
+// Called inside the same transaction as every granular geometry/reveal write.
+const patchProtectedItems = (entries) => {
+  const { items, allRevealed } = readBoardSnapshot();
+  protectedItemEntries(items, entries, allRevealed).forEach(({ id, patch }) => patchExistingItem(id, patch));
+};
+const concealForAdditions = (additions) => {
+  const { items, allRevealed } = readBoardSnapshot();
+  return concealEntriesForMove(items, [...items, ...additions], allRevealed);
 };
 
 // ---------------------------------------------------------------------------
@@ -958,16 +969,17 @@ if (provider) {
     // --- Granular board writes (delta-only; see helpers above) ---
     addItem(item, opts) {
       if (boardItemWriteError(item) || geometryErrorForItem(item) || yItems.has(item.id)) return false;
-      ydoc.transact(() => { createItem(item.id, item); }, originOf(opts));
+      const concealed = concealForAdditions([item]);
+      ydoc.transact(() => { createItem(item.id, item); patchProtectedItems(concealed); }, originOf(opts));
       return true;
     },
     addItems(items, opts) {
       if (!Array.isArray(items) || !items.length) return false;
       if (boardItemsWriteError(items) || items.some((item) => yItems.has(item.id))) return false;
+      const concealed = concealForAdditions(items);
       ydoc.transact(() => {
-        items.forEach((item) => {
-          createItem(item.id, item);
-        });
+        items.forEach((item) => createItem(item.id, item));
+        patchProtectedItems(concealed);
       }, originOf(opts));
       return true;
     },
@@ -977,7 +989,7 @@ if (provider) {
       if (!current
         || ('type' in patch && patch.type !== current.type)
         || geometryErrorForPatch(current, patch)) return false;
-      ydoc.transact(() => { patchExistingItem(id, patch); }, originOf(opts));
+      ydoc.transact(() => { patchProtectedItems([{ id, patch }]); }, originOf(opts));
       return true;
     },
     updateItems(entries, opts) {
@@ -990,9 +1002,7 @@ if (provider) {
       });
       if (!valid) return false;
       ydoc.transact(() => {
-        entries.forEach((e) => {
-          patchExistingItem(e.id, e.patch);
-        });
+        patchProtectedItems(entries);
       }, originOf(opts));
       return true;
     },
@@ -1188,9 +1198,9 @@ if (provider) {
       ydoc.transact(() => {
         const timer = yItems.get(zoneId)?.get('voteTimer');
         if (!timer || timer.startedAt !== expectedStartedAt) return;
-        const { items } = readBoardSnapshot();
+        const { items, allRevealed } = readBoardSnapshot();
         const votes = readCanonicalVotes(ymap);
-        const plan = planVoteFinalization(items, votes, zoneId, atTime, participants);
+        const plan = planVoteFinalization(items, votes, zoneId, atTime, participants, allRevealed);
         if (!plan || plan.entries.some(({ id, patch }) => geometryErrorForPatch(
           readItemSnapshot(yItems.get(id), id), patch,
         ))) return;

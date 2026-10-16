@@ -45,3 +45,14 @@ test('finalized rows clear default and explicit titles; short zones retain overf
     else assert.ok(row.y + note.h <= zone.y + zone.h);
   }
 });
+
+test('timer sorting cannot expose hidden cards when short owner zones overflow on a revealed board', () => {
+  const ZONE_HEIGHT_PX = 40;
+  const AT_TIME_MS = 100;
+  const zone = { id: 'zone', type: 'zone', x: 0, y: 0, w: 400, h: ZONE_HEIGHT_PX,
+    revealed: false, voteTimer: { endsAt: AT_TIME_MS } };
+  const card = { id: 'private', type: 'sticky', x: 0, y: 0, w: 20, h: 20,
+    private: true, parentZoneId: zone.id };
+  const plan = planVoteFinalization([zone, card], new Map(), zone.id, AT_TIME_MS, [], true);
+  assert.equal(plan.entries.find(entry => entry.id === card.id).patch.revealed, false);
+});

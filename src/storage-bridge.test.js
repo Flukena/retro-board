@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as Y from 'yjs';
 import { createServer } from 'vite';
+import { createZoneHeaderActions } from './zone-header-actions.js';
 import { PLAYER_PRESENCE_STALE_MS } from './player-cursors.js';
 
 const SESSION_TTL_MS = 60_000;
@@ -213,5 +214,65 @@ test('client result extraction ignores malformed motion and preserves determinis
     assert.deepEqual(forward, reverse);
     assert.deepEqual(forward.participants, [{ userId: 'person', name: 'Ada', votes: 0 }]);
     assert.equal(browser.__rbYItems.get('zone').get('voteTimer'), null);
+  });
+});
+
+test('geometry concealment and explicit reveal are atomic with undo and peer updates', async () => {
+  await withStorage(async (browser) => {
+    const source = { id: 'source', type: 'zone', x: 0, y: 0, w: 400, h: 400, revealed: false };
+    const destination = { ...source, id: 'destination', x: 600, revealed: true };
+    const card = { ...VALID_ITEM, private: true, authorId: 'author', parentZoneId: source.id };
+    putItem(browser, source); putItem(browser, destination); putItem(browser, card);
+    const peer = new Y.Doc();
+    try {
+      Y.applyUpdate(peer, Y.encodeStateAsUpdate(browser.__rbYDoc));
+      browser.__rbYDoc.on('update', update => Y.applyUpdate(peer, update));
+      const storage = browser.storage;
+      assert.equal(storage.updateItems([{ id: card.id, patch: { x: 620, parentZoneId: destination.id } }]), true);
+      assert.equal(peer.getMap('items').get(card.id).get('revealed'), false);
+      storage.undo();
+      assert.equal(browser.__rbYItems.get(card.id).get('x'), card.x);
+      assert.equal(browser.__rbYItems.get(card.id).has('revealed'), false);
+      storage.redo();
+      assert.equal(peer.getMap('items').get(card.id).get('revealed'), false);
+      assert.equal(storage.updateItem(destination.id, { revealed: false }), true);
+      assert.equal(browser.__rbYItems.get(card.id).get('revealed'), false);
+      assert.equal(storage.updateItem(destination.id, { revealed: true }), true);
+      assert.equal(peer.getMap('items').get(card.id).get('revealed'), null);
+    } finally {
+      peer.destroy();
+    }
+  });
+});
+
+test('zone additions and single-item geometry patches conceal legacy cards atomically', async () => {
+  await withStorage(async (browser) => {
+    const zone = { id: 'cover', type: 'zone', x: 0, y: 0, w: 400, h: 400, revealed: true };
+    putItem(browser, { ...VALID_ITEM, private: true });
+    assert.equal(browser.storage.addItems([zone]), true);
+    assert.equal(browser.__rbYItems.get(VALID_ITEM.id).get('revealed'), false);
+    assert.equal(browser.storage.updateItem(zone.id, { revealed: true }), true);
+    assert.equal(browser.__rbYItems.get(VALID_ITEM.id).get('revealed'), null);
+    assert.equal(browser.storage.updateItem(zone.id, { revealed: false }), true);
+    browser.__rbYMeta.set('allRevealed', true);
+    const SMALL_ZONE_SIZE_PX = 5;
+    assert.equal(browser.storage.updateItem(zone.id, { w: SMALL_ZONE_SIZE_PX, h: SMALL_ZONE_SIZE_PX }), true);
+    assert.equal(browser.__rbYItems.get(VALID_ITEM.id).get('revealed'), false);
+  });
+});
+
+test('zone header reveal toggle clears descendant overrides in its updateZone transaction', async () => {
+  await withStorage(async (browser) => {
+    const zone = { id: 'target', type: 'zone', x: 0, y: 0, w: 400, h: 400, revealed: false };
+    const card = { ...VALID_ITEM, private: true, revealed: false, parentZoneId: zone.id };
+    putItem(browser, zone); putItem(browser, card);
+    const context = { isAdmin: true, board: { items: [zone, card], allRevealed: false },
+      updateZone: (id, patch) => browser.storage.updateItem(id, patch) };
+    createZoneHeaderActions(() => context).toggleReveal(zone.id);
+    assert.equal(browser.__rbYItems.get(zone.id).get('revealed'), true);
+    assert.equal(browser.__rbYItems.get(card.id).get('revealed'), null);
+    browser.storage.undo();
+    assert.equal(browser.__rbYItems.get(zone.id).get('revealed'), false);
+    assert.equal(browser.__rbYItems.get(card.id).get('revealed'), false);
   });
 });

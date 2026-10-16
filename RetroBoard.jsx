@@ -42,7 +42,7 @@ import { templateRows, followBannerModel } from './src/chrome-model.js';
 import { SelectionToolbar, GroupSelectionToolbar } from './src/SelectionToolbar.jsx';
 import { selectionToolbarAnchor, groupSelectionToolbarAnchor } from './src/selection-toolbar-model.js';
 import { ZoneCard } from './src/ZoneCard.jsx';
-import { effectiveRevealed, zoneEffectiveRevealed, zoneGroupIds, nestedZoneCount } from './src/zone-actions.js';
+import { zoneEffectiveRevealed, zoneGroupIds, nestedZoneCount } from './src/zone-actions.js';
 import { useZoneHeaderActions } from './src/useZoneHeaderActions.js';
 import { Toast } from './src/Toast.jsx';
 import { TopBar } from './src/TopBar.jsx';
@@ -106,7 +106,9 @@ import { CollaborativeTextEditor } from './src/CollaborativeTextEditor.jsx';
 import { TextCard } from './src/TextCard.jsx';
 import { ImageCard } from './src/ImageCard.jsx';
 import { canvasCursor } from './src/board-cursor.js';
-import { isStickyHiddenForUser } from './src/board-visibility.js';
+import { protectedItemEntries, mergeItemEntries } from './src/move-concealment.js';
+import { reparentMoveEntries } from './src/move-reparenting.js';
+import { isStickyHiddenForUser, stickyEffectiveRevealed, stickyCloneRevealOverride } from './src/board-visibility.js';
 import { csvLabels } from './src/csv-labels.js';
 
 const loadBoardArchive = () => import('./src/board-archive.js');
@@ -957,12 +959,14 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       const current = itemById.get(e.id);
       return !current || geometryErrorForPatch(current, e.patch);
     })) { reportWriteFailure(); return; }
-    const byId = new Map(filtered.map((e) => [e.id, e.patch]));
+    const protectedEntries = protectedItemEntries(boardRef.current.items,
+      mergeItemEntries(pendingGeomRef.current || [], filtered), boardRef.current.allRevealed);
+    const byId = new Map(protectedEntries.map((e) => [e.id, e.patch]));
     setBoard((prev) => ({
       ...prev,
       items: prev.items.map((it) => (byId.has(it.id) ? { ...it, ...byId.get(it.id) } : it)),
     }));
-    pendingGeomRef.current = filtered;
+    pendingGeomRef.current = protectedEntries;
     if (Date.now() - lastFlushRef.current >= DRAG_FLUSH_MS) flushPendingGeom();
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(flushPendingGeom, DRAG_TRAILING_MS);
@@ -1551,7 +1555,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     const stickies = board.items.filter((i) => i.type === 'sticky');
     return [
       ...zones.map((z) => `z:${z.id}:${z.x}:${z.y}:${z.w}:${z.h}:${z.voteTimer?.endsAt || 0}:${z.voteTimer?.voteLimit ?? ''}:${z.voteTimer?.hideResults ? 1 : 0}:${z.votingLocked ? 1 : 0}:${z.revealed == null ? '' : z.revealed ? 1 : 0}:${z.parentZoneId ?? ''}`),
-      ...stickies.map((s) => `s:${s.id}:${s.x}:${s.y}:${s.w || STICKY_W}:${s.h || STICKY_H}:${Object.prototype.hasOwnProperty.call(s, 'parentZoneId') ? (s.parentZoneId || 'null') : 'unset'}`),
+      ...stickies.map((s) => `s:${s.id}:${s.x}:${s.y}:${s.w || STICKY_W}:${s.h || STICKY_H}:${s.revealed === false}:${Object.prototype.hasOwnProperty.call(s, 'parentZoneId') ? (s.parentZoneId || 'null') : 'unset'}`),
     ]
       .sort()
       .join('|');
@@ -1574,7 +1578,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         // "Hide counts" is session-wide, including the admin who started it.
         // Results become visible to everyone again as soon as the session ends.
         hideVoteCounts: !!voteTimer?.hideResults,
-        revealed: effectiveRevealed(s, board.items, board.allRevealed),
+        revealed: stickyEffectiveRevealed(s, board.items, board.allRevealed),
         inZone: !!zone,
       });
     });
@@ -2489,30 +2493,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       const wy = dy / z;
       const entries = [];
       seeds.forEach((seed, id) => entries.push({ id, patch: { x: seed.x + wx, y: seed.y + wy } }));
-      if (isFinal) {
-        const patchById = new Map(entries.map((entry) => [entry.id, entry.patch]));
-        const finalItems = boardRef.current.items.map((it) => (
-          patchById.has(it.id) ? { ...it, ...patchById.get(it.id) } : it
-        ));
-        primaryIds.forEach((id) => {
-          const it = finalItems.find((i) => i.id === id);
-          if (!it || (it.type === 'zone' && it.locked)) return;
-          const newParentId = resolveOwnerZone(it, finalItems)?.id ?? null;
-          if (!Object.prototype.hasOwnProperty.call(it, 'parentZoneId') || it.parentZoneId !== newParentId) {
-            const entry = entries.find((en) => en.id === id);
-            if (entry) entry.patch.parentZoneId = newParentId;
-            else entries.push({ id, patch: { parentZoneId: newParentId } });
-          }
-          if (it.type === 'zone') {
-            finalItems.forEach((child) => {
-              if (child.parentZoneId === id && !insideZone(centerOf(child), it)) {
-                entries.push({ id: child.id, patch: { parentZoneId: null } });
-              }
-            });
-          }
-        });
-      }
-      commitGeometry(entries);
+      commitGeometry(isFinal ? reparentMoveEntries(boardRef.current.items, entries, primaryIds) : entries);
     };
     const onMove = (ev) => {
       pending = { x: ev.clientX, y: ev.clientY };
@@ -2635,30 +2616,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       const wy = dy / z;
       const entries = [];
       initial.forEach((seed, id) => entries.push({ id, patch: { x: seed.x + wx, y: seed.y + wy } }));
-      if (isFinal) {
-        const patchById = new Map(entries.map((entry) => [entry.id, entry.patch]));
-        const finalItems = boardRef.current.items.map((it) => (
-          patchById.has(it.id) ? { ...it, ...patchById.get(it.id) } : it
-        ));
-        primaryIds.forEach((id) => {
-          const it = finalItems.find((i) => i.id === id);
-          if (!it || (it.type === 'zone' && it.locked)) return;
-          const newParentId = resolveOwnerZone(it, finalItems)?.id ?? null;
-          if (!Object.prototype.hasOwnProperty.call(it, 'parentZoneId') || it.parentZoneId !== newParentId) {
-            const entry = entries.find((en) => en.id === id);
-            if (entry) entry.patch.parentZoneId = newParentId;
-            else entries.push({ id, patch: { parentZoneId: newParentId } });
-          }
-          if (it.type === 'zone') {
-            finalItems.forEach((child) => {
-              if (child.parentZoneId === id && !insideZone(centerOf(child), it)) {
-                entries.push({ id: child.id, patch: { parentZoneId: null } });
-              }
-            });
-          }
-        });
-      }
-      commitGeometry(entries);
+      commitGeometry(isFinal ? reparentMoveEntries(boardRef.current.items, entries, primaryIds) : entries);
     };
     const onMove = (ev) => {
       pending = { x: ev.clientX, y: ev.clientY };
@@ -2988,6 +2946,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       if (isHidden) stripped += 1;
       const clone = {
         ...it,
+        ...stickyCloneRevealOverride(it, b.items, b.allRevealed),
         id: idMap.get(it.id),
         x: (it.x ?? 0) + offset,
         y: (it.y ?? 0) + offset,

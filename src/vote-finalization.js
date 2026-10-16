@@ -1,3 +1,4 @@
+import { protectedItemEntries } from './move-concealment.js';
 import { buildVoteResults } from './vote-results.js';
 import { zoneHeaderClearancePx } from './zone-title.js';
 
@@ -58,7 +59,7 @@ const isDescendant = (zone, root, items) => {
   return false;
 };
 
-export const planVoteFinalization = (items, votesByItem, zoneId, atTime, participants = []) => {
+const buildFinalizationPlan = (items, votesByItem, zoneId, atTime, participants = []) => {
   const root = items.find((item) => item.id === zoneId && item.type === 'zone');
   if (!root?.voteTimer) return null;
   const zones = items.filter((item) => (
@@ -110,4 +111,10 @@ export const planVoteFinalization = (items, votesByItem, zoneId, atTime, partici
   const voteResults = buildVoteResults(root, captured, votesByItem, participants, atTime);
   entries.push({ id: zoneId, patch: { voteTimer: null, lastResultsAt: finalizedAt, voteResults } });
   return { entries, finalizedAt, zoneIds, stickies, ownerByStickyId };
+};
+
+// The same plan is applied atomically by browser and relay finalizers.
+export const planVoteFinalization = (items, votesByItem, zoneId, atTime, participants = [], allRevealed = false) => {
+  const plan = buildFinalizationPlan(items, votesByItem, zoneId, atTime, participants);
+  return plan && { ...plan, entries: protectedItemEntries(items, plan.entries, allRevealed) };
 };
