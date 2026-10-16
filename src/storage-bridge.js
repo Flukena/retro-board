@@ -30,6 +30,7 @@
 //   translated into a granular field-level diff against the current Yjs
 //   state, so the UI code stays unchanged.
 
+import { readVoteResultParticipants } from './vote-result-participants.js';
 import { CLEARED_VOTE_RESULTS } from './vote-session-lifecycle.js';
 import { readCanonicalVotes } from './canonical-votes.js';
 import { planVoteFinalization } from './vote-finalization.js';
@@ -871,6 +872,7 @@ if (provider) {
     on(handler) { emitter.addEventListener('change', handler); },
     off(handler) { emitter.removeEventListener('change', handler); },
     getPresenceSnapshot() { return readPresenceMap(); },
+    getVoteResultParticipants(atTime = Date.now()) { return readVoteResultParticipants(provider?.awareness, atTime); },
     onPresenceChange(handler) {
       presenceEmitter.addEventListener('change', handler);
       return () => presenceEmitter.removeEventListener('change', handler);

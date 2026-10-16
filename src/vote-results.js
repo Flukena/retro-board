@@ -17,13 +17,19 @@ const participantName = (value) => (
     ? value.trim().slice(0, DISPLAY_NAME_MAX_LENGTH) : RESULT_GUEST_NAME
 );
 
+export function normalizeResultParticipant(participant) {
+  if (!isSafeId(participant?.userId)) return null;
+  return { userId: participant.userId, name: participantName(participant.name) };
+}
+
 export function normalizeResultParticipants(participants) {
   const names = new Map();
   for (const participant of participants) {
-    if (!isSafeId(participant?.userId)) continue;
-    const name = participantName(participant.name);
-    const previous = names.get(participant.userId);
-    if (previous === undefined || compareStableText(name, previous) < 0) names.set(participant.userId, name);
+    const candidate = normalizeResultParticipant(participant);
+    if (!candidate) continue;
+    const { userId, name } = candidate;
+    const previous = names.get(userId);
+    if (previous === undefined || compareStableText(name, previous) < 0) names.set(userId, name);
   }
   return names;
 }

@@ -1159,7 +1159,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     const group = zoneGroupIds(rootZone, b.items);
     b.items.filter((item) => group.has(item.id) || group.has(effectiveOwnerZone(item, b.items)?.id))
       .forEach((item) => recentlyMovedRef.current.delete(item.id));
-    const plan = window.storage.finalizeVoteSession(zoneId, rootZone.voteTimer.startedAt, Object.values(window.storage.getPresenceSnapshot()), Date.now());
+    const plan = window.storage.finalizeVoteSession(zoneId, rootZone.voteTimer.startedAt, window.storage.getVoteResultParticipants(), Date.now());
     if (!plan) return;
     const patchById = new Map(plan.entries.map((entry) => [entry.id, entry.patch]));
     setBoard((prev) => ({

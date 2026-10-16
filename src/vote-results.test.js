@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { DISPLAY_NAME_MAX_LENGTH } from './security-boundaries.js';
 import { buildVoteResults, MAX_RESULT_PARTICIPANTS, isVoteResults } from './vote-results.js';
 
 const root = { id: 'zone', voteTimer: { startedAt: 10, endsAt: 100, voteLimit: 2, showNonVoters: true } };
@@ -21,14 +22,17 @@ test('results snapshot aggregates canonical votes, ranks by count/id and dedupli
   assert.equal(isVoteResults(result, 'zone'), true);
 });
 test('presence is bounded, unsafe identities dropped, names truncated, aggregates never capped', () => {
-  const participants = Array.from({ length: MAX_RESULT_PARTICIPANTS + 1 }, (_, i) => ({ userId: `p${i}`, name: 'a'.repeat(200) }));
+  const participants = Array.from({ length: MAX_RESULT_PARTICIPANTS + 1 }, (_, i) => ({ userId: `p${i}`, name: 'a'.repeat(DISPLAY_NAME_MAX_LENGTH + 1) }));
   participants.push({ userId: '__proto__', name: 'bad' });
   const result = build(participants);
   assert.equal(result.participants.length, MAX_RESULT_PARTICIPANTS);
   assert.equal(result.omittedCount, 3);
   assert.equal(result.presentCount, MAX_RESULT_PARTICIPANTS + 1);
   assert.equal(result.totalVotes, 3);
-  assert.ok(result.participants.every((p) => p.name.length <= 120));
+  assert.ok(result.participants.every((participant) => participant.name.length <= DISPLAY_NAME_MAX_LENGTH));
+  const namedParticipants = result.participants.filter((participant) => participant.userId.startsWith('p'));
+  assert.ok(namedParticipants.length > 0);
+  namedParticipants.forEach((participant) => assert.equal(participant.name.length, DISPLAY_NAME_MAX_LENGTH));
 });
 test('private roster is absent when showNonVoters is false; malformed results fail validation', () => {
   const result = build([], { ...root, voteTimer: { ...root.voteTimer, showNonVoters: false } });
