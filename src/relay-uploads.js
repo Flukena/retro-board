@@ -8,6 +8,9 @@ import { MILLISECONDS_PER_SECOND, RETRY_AFTER_SHORT_SECONDS, ROOM_HANDLE_RE } fr
 import { evictOldestBucket, refillTokens, createTrafficBucket, trafficBucketFor, takeTrafficBudget } from './relay-rate-bucket.js';
 import { acceptCredentialOrigin } from './relay-http.js';
 import { roomLogId } from './relay-log-id.js';
+import { ROOM_UPLOAD_USAGE_META } from './relay-room-registry.js';
+
+export { ROOM_UPLOAD_USAGE_META } from './relay-room-registry.js';
 
 // SVG is intentionally excluded — same-origin user-uploaded SVG can embed
 // <script>, a stored-XSS vector this stack has no sanitizer for.
@@ -37,7 +40,6 @@ export const IMAGE_SNIFF_BYTES = WEBP_SIGNATURE_BYTES;
 const ROOM_HANDLE_CHARACTERS = 32;
 const PRIVATE_UPLOAD_FILE_MODE = 0o600;
 export const UPLOAD_STORAGE_FAILURE_EVENT = 'storageFailure';
-export const ROOM_UPLOAD_USAGE_META = 'retro-room-upload-usage-v1';
 
 const startsWithSignature = (buf, signature) => (
   buf.length >= signature.length && buf.subarray(0, signature.length).equals(signature)

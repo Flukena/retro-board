@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { runInNewContext } from 'node:vm';
 import { planVoteFinalization } from './src/vote-finalization.js';
+import { RelayMaintenance } from './src/relay-maintenance.js';
 import { geometryErrorForPatch } from './src/board-geometry.js';
 
 const require = createRequire(import.meta.url);
@@ -28,7 +29,7 @@ test('storage latch requests one fatal drain and retains the first failure', () 
   const callbacks = [];
   const first = new Error('first storage failure');
   const second = new Error('second storage failure');
-  const result = evaluate(`${section('const markStorageFailure =', '\nconst reconcileUploadUsage')}\n
+  const result = evaluate(`${section('const markStorageFailure =', '\nroomRegistry.on')}\n
     markStorageFailure(first); markStorageFailure(second);
     callbacks.forEach((callback) => callback()); storageFailure;`, {
     storageFailure: null, docs: new Map(), console: QUIET_LOGGER,
@@ -73,19 +74,20 @@ test('one bad room does not skip later rooms or storage and upload maintenance',
   const finalized = [];
   let scans = 0;
   let reconciles = 0;
-  await evaluate(`${section('let maintenanceRunning =', '\nconst maintenanceTimer')}\nrunMaintenance();`, {
-    console: QUIET_LOGGER, roomLogId: () => 'keyed-id',
+  await new RelayMaintenance().run({
+    log: QUIET_LOGGER,
     docs: new Map([['bad', {}], ['healthy', {}]]), uploadBuckets: new Map(), rateBuckets: {},
     imageReadIpBuckets: new Map(), imageReadRoomBuckets: new Map(), roomPersistenceChurn: new Map(),
-    blockedRooms: new Map(), DB_DIR: 'unused', UPLOADS_DIR: 'unused', dbUsageBytes: 0,
-    MAX_DB_BYTES: Infinity, UPLOAD_RETENTION_DAYS: 0, REQUEST_TIMEOUT_MS: AT_TIME_MS,
-    uploadState: { active: 0 }, fs: { promises: { readdir: async () => [] } },
-    directorySizeSync: () => { scans += 1; return 0; },
-    reconcileUploadUsage: async () => { reconciles += 1; },
-    finalizeExpiredVotes: (name) => {
+    blockedRooms: new Map(), config: { MAX_DB_BYTES: Infinity, UPLOAD_RETENTION_DAYS: 0, REQUEST_TIMEOUT_MS: AT_TIME_MS },
+    uploadState: { active: 0 }, io: { readdir: async () => [] },
+    storage: {
+      measureDatabase: () => { scans += 1; return 0; },
+      reconcileUploadUsage: async () => { reconciles += 1; },
+    },
+    votes: { finalize: (name) => {
       if (name === 'bad') { throw new Error('bad room'); }
       finalized.push(name);
-    },
+    } },
     rejectionCounters: { flush() {} },
   });
   assert.deepEqual(finalized, ['healthy']);
@@ -95,7 +97,7 @@ test('one bad room does not skip later rooms or storage and upload maintenance',
 
 test('upgrade rejections count status without exposing socket data', () => {
   const counts = [];
-  evaluate(`${section('const rejectUpgrade =', '\nlet maintenanceRunning')}\nrejectUpgrade(socket, status);`, {
+  evaluate(`${section('const rejectUpgrade =', '\nconst maintenance =')}\nrejectUpgrade(socket, status);`, {
     socket: { end() {}, destroy() {} }, status: 429,
     rejectionCounters: { upgrade: (status) => counts.push(status) },
   });

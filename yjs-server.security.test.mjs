@@ -26,6 +26,8 @@ const syncProtocol = require('y-protocols/sync');
 const ALLOWED_ORIGIN = 'https://allowed.example';
 const CAPACITY_PROFILE = Object.fromEntries((await readFile(join(here, 'config/room-capacity.env'), 'utf8'))
   .split('\n').filter((line) => /^YJS_[A-Z_]+=\d+$/.test(line)).map((line) => line.split('=')));
+const REGISTRY_STALE_USAGE_BYTES = 90;
+const REGISTRY_STALE_USAGE_FILES = 4;
 const DEFAULT_SESSION_SECRET = 'test-only-session-secret-0000000000000000';
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -839,6 +841,34 @@ test('quarantines a token-shaped document without the room commit marker', async
   server = await startServer({}, root);
   assert.equal((await apiPost(server, '/api/room-session', { code, token })).status, 404);
   assert.match(server.output(), /quarantined incomplete room/);
+});
+
+test('startup repairs a missing room handle and reconciles persisted upload usage', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'retro-yjs-security-registry-repair-'));
+  let server;
+  t.after(async () => {
+    await server?.stop();
+    await rm(root, { recursive: true, force: true });
+  });
+  server = await startServer({}, root);
+  const room = await createRoom(server);
+  await server.stop();
+  const name = `yjs/board-${room.code}-${room.token}`;
+  const persisted = new LeveldbPersistence(join(root, 'db'));
+  await persisted.setMeta(name, 'retro-room-handle-v1', 'invalid-handle');
+  await persisted.setMeta(name, 'retro-room-upload-usage-v1', { bytes: REGISTRY_STALE_USAGE_BYTES, files: REGISTRY_STALE_USAGE_FILES });
+  await persisted.destroy();
+  server = await startServer({}, root);
+  const session = await createSession(server, room);
+  assert.match(session.roomHandle, /^[A-Za-z0-9_-]{32}$/);
+  assert.match(server.output(), /reconciled room upload usage/);
+  await server.stop();
+  const repaired = new LeveldbPersistence(join(root, 'db'));
+  try {
+    assert.equal(await repaired.getMeta(name, 'retro-room-handle-v1'), session.roomHandle);
+    assert.deepEqual(await repaired.getMeta(name, 'retro-room-upload-usage-v1'), { bytes: 0, files: 0 });
+    assert.equal(await repaired.getMeta(name, 'retro-room-registration-v1'), 1);
+  } finally { await repaired.destroy(); }
 });
 
 test('finalizes an expired vote when the room reopens without an admin', async (t) => {

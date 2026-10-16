@@ -1,15 +1,15 @@
 // Yjs WebSocket relay with LevelDB persistence.
 // Single source of truth for collaborative state.
 
-import { envInt, envBool, readRelayConfig, MILLISECONDS_PER_SECOND, MILLISECONDS_PER_HOUR, MILLISECONDS_PER_DAY, ROOM_ID_ALLOCATION_ATTEMPTS, ROOM_BLOCK_TTL_MS, BLOCKED_ROOM_ENTRIES_PER_ACTIVE_ROOM, ROOM_HANDLE_RE, LARGE_UPDATE_LOG_THRESHOLD_BYTES, VOTE_EXPIRY_RETRY_INTERVAL_MS, MAINTENANCE_INTERVAL_MS, STORE_OPERATION_OVERHEAD_BYTES, MAX_HTTP_TARGET_CHARACTERS, CORS_PREFLIGHT_MAX_AGE_SECONDS, MAX_REQUESTS_PER_SOCKET, RETRY_AFTER_SHORT_SECONDS, RETRY_AFTER_LONG_SECONDS } from './src/relay-config.js';
+import { envInt, envBool, readRelayConfig, MILLISECONDS_PER_SECOND, MILLISECONDS_PER_HOUR, ROOM_BLOCK_TTL_MS, BLOCKED_ROOM_ENTRIES_PER_ACTIVE_ROOM, ROOM_HANDLE_RE, LARGE_UPDATE_LOG_THRESHOLD_BYTES, VOTE_EXPIRY_RETRY_INTERVAL_MS, MAINTENANCE_INTERVAL_MS, STORE_OPERATION_OVERHEAD_BYTES, MAX_HTTP_TARGET_CHARACTERS, CORS_PREFLIGHT_MAX_AGE_SECONDS, MAX_REQUESTS_PER_SOCKET, RETRY_AFTER_SHORT_SECONDS, RETRY_AFTER_LONG_SECONDS } from './src/relay-config.js';
 import { evictOldestBucket, refillTokens, takeTrafficTokens, takeTrafficBudget, createTrafficBucket } from './src/relay-rate-bucket.js';
 import { isExactAllowedOrigin, acceptCredentialOrigin, readJsonBody, sendJson, sendIfWritable, sendUpgradeRejection } from './src/relay-http.js';
 import { roomLogId } from './src/relay-log-id.js';
-import { createUploadState, scanUploadUsage, createRelayUploads, createImageReadBudgets, MIME_EXT, matchesMagicBytes, isStoredImageFilename, UPLOAD_STORAGE_FAILURE_EVENT, ROOM_UPLOAD_USAGE_META } from './src/relay-uploads.js';
+import { createUploadState, scanUploadUsage, createRelayUploads, createImageReadBudgets, MIME_EXT, matchesMagicBytes, UPLOAD_STORAGE_FAILURE_EVENT, ROOM_UPLOAD_USAGE_META } from './src/relay-uploads.js';
 import http from 'http';
 import fs from 'fs';
 import { createRequire } from 'module';
-import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
+import { createHmac, randomBytes, randomUUID } from 'crypto';
 import { isIP } from 'net';
 import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'url';
@@ -18,7 +18,9 @@ import {
   createRelayLifecycle, drainRelay, isRelayReady, STORAGE_FAILURE_LOG, STORAGE_FAILURE_REASON,
   UNHANDLED_REJECTION_EVENT, UNCAUGHT_EXCEPTION_EVENT,
 } from './src/relay-lifecycle.js';
-import { finalizeRelayVotes, maintainRoomVotes } from './src/relay-vote-maintenance.js';
+import { finalizeRelayVotes } from './src/relay-vote-maintenance.js';
+import { RoomRegistry, REGISTRY_STORAGE_FAILURE_EVENT, TOKENIZED_ROOM_RE, fixedDigestEqual, databaseCapacityError } from './src/relay-room-registry.js';
+import { RelayMaintenance, MAINTENANCE_STORAGE_FAILURE_EVENT } from './src/relay-maintenance.js';
 import { createRejectionCounters } from './src/relay-rejection-counters.js';
 
 // yjs, y-leveldb, and y-websocket must all resolve to the SAME yjs module
@@ -50,11 +52,7 @@ const ALLOW_INSECURE_HTTP = envBool('YJS_ALLOW_INSECURE_HTTP');
 // reverse proxy. Otherwise a direct client can forge CF-Connecting-IP/XFF.
 const TRUST_PROXY = envBool('YJS_TRUST_PROXY');
 
-const BOARD_CODE_RE = /^[A-Za-z0-9_-]{3,32}$/;
-const ROOM_TOKEN_RE = /^[A-Za-z0-9_-]{8,64}$/;
-const TOKENIZED_ROOM_RE = /^board-[A-Za-z0-9_-]{3,32}-[A-Za-z0-9_-]{8,64}$/;
 const LEGACY_ROOM_RE = /^board-[A-Za-z0-9_-]{3,32}$/;
-const canonicalDocName = (code, token) => `yjs/board-${code}-${token}`;
 
 // Accept the two paths WebsocketProvider uses in this repo:
 //   dev  /board-<code>-<token>
@@ -301,8 +299,6 @@ const {
   MAX_UPLOAD_FILES,
   MAX_ROOM_UPLOAD_BYTES,
   MAX_ROOM_UPLOAD_FILES,
-  UPLOAD_RETENTION_DAYS,
-  BUCKET_TTL_MS,
   MAX_BUCKETS,
 } = relayConfig;
 fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -384,81 +380,37 @@ for (const name of WIPE) {
   console.log('[yjs] wiped doc', roomLogId(name));
 }
 
-const ROOM_REGISTRATION_META = 'retro-room-registration-v1';
-const ROOM_HANDLE_META = 'retro-room-handle-v1';
-const registeredDocs = new Set();
-const registeredDocDigests = new Map();
-const registeredRoomsByHandle = new Map();
-const registeredRoomHandlesByDoc = new Map();
-const roomUploadUsage = new Map();
-const pendingRoomHandles = new Set();
-let pendingRoomCreations = 0;
-const existingDocNames = new Set(await checkedGetAllDocNames());
-
-const newUniqueRoomHandle = () => {
-  for (let attempt = 0; attempt < ROOM_ID_ALLOCATION_ATTEMPTS; attempt += 1) {
-    const handle = randomBytes(24).toString('base64url');
-    if (!registeredRoomsByHandle.has(handle) && !pendingRoomHandles.has(handle)) return handle;
-  }
-  throw Object.assign(new Error('room handle generation failed'), { code: 'SERVER_UNAVAILABLE' });
+const registryPersistence = {
+  getAllDocNames: checkedGetAllDocNames,
+  getMeta: checkedGetMeta,
+  setMeta: checkedSetMeta,
+  storeUpdate: checkedStoreUpdate,
+  flushDocument: checkedFlushDocument,
+  clearDocument: checkedClearDocument,
+  hasCapacity: () => dbUsageBytes + pendingStoreBytes < MAX_DB_BYTES,
+  reserveStore(estimatedBytes) {
+    if (pendingStoreOps >= MAX_PENDING_STORE_OPS
+        || pendingStoreBytes + estimatedBytes > MAX_PENDING_STORE_BYTES
+        || dbUsageBytes + pendingStoreBytes + estimatedBytes > MAX_DB_BYTES) throw databaseCapacityError();
+    pendingStoreOps += 1;
+    pendingStoreBytes += estimatedBytes;
+    return () => {
+      pendingStoreOps = Math.max(0, pendingStoreOps - 1);
+      pendingStoreBytes = Math.max(0, pendingStoreBytes - estimatedBytes);
+    };
+  },
+  measureDatabase() {
+    dbUsageBytes = directorySizeSync(DB_DIR);
+    return dbUsageBytes;
+  },
 };
-
-const roomHandleForDoc = (docName) => registeredRoomHandlesByDoc.get(docName) || null;
-
-const docRegistrationDigest = (docName) => createHmac('sha256', SESSION_SIGNING_KEY)
-  .update('room-registration\0')
-  .update(docName)
-  .digest();
-
-const registerDocInMemory = (docName, handle) => {
-  if (!ROOM_HANDLE_RE.test(handle)) throw new Error('invalid persisted room handle');
-  const prior = registeredRoomsByHandle.get(handle);
-  if (prior && prior !== docName) throw new Error('room handle collision');
-  registeredDocs.add(docName);
-  registeredDocDigests.set(docName, docRegistrationDigest(docName));
-  registeredRoomsByHandle.set(handle, docName);
-  registeredRoomHandlesByDoc.set(docName, handle);
-  return handle;
-};
-
-const tokenizedExistingDocs = [...existingDocNames].filter((name) => (
-  name.startsWith('yjs/') && TOKENIZED_ROOM_RE.test(name.slice('yjs/'.length))
-));
-for (const docName of tokenizedExistingDocs) {
-  // A document is reachable only after room creation writes this final commit
-  // marker. Older code adopted every token-shaped LevelDB key, which turned a
-  // partial failed creation into a permanent room whose capability was never
-  // delivered to a user. Leave incomplete documents quarantined instead.
-  if ((await checkedGetMeta(docName, ROOM_REGISTRATION_META)) !== 1) {
-    console.warn('[yjs] quarantined incomplete room', { docName: roomLogId(docName) });
-    continue;
-  }
-  if (registeredDocs.size >= MAX_REGISTERED_ROOMS) {
-    throw new Error('existing room count exceeds YJS_MAX_REGISTERED_ROOMS');
-  }
-  let roomHandle = await checkedGetMeta(docName, ROOM_HANDLE_META);
-  if (!ROOM_HANDLE_RE.test(roomHandle || '')) {
-    roomHandle = newUniqueRoomHandle();
-    await checkedSetMeta(docName, ROOM_HANDLE_META, roomHandle);
-  }
-  registerDocInMemory(docName, roomHandle);
-  const storedUsage = await checkedGetMeta(docName, ROOM_UPLOAD_USAGE_META);
-  const persistedBytes = Number.isSafeInteger(storedUsage?.bytes) && storedUsage.bytes >= 0 ? storedUsage.bytes : 0;
-  const persistedFiles = Number.isSafeInteger(storedUsage?.files) && storedUsage.files >= 0 ? storedUsage.files : 0;
-  const actualUsage = initialUploadUsage.roomsByHandle.get(roomHandle) || { bytes: 0, files: 0 };
-  const bytes = initialUploadUsage.complete ? actualUsage.bytes : persistedBytes;
-  const files = initialUploadUsage.complete ? actualUsage.files : persistedFiles;
-  if (initialUploadUsage.complete && (bytes !== persistedBytes || files !== persistedFiles)) {
-    await checkedSetMeta(docName, ROOM_UPLOAD_USAGE_META, { bytes, files });
-    console.warn('[yjs] reconciled room upload usage', {
-      docName: roomLogId(docName),
-      bytes,
-      files,
-    });
-  }
-  roomUploadUsage.set(docName, { bytes, files, reservedBytes: 0, active: 0 });
-}
-dbUsageBytes = directorySizeSync(DB_DIR);
+const roomRegistry = new RoomRegistry({
+  persistence: registryPersistence, Y, maxRooms: MAX_REGISTERED_ROOMS,
+  maxDatabaseBytes: MAX_DB_BYTES, signingKey: SESSION_SIGNING_KEY,
+});
+await roomRegistry.hydrate(initialUploadUsage);
+const { registeredDocs, registeredRoomsByHandle, roomUploadUsage, existingDocNames } = roomRegistry;
+const roomHandleForDoc = (docName) => roomRegistry.roomHandleForDoc(docName);
 
 // Flipped by the first storage failure. Existing clients are closed as well as
 // refusing new upgrades: otherwise they would continue seeing edits that can
@@ -473,6 +425,8 @@ const markStorageFailure = (err) => {
   console.error(STORAGE_FAILURE_LOG, { errorId: roomLogId(String(err)) });
   shutdown(STORAGE_FAILURE_REASON, true);
 };
+
+roomRegistry.on(REGISTRY_STORAGE_FAILURE_EVENT, markStorageFailure);
 
 const reconcileUploadUsage = async () => {
   const scanned = scanUploadUsage(relayConfig);
@@ -996,110 +950,8 @@ for (const name of MIGRATE) {
   }
 }
 
-const BOARD_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
-const randomBoardCode = () => {
-  const bytes = randomBytes(8);
-  let code = '';
-  for (const byte of bytes) code += BOARD_CODE_ALPHABET[byte % BOARD_CODE_ALPHABET.length];
-  return code;
-};
-const randomRoomToken = () => randomBytes(24).toString('base64url');
-
-const createRegisteredRoom = async () => {
-  if (shuttingDown || storageFailure) throw Object.assign(new Error('service unavailable'), { code: 'SERVER_UNAVAILABLE' });
-  if (registeredDocs.size + pendingRoomCreations >= MAX_REGISTERED_ROOMS) {
-    throw Object.assign(new Error('room capacity reached'), { code: 'ROOM_CAPACITY' });
-  }
-  if (dbUsageBytes + pendingStoreBytes >= MAX_DB_BYTES) throw Object.assign(new Error('database capacity reached'), { code: 'ROOM_CAPACITY' });
-  pendingRoomCreations += 1;
-  let storeReserved = false;
-  let estimatedBytes = 0;
-  let roomHandle = null;
-  let docName = null;
-  try {
-    let code;
-    let token;
-    for (let attempt = 0; attempt < ROOM_ID_ALLOCATION_ATTEMPTS; attempt += 1) {
-      code = randomBoardCode();
-      token = randomRoomToken();
-      docName = canonicalDocName(code, token);
-      if (!existingDocNames.has(docName) && !registeredDocs.has(docName)) break;
-      docName = null;
-    }
-    if (!docName) throw new Error('room id generation failed');
-    roomHandle = newUniqueRoomHandle();
-    pendingRoomHandles.add(roomHandle);
-
-    const seed = new Y.Doc();
-    seed.getMap('meta').set('__roomRegistered', 1);
-    const update = Y.encodeStateAsUpdate(seed);
-    seed.destroy();
-    estimatedBytes = update.byteLength + STORE_OPERATION_OVERHEAD_BYTES;
-    if (pendingStoreOps >= MAX_PENDING_STORE_OPS
-        || pendingStoreBytes + estimatedBytes > MAX_PENDING_STORE_BYTES
-        || dbUsageBytes + pendingStoreBytes + estimatedBytes > MAX_DB_BYTES) {
-      throw Object.assign(new Error('database capacity reached'), { code: 'ROOM_CAPACITY' });
-    }
-    pendingStoreOps += 1;
-    pendingStoreBytes += estimatedBytes;
-    storeReserved = true;
-    await checkedStoreUpdate(docName, update);
-    await checkedSetMeta(docName, ROOM_HANDLE_META, roomHandle);
-    await checkedSetMeta(docName, ROOM_UPLOAD_USAGE_META, { bytes: 0, files: 0 });
-    await checkedFlushDocument(docName);
-    dbUsageBytes = directorySizeSync(DB_DIR);
-    if (dbUsageBytes > MAX_DB_BYTES) {
-      const err = Object.assign(new Error('database capacity reached'), { code: 'ROOM_CAPACITY' });
-      markStorageFailure(err);
-      throw err;
-    }
-    // Commit marker comes last. Startup ignores token-shaped documents that do
-    // not have it, so a failed multi-step creation can never become reachable.
-    await checkedSetMeta(docName, ROOM_REGISTRATION_META, 1);
-    existingDocNames.add(docName);
-    registerDocInMemory(docName, roomHandle);
-    roomUploadUsage.set(docName, { bytes: 0, files: 0, reservedBytes: 0, active: 0 });
-    return { code, token };
-  } catch (err) {
-    if (docName && !registeredDocs.has(docName)) {
-      try {
-        await checkedClearDocument(docName);
-        existingDocNames.delete(docName);
-        dbUsageBytes = directorySizeSync(DB_DIR);
-      } catch (cleanupErr) {
-        markStorageFailure(cleanupErr);
-        console.error('[yjs] incomplete room rollback failed', {
-          docName: roomLogId(docName),
-          err: cleanupErr.message,
-        });
-      }
-    }
-    throw err;
-  } finally {
-    pendingRoomCreations = Math.max(0, pendingRoomCreations - 1);
-    if (roomHandle) pendingRoomHandles.delete(roomHandle);
-    if (storeReserved) {
-      pendingStoreOps = Math.max(0, pendingStoreOps - 1);
-      pendingStoreBytes = Math.max(0, pendingStoreBytes - estimatedBytes);
-    }
-  }
-};
-
-const fixedDigestEqual = (left, right) => (
-  Buffer.isBuffer(left)
-  && Buffer.isBuffer(right)
-  && left.byteLength === right.byteLength
-  && timingSafeEqual(left, right)
-);
-const DUMMY_REGISTRATION_DIGEST = randomBytes(32);
-
-const registeredDocForCapability = (code, token) => {
-  if (!BOARD_CODE_RE.test(code) || !ROOM_TOKEN_RE.test(token)) return null;
-  const docName = canonicalDocName(code, token);
-  const expected = registeredDocDigests.get(docName) || DUMMY_REGISTRATION_DIGEST;
-  const candidate = docRegistrationDigest(docName);
-  return fixedDigestEqual(candidate, expected) && registeredDocs.has(docName) ? docName : null;
-};
+const createRegisteredRoom = () => roomRegistry.createRoom({ unavailable: shuttingDown || Boolean(storageFailure) });
+const registeredDocForCapability = (code, token) => roomRegistry.registeredDocForCapability(code, token);
 
 const ROOM_COOKIE_NAME = 'rb_room_session';
 const sessionSignature = (handle, expiresAt, docName) => createHmac('sha256', SESSION_SIGNING_KEY)
@@ -1688,77 +1540,15 @@ const rejectUpgrade = (socket, status) => {
   sendUpgradeRejection(socket, status);
 };
 
-let maintenanceRunning = false;
-const runMaintenance = async () => {
-  if (maintenanceRunning) return;
-  maintenanceRunning = true;
-  try {
-    const now = Date.now();
-    for (const [ip, bucket] of uploadBuckets) {
-      if (now - bucket.lastSeen > BUCKET_TTL_MS) uploadBuckets.delete(ip);
-    }
-    for (const buckets of Object.values(rateBuckets)) {
-      for (const [key, bucket] of buckets) {
-        if (now - bucket.lastSeen > BUCKET_TTL_MS) buckets.delete(key);
-      }
-    }
-    for (const buckets of [imageReadIpBuckets, imageReadRoomBuckets]) {
-      for (const [key, bucket] of buckets) {
-        if (now - bucket.lastSeen > BUCKET_TTL_MS) buckets.delete(key);
-      }
-    }
-    for (const [docName, churn] of roomPersistenceChurn) {
-      if (!churn.compactionPromise
-          && (churn.uncompactedBytes >= ROOM_COMPACT_AFTER_BYTES
-            || churn.uncompactedUpdates >= ROOM_COMPACT_AFTER_UPDATES)) {
-        scheduleRoomCompaction(docName, { remeasure: true });
-      }
-    }
-    maintainRoomVotes(docs, finalizeExpiredVotes, now, (docName, err) => {
-      console.error('[yjs] vote finalization failed', { docName: roomLogId(docName), errorId: roomLogId(String(err)) });
-    });
-    for (const [name, expiresAt] of blockedRooms) {
-      if (expiresAt <= now) blockedRooms.delete(name);
-    }
-    dbUsageBytes = directorySizeSync(DB_DIR);
-    if (dbUsageBytes > MAX_DB_BYTES) markStorageFailure(new Error('configured database quota exceeded'));
-
-    // Final image deletion is disabled by default. Operators may explicitly
-    // configure retention after choosing a policy suitable for their boards.
-    if (UPLOAD_RETENTION_DAYS > 0) {
-      const cutoff = now - UPLOAD_RETENTION_DAYS * MILLISECONDS_PER_DAY;
-      let removed = 0;
-      const entries = await fs.promises.readdir(UPLOADS_DIR, { withFileTypes: true });
-      for (const entry of entries) {
-        if (!entry.isFile() || !isStoredImageFilename(entry.name)) continue;
-        const path = join(UPLOADS_DIR, entry.name);
-        const stat = await fs.promises.stat(path);
-        if (stat.mtimeMs >= cutoff) continue;
-        await fs.promises.unlink(path);
-        removed += 1;
-      }
-      if (removed) console.log('[yjs] upload retention sweep', { removed });
-    }
-
-    // Interrupted uploads are never published. Reap only our private temp-file
-    // namespace, and only after it is older than twice the request deadline.
-    const tempCutoff = now - REQUEST_TIMEOUT_MS * 2;
-    const tempEntries = await fs.promises.readdir(UPLOADS_DIR, { withFileTypes: true });
-    for (const entry of tempEntries) {
-      if (!entry.isFile() || !/^\.upload-[a-f0-9-]+\.tmp$/.test(entry.name)) continue;
-      const path = join(UPLOADS_DIR, entry.name);
-      const stat = await fs.promises.stat(path);
-      if (stat.mtimeMs < tempCutoff) await fs.promises.unlink(path);
-    }
-    if (uploadState.active === 0) await reconcileUploadUsage();
-  } catch (err) {
-    if (err?.code === 'STORAGE_FAILURE') markStorageFailure(err);
-    console.error('[yjs] maintenance failed', { err: err.message });
-  } finally {
-    rejectionCounters.flush();
-    maintenanceRunning = false;
-  }
-};
+const maintenance = new RelayMaintenance();
+maintenance.on(MAINTENANCE_STORAGE_FAILURE_EVENT, markStorageFailure);
+const runMaintenance = () => maintenance.run({
+  config: relayConfig, log: console, uploadBuckets, rateBuckets, imageReadIpBuckets, imageReadRoomBuckets,
+  roomPersistenceChurn, docs, blockedRooms, uploadState, rejectionCounters,
+  compaction: { schedule: scheduleRoomCompaction },
+  votes: { finalize: finalizeExpiredVotes },
+  storage: { measureDatabase: registryPersistence.measureDatabase, reconcileUploadUsage },
+});
 const maintenanceTimer = setInterval(runMaintenance, MAINTENANCE_INTERVAL_MS);
 maintenanceTimer.unref();
 
@@ -2209,7 +1999,7 @@ const lifecycle = createRelayLifecycle({
     const roomCount = docs.size;
     await drainRelay({
       server, clients: wss.clients, httpGraceMs: HTTP_SHUTDOWN_GRACE_MS,
-      isBusy: () => maintenanceRunning || pendingRoomCreations > 0 || uploadState.active > 0 || pendingStoreOps > 0,
+      isBusy: () => maintenance.running || roomRegistry.pendingRoomCreations > 0 || uploadState.active > 0 || pendingStoreOps > 0,
       compactions: () => [...roomPersistenceChurn.values()].map((churn) => churn.compactionPromise).filter(Boolean),
       destroyStorage: () => ldb.destroy(),
     });
