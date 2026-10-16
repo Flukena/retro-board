@@ -63,6 +63,10 @@ inflate memory or overwrite an active peer; it does not authenticate a person.
 A malicious link holder can spoof presence fields or temporarily squat an
 offline participant's ID.
 
+When `showNonVoters` is enabled, vote results persist presence names in the
+room document. Late joiners can see these historical names, and LevelDB backups
+retain them. JSON/ZIP board exports omit these runtime result snapshots.
+
 Hidden card text is omitted from the normal DOM and redacted from exports made
 by non-owners. It is nevertheless synchronized in plaintext to every room
 peer, so a malicious link holder can read it with a custom client. Do not put

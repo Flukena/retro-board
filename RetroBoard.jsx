@@ -32,6 +32,8 @@ import {
   ConfirmDialog, NameDialog, HelpDialog, CommentsDialog, AdminPinDialog, TemplateNameDialog, TEMPLATE_NAME_MODE,
 } from './src/Modals.jsx';
 import { MODAL_SIZE, BUTTON_VARIANT } from './src/ui-variants.js';
+import { CLEARED_VOTE_RESULTS, voteSessionScope, resetVoteSessionEntries } from './src/vote-session-lifecycle.js';
+import { confirmThenPin } from './src/confirm-then-pin.js';
 import { importWarningNotes } from './src/modal-model.js';
 import { ToolDock, TOOL_ID } from './src/ToolDock.jsx';
 import { ZoomControls } from './src/ZoomControls.jsx';
@@ -40,7 +42,7 @@ import { templateRows, followBannerModel } from './src/chrome-model.js';
 import { SelectionToolbar, GroupSelectionToolbar } from './src/SelectionToolbar.jsx';
 import { selectionToolbarAnchor, groupSelectionToolbarAnchor } from './src/selection-toolbar-model.js';
 import { ZoneCard } from './src/ZoneCard.jsx';
-import { effectiveRevealed, zoneEffectiveRevealed, zoneGroupIds, isNestedIn, nestedZoneCount } from './src/zone-actions.js';
+import { effectiveRevealed, zoneEffectiveRevealed, zoneGroupIds, nestedZoneCount } from './src/zone-actions.js';
 import { useZoneHeaderActions } from './src/useZoneHeaderActions.js';
 import { Toast } from './src/Toast.jsx';
 import { TopBar } from './src/TopBar.jsx';
@@ -97,7 +99,6 @@ import {
   normalizeViewport,
 } from './src/local-preferences.js';
 import { boardVoteIsOpen, timerDockModel, voteTimerIsOpen, voteTimerPhaseSignature } from './src/vote-timing.js';
-import { planVoteFinalization } from './src/vote-finalization.js';
 import { DEFAULT_BOARD, storage, adminRoleStorage } from './src/room-storage.js';
 import { effectiveZIndex, compareZOrder, swapZOrderEntries } from './src/z-order.js';
 import { IMAGE_MAX_MIB_LABEL, prepareImageBlob, readBackupImage, sanitizeImportedImages } from './src/image-upload.js';
@@ -1155,19 +1156,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     const b = boardRef.current;
     const rootZone = b.items.find((i) => i.id === zoneId && i.type === 'zone');
     if (!rootZone?.voteTimer) return;
-    const plan = planVoteFinalization(b.items, votesByItem, zoneId, Date.now());
+    const group = zoneGroupIds(rootZone, b.items);
+    b.items.filter((item) => group.has(item.id) || group.has(effectiveOwnerZone(item, b.items)?.id))
+      .forEach((item) => recentlyMovedRef.current.delete(item.id));
+    const plan = window.storage.finalizeVoteSession(zoneId, rootZone.voteTimer.startedAt, Object.values(window.storage.getPresenceSnapshot()), Date.now());
     if (!plan) return;
-    if (plan.entries.length > 1) {
-      // The sort is an authoritative reposition — it must win over any
-      // grace-period protection a prior drag left on these same ids,
-      // otherwise the self-echoed 'system' write below gets reverted back
-      // to the pre-sort dragged position by the recentlyMoved guard.
-      plan.entries.forEach((e) => recentlyMovedRef.current.delete(e.id));
-    }
-    if (!storage.updateItems(plan.entries, { silent: true })) {
-      reportWriteFailure();
-      return;
-    }
     const patchById = new Map(plan.entries.map((entry) => [entry.id, entry.patch]));
     setBoard((prev) => ({
       ...prev,
@@ -1175,38 +1168,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         patchById.has(item.id) ? { ...item, ...patchById.get(item.id) } : item
       )),
     }));
-    let totalVotes = 0;
-    const voters = new Set();
-    const votesByUser = new Map();
-    plan.stickies
-      .filter((s) => plan.zoneIds.has(plan.ownerByStickyId.get(s.id)))
-      .forEach((s) => {
-        const set = votesByItem.get(s.id);
-        if (!set) return;
-        totalVotes += set.size;
-        set.forEach((v) => {
-          voters.add(v);
-          votesByUser.set(v, (votesByUser.get(v) || 0) + 1);
-        });
-      });
-    let msg = t('vote.results', { n: totalVotes, users: voters.size });
-    if (rootZone.voteTimer.showNonVoters) {
-      const limit = rootZone.voteTimer.voteLimit;
-      // With a quota, "incomplete" covers both zero votes and a partial
-      // count (0/N is just the zero case of falling short of N) — one
-      // unified list instead of two separate ones. Without a quota there's
-      // no "full" to fall short of, so only the zero-vote case applies.
-      const incomplete = limit != null
-        ? onlineUsers
-          .filter((u) => (votesByUser.get(u.userId) || 0) < limit)
-          .map((u) => `${u.name} (${votesByUser.get(u.userId) || 0}/${limit})`)
-        : onlineUsers.filter((u) => !voters.has(u.userId)).map((u) => u.name);
-      if (incomplete.length) msg += ` ${t('vote.results.incompleteVoters', { names: incomplete.join(', ') })}`;
-    }
-    // Sticky: this can list every non-voter by name — the normal 3.2s
-    // auto-dismiss isn't enough time to read it during a live meeting.
-    setToast({ msg, type: 'info', sticky: true });
-  }, [votesByItem, onlineUsers, t, reportWriteFailure]);
+  }, []);
 
   /* ============================================================
      Persist viewport (per-user) — debounced lightly
@@ -3037,6 +2999,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       if (clone.type === 'zone') {
         clone.voteTimer = null;
         clone.lastResultsAt = null;
+        delete clone.voteResults;
         clone.votingLocked = false;
       }
       delete clone.zIndex;
@@ -3293,28 +3256,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     const rootZone = items.find((i) => i.id === zoneId && i.type === 'zone');
     if (!rootZone) return;
     const nowMs = Date.now();
-    // Presence-based, not endsAt-based: an expired-but-not-yet-finalized
-    // timer still blocks a related start — the natural-expiry reaper hasn't
-    // run yet, and letting a new session start in that window lets the
-    // reaper's later widened finalize trample it once it does run.
-    const isActive = (zone) => !!zone?.voteTimer;
-    const descendantZones = [...zoneGroupIds(rootZone, items)]
-      .map((id) => items.find((i) => i.id === id))
-      .filter((zone) => zone && zone.type === 'zone');
-    // A related session must be stopped before this zone can start one.
-    let relatedActive = descendantZones.some(isActive);
-    if (!relatedActive) {
-      let ancestor = effectiveOwnerZone(rootZone, items);
-      const visited = new Set();
-      while (ancestor && !visited.has(ancestor.id)) {
-        if (isActive(ancestor)) {
-          relatedActive = true;
-          break;
-        }
-        visited.add(ancestor.id);
-        ancestor = effectiveOwnerZone(ancestor, items);
-      }
-    }
+    // Expired-but-unfinalized timers still block related starts.
+    const { relatedActive, capturedIds, staleResultZoneIds } = voteSessionScope(rootZone, items);
     if (relatedActive) {
       setToast({ msg: t('vote.session.relatedActive'), type: 'warn' });
       return;
@@ -3326,19 +3269,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       voteTimer: {
         startedAt, endsAt, voteLimit: limit, hideResults: !!hideResults, showNonVoters: !!showNonVoters,
       },
-      lastResultsAt: null,
+      ...CLEARED_VOTE_RESULTS,
       votingLocked: false,
     };
-    const capturedIds = items
-      .filter((item) => item.type === 'sticky')
-      .filter((sticky) => {
-        const owner = effectiveOwnerZone(sticky, items);
-        return !!owner && (owner.id === rootZone.id || isNestedIn(owner, rootZone, items));
-      })
-      .map((sticky) => sticky.id);
-    const staleResultZoneIds = descendantZones
-      .filter((zone) => zone.lastResultsAt)
-      .map((zone) => zone.id);
     try {
       if (window.storage.startVoteSession(zoneId, timerPatch, staleResultZoneIds, capturedIds) !== true) {
         reportWriteFailure();
@@ -3352,7 +3285,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       ...prev,
       items: prev.items.map((it) => {
         if (it.id === zoneId) return { ...it, ...timerPatch };
-        if (staleResultZoneIds.includes(it.id)) return { ...it, lastResultsAt: null };
+        if (staleResultZoneIds.includes(it.id)) return { ...it, ...CLEARED_VOTE_RESULTS };
         return it;
       }),
     }));
@@ -3404,9 +3337,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     if (!isAdmin) return;
     // Votes live in CRDT keys; clearing them re-renders via the vote subscription.
     window.storage?.clearAllVotes?.();
-    const zoneEntries = boardRef.current.items
-      .filter((i) => i.type === 'zone' && (i.voteTimer || i.lastResultsAt))
-      .map((z) => ({ id: z.id, patch: { voteTimer: null, lastResultsAt: null } }));
+    const zoneEntries = resetVoteSessionEntries(boardRef.current.items);
     if (zoneEntries.length) {
       if (!storage.updateItems(zoneEntries)) { reportWriteFailure(); return; }
       const patchById = new Map(zoneEntries.map((entry) => [entry.id, entry.patch]));
@@ -3593,7 +3524,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     } = pendingImport;
     const rawItems = items.map((item) => (
       item.type === 'zone'
-        ? { ...item, voteTimer: null, lastResultsAt: null, votingLocked: false }
+        ? { ...item, voteTimer: null, lastResultsAt: null, voteResults: null, votingLocked: false }
         : item
     ));
     setImportBusy(true);
@@ -4369,6 +4300,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         onChange={onImportFileChange} style={{ display: 'none' }} />
       {renderTopBar()}
       <TopCenterStack
+        board={board} userId={userId} roomHandle={window.storage.getRoomHandle?.()} now={now}
         follow={stackFollow}
         timers={stackTimers}
         votesUsed={votesUsed}
@@ -4432,7 +4364,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           cancelLabel={t('common.cancel')}
           confirmLabel={t('unlockAll.confirm.ok')}
           onCancel={() => setConfirmUnlockAll(false)}
-          onConfirm={() => requireAdminPin(adminUnlockAll)}
+          onConfirm={() => confirmThenPin(setConfirmUnlockAll, requireAdminPin, adminUnlockAll)}
         />
       )}
       {confirmResetVotes && (
@@ -4443,7 +4375,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           cancelLabel={t('common.cancel')}
           confirmLabel={t('reset.confirm.ok')}
           onCancel={() => setConfirmResetVotes(false)}
-          onConfirm={() => requireAdminPin(adminResetVotes)}
+          onConfirm={() => confirmThenPin(setConfirmResetVotes, requireAdminPin, adminResetVotes)}
         />
       )}
       {pendingImport && (
@@ -4495,7 +4427,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           confirmLabel={t('clear.confirm.ok')}
           confirmVariant={BUTTON_VARIANT.DANGER}
           onCancel={() => setConfirmClear(false)}
-          onConfirm={() => requireAdminPin(adminClearBoard)}
+          onConfirm={() => confirmThenPin(setConfirmClear, requireAdminPin, adminClearBoard)}
         />
       )}
 

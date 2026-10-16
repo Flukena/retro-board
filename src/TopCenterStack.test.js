@@ -15,3 +15,23 @@ test('TopCenterStack preserves presentation and event contracts', async () => {
     assert.match(markup, /aria-label=/);
   });
 });
+
+test('TopCenterStack renders nothing when all room results are dismissed', async () => {
+  await withChromeModule('/src/TopCenterStack.jsx', ({ TopCenterStack }) => {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const key = JSON.stringify(['room', 'zone:1']);
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: { localStorage: { getItem: () => JSON.stringify([key]) } } });
+    try {
+      const board = { items: [{ id: 'zone', type: 'zone', voteResults: { resultId: 'zone:1' } }] };
+      const html = renderToStaticMarkup(React.createElement(TopCenterStack, { board, roomHandle: 'room', timers: [] }));
+      assert.equal(html, '');
+      const follow = renderToStaticMarkup(React.createElement(TopCenterStack, {
+        board, roomHandle: 'room', timers: [], follow: { name: 'Still following', hue: 40 },
+      }));
+      assert.match(follow, /Still following/);
+    } finally {
+      if (previous) Object.defineProperty(globalThis, 'window', previous);
+      else delete globalThis.window;
+    }
+  });
+});

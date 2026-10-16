@@ -1,3 +1,5 @@
+import { readPlayerPresence } from './player-cursors.js';
+import { readCanonicalVotes } from './canonical-votes.js';
 import { planVoteFinalization } from './vote-finalization.js';
 import { geometryErrorForPatch } from './board-geometry.js';
 
@@ -7,7 +9,6 @@ const ZONE_TYPE = 'zone';
 const ITEM_TYPE_KEY = 'type';
 const VOTE_TIMER_KEY = 'voteTimer';
 const TIMER_EXPIRY_ORIGIN = 'timer-expiry';
-const VOTE_KEY_PATTERN = /^s\|\|vote:([^:]+):([^:]+)$/;
 
 const expiredZones = (yItems, Y, atTime) => {
   const expired = [];
@@ -32,20 +33,6 @@ const flattenItems = (yItems, Y) => {
   return { items, itemsById };
 };
 
-const votesForDoc = (ydoc) => {
-  const votes = new Map();
-  ydoc.getMap(VOTES_MAP_KEY).forEach((value, key) => {
-    if (!value) return;
-    const match = VOTE_KEY_PATTERN.exec(key);
-    if (!match) return;
-    const [, itemId, voterId] = match;
-    let voters = votes.get(itemId);
-    if (!voters) { voters = new Set(); votes.set(itemId, voters); }
-    voters.add(voterId);
-  });
-  return votes;
-};
-
 const applyPlan = (ydoc, yItems, zoneId, plan, Y, atTime) => {
   ydoc.transact(() => {
     const liveTimer = yItems.get(zoneId)?.get(VOTE_TIMER_KEY);
@@ -62,10 +49,13 @@ export const finalizeRelayVotes = (ydoc, Y, atTime, invalidGeometry) => {
   const yItems = ydoc.getMap(ITEMS_MAP_KEY);
   const expired = expiredZones(yItems, Y, atTime);
   if (!expired.length) return;
+  const participants = Object.values(readPlayerPresence(
+    ydoc.awareness?.getStates() || new Map(), ydoc.awareness?.meta, atTime,
+  ));
   const { items, itemsById } = flattenItems(yItems, Y);
-  const votesByItem = votesForDoc(ydoc);
+  const votesByItem = readCanonicalVotes(ydoc.getMap(VOTES_MAP_KEY));
   for (const zoneId of expired) {
-    const plan = planVoteFinalization(items, votesByItem, zoneId, atTime);
+    const plan = planVoteFinalization(items, votesByItem, zoneId, atTime, participants);
     if (!plan || plan.entries.some((entry) => {
       const current = itemsById.get(entry.id);
       return !current || geometryErrorForPatch(current, entry.patch);

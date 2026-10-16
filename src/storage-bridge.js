@@ -30,6 +30,9 @@
 //   translated into a granular field-level diff against the current Yjs
 //   state, so the UI code stays unchanged.
 
+import { CLEARED_VOTE_RESULTS } from './vote-session-lifecycle.js';
+import { readCanonicalVotes } from './canonical-votes.js';
+import { planVoteFinalization } from './vote-finalization.js';
 import * as Y from 'yjs';
 import { attachClientSync } from './client-sync.js';
 import { decodeRemoteBoard } from './remote-board-decoder.js';
@@ -697,7 +700,7 @@ const remoteSelectionSignature = (selection) => Array.from(selection.entries())
   .join('|');
 let lastRemoteSelectionSignature = '';
 const readPresenceMap = () => readPlayerPresence(
-  provider?.awareness.getStates() || new Map(),
+  provider?.awareness.getStates() || new Map(), provider?.awareness.meta,
 );
 
 if (provider) {
@@ -1095,6 +1098,7 @@ if (provider) {
         if (yItems.has(itemId)) yItems.delete(itemId);
       }, 'local');
     },
+    getRoomHandle() { return getActiveRoomSession()?.roomHandle || ''; },
     snapshotVotes() {
       const out = new Map();
       indexedVotes.forEach((voters, itemId) => {
@@ -1177,14 +1181,30 @@ if (provider) {
       if (!keys.length) return;
       ydoc.transact(() => { keys.forEach((k) => ymap.delete(k)); }, 'local');
     },
+    finalizeVoteSession(zoneId, expectedStartedAt, participants, atTime) {
+      let finalized = null;
+      ydoc.transact(() => {
+        const timer = yItems.get(zoneId)?.get('voteTimer');
+        if (!timer || timer.startedAt !== expectedStartedAt) return;
+        const { items } = readBoardSnapshot();
+        const votes = readCanonicalVotes(ymap);
+        const plan = planVoteFinalization(items, votes, zoneId, atTime, participants);
+        if (!plan || plan.entries.some(({ id, patch }) => geometryErrorForPatch(
+          readItemSnapshot(yItems.get(id), id), patch,
+        ))) return;
+        plan.entries.forEach(({ id, patch }) => patchExistingItem(id, patch));
+        finalized = plan;
+      }, 'system');
+      return finalized;
+    },
     startVoteSession(rootZoneId, timerPatch, staleResultZoneIds, clearedItemIds) {
       const root = yItems.get(rootZoneId);
       if (!(root instanceof Y.Map) || root.get('type') !== 'zone'
           || root.get('voteTimer') || !timerPatch?.voteTimer
           || !Array.isArray(staleResultZoneIds) || !Array.isArray(clearedItemIds)) return false;
       ydoc.transact(() => {
-        patchExistingItem(rootZoneId, timerPatch);
-        staleResultZoneIds.forEach((id) => patchExistingItem(id, { lastResultsAt: null }));
+        patchExistingItem(rootZoneId, { ...timerPatch, ...CLEARED_VOTE_RESULTS });
+        staleResultZoneIds.forEach((id) => patchExistingItem(id, CLEARED_VOTE_RESULTS));
         if (clearedItemIds.length) {
           const prefixes = clearedItemIds.map((id) => `${VOTE_PREFIX}${id}:`);
           const keys = [];
