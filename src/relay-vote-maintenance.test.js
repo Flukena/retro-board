@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { PLAYER_PRESENCE_STALE_MS } from './player-cursors.js';
+import { readPlayerPresence, PLAYER_PRESENCE_STALE_MS } from './player-cursors.js';
 import { finalizeRelayVotes, maintainRoomVotes } from './relay-vote-maintenance.js';
 
 const require = createRequire(import.meta.url);
@@ -76,7 +76,7 @@ test('relay snapshots awareness only after expiry, missing awareness is optional
   } finally { doc.destroy(); }
 });
 
-test('relay excludes expired protocol slots and merges duplicate users by the shared presence rule', () => {
+test('relay excludes expired slots and normalizes result names while live presence still selects the newest tab', () => {
   const doc = new Y.Doc();
   const finalizedAt = 100_000;
   const states = new Map([
@@ -91,7 +91,51 @@ test('relay excludes expired protocol slots and merges duplicate users by the sh
       voteTimer: { startedAt: 10, endsAt: finalizedAt, showNonVoters: true } }));
     doc.getMap('items').set('zone', zone);
     finalizeRelayVotes(doc, Y, finalizedAt, () => assert.fail('geometry'));
-    assert.deepEqual(zone.get('voteResults').participants, [{ userId: 'live', name: 'Z newest tab', votes: 0 }]);
+    assert.equal(readPlayerPresence(states, doc.awareness.meta, finalizedAt).live.name, 'Z newest tab');
+    assert.deepEqual(zone.get('voteResults').participants, [{ userId: 'live', name: 'A older tab', votes: 0 }]);
     assert.equal(zone.get('voteResults').presentCount, 1);
   } finally { doc.destroy(); }
+});
+
+function finalizeParticipantFixture(states, showNonVoters = true) {
+  const doc = new Y.Doc();
+  doc.awareness = { getStates: () => states,
+    meta: new Map([...states.keys()].map((id) => [id, { lastUpdated: DEADLINE_MS }])) };
+  try {
+    const zone = new Y.Map(Object.entries({ type: 'zone', x: 0, y: 0, w: ZONE_WIDTH_PX, h: ZONE_HEIGHT_PX,
+      voteTimer: { startedAt: 1, endsAt: DEADLINE_MS, showNonVoters } }));
+    doc.getMap('items').set('zone', zone);
+    finalizeRelayVotes(doc, Y, DEADLINE_MS, () => assert.fail('valid geometry rejected'));
+    return { timer: zone.get('voteTimer'), result: zone.get('voteResults') };
+  } finally { doc.destroy(); }
+}
+
+test('malformed JSON cursor and view cannot prevent expired votes from persisting results', () => {
+  const invalidNumber = JSON.parse('{"toString":null,"valueOf":null}');
+  const malformedMotion = [
+    { cursor: { x: invalidNumber, y: 0, updatedAt: DEADLINE_MS } },
+    { view: { zoom: invalidNumber, updatedAt: DEADLINE_MS } },
+  ];
+  for (const showNonVoters of [false, true]) {
+    for (const motion of malformedMotion) {
+      const { timer, result } = finalizeParticipantFixture(new Map([[1, {
+        user: { userId: 'present', name: 'Present' }, ...motion,
+      }]]), showNonVoters);
+      assert.equal(timer, null);
+      assert.equal(result.finalizedAt, DEADLINE_MS);
+      assert.equal(result.presentCount, 1);
+      assert.equal(Object.hasOwn(result, 'participants'), showNonVoters);
+    }
+  }
+});
+
+test('relay results are identical when equal-lastSeen duplicate awareness entries are reversed', () => {
+  const entries = [
+    [1, { user: { userId: 'person', name: 'Zed', lastSeen: 1 } }],
+    [2, { user: { userId: 'person', name: 'Ada', lastSeen: 1 } }],
+  ];
+  const forward = finalizeParticipantFixture(new Map(entries)).result;
+  const reverse = finalizeParticipantFixture(new Map([...entries].reverse())).result;
+  assert.deepEqual(forward, reverse);
+  assert.deepEqual(forward.participants, [{ userId: 'person', name: 'Ada', votes: 0 }]);
 });

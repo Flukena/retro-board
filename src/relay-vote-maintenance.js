@@ -1,4 +1,4 @@
-import { readPlayerPresence } from './player-cursors.js';
+import { readVoteResultParticipants } from './vote-result-participants.js';
 import { readCanonicalVotes } from './canonical-votes.js';
 import { planVoteFinalization } from './vote-finalization.js';
 import { geometryErrorForPatch } from './board-geometry.js';
@@ -49,9 +49,7 @@ export const finalizeRelayVotes = (ydoc, Y, atTime, invalidGeometry) => {
   const yItems = ydoc.getMap(ITEMS_MAP_KEY);
   const expired = expiredZones(yItems, Y, atTime);
   if (!expired.length) return;
-  const participants = Object.values(readPlayerPresence(
-    ydoc.awareness?.getStates() || new Map(), ydoc.awareness?.meta, atTime,
-  ));
+  const participants = readVoteResultParticipants(ydoc.awareness, atTime);
   const { items, itemsById } = flattenItems(yItems, Y);
   const votesByItem = readCanonicalVotes(ydoc.getMap(VOTES_MAP_KEY));
   for (const zoneId of expired) {

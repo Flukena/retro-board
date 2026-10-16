@@ -185,3 +185,33 @@ test('finalization presence snapshot re-reads protocol freshness without waiting
     assert.equal(participants.idle.name, 'Connected idle user');
   });
 });
+
+test('client result extraction ignores malformed motion and preserves deterministic duplicate name candidates', async () => {
+  await withStorage(async (browser) => {
+    const awareness = browser.__rbProvider.awareness;
+    const finalizedAt = PLAYER_PRESENCE_STALE_MS * 2;
+    const invalidNumber = JSON.parse('{"toString":null,"valueOf":null}');
+    const entries = [
+      [1001, { user: { userId: 'person', name: 'Zed', lastSeen: 1 }, cursor: { x: invalidNumber, y: 0, updatedAt: finalizedAt } }],
+      [1002, { user: { userId: 'person', name: 'Ada', lastSeen: 1 }, view: { zoom: invalidNumber, updatedAt: finalizedAt } }],
+    ];
+    const finalize = (ordered) => {
+      awareness.states.clear();
+      ordered.forEach(([id, state]) => {
+        awareness.states.set(id, state);
+        awareness.meta.set(id, { clock: 1, lastUpdated: finalizedAt });
+      });
+      putItem(browser, { id: 'zone', type: 'zone', x: 0, y: 0, w: 800, h: 600,
+        voteTimer: { startedAt: 1, endsAt: finalizedAt, showNonVoters: true } });
+      const candidates = browser.storage.getVoteResultParticipants(finalizedAt);
+      assert.equal(candidates.length, entries.length);
+      const plan = browser.storage.finalizeVoteSession('zone', 1, candidates, finalizedAt);
+      return plan.entries.at(-1).patch.voteResults;
+    };
+    const forward = finalize(entries);
+    const reverse = finalize([...entries].reverse());
+    assert.deepEqual(forward, reverse);
+    assert.deepEqual(forward.participants, [{ userId: 'person', name: 'Ada', votes: 0 }]);
+    assert.equal(browser.__rbYItems.get('zone').get('voteTimer'), null);
+  });
+});
