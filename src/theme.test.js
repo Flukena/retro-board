@@ -5,8 +5,33 @@ import { stickyCardVars, zoneCardVars, medalLook, ZONE_EDGE_HIT_WIDTH_PX } from 
 import { PALETTE } from './palette.js';
 import { defineTokens, TOKENS } from './theme.js';
 import { compositeOver, contrastRatio } from './color-contrast.js';
+import { zoneHeaderClearancePx } from './zone-title.js';
 
 const REQUIRED_ZONE_EDGE_HIT_WIDTH_PX = 16;
+const ZONE_TITLE_INK_CLEARANCE_TOKEN = '--zone-title-ink-clearance';
+const NO_INK_CLEARANCE_EM = 0;
+const FIXED_AUTO_TITLE_ZONE = { w: 600, h: 400 };
+const FIXED_AUTO_TITLE_HEADER_CLEARANCE_PX = 66.4;
+
+test('zone title ink clearance is positive and scales with the font in both themes', () => {
+  for (const tokens of Object.values(TOKENS)) {
+    const clearance = tokens[ZONE_TITLE_INK_CLEARANCE_TOKEN];
+    assert.match(clearance, /^\d*\.?\d+em$/);
+    assert.ok(Number.parseFloat(clearance) > NO_INK_CLEARANCE_EM);
+  }
+});
+
+test('zone title display and editor cancel ink padding with negative block margins', () => {
+  for (const selector of ['.rb-zone__label', '.rb-zone__editor']) {
+    const declarations = cardDeclarations(selector);
+    assert.equal(declarations['padding-block'], `var(${ZONE_TITLE_INK_CLEARANCE_TOKEN})`, selector);
+    assert.equal(declarations['margin-block'], `calc(-1 * var(${ZONE_TITLE_INK_CLEARANCE_TOKEN}))`, selector);
+  }
+});
+
+test('zone title ink clearance preserves the fixed auto-title header clearance', () => {
+  assert.equal(zoneHeaderClearancePx(FIXED_AUTO_TITLE_ZONE), FIXED_AUTO_TITLE_HEADER_CLEARANCE_PX);
+});
 
 test('both themes expose the 16 world-pixel zone edge hit width from card-look', () => {
   assert.equal(ZONE_EDGE_HIT_WIDTH_PX, REQUIRED_ZONE_EDGE_HIT_WIDTH_PX);

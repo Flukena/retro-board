@@ -181,6 +181,7 @@ const MODE_INDEPENDENT_TOKENS = Object.freeze({
   '--zone-title-font-size': `${ZONE_AUTO_TITLE_MAX_FONT_PX}px`,
   '--zone-title-font-weight': '500',
   '--zone-title-line-height': String(ZONE_TITLE_LINE_HEIGHT_RATIO),
+  '--zone-title-ink-clearance': '0.15em', // Thai stacked marks extend above the Mitr ascent.
   '--zone-count-font-size': `${ZONE_COUNT_FONT_PX}px`,
   '--zone-lock-size': '0.8125em',
   '--zone-title-shadow': '0 2px 0 rgba(0,0,0,0.08)',

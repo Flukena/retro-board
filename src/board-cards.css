@@ -285,6 +285,8 @@
 .rb-zone__editor {
   line-height: inherit;
   padding: 0;
+  padding-block: var(--zone-title-ink-clearance);
+  margin-block: calc(-1 * var(--zone-title-ink-clearance));
   flex: 1;
   min-width: 0;
   width: 100%;
@@ -298,6 +300,8 @@
 }
 
 .rb-zone__label {
+  padding-block: var(--zone-title-ink-clearance);
+  margin-block: calc(-1 * var(--zone-title-ink-clearance));
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
