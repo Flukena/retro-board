@@ -115,3 +115,14 @@ test('single thumbnail is centred; empty and zero-size bounds produce no rectang
   assert.deepEqual(templateThumbnail([zone('zero', 0, 0, 0, 0)], 60, 40, 4), []);
   assert.deepEqual(templateThumbnail([zone('zero-width', 0, 0, 0, 10)], 60, 40, 4), []);
 });
+
+test('reveal zooms out to fit a template larger than the viewport at the current zoom', () => {
+  const viewportSize = { w: 1440, h: 900 };
+  const bounds = { x: 0, y: 0, w: 12438, h: 4632 };
+  const next = templateRevealViewport({ bounds, viewport: { x: -5500, y: -1900, zoom: 1 }, viewportSize });
+  assert.ok(next.zoom < 1);
+  assert.ok(bounds.x * next.zoom + next.x >= 0);
+  assert.ok(bounds.y * next.zoom + next.y >= 0);
+  assert.ok((bounds.x + bounds.w) * next.zoom + next.x <= viewportSize.w);
+  assert.ok((bounds.y + bounds.h) * next.zoom + next.y <= viewportSize.h);
+});

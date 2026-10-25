@@ -11,6 +11,7 @@ src/
     app/                      Bootstrap, routing, landing, error recovery
     board/                    Canvas, cards, gestures, selection, minimap
     chrome/                   Navigation and tool docks
+    legal/                    Privacy policy and terms pages
     public-wall/              Public entry, snapshots and previews
     session/                  Yjs adapter, local identity, presence, undo
     templates/                Template picker and workflow

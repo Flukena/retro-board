@@ -2,6 +2,7 @@ import { effectiveOwnerZone } from './board-ownership.js';
 import { sizeForPlacement } from './board-geometry.js';
 import { IMPORT_COORDINATE_MAX_ABS } from './security-boundaries.js';
 import { centerViewportOnWorld } from './minimap.js';
+import { fitViewportToItems } from './viewport-framing.js';
 
 export const TEMPLATE_PLACEMENT_GAP_PX = 80;
 export const TEMPLATE_PLACEMENT_MAX_RINGS = 8;
@@ -121,6 +122,11 @@ export const templateRevealViewport = ({ bounds, viewport, viewportSize }) => {
   if (left >= 0 && top >= 0
     && left + bounds.w * viewport.zoom <= viewportSize.w
     && top + bounds.h * viewport.zoom <= viewportSize.h) return null;
+  const fitsAtCurrentZoom = bounds.w * viewport.zoom <= viewportSize.w
+    && bounds.h * viewport.zoom <= viewportSize.h;
+  if (!fitsAtCurrentZoom) {
+    return fitViewportToItems([{ type: 'zone', ...bounds }], viewportSize.w, viewportSize.h);
+  }
   return centerViewportOnWorld(viewport, viewportSize, {
     x: bounds.x + bounds.w / CENTRE_DIVISOR,
     y: bounds.y + bounds.h / CENTRE_DIVISOR,

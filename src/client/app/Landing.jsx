@@ -20,6 +20,7 @@ import {
   createRoom,
 } from '../session/room-session.js';
 import PublicWallPreview from '../public-wall/PublicWallPreview.jsx';
+import { LEGAL_PAGE, LEGAL_PATH } from '../legal/legal-content.js';
 import './landing.css';
 
 const CREATE_RETRY_FALLBACK_SECONDS = 2;
@@ -151,7 +152,13 @@ export default function Landing() {
                 <RecentRow key={`${recent.code}#${recent.token || ''}`} recent={recent} onRemove={removeRecent} />
               )) : <p className="rb-landing__description">{t('landing.recents.empty')}</p>}
             </Surface>
-            <div className="rb-landing__footer">{t('landing.footer')}</div>
+            <div className="rb-landing__footer">
+              {t('landing.footer')}
+              <nav className="rb-landing__legal" aria-label={t('legal.footer.nav')}>
+                <a href={LEGAL_PATH[LEGAL_PAGE.PRIVACY]}>{t('legal.footer.privacy')}</a>
+                <a href={LEGAL_PATH[LEGAL_PAGE.TERMS]}>{t('legal.footer.terms')}</a>
+              </nav>
+            </div>
           </>
         }>
           <div className="rb-landing__intro">

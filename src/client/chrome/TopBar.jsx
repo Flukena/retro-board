@@ -32,8 +32,9 @@ export function TopBarButton({ title, onClick, active, enabled, icon, label, dis
   );
 }
 
+// Your own admin role already shows as the crown on your name button.
 function AdminPill({ admin, isAdmin }) {
-  if (!admin) return null;
+  if (!admin || isAdmin) return null;
   return (
     <div
       className="rb-topbar-admin"
@@ -41,7 +42,7 @@ function AdminPill({ admin, isAdmin }) {
       style={{ opacity: admin.isOnline ? 1 : OFFLINE_ADMIN_OPACITY }}
     >
       <Crown size={TOPBAR_ICON_SIZE_PX.CHIP} />
-      <span>{admin.name}{isAdmin ? ` ${t('common.you')}` : ''}</span>
+      <span>{admin.name}</span>
     </div>
   );
 }
@@ -74,7 +75,7 @@ function PresenceButton({ players, onClick }) {
 }
 
 export function TopBar({
-  mode = BOARD_MODE.PRIVATE, code, canUndo, canRedo, editingLocked, isAdmin, admin, canClaim, players,
+  mode = BOARD_MODE.PRIVATE, code, title = null, canUndo, canRedo, editingLocked, isAdmin, admin, canClaim, players,
   userId, userName, lang, themePref, exportBusy, scrollWheelZoomEnabled,
   onHome, onCopyLink, onUndo, onRedo, onToggleEditingLock, onClaimAdmin,
   onEditName, onToggleLanguage, onToggleTheme, onToggleScrollWheelZoom,
@@ -117,6 +118,7 @@ export function TopBar({
             {code}
           </button>
         )}
+        {title && <span className="rb-topbar-title" title={title}>{title}</span>}
         <div className="rb-topbar-spacer" />
         <div className="rb-topbar-controls">
           <TopBarButton

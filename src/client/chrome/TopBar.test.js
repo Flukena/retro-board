@@ -30,6 +30,14 @@ test('top bar preserves undo, admin, claim and follow contracts', async (context
     };
     const markup = renderToStaticMarkup(React.createElement(TopBar, props));
     assert.match(markup, /Fallback/);
+    const own = renderToStaticMarkup(React.createElement(TopBar, {
+      ...props, isAdmin: true, admin: { name: 'Owner', isOnline: true }, userName: 'Owner',
+    }));
+    assert.doesNotMatch(own, /rb-topbar-admin/);
+    const titled = renderToStaticMarkup(React.createElement(TopBar, { ...props, code: 'Room1234', title: 'Sprint 42 Retro' }));
+    assert.match(titled, /<span class="rb-topbar-title" title="Sprint 42 Retro">Sprint 42 Retro<\/span>/);
+    assert.doesNotMatch(markup, /rb-topbar-title/);
+    assert.match(markup, /rb-topbar-admin/);
     assert.doesNotMatch(markup, /data-action="claim"/);
     const claim = renderToStaticMarkup(React.createElement(TopBar, {
       ...props,

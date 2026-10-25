@@ -2,6 +2,7 @@
 // No history API beyond plain navigation — each visit is a full page load.
 
 import { PUBLIC_PATH } from '../../domain/public-wall-contract.js';
+import { legalPageForPath } from '../legal/legal-content.js';
 
 const BOARD_PATH = /^\/b\/([A-Za-z0-9_-]{3,32})\/?$/;
 // Tokens are 16 alphanumeric chars (Web Crypto generated). The pattern is
@@ -19,6 +20,8 @@ function readTokenFromHash() {
 export function parseRoute() {
   const path = (typeof window !== 'undefined' ? window.location.pathname : '/') || '/';
   if (path === PUBLIC_PATH || path === `${PUBLIC_PATH}/`) return { kind: 'public' };
+  const legalPage = legalPageForPath(path);
+  if (legalPage) return { kind: 'legal', page: legalPage };
   const m = path.match(BOARD_PATH);
   if (m) return { kind: 'board', code: m[1], token: readTokenFromHash() };
   return { kind: 'landing' };
@@ -141,6 +144,12 @@ export function rememberRecent(code, name, token) {
 
 export function loadRecents() {
   return readRecentList();
+}
+
+// Name the creator typed for this room, kept with its recent entry.
+export function recentBoardName(code, token) {
+  const normalizedToken = token == null ? null : normalizeToken(token);
+  return loadRecents().find((r) => r.code === code && r.token === normalizedToken)?.name || null;
 }
 
 export function forgetRecent(code, token) {

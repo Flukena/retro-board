@@ -1,0 +1,5 @@
+User-agent: *
+Disallow: /b/
+Allow: /
+
+Sitemap: https://retroroom.party/sitemap.xml

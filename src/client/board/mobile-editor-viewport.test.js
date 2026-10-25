@@ -27,6 +27,7 @@ function fixture(heightPx = 160, zoom = 1, widthPx = 240) {
   const root = {
     ownerDocument: { defaultView: view, activeElement: editor }, contains: (node) => node === editor,
     querySelector: (selector) => ({ getBoundingClientRect: () => controls[selector] }),
+    getBoundingClientRect: () => ({ left: 0, top: 0 }),
   };
   let viewport = { x: 0, y: 0, zoom };
   const commits = [];
@@ -96,4 +97,23 @@ test('zoomed inline text wraps within the visible canvas width without changing 
   f.dispose();
   assert.equal(f.properties.size, 0);
   assert.equal(f.editor.dataset.mobileWidthBounded, undefined);
+});
+
+test('editing a card too small to read zooms in once instead of panning a tiny editor', () => {
+  const f = fixture(20, 0.12, 24);
+  f.dispatch(MOBILE_EDITOR_VISIBILITY_EVENT);
+  assert.equal(f.commits.length, 1);
+  assert.ok(f.commits[0].zoom > 0.12, `zoom ${f.commits[0].zoom}`);
+  assert.equal(f.properties.size, 0, 'Size limits wait for the next reveal at the new zoom');
+  f.dispose();
+});
+
+test('focus zoom sizes the whole sticky, not the narrow empty input inside it', () => {
+  const f = fixture(20, 0.12, 4);
+  const card = { getBoundingClientRect: () => ({ left: 20, top: 300, right: 44, bottom: 321, width: 24, height: 21 }) };
+  f.editor.closest = (selector) => (selector === '[data-sticky-id]' ? card : null);
+  f.dispatch(MOBILE_EDITOR_VISIBILITY_EVENT);
+  const scale = f.commits[0].zoom / 0.12;
+  assert.ok(24 * scale <= VISIBLE_VIEWPORT.width - 84, `card width ${24 * scale}`);
+  f.dispose();
 });

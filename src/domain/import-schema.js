@@ -22,6 +22,7 @@ import {
   repairBoardGeometry,
 } from './board-geometry.js';
 import { isValidFontColor, isValidFontSize, isValidZIndex } from './item-appearance.js';
+import { isBoardTitle } from './board-title.js';
 
 // Portable JSON backups include raster bytes expanded by base64. This file
 // budget is separate from the small Yjs transaction after image uploads.
@@ -261,12 +262,19 @@ export const validateBoardItem = (item) => {
   normalizeBoardItem(item, 0, 0, Number.MAX_SAFE_INTEGER);
 };
 
+const importedBoardTitle = (title) => {
+  if (title == null) return null;
+  if (!isBoardTitle(title)) fail('board.title must be a trimmed, non-empty bounded string');
+  return title;
+};
+
 const normalizeBoardMeta = (board) => ({
   timer: null,
   editingLocked: board.editingLocked === true,
   votingLocked: board.votingLocked === true,
   allRevealed: board.allRevealed === true,
   lastResultsAt: safeTimestamp(board.lastResultsAt, null),
+  title: importedBoardTitle(board.title),
 });
 
 // Validate and normalize every cross-reference before an import is allowed to

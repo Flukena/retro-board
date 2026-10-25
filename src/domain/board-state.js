@@ -12,6 +12,8 @@ export const DEFAULT_BOARD = {
   // - voteLimit=null → unlimited votes per user
   timer: null,
   lastResultsAt: null,
+  // Room name chosen at creation; null when the room was never named.
+  title: null,
   // SHA-256(boardCode + ':' + pin) — required before destructive admin
   // actions (Clear / Reset votes / Transfer admin). null until the first
   // admin sets one; if still null, the actions just prompt the admin to set

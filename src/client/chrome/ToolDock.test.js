@@ -141,3 +141,12 @@ test('open templates raise the whole fixed rail above zoom and header while clos
     assert.ok(opened.props.style.zIndex > closed.props.style.zIndex);
   });
 });
+
+test('zone tile does not reuse the template icon', async () => {
+  await withChromeModule('/src/client/chrome/ToolDock.jsx', async ({ ToolDock }) => {
+    const props = { creationMode: null, templatesOpen: false, rows: { builtin: [], custom: [] } };
+    const markup = renderToStaticMarkup(React.createElement(ToolDock, props));
+    const iconOf = (toolId) => markup.match(new RegExp(`data-tool="${toolId}"[\\s\\S]*?<svg[^>]*class="([^"]*)"`))?.[1];
+    assert.notEqual(iconOf('zone'), iconOf('templates'));
+  });
+});

@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { resolveOwnerZone } from './board-ownership.js';
-import { getTemplates } from '../client/templates/builtin-templates.js';
 
 test('public zone creation provides room for multiple cards while private drawing keeps its minimum', async () => {
   const { publicZoneCreationSize } = await import('./public-zone-layout.js');
@@ -36,14 +35,4 @@ test('enlargement rejects geometry that would exceed canonical bounds without pa
     { id: 'huge', type: 'zone', x: 0, y: 0, w: 100000, h: 1080 },
   ]), /dimensions|width/);
   assert.deepEqual(enlargedZoneLayoutEntries([]), []);
-});
-
-test('new Retro Loop columns have at least twice the previous width and height', () => {
-  const template = getTemplates().retroLoop;
-  assert.ok(template.zones[0].w >= 12438);
-  assert.ok(template.zones[0].h >= 4632);
-  for (const zone of template.zones.slice(1)) {
-    assert.ok(zone.w >= 1854);
-    assert.ok(zone.h >= 2880);
-  }
 });

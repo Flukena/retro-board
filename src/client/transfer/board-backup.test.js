@@ -85,3 +85,12 @@ test('whole-board CSV keeps nested owners and board zone order, redacts private 
   const ownerCsv = buildBoardCsv({ items: CSV_ITEMS }, new Map(), 'owner', CSV_LABELS);
   assert.match(ownerCsv, /Outer,secret,/);
 });
+
+test('JSON backup round-trips the board title through the import decoder', () => {
+  const artifact = createJsonBackupArtifact({
+    fallbackBoardCode: 'Room1234', pathname: '/b/Room1234', exportedAt: 1_700_000_000_000,
+    board: { items: [], title: 'ทีม A · Sprint 42' }, votes: {}, comments: {}, customTemplates: [],
+  });
+  const payload = JSON.parse(artifact.contents);
+  assert.equal(normalizeImportManifest(payload, payload.exportedAt).boardMeta.title, 'ทีม A · Sprint 42');
+});

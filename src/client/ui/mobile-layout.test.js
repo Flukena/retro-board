@@ -24,7 +24,7 @@ test('mobile header keeps every control reachable and template picker is a bound
   assert.match(readSource('../chrome/TopBar.jsx'), /import '\.\.\/ui\/mobile-layout.css'/);
 });
 
-test('mobile sticky creation emits one action without changing desktop tool selection', async () => {
+test('sticky creation shows on every layout and emits one action without changing tool selection', async () => {
   await withChromeModule('/src/client/chrome/ToolDock.jsx', ({ ToolDock, TOOL_ID }) => {
     let added = 0;
     const withoutSticky = ToolDock({});
@@ -32,7 +32,7 @@ test('mobile sticky creation emits one action without changing desktop tool sele
     const tiles = (tree) => tree.props.children[0].props.children;
     const sticky = tiles(withSticky).find((child) => child?.props?.toolId === 'sticky');
     assert.ok(sticky);
-    assert.equal(sticky.props.className, 'rb-dock-tile rb-mobile-only');
+    assert.doesNotMatch(sticky.props.className || '', /rb-mobile-only/);
     assert.equal(tiles(withoutSticky).some((child) => child?.props?.toolId === 'sticky'), false);
     sticky.props.onClick();
     assert.equal(added, 1);

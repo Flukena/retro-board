@@ -10,6 +10,7 @@ import { t } from '../ui/i18n.js';
 import { CARD_OVERVIEW_MAX_EDGE_PX, CARD_OVERVIEW_TEXT_MAX_LENGTH, CARD_OVERVIEW_FOOTER_HEIGHT_PX } from '../../domain/viewport-limits.js';
 import { OverviewRasterContext } from './overview-raster-context.js';
 import { observeContentSize } from './observe-content-size.js';
+import { useTapToEdit } from './tap-to-edit.js';
 
 // Let notes grow while typing, but keep a pasted essay from turning into a
 // many-thousand-pixel card. At the cap the editor becomes internally scrollable.
@@ -63,6 +64,7 @@ export const StickyCard = React.memo(function StickyCard({
   const top3 = voteRank != null;
   const [hovered, setHovered] = useState(false);
   const [commentPreviewIndex, setCommentPreviewIndex] = useState(0);
+  const watchTapToEdit = useTapToEdit({ selected, enabled: !isEditing && !hideContent });
   const commentPreview = commentPreviews[commentPreviewIndex] ?? commentPreviews[0] ?? '';
   const showCommentPreview = !hideContent && !!commentPreview;
   const showCommentEntry = !hideContent && (commentCount > 0 || hovered);
@@ -134,7 +136,11 @@ export const StickyCard = React.memo(function StickyCard({
     <div
       data-sticky-id={it.id}
       className={stickyClassName({ selected, remoteSelected, winner: top3, dense })}
-      onMouseDown={(e) => { if (!isEditing) onStartDrag(e, it); }}
+      onMouseDown={(e) => {
+        if (isEditing) return;
+        watchTapToEdit(e, () => onBeginFocus(it, 'text'));
+        onStartDrag(e, it);
+      }}
       onDoubleClick={(e) => { e.stopPropagation(); if (!hideContent) onBeginFocus(it, 'text'); }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}

@@ -9,7 +9,7 @@ const IMPORTED_AT_MS = 1_700_000_000_000;
 const OVER_LIMIT_ITEM_COUNT = 64;
 const zone = { id: 'zone', type: 'zone', x: 0, y: 0, w: 500, h: 400, title: 'Ideas',
   voteTimer: { endsAt: IMPORTED_AT_MS }, lastResultsAt: IMPORTED_AT_MS, voteResults: {}, votingLocked: true };
-const payload = { board: { items: [zone], editingLocked: true } };
+const payload = { board: { items: [zone], editingLocked: true, title: 'Imported retro' } };
 const file = () => new File([JSON.stringify(payload)], 'board.json', { type: 'application/json' });
 
 test('file intake validates JSON and exposes one normalized manifest for confirmation', async () => {
@@ -30,6 +30,7 @@ test('import preparation clears zone sessions while preserving the current room 
   assert.equal(board.adminName, identity.adminName);
   assert.equal(board.adminPinHash, pinHash);
   assert.equal(board.editingLocked, true);
+  assert.equal(board.title, 'Imported retro');
   assert.equal(board.items[0].voteTimer, null);
   assert.equal(board.items[0].voteResults, null);
   assert.equal(board.items[0].votingLocked, false);
@@ -44,4 +45,11 @@ test('oversized file intake fails before reading and oversized room updates fail
     id: `sticky-${index}`, type: 'sticky', x: index, y: 0, text: 'a'.repeat(BOARD_TEXT_MAX_LENGTH),
   }));
   await assert.rejects(prepareBoardImport(manifest, {}), ImportBundleLimitError);
+});
+
+test('importing a backup without a title keeps the current room title', async () => {
+  const untitled = new File([JSON.stringify({ board: { items: [zone] } })], 'old.json', { type: 'application/json' });
+  const manifest = await readBoardImport(untitled, IMPORTED_AT_MS);
+  assert.equal((await prepareBoardImport(manifest, { title: 'Current room' })).title, 'Current room');
+  assert.equal((await prepareBoardImport(manifest, {})).title, null);
 });

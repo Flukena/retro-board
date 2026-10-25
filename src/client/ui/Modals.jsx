@@ -330,7 +330,7 @@ export function NameDialog({ draft, onDraftChange, onSave, onClose, hasName }) {
         placeholder={t('name.placeholder')}
       />
       <div className="rb-dialog__actions rb-dialog__actions--spaced">
-        <Button onClick={onClose}>{t(hasName ? 'common.cancel' : 'name.skip')}</Button>
+        {hasName && <Button onClick={onClose}>{t('common.cancel')}</Button>}
         <Button
           variant={BUTTON_VARIANT.PRIMARY}
           onClick={onSave}

@@ -1,5 +1,15 @@
 import { t } from '../ui/i18n.js';
-import { enlargedZoneGeometry } from '../../domain/public-zone-layout.js';
+
+// Layout is drawn at a 1x design size, then scaled so the whole template fits
+// a laptop screen near 44% zoom; zone titles and header icons follow the zone size.
+const RETRO_LOOP_SCALE = 0.5;
+const scaledZone = (zone) => ({
+  ...zone,
+  x: Math.round(zone.x * RETRO_LOOP_SCALE),
+  y: Math.round(zone.y * RETRO_LOOP_SCALE),
+  w: Math.round(zone.w * RETRO_LOOP_SCALE),
+  h: Math.round(zone.h * RETRO_LOOP_SCALE),
+});
 
 // Built-in templates are evaluated lazily so titles re-localize on lang change.
 export const getTemplates = () => ({
@@ -13,6 +23,6 @@ export const getTemplates = () => ({
       { title: t('tmpl.loop.bad'),     color: 1, x: 2391, y: 351, w: 1140, h: 1560 },
       { title: t('tmpl.loop.try'),     color: 4, x: 3591, y: 351, w: 1140, h: 1560 },
       { title: t('tmpl.loop.next'),    color: 5, x: 4848, y: 417, w: 1086, h: 1464 },
-    ].map(zone => ({ ...zone, ...enlargedZoneGeometry(zone) })),
+    ].map(scaledZone),
   },
 });

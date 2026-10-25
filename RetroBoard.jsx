@@ -62,6 +62,7 @@ import { useUserIdentity } from './src/client/session/useUserIdentity.js';
 import { getTemplates } from './src/client/templates/builtin-templates.js';
 import { templateRevealViewport } from './src/domain/template-model.js';
 import { useBoardTemplates } from './src/client/templates/use-board-templates.js';
+import { useBoardTitle } from './src/client/app/use-board-title.js';
 import { activeVoteZone, zoneHasActiveGovernor } from './src/domain/vote-ownership.js';
 import { useAdminRole } from './src/client/session/useAdminRole.js';
 import { clientPointToWorld } from './src/domain/board-coordinates.js';
@@ -200,7 +201,7 @@ const readScrollWheelZoomEnabled = () => {
    Component
    ============================================================ */
 
-export default function RetroBoard({ boardCode = null, boardToken = null, mode = BOARD_MODE.PRIVATE }) {
+export default function RetroBoard({ boardCode = null, boardToken = null, mode = BOARD_MODE.PRIVATE, pendingTitle = null }) {
   const publicMode = mode === BOARD_MODE.PUBLIC;
   useEffect(() => { void warmBoardFonts(document); }, []);
   /* ---------- i18n + theme ---------- */
@@ -840,6 +841,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     setBoard((prev) => ({ ...prev, ...patch }));
     return true;
   }, [reportWriteFailure]);
+  useBoardTitle({ storage, liveStorage: adminRoleStorage, title: board.title, pendingTitle, patchMeta });
 
   const {
     isAdmin: roleIsAdmin, canClaim, pinPromptCfg, requireAdminPin: requirePrivateAdminPin, adminClaim, adminTransfer,
@@ -3611,6 +3613,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
   const renderTopBar = () => (
     <TopBar mode={mode}
       code={boardCode}
+      title={board.title}
       canUndo={undoState.canUndo}
       canRedo={undoState.canRedo}
       editingLocked={board.editingLocked}

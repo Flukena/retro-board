@@ -309,6 +309,13 @@
 .rb-landing__recent-detail { font-size: var(--landing-small-font-size); color: var(--text-muted); overflow-wrap: anywhere; }
 .rb-landing__recent-code { font-family: var(--font-mono); }
 .rb-landing__remove { width: var(--landing-remove-size); height: var(--landing-remove-size); flex: none; }
+.rb-landing__legal {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-4);
+  margin-top: var(--space-2);
+}
+.rb-landing__legal a { color: var(--accent-text); }
 .rb-landing__footer {
   text-align: center;
   font-size: var(--landing-small-font-size);

@@ -1,0 +1,46 @@
+.rb-legal {
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  overflow-y: auto;
+  height: 100%;
+  box-sizing: border-box;
+  padding: var(--space-4);
+}
+.rb-legal__bar {
+  max-width: var(--legal-max-width);
+  margin: 0 auto var(--space-6);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+}
+.rb-legal__home {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--accent-text);
+  font-weight: var(--legal-link-weight);
+  text-decoration: none;
+}
+.rb-legal__doc {
+  max-width: var(--legal-max-width);
+  margin: 0 auto;
+  background: var(--bg-panel);
+  border: var(--legal-border-width) solid var(--border-soft);
+  border-radius: var(--legal-radius);
+  padding: var(--space-8) var(--space-6);
+  line-height: var(--legal-line-height);
+}
+.rb-legal__title { font-family: var(--font-display); font-size: var(--legal-title-size); line-height: var(--legal-title-line-height); margin: 0; }
+.rb-legal__date { color: var(--text-muted); margin: var(--space-2) 0 var(--space-6); }
+.rb-legal__section h2 { font-size: var(--legal-heading-size); margin: var(--space-6) 0 var(--space-2); }
+.rb-legal__section p { margin: 0 0 var(--space-3); }
+.rb-legal__other { margin-top: var(--space-8); }
+.rb-legal__other a { color: var(--accent-text); }
+
+@media (max-width: 767px) {
+  .rb-legal__doc { padding: var(--space-6) var(--space-4); }
+  .rb-legal__title { font-size: var(--legal-title-size-mobile); }
+}

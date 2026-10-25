@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   BOARD_TEXT_MAX_LENGTH,
+  BOARD_TITLE_MAX_LENGTH,
   IMPORT_COORDINATE_MAX_ABS,
   IMPORT_DIMENSION_MAX,
   IMPORT_MAX_TEMPLATE_ZONES,
@@ -69,6 +70,7 @@ test('normalizes a manifest into bounded whitelisted records', () => {
     votingLocked: false,
     allRevealed: false,
     lastResultsAt: importedAt - 1,
+    title: null,
   });
   assert.equal(normalized.customTemplates[0].name, 'Team retro');
   assert.deepEqual(normalized.customTemplates[0].zones[0], {
@@ -160,4 +162,13 @@ test('validates custom templates deeply and enforces count and text limits', () 
       { title: '', color: 0, x: 0, y: 0, w: 100, h: 100 }
     )),
   }], importedAt), /too many zones/);
+});
+
+test('board title imports when valid and rejects explicit invalid values', () => {
+  const withTitle = (title) => ({ ...validManifest(), board: { ...validManifest().board, title } });
+  assert.equal(normalizeImportManifest(withTitle('Sprint 42 Retro'), importedAt).boardMeta.title, 'Sprint 42 Retro');
+  assert.equal(normalizeImportManifest(withTitle(null), importedAt).boardMeta.title, null);
+  for (const bad of ['', ' padded ', 42, 'x'.repeat(BOARD_TITLE_MAX_LENGTH + 1)]) {
+    assert.throws(() => normalizeImportManifest(withTitle(bad), importedAt), /title/, JSON.stringify(bad));
+  }
 });

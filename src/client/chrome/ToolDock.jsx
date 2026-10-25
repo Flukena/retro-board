@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutTemplate, MousePointer2, Type, Image, Trash2, Pencil, ChevronDown, StickyNote, X } from 'lucide-react';
+import { LayoutTemplate, SquareDashed, MousePointer2, Type, Image, Trash2, Pencil, ChevronDown, StickyNote, X } from 'lucide-react';
 import { Button, Divider, MenuItem, Surface } from '../ui/UiPrimitives.jsx';
 import { DIVIDER_ORIENTATION } from '../ui/ui-variants.js';
 import { PALETTE, DOCK_TILE_INDEX } from '../ui/palette.js';
@@ -16,7 +16,7 @@ const TEMPLATE_TOOL_ID = 'templates';
 const TOOL_ICONS = Object.freeze({
   [TOOL_ID.SELECT]: MousePointer2,
   [TOOL_ID.TEXT]: Type,
-  [TOOL_ID.ZONE]: LayoutTemplate,
+  [TOOL_ID.ZONE]: SquareDashed,
   [TOOL_ID.IMAGE]: Image,
   [TOOL_ID.DRAW]: Pencil,
 });
@@ -135,7 +135,6 @@ export function ToolDock({
         {onAddSticky && <DockTile
           toolId="sticky"
           icon={StickyNote}
-          className="rb-dock-tile rb-mobile-only"
           paletteIndex={DOCK_TILE_INDEX.text}
           label={t('tool.sticky')}
           title={t('tool.sticky.title')}

@@ -1,8 +1,10 @@
 import {
-  MOBILE_EDITOR_CLEARANCE_PX, MOBILE_EDITOR_VISIBILITY_EVENT, mobileEditorPanDelta,
+  MOBILE_EDITOR_CLEARANCE_PX, MOBILE_EDITOR_VISIBILITY_EVENT, mobileEditorFocusViewport, mobileEditorPanDelta,
 } from './mobile-editing.js';
 
 const EDITOR_SELECTOR = '.rb-mobile-editor__input';
+// Focus zoom frames the whole card; an empty input alone is only a few pixels wide.
+const FOCUS_CARD_SELECTOR = '[data-sticky-id]';
 const HEIGHT_LIMIT_PROPERTY = '--rb-inline-editor-max-height-px';
 const WIDTH_LIMIT_PROPERTY = '--rb-inline-editor-max-width-px';
 const MIN_EDITOR_HEIGHT_SCREEN_PX = 24;
@@ -68,6 +70,10 @@ export function attachMobileEditorViewport(root, { getViewport, commitViewport }
     const insets = mobileEditorInsets(root, visible);
     if (activeEditor && activeEditor !== editor) releaseEditor(activeEditor);
     activeEditor = editor;
+    const focusTarget = editor.closest?.(FOCUS_CARD_SELECTOR) ?? editor;
+    const focused = mobileEditorFocusViewport({ editor: focusTarget.getBoundingClientRect(), visible, insets, viewport,
+      origin: root.getBoundingClientRect(), fitWide: focusTarget !== editor });
+    if (focused) { commitViewport(focused); return; }
     boundEditorSize(editor, mobileEditorHeightLimitPx(visible, insets, viewport.zoom),
       mobileEditorWidthLimitPx(visible, insets, viewport.zoom), viewport.zoom);
     const delta = mobileEditorPanDelta(editor.getBoundingClientRect(), visible, insets);

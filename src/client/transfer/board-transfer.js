@@ -69,6 +69,7 @@ export async function prepareBoardImport(manifest, currentBoard) {
   const nextBoard = { ...DEFAULT_BOARD, items: importedItems, timer: meta.timer,
     editingLocked: meta.editingLocked, votingLocked: meta.votingLocked,
     allRevealed: meta.allRevealed, lastResultsAt: meta.lastResultsAt,
+    title: meta.title ?? currentBoard.title ?? null,
     adminUserId: currentBoard.adminUserId, adminName: currentBoard.adminName, adminPinHash: currentBoard.adminPinHash };
   const snapshotBytes = importBundleByteLength({ board: nextBoard, votes: manifest.voteEntries,
     comments: manifest.commentEntries, customTemplates: manifest.customTemplates });

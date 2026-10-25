@@ -90,6 +90,9 @@ test('confirmation and name cancel through the shared shell without submitting',
     name.props.onDismiss();
     assert.deepEqual(events, ['cancel', 'cancel', 'confirm', 'Ada', 'save', 'close']);
     assert.equal(name.props.labelledBy, 'name-dialog-title');
+    const actionButtons = (dialog) => dialog.props.children.at(-1).props.children.filter(Boolean);
+    assert.equal(actionButtons(name).length, 1);
+    assert.equal(actionButtons(NameDialog({ draft: 'Ada', hasName: true, onClose() {}, onSave() {} })).length, 2);
   });
 });
 

@@ -3,6 +3,7 @@ import { BOARD_TEXT_MAX_LENGTH } from '../../domain/security-boundaries.js';
 import { sizeForPlacement } from '../../domain/board-geometry.js';
 import { fontSizeForItem } from './selection-toolbar-model.js';
 import { CollaborativeTextEditor } from './CollaborativeTextEditor.jsx';
+import { useTapToEdit } from './tap-to-edit.js';
 
 const { w: TEXT_WIDTH_PX, h: TEXT_HEIGHT_PX } = sizeForPlacement({ type: 'text' });
 const TEXT_FONT_SIZE_PX = fontSizeForItem({ type: 'text' });
@@ -14,10 +15,15 @@ export const TextCard = React.memo(function TextCard({
 }) {
   void lang;
   const it = item;
+  const watchTapToEdit = useTapToEdit({ selected, enabled: !isEditing });
   return (
     <div
       className={remoteSelected ? 'rb-remote-selected-card' : undefined}
-      onMouseDown={(e) => { if (!isEditing) onStartDrag(e, it); }}
+      onMouseDown={(e) => {
+        if (isEditing) return;
+        watchTapToEdit(e, () => onBeginFocus(it, 'text'));
+        onStartDrag(e, it);
+      }}
       onDoubleClick={(e) => { e.stopPropagation(); onBeginFocus(it, 'text'); }}
       style={{
         position: 'absolute',

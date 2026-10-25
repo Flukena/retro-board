@@ -48,6 +48,16 @@
   color: var(--brand-tile-fg);
 }
 
+.rb-topbar-title {
+  min-width: 0;
+  max-width: 28vw;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text);
+  font-weight: 600;
+  font-size: 14px;
+}
 .rb-topbar-code {
   display: inline-flex;
   align-items: center;

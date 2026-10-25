@@ -1,7 +1,7 @@
 <!-- Canonical agent instructions for Claude and Codex. CLAUDE.md imports this file; edit only here. -->
 # RetroBoard
 
-Real-time collaborative retro board: React 18 + Vite client, Yjs CRDT over `y-websocket`, Node relay `yjs-server.mjs` with LevelDB persistence. Production is publicly reachable (`retro.sagonzis.space`) through Cloudflare Tunnel only.
+Real-time collaborative retro board: React 18 + Vite client, Yjs CRDT over `y-websocket`, Node relay `yjs-server.mjs` with LevelDB persistence. Production is publicly reachable at `retroroom.party` (`retro.sagonzis.space` still routes to the same web service) through Cloudflare Tunnel only.
 
 Read before touching the matching area (sections only, not whole files):
 - Domain terms and data invariants: `CONTEXT.md`

@@ -2,6 +2,7 @@ import { isVoteResults } from '../../domain/vote-results.js';
 import { validateBoardItem } from '../../domain/import-schema.js';
 import { COMMENT_AUTHOR_NAME_MAX_LEN, isSafeId } from '../../domain/comment-schema.js';
 import { DISPLAY_NAME_MAX_LENGTH } from '../../domain/security-boundaries.js';
+import { isBoardTitle } from '../../domain/board-title.js';
 
 // hashAdminPin uses SHA-256, represented as two hexadecimal characters per byte.
 const ADMIN_PIN_HASH_HEX_LENGTH = 64;
@@ -34,7 +35,7 @@ const ITEM_RUNTIME_FIELDS = {
 const META_FIELDS = {
   adminUserId: nullable(isSafeId), adminName: nullable(boundedString(DISPLAY_NAME_MAX_LENGTH)), adminPinHash: nullable(isPinHash),
   editingLocked: isBoolean, votingLocked: isBoolean, allRevealed: isBoolean,
-  timer: nullable(isTimer), lastResultsAt: nullable(isTimestamp),
+  timer: nullable(isTimer), lastResultsAt: nullable(isTimestamp), title: nullable(isBoardTitle),
 };
 
 export function decodeRemoteItem(item) {

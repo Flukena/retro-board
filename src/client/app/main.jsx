@@ -6,11 +6,12 @@ import '../ui/theme.js'; // apply CSS variables on <html> before first paint
 import RetroBoard from '../../../RetroBoard.jsx';
 import { establishPublicRoomSession } from '../public-wall/public-room-session.js';
 import Landing from './Landing.jsx';
+import LegalPage from '../legal/LegalPage.jsx';
 import { BoardErrorBoundary } from './BoardErrorBoundary.jsx';
 import { SyncBanner } from '../session/SyncBanner.jsx';
 import { t } from '../ui/i18n.js';
 import {
-  isBoardCreatedByMe, gotoLanding, parseRoute, rememberRecent,
+  isBoardCreatedByMe, gotoLanding, parseRoute, recentBoardName, rememberRecent,
 } from './router.js';
 import {
   ROOM_SESSION_ERROR,
@@ -137,7 +138,8 @@ function BoardBootstrap({ code, token, mode = BOARD_MODE.PRIVATE }) {
   }, [attempt, code, token, mode]);
 
   if (state.status === 'ready') {
-    return <><SyncBanner /><RetroBoard boardCode={code} boardToken={token} mode={mode} /></>;
+    const pendingTitle = isBoardCreatedByMe(code, token) ? recentBoardName(code, token) : null;
+    return <><SyncBanner /><RetroBoard boardCode={code} boardToken={token} mode={mode} pendingTitle={pendingTitle} /></>;
   }
   return (
     <RoomBootstrapScreen
@@ -149,9 +151,12 @@ function BoardBootstrap({ code, token, mode = BOARD_MODE.PRIVATE }) {
   );
 }
 
-const App = route.kind === 'board'
-  ? <BoardBootstrap code={route.code} token={route.token} />
-  : route.kind === 'public' ? <BoardBootstrap mode={BOARD_MODE.PUBLIC} /> : <Landing />;
+const ROUTE_VIEWS = {
+  board: () => <BoardBootstrap code={route.code} token={route.token} />,
+  public: () => <BoardBootstrap mode={BOARD_MODE.PUBLIC} />,
+  legal: () => <LegalPage page={route.page} />,
+};
+const App = (ROUTE_VIEWS[route.kind] ?? (() => <Landing />))();
 
 createRoot(document.getElementById('root')).render(
   <React.StrictMode><BoardErrorBoundary>{App}</BoardErrorBoundary></React.StrictMode>,

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as Y from 'yjs';
 import { boardVoteIsOpen } from '../../domain/vote-timing.js';
 import { COMMENT_AUTHOR_NAME_MAX_LEN, COMMENT_ID_MAX_LEN } from '../../domain/comment-schema.js';
-import { DISPLAY_NAME_MAX_LENGTH } from '../../domain/security-boundaries.js';
+import { BOARD_TITLE_MAX_LENGTH, DISPLAY_NAME_MAX_LENGTH } from '../../domain/security-boundaries.js';
 import { decodeRemoteBoard } from './remote-board-decoder.js';
 
 const STICKY = Object.freeze({ id: 'sticky', type: 'sticky', x: 0, y: 0, text: 'hello',
@@ -91,4 +91,11 @@ test('oversized metadata strings are omitted while boundary-length values surviv
   assert.deepEqual(decodeRemoteBoard([], {
     adminName: valid.adminName + 'a', adminPinHash: valid.adminPinHash + 'a',
   }), { items: [] });
+});
+
+test('board title from a peer survives only when it is a valid title', () => {
+  assert.equal(decodeRemoteBoard([], { title: 'Sprint 42' }).title, 'Sprint 42');
+  for (const bad of ['', ' x ', 7, { text: 'x' }, 'x'.repeat(BOARD_TITLE_MAX_LENGTH + 1)]) {
+    assert.equal(Object.hasOwn(decodeRemoteBoard([], { title: bad }), 'title'), false, JSON.stringify(bad));
+  }
 });
