@@ -12,7 +12,7 @@ export const LEGAL_PATH = Object.freeze({
 export const LEGAL_EFFECTIVE_DATE_ISO = '2026-10-25';
 
 // Owner-provided address people can write to about their data or these terms.
-export const LEGAL_CONTACT_EMAIL = '';
+export const LEGAL_CONTACT_EMAIL = 's.theerasuwanajak@gmail.com';
 
 const SECTION_IDS = Object.freeze({
   [LEGAL_PAGE.PRIVACY]: ['intro', 'collect', 'browser', 'use', 'share', 'retention', 'security', 'rights', 'changes', 'contact'],

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { LEGAL_PAGE, LEGAL_PATH, legalPageForPath, legalSections, otherLegalPage } from './legal-content.js';
+import { LEGAL_CONTACT_EMAIL, LEGAL_PAGE, LEGAL_PATH, legalPageForPath, legalSections, otherLegalPage } from './legal-content.js';
 
 test('legal paths resolve to their page with or without a trailing slash', () => {
   assert.equal(legalPageForPath('/privacy'), LEGAL_PAGE.PRIVACY);
@@ -19,4 +19,8 @@ test('each page links to the other and lists sections ending with contact', () =
     assert.equal(new Set(sections.map((section) => section.id)).size, sections.length);
   }
   assert.deepEqual(legalSections('unknown'), []);
+});
+
+test('legal pages publish a contact address for privacy requests', () => {
+  assert.match(LEGAL_CONTACT_EMAIL, /^[^\s@]+@[^\s@]+\.[^\s@]+$/);
 });
