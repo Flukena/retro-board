@@ -18,11 +18,10 @@ function controlRect(root, selector) {
 export function mobileEditorInsets(root, viewport) {
   const header = controlRect(root, '.rb-topbar');
   const dock = controlRect(root, '.rb-tool-dock');
-  const done = controlRect(root, '.rb-mobile-editor__done');
   return {
     left: Math.max(0, (dock?.right ?? viewport.left) - viewport.left),
     top: Math.max(0, (header?.bottom ?? viewport.top) - viewport.top),
-    bottom: Math.max(0, viewport.bottom - (done?.top ?? viewport.bottom)),
+    bottom: 0,
   };
 }
 

@@ -22,7 +22,6 @@ function fixture(heightPx = 160, zoom = 1, widthPx = 240) {
   const controls = {
     '.rb-topbar': { width: 374, height: 62, bottom: 70 },
     '.rb-tool-dock': { width: 76, height: 280, right: 84 },
-    '.rb-mobile-editor__done': { width: 100, height: 44, top: 312 },
   };
   const root = {
     ownerDocument: { defaultView: view, activeElement: editor }, contains: (node) => node === editor,
@@ -48,12 +47,12 @@ function fixture(heightPx = 160, zoom = 1, widthPx = 240) {
   return { root, editor, properties, commits, dispose, dispatch };
 }
 
-test('keyboard reveal measures the actual header, left rail and Done control', () => {
+test('keyboard reveal measures the actual header and left rail and reserves nothing at the bottom', () => {
   const f = fixture();
-  assert.deepEqual(mobileEditorInsets(f.root, VISIBLE_VIEWPORT), { left: 84, top: 46, bottom: 52 });
+  assert.deepEqual(mobileEditorInsets(f.root, VISIBLE_VIEWPORT), { left: 84, top: 46, bottom: 0 });
   assert.equal(mobileEditorHeightLimitPx(VISIBLE_VIEWPORT, { top: 46, bottom: 52 }, 2), 109);
   f.dispatch(MOBILE_EDITOR_VISIBILITY_EVENT);
-  assert.deepEqual(f.commits, [{ x: 76, y: -160, zoom: 1 }]);
+  assert.deepEqual(f.commits, [{ x: 76, y: -108, zoom: 1 }]);
   f.dispatch(MOBILE_EDITOR_VISIBILITY_EVENT);
   assert.equal(f.commits.length, 1, 'Already visible input must not move the board again');
   f.dispose();
@@ -62,10 +61,10 @@ test('keyboard reveal measures the actual header, left rail and Done control', (
 test('a tall inline editor is bounded in world pixels and released on blur without item writes', () => {
   const f = fixture(600, 2);
   f.dispatch(MOBILE_EDITOR_VISIBILITY_EVENT);
-  assert.equal(f.properties.get(HEIGHT_LIMIT_PROPERTY), '109px');
+  assert.equal(f.properties.get(HEIGHT_LIMIT_PROPERTY), '135px');
   assert.equal(f.editor.dataset.mobileHeightBounded, 'true');
   const rect = f.editor.getBoundingClientRect();
-  assert.ok(rect.top >= 82 && rect.bottom <= 300, 'Input must fit above Done and keyboard');
+  assert.ok(rect.top >= 82 && rect.bottom <= 352, 'Input must fit above the keyboard');
   f.dispatch('focusout');
   assert.equal(f.properties.has(HEIGHT_LIMIT_PROPERTY), false);
   assert.equal(f.editor.dataset.mobileHeightBounded, undefined);

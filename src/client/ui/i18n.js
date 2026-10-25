@@ -9,8 +9,6 @@ const dict = {
   th: {
     'tool.sticky': 'สติกเกอร์',
     'tool.sticky.title': 'เพิ่มสติกเกอร์',
-    'mobile.edit': 'แก้ไขข้อความ',
-    'mobile.done': 'เสร็จสิ้น',
     'mobile.editorLabel': 'แก้ไขข้อความ',
     'mobile.emptyHint': 'แตะสติกเกอร์เพื่อเริ่ม หรือเลือกเทมเพลตจากแถบซ้าย',
     'public.title': 'กำแพงสาธารณะ',
@@ -473,8 +471,6 @@ const dict = {
   en: {
     'tool.sticky': 'Sticky',
     'tool.sticky.title': 'Add a sticky note',
-    'mobile.edit': 'Edit text',
-    'mobile.done': 'Done',
     'mobile.editorLabel': 'Edit text',
     'mobile.emptyHint': 'Tap Sticky to start, or pick a template from the left bar',
     'public.title': 'Public Wall',

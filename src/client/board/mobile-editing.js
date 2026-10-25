@@ -1,6 +1,5 @@
 import { VIEWPORT_ZOOM_MAX } from '../../domain/viewport-limits.js';
 
-const TEXT_ITEM_TYPES = new Set(['sticky', 'text']);
 export const MOBILE_EDITOR_VISIBILITY_EVENT = 'rb:mobile-editor-visibility';
 export const MOBILE_EDITOR_CLEARANCE_PX = 12;
 // A card narrower than this on screen is zoomed in when editing starts.
@@ -9,19 +8,6 @@ export const MOBILE_EDITOR_MIN_READABLE_WIDTH_PX = 200;
 const MOBILE_EDITOR_FOCUS_WIDTH_SHARE = 0.85;
 const CLEARANCE_SIDES = 2;
 const CENTER_DIVISOR = 2;
-
-export function mobileEditableField(item) {
-  if (!item) return null;
-  if (item.type === 'zone') return 'title';
-  return TEXT_ITEM_TYPES.has(item.type) ? 'text' : null;
-}
-
-export function mobileViewportStyle(viewport, layoutHeightPx = 0) {
-  if (!viewport) return {};
-  return {
-    '--rb-mobile-keyboard-bottom-px': `${Math.max(0, layoutHeightPx - viewport.offsetTop - viewport.height)}px`,
-  };
-}
 
 export function editorContentOverflowPx(node) {
   const viewportBounded = node.dataset.mobileHeightBounded === 'true' || node.dataset.mobileWidthBounded === 'true';

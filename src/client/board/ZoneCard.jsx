@@ -14,6 +14,7 @@ import { createZoneMenuActions } from './zone-menu-actions.js';
 import { useDismiss } from '../ui/useDismiss.js';
 import { useZoneMenuViewport } from './zone-menu-viewport.js';
 import './board-cards.css';
+import { useTapToEdit } from './tap-to-edit.js';
 
 const SINGLE_CARD_COUNT = 1;
 const ZONE_EDGE_SIDES = ['top', 'bottom', 'left', 'right'];
@@ -66,6 +67,7 @@ export const ZoneCard = React.memo(function ZoneCard({
 }) {
   void lang; // Language changes must invalidate React.memo for localized labels.
   const [menuOpen, setMenuOpen] = useState(false);
+  const watchTapToEdit = useTapToEdit({ selected, enabled: !isEditingTitle });
   const presence = usePresence(menuOpen);
   const headerRef = useRef(null);
   const popupRef = useRef(null);
@@ -92,7 +94,11 @@ export const ZoneCard = React.memo(function ZoneCard({
     >
       <div ref={headerRef} className="rb-zone__title" style={{ ...ZONE_HEADER_SIZE_TOKENS, fontSize: titleFs, '--rb-zone-title-size': `${titleFs}px` }}>
         <div className={isEditingTitle ? 'rb-zone__chip rb-zone__chip--editing' : 'rb-zone__chip'}
-          onMouseDown={(e) => { if (!isEditingTitle) onStartZoneDrag(e, it); }}
+          onMouseDown={(e) => {
+            if (isEditingTitle) return;
+            watchTapToEdit(e, () => onBeginFocus(it, 'title'));
+            onStartZoneDrag(e, it);
+          }}
           onDoubleClick={(e) => { e.stopPropagation(); onBeginFocus(it, 'title'); }}
           style={{ cursor: isEditingTitle ? 'text' : (it.locked ? 'not-allowed' : 'grab') }}>
           {isEditingTitle ? (

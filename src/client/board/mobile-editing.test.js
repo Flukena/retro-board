@@ -2,31 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  mobileEditableField, mobileViewportStyle, mobileEditorPanDelta, editorContentOverflowPx, mobileEditorFocusViewport,
+  mobileEditorPanDelta, editorContentOverflowPx, mobileEditorFocusViewport,
   MOBILE_EDITOR_MIN_READABLE_WIDTH_PX,
 } from './mobile-editing.js';
 import { VIEWPORT_ZOOM_MAX } from '../../domain/viewport-limits.js';
-
-test('mobile editing selects text or zone title and excludes non-text items', () => {
-  assert.equal(mobileEditableField({ type: 'sticky' }), 'text');
-  assert.equal(mobileEditableField({ type: 'text' }), 'text');
-  assert.equal(mobileEditableField({ type: 'zone' }), 'title');
-  assert.equal(mobileEditableField({ type: 'image' }), null);
-  assert.equal(mobileEditableField(null), null);
-});
-
-test('compact Done control follows the visible viewport above an open keyboard', () => {
-  assert.deepEqual(mobileViewportStyle({ height: 310, offsetTop: 40 }, 844), {
-    '--rb-mobile-keyboard-bottom-px': '494px',
-  });
-  assert.deepEqual(mobileViewportStyle(null), {});
-});
-
-test('mobile edit control clears the reserved tool rail independently of the bottom inset', () => {
-  const css = readFileSync(new URL('./mobile-editing.css', import.meta.url), 'utf8');
-  const mobileRule = css.slice(css.indexOf('@media'));
-  assert.match(mobileRule, /left:\s*var\(--rb-mobile-canvas-left-px\)/);
-});
 
 test('inline editor pan keeps the card above the keyboard and outside reserved controls', () => {
   const viewport = { left: 0, top: 0, right: 390, bottom: 400 };

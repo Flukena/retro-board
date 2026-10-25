@@ -122,7 +122,6 @@ import { attachSafariGestures } from './src/client/board/safari-gestures.js';
 import { attachMobileGestures, isMobileGestureEvent } from './src/client/board/mobile-gestures.js';
 import { APP_VIEWPORT_CONTENT } from './src/client/ui/mobile-layout.js';
 import { shouldPreserveRecentLocalItem } from './src/domain/pending-local-items.js';
-import { MobileEditingControls } from './src/client/board/MobileEditingControls.jsx';
 import { attachMobileEditorViewport } from './src/client/board/mobile-editor-viewport.js';
 
 
@@ -4017,10 +4016,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
         {...selectionLayerAttributes({ item: selectedItem, groupBBox, selectedCount: selectedIds.size,
           stackHeightPx, editing: Boolean(focusedTextId) })}>
         {renderActionToolbar()}
-        <MobileEditingControls item={selectedItem} isEditing={Boolean(focusedTextId)}
-          editorRef={editAreaRef}
-          editingAllowed={editingAllowed && !isStickyHiddenForUser(selectedItem, board.items, board.allRevealed, userId)}
-          onBeginFocus={beginFocus} lang={lang} />
         {renderResizeHandles()}
       </div>
 
