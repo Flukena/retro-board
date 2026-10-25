@@ -11,5 +11,6 @@ test('canvas cursor keeps pan, space and creation mode precedence', () => {
   assert.equal(canvasCursor(undefined, false, 'zone'), 'crosshair');
   assert.equal(canvasCursor(undefined, false, 'select'), 'crosshair');
   assert.equal(canvasCursor(undefined, false, 'draw'), 'crosshair');
-  for (const mode of [null, 'text', 'image']) assert.equal(canvasCursor(undefined, false, mode), 'default');
+  assert.equal(canvasCursor(undefined, false, 'text'), 'text', 'Text placement shows where the text will go');
+  for (const mode of [null, 'image']) assert.equal(canvasCursor(undefined, false, mode), 'default');
 });

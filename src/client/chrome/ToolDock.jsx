@@ -35,14 +35,21 @@ function DockTile({ toolId, icon: Icon, label, chevron = false, paletteIndex = D
   );
 }
 
+// Tools that wait for a click/tap on the board explain how to finish on the board itself.
+const PLACEMENT_HINT_TOOLS = new Set([TOOL_ID.TEXT, TOOL_ID.ZONE]);
+
+function PlacementHint({ creationMode }) {
+  if (!PLACEMENT_HINT_TOOLS.has(creationMode)) return null;
+  return <div className="rb-placement-hint" role="status" style={{ zIndex: Z.DOCK }}>{t(`tool.${creationMode}.active`)}</div>;
+}
+
 export function ToolTile({ toolId, active, onTool }) {
-  const activeCreation = active && toolId !== TOOL_ID.SELECT && toolId !== TOOL_ID.DRAW;
   return (
     <DockTile
       toolId={toolId}
-      icon={activeCreation ? MousePointer2 : TOOL_ICONS[toolId]}
-      label={t(activeCreation ? `tool.${toolId}.placeholder` : `tool.${toolId}`)}
-      title={t(activeCreation ? `tool.${toolId}.active` : `tool.${toolId}.title`)}
+      icon={TOOL_ICONS[toolId]}
+      label={t(`tool.${toolId}`)}
+      title={t(`tool.${toolId}.title`)}
       aria-pressed={active}
       onClick={() => onTool(toolId)}
     />
@@ -151,6 +158,7 @@ export function ToolDock({
           />
         ))}
       </div>
+      <PlacementHint creationMode={creationMode} />
       {templatesOpen && (
         <TemplatePopover
           rows={rows}

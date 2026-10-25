@@ -1,11 +1,12 @@
-import React, { memo, useRef, useState } from 'react';
-import { Undo2, Redo2, X, ChevronDown, Pencil, Eraser, Square, Circle, ArrowUpRight } from 'lucide-react';
-import { DrawingDraft, DRAWING_WIDTHS_SCREEN_PX, DRAWING_DEFAULT_WIDTH_SCREEN_PX, DRAWING_ERASER_WIDTHS_SCREEN_PX, DRAWING_DEFAULT_ERASER_WIDTH_SCREEN_PX } from '../../domain/freehand-drawing.js';
+import React, { memo, useEffect, useRef, useState } from 'react';
+import { Undo2, Redo2, X, Pencil, Eraser, Square, Circle, ArrowUpRight } from 'lucide-react';
+import { DrawingDraft, DRAWING_WIDTHS_SCREEN_PX, DRAWING_ERASER_WIDTHS_SCREEN_PX } from '../../domain/freehand-drawing.js';
 import { DRAWING_TOOL, DRAWING_TOOLS } from '../../domain/drawing-shapes.js';
 import { DrawingLiveSession } from './DrawingLiveSession.js';
 import { hideDrawingImage } from './drawing-visibility.js';
 import { useDrawingImage } from './useDrawingImage.js';
 import { DrawingController } from './DrawingController.js';
+import { loadDrawingPreferences, saveDrawingPreferences } from './drawing-preferences.js';
 import { uploadWithRetry } from '../transfer/image-upload.js';
 import { FONT_COLORS } from '../ui/palette.js';
 import { Button, IconButton, Surface } from '../ui/UiPrimitives.jsx';
@@ -15,16 +16,34 @@ import { CHROME_ICON_SIZE_PX, Z } from '../chrome/chrome-layout.js';
 import { t } from '../ui/i18n.js';
 import './drawing-tool.css';
 
-const AUTO_COLOR = 'auto';
 const DRAWING_ICONS = Object.freeze({ pen: Pencil, eraser: Eraser, rectangle: Square, circle: Circle, arrow: ArrowUpRight });
 const summaryOf = draft => ({ canUndo: draft.canUndo, canRedo: draft.canRedo, empty: draft.empty });
 
-function DrawingSelect({ label, children, ...props }) {
-  return <label className="rb-drawing-field"><span>{label}</span>
-    <span className="rb-drawing-select"><select aria-label={label} {...props}>{children}</select>
-      <ChevronDown size={CHROME_ICON_SIZE_PX.SMALL} aria-hidden="true" />
-    </span>
-  </label>;
+function browserStorage() {
+  try { return typeof window === 'undefined' ? null : window.localStorage; } catch { return null; }
+}
+
+function statusKey({ error, failed, loading, ready, saving }) {
+  if (error) return error;
+  if (failed) return 'draw.loadFailed';
+  if (loading || !ready) return 'draw.loading';
+  return saving ? 'draw.saving' : null;
+}
+
+function ColorSwatches({ color, disabled, onChange }) {
+  return <div className="rb-drawing-group" role="group" aria-label={t('draw.color')}>
+    {FONT_COLORS.map(entry => <button key={entry.label} type="button" className="rb-drawing-swatch"
+      aria-pressed={color === entry.value} aria-label={t(`font.color.${entry.label}`)} title={t(`font.color.${entry.label}`)}
+      disabled={disabled} style={{ '--rb-drawing-swatch': entry.swatch }} onClick={() => onChange(entry.value)} />)}
+  </div>;
+}
+
+function SizeButtons({ label, widths, width, disabled, onChange }) {
+  return <div className="rb-drawing-group" role="group" aria-label={label}>
+    {widths.map((value, step) => <button key={value} type="button" className="rb-drawing-size" data-size-step={step}
+      aria-pressed={width === value} aria-label={t('draw.widthPx', { n: value })} title={t('draw.widthPx', { n: value })}
+      disabled={disabled} onClick={() => onChange(value)}><span aria-hidden="true" /></button>)}
+  </div>;
 }
 
 export const DrawingTool = memo(function DrawingTool(props) {
@@ -32,8 +51,10 @@ export const DrawingTool = memo(function DrawingTool(props) {
   const draftRef = useRef(null); if (!draftRef.current) draftRef.current = new DrawingDraft();
   const canvasRef = useRef(null), controllerRef = useRef(null), contextRef = useRef(props), sessionRef = useRef(null);
   const [summary, setSummary] = useState(() => summaryOf(draftRef.current));
-  const [color, setColor] = useState(AUTO_COLOR), [width, setWidth] = useState(DRAWING_DEFAULT_WIDTH_SCREEN_PX);
-  const [tool, setTool] = useState(DRAWING_TOOL.PEN), [eraserWidth, setEraserWidth] = useState(DRAWING_DEFAULT_ERASER_WIDTH_SCREEN_PX);
+  const [initialPreferences] = useState(() => loadDrawingPreferences(browserStorage()));
+  const [color, setColor] = useState(initialPreferences.color), [width, setWidth] = useState(initialPreferences.width);
+  const [tool, setTool] = useState(DRAWING_TOOL.PEN), [eraserWidth, setEraserWidth] = useState(initialPreferences.eraserWidth);
+  useEffect(() => { saveDrawingPreferences(browserStorage(), { color, width, eraserWidth }); }, [color, width, eraserWidth]);
   const [closing, setClosing] = useState(false);
   const [saving, setSaving] = useState(false), [error, setError] = useState(null);
   const closingRef = useRef(closing); closingRef.current = closing;
@@ -41,7 +62,7 @@ export const DrawingTool = memo(function DrawingTool(props) {
   const selectedWidth = erasing ? eraserWidth : width;
   const settingsRef = useRef({ color: null, width: selectedWidth, tool });
   useBrowserLayoutEffect(() => {
-    contextRef.current = props; settingsRef.current = { color: color === AUTO_COLOR ? null : color, width: selectedWidth, tool };
+    contextRef.current = props; settingsRef.current = { color, width: selectedWidth, tool };
     controllerRef.current?.requestPaint();
   });
   const refresh = () => { setSummary(summaryOf(draftRef.current)); controllerRef.current?.requestPaint(); };
@@ -94,6 +115,7 @@ export const DrawingTool = memo(function DrawingTool(props) {
     setError(null); refresh(); sessionRef.current?.changed();
   };
   if (!active) return null;
+  const status = statusKey({ error, failed, loading, ready, saving });
   return <>
     <canvas ref={canvasRef} className="rb-drawing-canvas" role="img" aria-label={t('draw.canvas')}
       data-mobile-gesture="native" style={{ zIndex: Z.DRAWING_LAYER }} />
@@ -104,17 +126,18 @@ export const DrawingTool = memo(function DrawingTool(props) {
           aria-pressed={tool === value} aria-label={t(`draw.tool.${value}`)} title={t(`draw.tool.${value}`)} disabled={closing || !ready}
           onClick={() => { controllerRef.current?.finishStroke(); setTool(value); }}><Icon size={CHROME_ICON_SIZE_PX.TOOL} /></IconButton>; })}
       </div>
-      <DrawingSelect label={t('draw.color')} value={color} disabled={closing || erasing || !ready} onChange={event => setColor(event.target.value)}>
-        {FONT_COLORS.map(entry => <option key={entry.label} value={entry.value ?? AUTO_COLOR}>{t(`font.color.${entry.label}`)}</option>)}
-      </DrawingSelect>
-      <DrawingSelect label={t(erasing ? 'draw.eraserSize' : 'draw.width')} value={selectedWidth} disabled={closing || !ready} onChange={event => (erasing ? setEraserWidth : setWidth)(Number(event.target.value))}>
-        {(erasing ? DRAWING_ERASER_WIDTHS_SCREEN_PX : DRAWING_WIDTHS_SCREEN_PX).map(value => <option key={value} value={value}>{t('draw.widthPx', { n: value })}</option>)}
-      </DrawingSelect>
+      <div className="rb-drawing-options">
+        <SizeButtons label={t(erasing ? 'draw.eraserSize' : 'draw.width')} widths={erasing ? DRAWING_ERASER_WIDTHS_SCREEN_PX : DRAWING_WIDTHS_SCREEN_PX}
+          width={selectedWidth} disabled={closing || !ready} onChange={erasing ? setEraserWidth : setWidth} />
+        <ColorSwatches color={color} disabled={closing || erasing || !ready} onChange={setColor} />
+      </div>
+      <div className="rb-drawing-actions">
       <IconButton title={t('topbar.undo')} aria-label={t('topbar.undo')} disabled={closing || !summary.canUndo} onClick={() => changeHistory(false)}><Undo2 size={CHROME_ICON_SIZE_PX.TOOL} /></IconButton>
       <IconButton title={t('topbar.redo')} aria-label={t('topbar.redo')} disabled={closing || !summary.canRedo} onClick={() => changeHistory(true)}><Redo2 size={CHROME_ICON_SIZE_PX.TOOL} /></IconButton>
       <IconButton title={t('draw.cancel')} aria-label={t('draw.cancel')} onClick={() => { sessionRef.current?.discard(); finish(); }}><X size={CHROME_ICON_SIZE_PX.TOOL} /></IconButton>
+      </div>
       {failed && <Button onClick={retry}>{t('draw.retryLoad')}</Button>}
-      <div className="rb-drawing-status" role={error ? 'alert' : 'status'}>{t(error || (failed ? 'draw.loadFailed' : loading || !ready ? 'draw.loading' : saving ? 'draw.saving' : 'draw.hint'))}</div>
+      {status && <div className="rb-drawing-status" role={error ? 'alert' : 'status'}>{t(status)}</div>}
     </Surface>
   </>;
 });

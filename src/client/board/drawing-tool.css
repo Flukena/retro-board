@@ -1,17 +1,42 @@
 .rb-drawing-canvas { position: fixed; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
-.rb-drawing-toolbar { position: fixed; top: var(--draw-toolbar-top); left: var(--draw-toolbar-left); max-width: calc(100vw - var(--draw-toolbar-left) - var(--space-4)); display: flex; align-items: end; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-3); border-radius: var(--radius-lg); background: var(--tool-section-bg); border: var(--draw-border-width) solid var(--tool-section-border); box-shadow: var(--shadow-pop); font-family: var(--font-ui); }
-.rb-drawing-field { display: grid; gap: var(--space-1); color: var(--text-mid); font-size: var(--draw-toolbar-font-size); }
-.rb-drawing-select { position: relative; display: block; width: var(--draw-select-width); }
-.rb-drawing-select svg { position: absolute; right: var(--space-2); top: 50%; transform: translateY(-50%); pointer-events: none; }
-.rb-drawing-field select { appearance: none; box-sizing: border-box; height: var(--draw-control-height); width: 100%; padding: 0 calc(var(--space-4) + var(--space-3)) 0 var(--space-2); color: var(--text); background: var(--bg-panel); border: var(--draw-border-width) solid var(--border); border-radius: var(--radius-md); font: inherit; }
+.rb-drawing-toolbar { position: fixed; top: var(--draw-toolbar-top); left: var(--draw-toolbar-left); max-width: calc(100vw - var(--draw-toolbar-left) - var(--space-4)); display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-2); border-radius: var(--radius-lg); background: var(--tool-section-bg); border: var(--draw-border-width) solid var(--tool-section-border); box-shadow: var(--shadow-pop); font-family: var(--font-ui); }
 .rb-drawing-toolbar button { min-height: var(--draw-control-height); }
+.rb-drawing-tools,
+.rb-drawing-options,
+.rb-drawing-actions,
+.rb-drawing-group { display: flex; align-items: center; gap: var(--space-1); }
+.rb-drawing-group { padding-left: var(--space-2); border-left: var(--draw-border-width) solid var(--border-soft); }
+.rb-drawing-tools [aria-pressed="true"] { color: var(--accent); background: var(--bg-panel-2); }
+
+.rb-drawing-swatch { box-sizing: border-box; width: var(--draw-swatch-size); height: var(--draw-swatch-size); min-height: var(--draw-swatch-size); padding: 0; border: var(--draw-border-width) solid var(--border); border-radius: var(--radius-round); background: var(--rb-drawing-swatch); cursor: pointer; }
+.rb-drawing-toolbar .rb-drawing-swatch { min-height: var(--draw-swatch-size); }
+.rb-drawing-swatch[aria-pressed="true"] { outline: var(--draw-border-width) solid var(--accent); outline-offset: var(--draw-border-width); }
+
+.rb-drawing-size { display: inline-grid; place-items: center; width: var(--draw-control-height); padding: 0; color: var(--text); background: transparent; border: var(--draw-border-width) solid transparent; border-radius: var(--radius-md); cursor: pointer; }
+.rb-drawing-size > span { width: var(--draw-dot-small); height: var(--draw-dot-small); border-radius: var(--radius-round); background: currentColor; }
+.rb-drawing-size[data-size-step="1"] > span { width: var(--draw-dot-medium); height: var(--draw-dot-medium); }
+.rb-drawing-size[data-size-step="2"] > span { width: var(--draw-dot-large); height: var(--draw-dot-large); }
+.rb-drawing-size[aria-pressed="true"] { color: var(--accent); background: var(--bg-panel-2); border-color: var(--accent); }
+.rb-drawing-swatch:disabled,
+.rb-drawing-size:disabled { cursor: not-allowed; opacity: var(--draw-disabled-opacity); }
+
 .rb-drawing-status { flex-basis: 100%; color: var(--text-muted); font-size: var(--draw-toolbar-font-size); overflow-wrap: anywhere; }
 .rb-drawing-status[role="alert"] { color: var(--danger); }
-@media (max-width: 767px), (max-width: 1024px) and (pointer: coarse) {
-  .rb-drawing-toolbar { top: var(--rb-mobile-canvas-top-px); left: var(--rb-mobile-canvas-left-px); max-width: calc(100vw - var(--rb-mobile-canvas-left-px) - var(--rb-mobile-right-px)); padding: var(--space-2); gap: var(--space-1); }
-  .rb-drawing-toolbar button { min-width: var(--modal-touch-target); min-height: var(--modal-touch-target); }
-  .rb-drawing-field select { height: var(--modal-touch-target); font-size: var(--modal-input-font-size); }
-}
 
-.rb-drawing-tools { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: var(--space-1); }
-.rb-drawing-tools [aria-pressed="true"] { color: var(--accent); background: var(--bg-panel-2); }
+@media (max-width: 767px), (max-width: 1024px) and (pointer: coarse) {
+  /* Two rows under the thumb: tools and history on top, sizes and colours below. */
+  .rb-drawing-toolbar { top: auto; bottom: var(--rb-mobile-bottom-px); left: var(--rb-mobile-left-px); right: var(--rb-mobile-right-px); max-width: none; display: grid; grid-template-columns: 1fr auto; grid-template-areas: "tools actions" "options options"; padding: var(--space-1) var(--space-2); gap: var(--space-1); }
+  .rb-drawing-tools { grid-area: tools; }
+  .rb-drawing-actions { grid-area: actions; }
+  .rb-drawing-options { grid-area: options; overflow-x: auto; overscroll-behavior-x: contain; }
+  .rb-drawing-options > * { flex-shrink: 0; }
+  .rb-drawing-tools button,
+  .rb-drawing-actions button { min-width: var(--modal-touch-target); min-height: var(--modal-touch-target); }
+  .rb-drawing-group:first-child { padding-left: 0; border-left: none; }
+  .rb-drawing-toolbar .rb-drawing-swatch,
+  .rb-drawing-toolbar .rb-drawing-size { width: var(--draw-mobile-option-size); min-width: var(--draw-mobile-option-size); height: var(--draw-mobile-option-size); min-height: var(--draw-mobile-option-size); }
+  .rb-drawing-toolbar .rb-drawing-swatch { background-clip: content-box; padding: var(--space-1); border-color: transparent; }
+  .rb-drawing-status { position: fixed; left: var(--rb-mobile-canvas-left-px); right: var(--rb-mobile-right-px); bottom: calc(var(--rb-mobile-bottom-px) + var(--modal-touch-target) + var(--space-4)); padding: var(--space-1) var(--space-2); border-radius: var(--radius-md); background: var(--tool-section-bg); }
+  :root:has(.rb-drawing-toolbar) .rb-zoom-controls,
+  :root:has(.rb-drawing-toolbar) .rb-minimap { display: none; }
+}

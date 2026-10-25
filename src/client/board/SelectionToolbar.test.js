@@ -19,6 +19,9 @@ test('selection toolbar exposes only the controls allowed for its type and role'
         assert.ok(!markup.includes(t('zone.revealCards')));
         assert.ok(markup.includes(`title="${t('selection.bringToFront')}"`));
         assert.ok(markup.includes(`title="${t('selection.sendToBack')}"`));
+        for (const key of ['selection.bringToFront', 'selection.sendToBack']) assert.ok(markup.includes(`aria-label="${t(key)}"`));
+        assert.match(markup, /lucide-arrow-up-to-line/);
+        assert.match(markup, /lucide-arrow-down-to-line/);
         assert.match(markup, /class="rb-icon-btn rb-icon-btn--danger"[^>]*disabled=""/);
       }
       for (const name of ['yellow', 'red', 'green', 'blue', 'purple', 'orange']) {

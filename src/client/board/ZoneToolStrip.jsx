@@ -4,7 +4,7 @@ import { createZoneToolScrollHandlers } from './mobile-gestures.js';
 import { zoneTitleFontSize } from '../../domain/zone-title.js';
 import { portalToBody } from '../ui/UiPrimitives.jsx';
 import { ZONE_HEADER_SIZE_TOKENS } from '../ui/theme.js';
-import { Lock, Unlock, Download, LayoutTemplate, BringToFront, SendToBack, Trash2, Eye, EyeOff, ThumbsUp, Square } from 'lucide-react';
+import { Lock, Unlock, Download, LayoutTemplate, ArrowUpToLine, ArrowDownToLine, Trash2, Eye, EyeOff, ThumbsUp, Square } from 'lucide-react';
 import { ColorSwatches, FontSizeControl } from './SelectionToolbar.jsx';
 import { t } from '../ui/i18n.js';
 import { boardManagementPermissions } from '../../domain/public-board-permissions.js';
@@ -28,8 +28,8 @@ function zoneTools(item, canEdit, canDelete, actions, labelled) {
       !canEdit, () => actions.toggleLock(id), labelled),
     toolButton('zone.exportCsvTitle', Download, false, () => actions.exportCsv(id), labelled),
     toolButton('selection.saveTemplate', LayoutTemplate, false, () => actions.saveTemplate(id), labelled),
-    toolButton('selection.bringToFront', BringToFront, !canEdit, () => actions.bringToFront(id), labelled),
-    toolButton('selection.sendToBack', SendToBack, !canEdit, () => actions.sendToBack(id), labelled),
+    toolButton('selection.bringToFront', ArrowUpToLine, !canEdit, () => actions.bringToFront(id), labelled),
+    toolButton('selection.sendToBack', ArrowDownToLine, !canEdit, () => actions.sendToBack(id), labelled),
     toolButton('common.delete', Trash2, !canDelete, () => actions.remove(id), labelled),
   ];
 }

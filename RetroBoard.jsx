@@ -115,6 +115,7 @@ import { CollaborativeTextEditor } from './src/client/board/CollaborativeTextEdi
 import { TextCard } from './src/client/board/TextCard.jsx';
 import { ImageCard } from './src/client/board/ImageCard.jsx';
 import { canvasCursor } from './src/client/board/board-cursor.js';
+import { textPlacementAt, toggleCreationMode } from './src/client/board/creation-mode.js';
 import { protectedItemEntries, mergeItemEntries } from './src/domain/move-concealment.js';
 import { reparentMoveEntries } from './src/domain/move-reparenting.js';
 import { isStickyHiddenForUser, stickyEffectiveRevealed, stickyCloneRevealOverride } from './src/domain/board-visibility.js';
@@ -1959,6 +1960,14 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
         document.activeElement.blur();
       }
     }
+    if (!spaceHeldRef.current && creationModeRef.current === TOOL_ID.TEXT && requireEdit()) {
+      e.preventDefault();
+      const rect = canvasRef.current.getBoundingClientRect();
+      const at = textPlacementAt(screenToWorld(e.clientX - rect.left, e.clientY - rect.top), { w: TEXT_W, h: TEXT_H });
+      setCreationMode(null);
+      addText(at.x, at.y);
+      return;
+    }
     // Zone-creation tool: drag rectangle on canvas to place a new zone.
     if (!spaceHeldRef.current && creationModeRef.current === 'zone' && requireEdit()) {
       e.preventDefault();
@@ -2063,7 +2072,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     }
     if (e.button === 0) startPan(e);
   }, [
-    selectedIds, requireEdit, screenToWorld, addZone, mode,
+    selectedIds, requireEdit, screenToWorld, addZone, addText, mode,
     settleWheelBeforeInteraction, startPan, updateFocusedText,
   ]);
 
@@ -3680,17 +3689,18 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     const world = screenToWorld(rect.width / 2, rect.height / 2);
     create(world.x, world.y);
   };
+  const armPlacementTool = (tool) => {
+    if (!requireEdit()) return;
+    setCreationMode((mode) => toggleCreationMode(mode, tool));
+    setSelectedIds(new Set());
+  };
   const toolHandlers = {
     [TOOL_ID.SELECT]: () => {
       setCreationMode((mode) => (mode === TOOL_ID.SELECT ? null : TOOL_ID.SELECT));
       setSelectedIds(new Set());
     },
-    [TOOL_ID.TEXT]: () => createAtViewportCenter(addText),
-    [TOOL_ID.ZONE]: () => {
-      if (!requireEdit()) return;
-      setCreationMode((mode) => (mode === TOOL_ID.ZONE ? null : TOOL_ID.ZONE));
-      setSelectedIds(new Set());
-    },
+    [TOOL_ID.TEXT]: () => armPlacementTool(TOOL_ID.TEXT),
+    [TOOL_ID.ZONE]: () => armPlacementTool(TOOL_ID.ZONE),
     [TOOL_ID.IMAGE]: pickImageFile,
     [TOOL_ID.DRAW]: drawingSession.toggle,
   };

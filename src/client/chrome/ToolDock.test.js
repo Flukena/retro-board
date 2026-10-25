@@ -73,7 +73,7 @@ test('each template row has a thumbnail; custom rename emits its id with localiz
 
 const dockButton = (markup, toolId) => markup.match(new RegExp(`<button[^>]*data-tool="${toolId}"[^>]*>[\\s\\S]*?</button>`))?.[0];
 
-test('Select is pressed at rest with its normal label and icon; creation tools retain placeholder semantics', async () => {
+test('Select is pressed at rest; an armed placement tool keeps its own label and icon and shows a board hint', async () => {
   await withChromeModule('/src/client/chrome/ToolDock.jsx', ({ ToolDock, TOOL_ID }, { t, getLang, setLang }) => {
     const originalLang = getLang();
     try {
@@ -90,14 +90,18 @@ test('Select is pressed at rest with its normal label and icon; creation tools r
         assert.match(explicitSelect, /aria-pressed="true"/);
         assert.ok(explicitSelect.includes(`>${t('tool.select')}</span>`));
         assert.ok(explicitSelect.includes(`title="${t('tool.select.title')}"`));
-        for (const toolId of [TOOL_ID.TEXT, TOOL_ID.ZONE, TOOL_ID.IMAGE]) {
+        assert.doesNotMatch(resting, /rb-placement-hint/);
+        for (const toolId of [TOOL_ID.TEXT, TOOL_ID.ZONE]) {
           assert.match(dockButton(resting, toolId), /aria-pressed="false"/);
           const creating = renderToStaticMarkup(React.createElement(ToolDock, { creationMode: toolId }));
           assert.match(dockButton(creating, TOOL_ID.SELECT), /aria-pressed="false"/);
           const active = dockButton(creating, toolId);
           assert.match(active, /aria-pressed="true"/);
-          assert.ok(active.includes(t(`tool.${toolId}.placeholder`)));
-          assert.match(active, /lucide-mouse-pointer2/);
+          assert.ok(active.includes(`>${t(`tool.${toolId}`)}</span>`), 'The tile keeps its short name instead of a truncated hint');
+          assert.doesNotMatch(active, /lucide-mouse-pointer2/);
+          const hintKey = `tool.${toolId}.active`;
+          assert.notEqual(t(hintKey), hintKey);
+          assert.match(creating, new RegExp(`class="rb-placement-hint"[^>]*role="status"[^>]*>${t(hintKey)}<`));
         }
       }
     } finally {

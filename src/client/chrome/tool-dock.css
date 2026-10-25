@@ -59,10 +59,44 @@
   white-space: nowrap;
 }
 
-.rb-dock-tile:hover,
 .rb-dock-tile[aria-pressed="true"] {
   background: var(--bg-panel-2);
   color: var(--text);
+}
+
+/* Touch screens keep :hover after a tap, which made two tiles look selected. */
+@media (hover: hover) {
+  .rb-dock-tile:hover {
+    background: var(--bg-panel-2);
+    color: var(--text);
+  }
+}
+
+.rb-placement-hint {
+  position: fixed;
+  top: var(--draw-toolbar-top);
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100vw - var(--draw-toolbar-left) - var(--draw-toolbar-left));
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-fg);
+  box-shadow: var(--shadow-pop);
+  font-family: var(--font-ui);
+  font-size: var(--draw-toolbar-font-size);
+  text-align: center;
+  pointer-events: none;
+}
+
+@media (max-width: 767px), (max-width: 1024px) and (pointer: coarse) {
+  .rb-placement-hint {
+    top: var(--rb-mobile-canvas-top-px);
+    left: var(--rb-mobile-canvas-left-px);
+    right: var(--rb-mobile-right-px);
+    max-width: none;
+    transform: none;
+  }
 }
 
 .rb-dock-tile[aria-pressed="true"] {

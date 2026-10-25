@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import {
-  Pencil, LayoutTemplate, Trash2, Lock, Unlock, Type, BringToFront, SendToBack,
+  Pencil, LayoutTemplate, Trash2, Lock, Unlock, Type, ArrowUpToLine, ArrowDownToLine,
 } from 'lucide-react';
 import { IconButton, Surface } from '../ui/UiPrimitives.jsx';
 import { ICON_BUTTON_VARIANT, SURFACE_KIND, surfaceClass } from '../ui/ui-variants.js';
@@ -214,11 +214,11 @@ export function SelectionToolbar({ anchor, item, can, canDelete,
       {onEditDrawing && <IconButton onClick={() => can && onEditDrawing()} disabled={!can} title={t('draw.editImage')} aria-label={t('draw.editImage')}>
         <Pencil size={TOOLBAR_ICON_SIZE_PX} />
       </IconButton>}
-      <IconButton onClick={() => can && onBringToFront()} disabled={!can} title={t('selection.bringToFront')}>
-        <BringToFront size={TOOLBAR_ICON_SIZE_PX} />
+      <IconButton onClick={() => can && onBringToFront()} disabled={!can} title={t('selection.bringToFront')} aria-label={t('selection.bringToFront')}>
+        <ArrowUpToLine size={TOOLBAR_ICON_SIZE_PX} />
       </IconButton>
-      <IconButton onClick={() => can && onSendToBack()} disabled={!can} title={t('selection.sendToBack')}>
-        <SendToBack size={TOOLBAR_ICON_SIZE_PX} />
+      <IconButton onClick={() => can && onSendToBack()} disabled={!can} title={t('selection.sendToBack')} aria-label={t('selection.sendToBack')}>
+        <ArrowDownToLine size={TOOLBAR_ICON_SIZE_PX} />
       </IconButton>
       <IconButton
         variant={ICON_BUTTON_VARIANT.DANGER}
