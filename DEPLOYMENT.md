@@ -13,7 +13,7 @@ untrusted participants is outside the supported security model.
    `cloudflared.prod.yml`. Set its tunnel ID and hostname.
 3. Set the same exact HTTPS origin in `YJS_ALLOWED_ORIGINS` in
    `docker-compose.prod.yml`. If the hostname is not
-   `retro.sagonzis.space`, also replace the explicit WebSocket origin in
+   `retroroom.party`, also replace the explicit WebSocket origin in
    `nginx.conf`'s Content Security Policy. Before retaining HSTS
    `includeSubDomains`, verify that every child of the chosen public hostname
    is HTTPS-capable.

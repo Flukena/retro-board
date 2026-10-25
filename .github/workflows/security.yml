@@ -155,7 +155,7 @@ jobs:
             const create = await fetch(base + '/api/rooms', {
               method: 'POST',
               headers: {
-                origin: 'https://retro.sagonzis.space',
+                origin: 'https://retroroom.party',
                 'content-type': 'application/json',
               },
               body: '{}',

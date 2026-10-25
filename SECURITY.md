@@ -154,7 +154,7 @@ as a deliberate, backed-up maintenance operation.
   container smoke tests before each release. CI and Dependabot configuration
   are included in `.github/`.
 
-The production CSP currently names `https://retro.sagonzis.space`. If the
+The production CSP currently names `https://retroroom.party`. If the
 public hostname changes, update both `nginx.conf` and `YJS_ALLOWED_ORIGINS`
 before deploying.
 
