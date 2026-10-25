@@ -1,0 +1,18 @@
+.rb-zoom-controls {
+  position: fixed;
+  bottom: var(--rb-zoom-inset-px);
+  right: var(--rb-zoom-inset-px);
+  display: flex;
+  align-items: center;
+  padding: var(--rb-zoom-padding);
+  background: var(--tool-frame-bg);
+  border: var(--rb-chrome-border) solid var(--tool-frame-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--tool-frame-shadow);
+}
+
+.rb-zoom-percentage {
+  height: var(--rb-zoom-button-height);
+  min-width: 70px;
+  justify-content: center;
+}

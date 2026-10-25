@@ -17,7 +17,33 @@ RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
 
 # Server entrypoint and its shared pure domain modules.
 COPY --chown=node:node yjs-server.mjs ./
-COPY --chown=node:node src/board-geometry.js src/move-concealment.js src/board-visibility.js src/board-ownership.js src/zone-actions.js src/security-boundaries.js src/vote-finalization.js src/vote-results.js src/vote-ranking.js src/canonical-votes.js src/awareness-liveness.js src/vote-result-participants.js src/comment-schema.js src/zone-title.js src/relay-lifecycle.js src/relay-vote-maintenance.js src/relay-rejection-counters.js src/relay-config.js src/relay-rate-bucket.js src/relay-http.js src/relay-uploads.js src/relay-log-id.js src/relay-room-registry.js src/relay-maintenance.js ./src/
+COPY --chown=node:node \
+    src/domain/awareness-liveness.js src/domain/board-coordinates.js src/domain/board-geometry.js \
+    src/domain/board-ownership.js src/domain/board-reconciliation.js src/domain/board-state.js \
+    src/domain/board-visibility.js src/domain/canonical-votes.js src/domain/comment-schema.js \
+    src/domain/csv-import.js src/domain/import-schema.js src/domain/item-appearance.js \
+    src/domain/minimap.js src/domain/move-concealment.js src/domain/move-reparenting.js \
+    src/domain/pending-local-items.js src/domain/public-board-permissions.js src/domain/public-wall-contract.js \
+    src/domain/public-wall-image-source.js src/domain/public-zone-layout.js src/domain/security-boundaries.js \
+    src/domain/template-model.js src/domain/template-store.js src/domain/viewport-framing.js \
+    src/domain/viewport-limits.js src/domain/viewport-zoom.js src/domain/vote-finalization.js \
+    src/domain/vote-ownership.js src/domain/vote-ranking.js src/domain/vote-result-participants.js \
+    src/domain/vote-results.js src/domain/vote-session-lifecycle.js src/domain/vote-timing.js \
+    src/domain/voting-results.js src/domain/z-order.js src/domain/zone-actions.js \
+    src/domain/zone-title.js \
+    ./src/domain/
+
+COPY --chown=node:node \
+    src/server/public-restore-images.js src/server/public-upload-backup.js src/server/public-wall-config.js \
+    src/server/public-wall-history.js src/server/public-wall-prune.js src/server/public-wall-restore.js \
+    src/server/public-wall-snapshot.js src/server/relay-awareness-fanout.js src/server/relay-config.js src/server/relay-http.js \
+    src/server/relay-lifecycle.js src/server/relay-local-files.js src/server/relay-log-id.js \
+    src/server/relay-maintenance.js src/server/relay-protocol.js src/server/relay-public-wall.js \
+    src/server/relay-rate-bucket.js src/server/relay-rejection-counters.js src/server/relay-room-registry.js \
+    src/server/relay-session.js src/server/relay-uploads.js src/server/relay-vote-maintenance.js \
+    ./src/server/
+
+COPY --chown=node:node scripts/public-wall-restore.mjs scripts/public-wall-restore.sh ./scripts/
 
 # Named volumes inherit these ownership bits on first creation, allowing the
 # runtime to persist data without retaining root inside the container.

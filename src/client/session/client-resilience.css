@@ -1,0 +1,37 @@
+.rb-sync-banner {
+  position: fixed;
+  bottom: var(--rb-sync-bottom-px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: var(--resilience-gap-px);
+  padding: var(--resilience-padding-px);
+  width: max-content;
+  max-width: calc(100% - var(--resilience-edge-space-px));
+  box-sizing: border-box;
+  color: var(--warn-text);
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+  font-family: var(--font-ui);
+  font-size: var(--resilience-font-size-px);
+}
+
+.rb-recovery {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: var(--resilience-edge-space-px);
+  box-sizing: border-box;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--resilience-font-size-px);
+}
+
+.rb-recovery__panel {
+  padding: var(--resilience-edge-space-px);
+  max-width: var(--resilience-recovery-max-width-px);
+}

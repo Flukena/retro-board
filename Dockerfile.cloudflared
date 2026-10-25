@@ -2,7 +2,8 @@
 # commit. The vendor image for 2026.8.3 was published before fixes for the Go
 # toolchain, x/crypto, x/net, and gRPC vulnerabilities used by this binary. Keep the
 # release source fixed while applying only those security dependency updates.
-FROM golang:1.26.9-alpine@sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade AS build
+# Go 1.26.10 fixes crypto/x509 certificate trust (GO-2026-6809).
+FROM golang:1.26.10-alpine@sha256:5cb67f19c5e7994dcb80c074f7cfca8aeeada45bbdca035f73df269cefdcce61 AS build
 
 ARG TARGETOS=linux
 ARG TARGETARCH
@@ -32,13 +33,15 @@ RUN apk upgrade --no-cache \
 RUN go mod edit -require=golang.org/x/crypto@v0.57.0 \
     && go mod edit -require=golang.org/x/net@v0.60.0 \
     && go mod edit -require=google.golang.org/grpc@v1.83.2 \
+    && go mod edit -require=github.com/klauspost/compress@v1.18.7 \
     && go mod tidy \
     && go mod verify \
-    && echo "8ffbfc536844fc28cf377fc4a1b44f5918259cc2f4ada3b0461fb1a3ac0a5bbd  go.mod" | sha256sum -c - \
-    && echo "ee59a9063b964419b44be18d53f294c5cc47f4a8aa6d6f984e45312cac3a8eb5  go.sum" | sha256sum -c - \
+    && echo "8668f6cee9347911f35aaf03247b49eca138331c89520bf6e751ba73bef73cef  go.mod" | sha256sum -c - \
+    && echo "9cb2310d7282750205f38dc0e01a392b262d036a21df8094ee4dd4ebb97a58e9  go.sum" | sha256sum -c - \
     && test "$(go list -mod=mod -m -f '{{.Version}}' golang.org/x/crypto)" = "v0.57.0" \
     && test "$(go list -mod=mod -m -f '{{.Version}}' golang.org/x/net)" = "v0.60.0" \
-    && test "$(go list -mod=mod -m -f '{{.Version}}' google.golang.org/grpc)" = "v1.83.2"
+    && test "$(go list -mod=mod -m -f '{{.Version}}' google.golang.org/grpc)" = "v1.83.2" \
+    && test "$(go list -mod=mod -m -f '{{.Version}}' github.com/klauspost/compress)" = "v1.18.7"
 
 RUN resolved_arch="${TARGETARCH:-$(go env GOARCH)}" \
     && GOOS="${TARGETOS}" GOARCH="${resolved_arch}" \
@@ -57,7 +60,7 @@ RUN apk upgrade --no-cache \
     && adduser -S -D -H -u 65532 -G cloudflared cloudflared
 
 LABEL org.opencontainers.image.source="https://github.com/cloudflare/cloudflared" \
-      org.opencontainers.image.version="2026.8.3-security.3" \
+      org.opencontainers.image.version="2026.8.3-security.5" \
       org.opencontainers.image.revision="fe70e951a3c52d92abf9f6c4248e32937b2f42fc"
 
 COPY --from=build --chown=65532:65532 /out/cloudflared /usr/local/bin/cloudflared

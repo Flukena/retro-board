@@ -1,0 +1,379 @@
+.rb-landing__page {
+  position: fixed;
+  inset: 0;
+  overflow: auto;
+  background: var(--bg);
+  background-image: radial-gradient(circle, var(--grid-dot) 1px, transparent 1px);
+  background-size: var(--grid-pitch) var(--grid-pitch);
+  font-family: var(--font-ui);
+  color: var(--text);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: var(--landing-page-padding);
+  box-sizing: border-box;
+}
+
+.rb-landing__corner {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  gap: var(--space-2);
+  z-index: var(--landing-corner-layer);
+}
+
+.rb-landing__content {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  width: 100%;
+  max-width: var(--landing-max-width);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--landing-gap);
+}
+.rb-landing__scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scroll-padding-top: var(--landing-hero-top-clearance);
+  scroll-behavior: smooth;
+}
+.rb-landing__masthead,
+.rb-landing__identity { display: flex; align-items: center; }
+.rb-landing__masthead {
+  position: absolute;
+  top: calc(var(--space-6) + env(safe-area-inset-top, 0px));
+  left: calc(var(--space-6) + env(safe-area-inset-left, 0px));
+  right: calc(var(--space-6) + env(safe-area-inset-right, 0px));
+  z-index: var(--landing-corner-layer);
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+.rb-landing__identity { gap: var(--space-3); min-width: 0; padding: var(--space-2) var(--space-3); background: var(--bg-overlay); border: var(--landing-line-width) solid var(--border); border-radius: var(--radius-xl); }
+.rb-landing__identity,
+.rb-landing__corner .rb-btn { box-shadow: var(--landing-chrome-shadow); }
+.rb-landing__wordmark { font-family: var(--font-display); font-size: var(--landing-wordmark-size); font-weight: var(--landing-title-font-weight); white-space: nowrap; }
+.rb-landing__hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  border: 0;
+  border-radius: var(--landing-hero-radius);
+  background: var(--bg-panel);
+  box-shadow: var(--landing-hero-shadow);
+}
+.rb-landing__backdrop { position: absolute; inset: 0; z-index: -2; pointer-events: none; }
+.rb-landing__hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--landing-ambient-light), var(--landing-edge-shade), var(--landing-hero-veil);
+  pointer-events: none;
+}
+.rb-landing__backdrop .rb-public-wall__preview {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+.rb-landing__backdrop .rb-public-wall__image {
+  position: absolute;
+  inset: calc(-1 * var(--landing-backdrop-overscan));
+  width: calc(100% + 2 * var(--landing-backdrop-overscan));
+  height: calc(100% + 2 * var(--landing-backdrop-overscan));
+  object-fit: cover;
+  filter: blur(var(--landing-backdrop-blur));
+}
+.rb-landing__backdrop .rb-public-wall__capture:not(.rb-public-wall__capture--offscreen) { filter: blur(var(--landing-backdrop-blur)); }
+.rb-landing__hero-layout {
+  position: relative;
+  display: grid;
+  flex: 1;
+  grid-template-columns: var(--landing-hero-columns);
+  align-items: center;
+  gap: var(--landing-hero-column-gap);
+  padding:
+    calc(var(--landing-hero-top-clearance) + env(safe-area-inset-top, 0px))
+    calc(var(--landing-hero-padding) + env(safe-area-inset-right, 0px))
+    var(--landing-hero-padding)
+    calc(var(--landing-hero-padding) + env(safe-area-inset-left, 0px));
+}
+.rb-landing__intro {
+  min-width: 0;
+  max-width: var(--landing-hero-intro-max-width);
+  align-self: end;
+  padding: var(--space-6);
+  background: var(--bg-overlay);
+  background-image: var(--landing-panel-light);
+  box-shadow: var(--landing-panel-shadow);
+  border: var(--landing-line-width) solid var(--border);
+  border-radius: var(--radius-xl);
+  box-sizing: border-box;
+}
+.rb-landing__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--landing-hero-eyebrow-size);
+  font-weight: var(--landing-heading-font-weight);
+  letter-spacing: var(--landing-hero-eyebrow-spacing);
+  color: var(--landing-hero-accent);
+  margin: 0 0 var(--space-6);
+}
+.rb-landing__eyebrow::before { content: ''; width: var(--space-6); height: var(--landing-line-width); background: currentColor; }
+.rb-landing__forms { display: grid; gap: var(--space-4); min-width: 0; }
+.rb-landing__page .rb-landing__hero .rb-landing__card { background: var(--landing-hero-form-bg); background-image: var(--landing-panel-light); box-shadow: var(--landing-panel-shadow); }
+.rb-landing__hero .rb-landing__action,
+.rb-landing__hero .rb-landing__input,
+.rb-landing__public-bar .rb-public-wall__join { height: var(--landing-control-height); }
+.rb-landing__hero .rb-landing__form-row { flex-direction: column; }
+.rb-landing__hero .rb-landing__action { justify-content: center; }
+.rb-landing__public-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: var(--landing-corner-layer);
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--landing-hero-padding);
+  padding-bottom: calc(var(--space-3) + env(safe-area-inset-bottom, 0px));
+  padding-left: calc(var(--landing-hero-padding) + env(safe-area-inset-left, 0px));
+  padding-right: calc(var(--landing-hero-padding) + env(safe-area-inset-right, 0px));
+  border-top: var(--landing-line-width) solid var(--border);
+  background: var(--landing-hero-form-bg);
+  background-image: var(--landing-panel-light);
+  box-shadow: var(--landing-bar-shadow);
+}
+.rb-landing__public-row { display: flex; align-items: center; gap: var(--space-4); min-width: 0; }
+.rb-landing__scroll-cue {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  gap: var(--space-2);
+  min-height: var(--landing-control-height);
+  padding-inline: var(--space-4);
+  color: var(--accent-text);
+  font-family: var(--font-ui);
+  font-size: var(--landing-body-font-size);
+  font-weight: var(--landing-heading-font-weight);
+  border-radius: var(--radius-pill);
+  text-decoration: none;
+}
+.rb-landing__scroll-cue svg { width: var(--space-4); height: var(--space-4); }
+.rb-landing__scroll-cue:hover { background: var(--bg-panel-2); }
+.rb-landing__scroll-cue:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.rb-landing__public-icon { display: grid; place-items: center; width: var(--landing-control-height); height: var(--landing-control-height); flex: none; border-radius: var(--radius-lg); background: var(--brand-tile-bg); color: var(--brand-tile-fg); }
+.rb-landing__public-icon svg { width: var(--space-6); height: var(--space-6); }
+.rb-landing__public-copy { flex: 1; min-width: 0; }
+.rb-landing__public-copy h2 { margin: 0 0 var(--space-1); font: inherit; line-height: var(--landing-title-line-height); font-weight: var(--landing-heading-font-weight); }
+.rb-landing__public-copy p { margin: 0; min-height: 2lh; color: var(--text-muted); font-size: var(--landing-body-font-size); line-height: var(--landing-footer-line-height); }
+.rb-landing__public-bar .rb-public-wall__join {
+  flex: none;
+  gap: var(--space-2);
+  min-width: var(--landing-public-cta-min-width);
+  box-sizing: border-box;
+  justify-content: center;
+  padding: 0 var(--space-6);
+  background: var(--landing-public-cta-bg);
+  color: var(--landing-public-cta-fg);
+  border-color: var(--landing-public-cta-bg);
+  font-size: var(--landing-public-cta-font-size);
+  font-weight: var(--landing-heading-font-weight);
+  white-space: nowrap;
+}
+.rb-landing__public-bar .rb-public-wall__join.rb-btn--primary:hover { background: var(--landing-public-cta-hover); }
+.rb-landing__public-bar .rb-public-wall__join svg { width: var(--space-5); height: var(--space-5); }
+.rb-landing__forms .rb-btn--primary:not(:disabled),
+.rb-landing__public-bar .rb-public-wall__join {
+  background-image: var(--landing-button-light);
+  box-shadow: var(--landing-button-shadow);
+}
+.rb-landing__forms .rb-btn--primary:not(:disabled):active,
+.rb-landing__public-bar .rb-public-wall__join.rb-btn--primary:active { box-shadow: var(--landing-button-pressed-shadow); }
+.rb-landing__forms .rb-input { box-shadow: var(--landing-input-shadow); }
+.rb-landing__forms .rb-btn--primary:not(:disabled):hover,
+.rb-landing__public-bar .rb-public-wall__join.rb-btn--primary:hover { background-image: var(--landing-button-light); }
+
+.rb-landing__brand {
+  background: var(--brand-tile-bg);
+  color: var(--brand-tile-fg);
+  border-radius: var(--radius-lg);
+  width: var(--landing-logo-size);
+  height: var(--landing-logo-size);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+.rb-landing__title {
+  font-family: var(--font-display);
+  font-size: var(--landing-hero-title-size);
+  font-weight: var(--landing-title-font-weight);
+  line-height: var(--landing-hero-title-line-height);
+  letter-spacing: var(--landing-hero-title-spacing);
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.rb-landing__title span { display: block; color: var(--landing-hero-accent); }
+.rb-landing__tagline { font-size: var(--landing-hero-body-size); line-height: var(--landing-footer-line-height); color: var(--text-muted); max-width: var(--landing-tagline-max-width); margin: var(--space-6) 0 0; }
+.rb-landing__page .rb-landing__card {
+  padding: var(--landing-card-padding);
+  background: var(--bg-panel);
+  border: var(--landing-line-width) solid var(--border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-card);
+}
+.rb-landing__section-head {
+  font-family: var(--font-display);
+  font-size: var(--landing-heading-font-size);
+  font-weight: var(--landing-heading-font-weight);
+  margin: var(--landing-heading-margin);
+}
+.rb-landing__section-head:has(+ .rb-landing__description) { margin: var(--landing-create-heading-margin); }
+.rb-landing__description {
+  font-size: var(--landing-body-font-size);
+  color: var(--text-muted);
+  margin: var(--landing-description-margin);
+}
+.rb-landing__form-row { display: flex; flex-wrap: wrap; gap: var(--landing-form-gap); }
+.rb-input.rb-landing__input {
+  flex: 1 1 var(--landing-input-basis);
+  min-width: 0;
+  box-sizing: border-box;
+  height: var(--landing-control-height);
+  padding: var(--landing-input-padding);
+  font-size: var(--landing-control-font-size);
+  background: var(--bg-panel-2);
+  border: var(--landing-line-width) solid var(--border);
+  border-radius: var(--radius-md);
+}
+.rb-landing__page .rb-landing__action {
+  height: var(--landing-control-height);
+  padding: var(--landing-action-padding);
+  font-size: var(--landing-control-font-size);
+  font-weight: var(--landing-heading-font-weight);
+  white-space: nowrap;
+}
+.rb-landing__page .rb-landing__action:not(.rb-btn--primary):not(:disabled) { color: var(--text); }
+.rb-landing__hero .rb-input.rb-landing__input { flex: 0 0 auto; width: 100%; }
+.rb-landing__error { margin: var(--landing-error-margin); color: var(--danger); font-size: var(--landing-body-font-size); }
+.rb-landing__page .rb-landing__card--recents { padding: var(--landing-recents-padding); margin: var(--space-6); }
+.rb-landing__card--recents .rb-landing__section-head { margin: var(--landing-recents-heading-margin); }
+.rb-landing__recent {
+  display: flex;
+  align-items: center;
+  gap: var(--landing-recent-gap);
+  padding: var(--landing-recent-padding);
+  transition: var(--landing-hover-transition);
+}
+.rb-landing__recent + .rb-landing__recent { border-top: var(--landing-line-width) solid var(--border); }
+.rb-landing__recent:hover { background: var(--bg-panel-2); }
+.rb-landing__recent-open {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  color: inherit;
+  font-family: inherit;
+  display: flex;
+  flex-direction: column;
+  gap: var(--landing-recent-detail-gap);
+}
+.rb-landing__recent-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.rb-landing__recent-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--landing-control-font-size);
+  font-weight: var(--landing-recent-font-weight);
+}
+.rb-landing__recent-detail { font-size: var(--landing-small-font-size); color: var(--text-muted); overflow-wrap: anywhere; }
+.rb-landing__recent-code { font-family: var(--font-mono); }
+.rb-landing__remove { width: var(--landing-remove-size); height: var(--landing-remove-size); flex: none; }
+.rb-landing__footer {
+  text-align: center;
+  font-size: var(--landing-small-font-size);
+  color: var(--text-muted);
+  margin: var(--landing-footer-margin);
+  padding: var(--space-4) var(--space-6);
+  line-height: var(--landing-footer-line-height);
+}
+@media (prefers-reduced-motion: reduce) {
+  .rb-landing__recent { transition: none; }
+  .rb-landing__scroll { scroll-behavior: auto; }
+}
+
+@media (max-width: 767px), (max-width: 1024px) and (pointer: coarse) {
+  .rb-landing__page {
+    --landing-control-height: 44px;
+    --landing-control-font-size: 16px;
+  }
+
+  .rb-landing__page .rb-landing__corner {
+    position: relative;
+  }
+
+  .rb-landing__page button {
+    box-sizing: border-box;
+    min-height: var(--landing-control-height);
+    min-width: var(--landing-control-height);
+  }
+}
+
+@media (max-width: 900px) {
+  .rb-landing__hero-layout { grid-template-columns: minmax(0, 1fr); gap: var(--space-8); }
+  .rb-landing__hero-layout { align-content: center; }
+  .rb-landing__forms { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+}
+@media (max-width: 599px) {
+  .rb-landing__page { --landing-wordmark-size: var(--landing-wordmark-mobile-size); --landing-logo-size: var(--landing-mobile-logo-size); --landing-panel-shadow: var(--landing-panel-shadow-mobile); }
+  .rb-landing__masthead { top: calc(var(--space-4) + env(safe-area-inset-top, 0px)); left: calc(var(--space-4) + env(safe-area-inset-left, 0px)); right: calc(var(--space-4) + env(safe-area-inset-right, 0px)); gap: var(--space-2); }
+  .rb-landing__identity { padding: var(--space-1) var(--space-2); }
+  .rb-landing__hero-layout { --landing-hero-top-clearance: var(--landing-hero-mobile-top-clearance); --landing-hero-padding: var(--space-4); gap: var(--space-4); }
+  .rb-landing__intro { padding: var(--space-4); --landing-hero-title-size: var(--landing-hero-mobile-title-size); }
+  .rb-landing__intro .rb-landing__tagline { font-size: var(--landing-body-font-size); margin-top: var(--space-2); }
+  .rb-landing__intro .rb-landing__eyebrow { display: none; }
+  .rb-landing__identity { gap: var(--space-2); }
+  .rb-landing__forms { grid-template-columns: minmax(0, 1fr); }
+  .rb-landing__eyebrow { letter-spacing: normal; margin-bottom: var(--space-4); }
+  .rb-landing__tagline { margin-top: var(--space-4); }
+  .rb-landing__public-bar { padding-left: calc(var(--space-4) + env(safe-area-inset-left, 0px)); padding-right: calc(var(--space-4) + env(safe-area-inset-right, 0px)); }
+  .rb-landing__public-row { flex-wrap: wrap; gap: var(--space-3); }
+  .rb-landing__scroll { scroll-padding-top: var(--landing-hero-mobile-top-clearance); }
+  .rb-landing__public-bar .rb-public-wall__join { width: 100%; min-width: 0; box-sizing: border-box; justify-content: center; }
+}
+@media (max-width: 359px) {
+  .rb-landing__page { --landing-wordmark-size: var(--landing-compact-wordmark-size); --landing-logo-size: var(--landing-compact-logo-size); }
+}
+@media (max-height: 560px) and (min-width: 600px) {
+  .rb-landing__scroll { scroll-padding-top: var(--landing-hero-mobile-top-clearance); }
+  .rb-landing__page { --landing-hero-title-size: var(--landing-compact-title-size); --landing-hero-padding: var(--space-6); }
+  .rb-landing__masthead { top: var(--space-3); }
+  .rb-landing__hero-layout { --landing-hero-top-clearance: var(--landing-hero-mobile-top-clearance); grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-6); }
+  .rb-landing__forms { grid-template-columns: minmax(0, 1fr); gap: var(--space-3); }
+  .rb-landing__intro { padding: var(--space-3); }
+  .rb-landing__hero .rb-landing__card { padding: var(--space-3); }
+  .rb-landing__hero .rb-landing__description { display: none; }
+  .rb-landing__hero .rb-landing__section-head { margin-bottom: var(--space-2); }
+  .rb-landing__hero .rb-landing__form-row { flex-direction: row; }
+  .rb-landing__hero .rb-input.rb-landing__input { flex: 1 1 0; width: 0; }
+}

@@ -13,19 +13,37 @@ gpg --batch --quiet --decrypt --pinentry-mode loopback --passphrase-file "$key_f
 [[ -f "$scratch/data/.room-session-key" && -d "$scratch/uploads" ]] || {
   echo 'archive is missing a volume or the session key' >&2; exit 1;
 }
+[[ -f "$scratch/public-data/.public-wall-v1" && -f "$scratch/public-data/.room-session-key" ]] || {
+  echo 'archive is missing public relay data or session key' >&2; exit 1;
+}
 cd "$repo_dir"
-BACKUP_VERIFY_DB_DIR="$scratch/data" node --input-type=module -e '
+for database in data public-data; do
+BACKUP_VERIFY_DB_DIR="$scratch/$database" BACKUP_VERIFY_MODE="$database" BACKUP_VERIFY_PUBLIC_UPLOADS="$scratch/public-uploads" node --input-type=module -e '
   import { LeveldbPersistence } from "y-leveldb";
+  import { ROOM_REGISTRATION_META } from "./src/server/relay-room-registry.js";
+  import { verifyPublicUploadFiles } from "./src/server/public-upload-backup.js";
   const persistence = new LeveldbPersistence(process.env.BACKUP_VERIFY_DB_DIR);
   try {
     const names = await persistence.getAllDocNames();
     if (!Array.isArray(names)) throw new Error("restored LevelDB cannot list rooms");
+    const isPublic = process.env.BACKUP_VERIFY_MODE === "public-data";
+    const PUBLIC_REGISTERED_ROOM_COUNT = 1;
+    const REGISTERED_META_VALUE = 1;
+    let committed = 0;
     for (const name of names) {
+      if (isPublic && await persistence.getMeta(name, ROOM_REGISTRATION_META) !== REGISTERED_META_VALUE) continue;
+      committed += 1;
       const doc = await persistence.getYDoc(name);
       if (!doc) throw new Error("restored room cannot be decoded");
-      doc.destroy();
+      try {
+        if (isPublic) await verifyPublicUploadFiles(doc, process.env.BACKUP_VERIFY_PUBLIC_UPLOADS);
+      } finally { doc.destroy(); }
     }
-    console.log(`restored LevelDB opens; ${names.length} documents decoded`);
+    if (isPublic && committed !== PUBLIC_REGISTERED_ROOM_COUNT) {
+      throw new Error("public backup must contain exactly one registered room");
+    }
+    console.log(`restored ${process.env.BACKUP_VERIFY_MODE} LevelDB opens; ${committed} documents decoded`);
   } finally { await persistence.destroy(); }
 '
-echo 'backup restores both volumes and the session key'
+done
+echo 'backup restores private data/uploads, public data/uploads and both session keys'

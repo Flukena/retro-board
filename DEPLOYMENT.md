@@ -71,10 +71,11 @@ the production host.
 
 The pinned JavaScript build/runtime image is Node.js 24 LTS. The tunnel image
 is built from Cloudflare's immutable `2026.8.3` source commit with a verified
-archive checksum and narrowly updated Go security dependencies; CI scans every
-runtime image and rejects unfixed High or Critical findings. Re-resolve and
-review source, dependency, action, and base-image pins during planned
-maintenance; do not downgrade to an end-of-life runtime.
+archive checksum, Go 1.26.10 (GO-2026-6809), and narrowly updated security
+dependencies; CI scans every runtime image and rejects unfixed High or
+Critical findings. Re-resolve and review source, dependency, action, and
+base-image pins during planned maintenance; do not downgrade to an
+end-of-life runtime.
 
 The Compose defaults cap each encoded document at 32 MiB and all resident
 documents together at 96 MiB inside the 768 MiB Yjs container. If these values
@@ -108,9 +109,33 @@ Verify the application flow through the public hostname: create a room,
 exchange its link in a separate browser profile, synchronize an edit, upload
 and load an image, then confirm an invalid link cannot open a WebSocket.
 
+## Stack resource budget
+
+Every production service, including the one-shot volume initializer, uses the
+same `cpuset: "0,1"`. All containers therefore share two Docker virtual CPUs;
+their individual CPU quotas do not grant access to additional CPUs. The host
+must expose CPU IDs 0 and 1. This restriction survives container restarts and
+Compose recreation without changing images, admission or security settings.
+
+Existing memory limits remain 768 MiB for each relay, 128 MiB for web and
+256 MiB for each tunnel. The initializer is limited to 128 MiB. Their combined
+ceiling, counting even the initializer alongside all long-running services,
+is 2,304 MiB (2,415,919,104 bytes), below the requested 3,000,000,000-byte
+budget. This counts container memory; Docker daemon and load-generator
+processes outside the production containers are separate.
+
+Run `node scripts/check-resource-budget.mjs` before applying Compose changes.
+It checks the fully resolved service definitions, including inherited Public
+and tunnel settings, without loading secrets or resolving service env files.
+It rejects missing limits, divergent CPU sets and combined memory above 3 GB.
+Docker resource updates can apply the shared CPU pair to existing containers
+without restarting them; inspect both configured and effective cgroup limits
+afterwards. Manually started containers sharing the project must also use the
+same CPU pair and be included in the live memory total.
+
 ## Capacity profile
 
-Production loads `config/room-capacity.env`. The supported test envelope is
+Private relays load `config/room-capacity.env`. Their supported test envelope is
 32 WebSocket connections per room (one tab uses one connection), with 64
 connections per IP for shared office networks. This replaces the previous
 untested 64-connection room admission limit. It is not a claim of unlimited
@@ -151,6 +176,27 @@ A rollback also recreates Yjs; do not restart the tunnel or change named volumes
 Afterwards verify readiness, the effective environment, unchanged web/tunnel
 container IDs, and graceful-drain/startup logs.
 
+Public additionally loads `config/public-room-capacity.env` and admits500
+connections per room/IP. Private admission stays32 per room and64 perIP.
+Public has separate session/upgrade and full-sync response budgets, a192KiB
+aggregate awareness bound and bounded131,072 recipient sends/second and32MiB/s
+room egress. Per-sender flood checks, storage, upload and persistence safeguards
+are unchanged. Public incremental awareness broadcasts coalesce for50ms;
+full rosters remain targeted and document/sync frames remain immediate. This cap is not a promise that500 clients can each publish
+cursor and geometry updates at10Hz simultaneously: that workload exceeded
+finite fanout budgets in the earlier experiment.
+
+Before this Public increase, run the isolated500-provider `mixed` workload
+(10 active publishers at10Hz motion /2Hz edits; remaining providers retain
+presence), verify all500 remain connected and converge, then verify persisted
+final edits after graceful drain under the production1.5CPU/768MiB limits.
+The `all-active` workload remains available as a separate overload probe.
+After deploying only `yjs-public`, test browser-native connections through
+`https://retroroom.party/public`, record existing users plus test awareness
+slots, remove all test awareness, and confirm canonical Public cards were not
+changed. Production testing may reach500 room slots before all500 test clients
+join because real users occupy slots too.
+
 ## Operations
 
 Portable board exports use a ZIP archive up to 1 GiB containing `board.json`
@@ -159,8 +205,20 @@ without base64. Import reads the manifest first and uploads one image at a time;
 the archive is never decoded as a single JSON string or sent through WebSocket.
 Existing JSON (up to 256 MiB) and CSV (25 MiB) imports remain supported.
 Each image still has a 5 MiB limit and the normalized board update a 1 MiB limit.
-Production upload storage allows 2 GiB / 10,000 files per room and 8 GiB / 50,000
+Production upload storage allows 5 GiB / 10,000 files per room and 8 GiB / 50,000
 files globally. Retained images from past imports also count toward these quotas.
+The Public relay has the same independent limits and stores images on
+`/Volumes/ssd-fluke/BaseData/retro-board/public-wall-uploads`, separately from
+its database and all private uploads. Create this directory on the mounted
+operator SSD before `volume-init`; Compose refuses to create a missing bind
+source. Existing backups from before Public uploads remain verifiable when
+their public board has no referenced image files. New backups include
+`public-uploads/` and verification rejects missing referenced Public images.
+Public snapshot restoration validates all referenced image files before
+publishing a replacement room, hardlinks them into its new handle and rewrites
+only the image URLs. Historical aliases remain available to later restores;
+global byte accounting counts each physical file once, while room byte and
+file quotas and the global file count still include the relevant aliases.
 
 Monitor `/yjs/readyz`, container restarts, both persistent-volume usage, room
 count, and bursts of `429`, `503`, or `507` responses. Alert with enough free

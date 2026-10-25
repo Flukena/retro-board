@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import { filesUnder } from '../scripts/project-files.mjs';
 
 const REPO_ROOT = new URL('../', import.meta.url);
 // AGENTS.md: frozen in size. These line ceilings may only be lowered, never raised.
-const RETRO_BOARD_MAX_LINES = 4437;
-const YJS_SERVER_MAX_LINES = 2031;
+const RETRO_BOARD_MAX_LINES = 4177;
+const YJS_SERVER_MAX_LINES = 1881;
 const LINE_CEILINGS = new Map([
   ['RetroBoard.jsx', RETRO_BOARD_MAX_LINES],
   ['yjs-server.mjs', YJS_SERVER_MAX_LINES],
@@ -54,8 +55,7 @@ for (const [filename, maxLines] of LINE_CEILINGS) {
   });
 }
 
-const jsxFiles = ['RetroBoard.jsx', ...readdirSync(new URL('src/', REPO_ROOT))
-  .filter(filename => filename.endsWith('.jsx')).map(filename => `src/${filename}`)];
+const jsxFiles = ['RetroBoard.jsx', ...filesUnder('src').filter(filename => filename.endsWith('.jsx'))];
 
 for (const filename of jsxFiles) {
   test(`${filename} uses colour tokens or explicitly allowed functional signals`, () => {

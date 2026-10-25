@@ -3,15 +3,15 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { runInNewContext } from 'node:vm';
-import { planVoteFinalization } from './src/vote-finalization.js';
-import { RelayMaintenance } from './src/relay-maintenance.js';
-import { geometryErrorForPatch } from './src/board-geometry.js';
+import { planVoteFinalization } from './src/domain/vote-finalization.js';
+import { RelayMaintenance } from './src/server/relay-maintenance.js';
+import { geometryErrorForPatch } from './src/domain/board-geometry.js';
 
 const require = createRequire(import.meta.url);
 const Y = require('yjs');
 const source = await readFile(process.env.RB_TEST_SOURCE || new URL('./yjs-server.mjs', import.meta.url), 'utf8');
 const imported = {};
-for (const match of source.matchAll(/^import \{[^}]+\} from '(\.\/src\/relay-[^']+)';/gm)) {
+for (const match of source.matchAll(/^import \{[^}]+\} from '(\.\/src\/server\/relay-[^']+)';/gm)) {
   Object.assign(imported, await import(match[1]));
 }
 const section = (start, end) => {

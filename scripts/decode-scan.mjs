@@ -8,7 +8,7 @@
  *   node scripts/decode-scan.mjs <leveldb-copy-dir>
  */
 import { createRequire } from 'node:module';
-import { decodeRemoteBoard } from '../src/remote-board-decoder.js';
+import { decodeRemoteBoard } from '../src/client/board/remote-board-decoder.js';
 
 const require = createRequire(import.meta.url);
 const Y = require('yjs');

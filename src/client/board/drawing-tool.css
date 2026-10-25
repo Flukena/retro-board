@@ -1,0 +1,17 @@
+.rb-drawing-canvas { position: fixed; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+.rb-drawing-toolbar { position: fixed; top: var(--draw-toolbar-top); left: var(--draw-toolbar-left); max-width: calc(100vw - var(--draw-toolbar-left) - var(--space-4)); display: flex; align-items: end; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-3); border-radius: var(--radius-lg); background: var(--tool-section-bg); border: var(--draw-border-width) solid var(--tool-section-border); box-shadow: var(--shadow-pop); font-family: var(--font-ui); }
+.rb-drawing-field { display: grid; gap: var(--space-1); color: var(--text-mid); font-size: var(--draw-toolbar-font-size); }
+.rb-drawing-select { position: relative; display: block; width: var(--draw-select-width); }
+.rb-drawing-select svg { position: absolute; right: var(--space-2); top: 50%; transform: translateY(-50%); pointer-events: none; }
+.rb-drawing-field select { appearance: none; box-sizing: border-box; height: var(--draw-control-height); width: 100%; padding: 0 calc(var(--space-4) + var(--space-3)) 0 var(--space-2); color: var(--text); background: var(--bg-panel); border: var(--draw-border-width) solid var(--border); border-radius: var(--radius-md); font: inherit; }
+.rb-drawing-toolbar button { min-height: var(--draw-control-height); }
+.rb-drawing-status { flex-basis: 100%; color: var(--text-muted); font-size: var(--draw-toolbar-font-size); overflow-wrap: anywhere; }
+.rb-drawing-status[role="alert"] { color: var(--danger); }
+@media (max-width: 767px), (max-width: 1024px) and (pointer: coarse) {
+  .rb-drawing-toolbar { top: var(--rb-mobile-canvas-top-px); left: var(--rb-mobile-canvas-left-px); max-width: calc(100vw - var(--rb-mobile-canvas-left-px) - var(--rb-mobile-right-px)); padding: var(--space-2); gap: var(--space-1); }
+  .rb-drawing-toolbar button { min-width: var(--modal-touch-target); min-height: var(--modal-touch-target); }
+  .rb-drawing-field select { height: var(--modal-touch-target); font-size: var(--modal-input-font-size); }
+}
+
+.rb-drawing-tools { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.rb-drawing-tools [aria-pressed="true"] { color: var(--accent); background: var(--bg-panel-2); }

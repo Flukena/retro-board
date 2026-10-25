@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { RelayMaintenance, MAINTENANCE_STORAGE_FAILURE_EVENT, sweepRetainedUploads, sweepInterruptedUploads } from './src/relay-maintenance.js';
-import { MILLISECONDS_PER_DAY } from './src/relay-config.js';
+import * as Y from 'yjs';
+import { RelayMaintenance, MAINTENANCE_STORAGE_FAILURE_EVENT, sweepRetainedUploads, sweepInterruptedUploads } from './src/server/relay-maintenance.js';
+import { MILLISECONDS_PER_DAY } from './src/server/relay-config.js';
 
 const AT_TIME_MS = MILLISECONDS_PER_DAY * 2;
 const EXPIRED_TIME_MS = 0;
@@ -159,4 +160,35 @@ test('maintenance upload sweep failures skip reconciliation and always flush cou
   assert.deepEqual(trace, [COMPACTION_STEP_LABEL, BAD_VOTE_STEP_LABEL, HEALTHY_VOTE_STEP_LABEL, DISK_STEP_LABEL, FLUSH_STEP_LABEL]);
   assert.deepEqual(failures, []);
   assert.equal(maintenance.running, false);
+});
+
+test('public maintenance prunes once before handing the encoded-history owner the document', async () => {
+  const doc = new Y.Doc();
+  for (let index = 0; index < 1501; index++) {
+    doc.getMap('items').set(String(index), new Y.Map([['createdAt', index]]));
+  }
+  const origins = [];
+  doc.on('afterTransaction', transaction => origins.push(transaction.origin));
+  let snapshotCount = 0;
+  const runner = new RelayMaintenance();
+  const context = {
+    config: { BUCKET_TTL_MS: 1, ROOM_COMPACT_AFTER_BYTES: 1, ROOM_COMPACT_AFTER_UPDATES: 1,
+      MAX_DB_BYTES: 1, UPLOAD_RETENTION_DAYS: 0, REQUEST_TIMEOUT_MS: 1, UPLOADS_DIR: '/virtual' },
+    log: QUIET_LOGGER, uploadBuckets: new Map(), rateBuckets: {}, imageReadIpBuckets: new Map(),
+    imageReadRoomBuckets: new Map(), roomPersistenceChurn: new Map(), docs: new Map([['public', doc]]),
+    blockedRooms: new Map(), uploadState: { active: 0 }, rejectionCounters: { flush() {} },
+    compaction: { schedule() {} }, votes: { finalize() {} },
+    storage: { measureDatabase: () => 0, async reconcileUploadUsage() {} },
+    io: { async readdir() { return []; } },
+    publicWall: { docName: 'public', history: { async maintain(current) {
+      assert.equal(current, doc);
+      assert.equal(current.getMap('items').size, 1500);
+      snapshotCount++;
+    } } },
+  };
+  try {
+    await runner.run(context);
+    assert.equal(snapshotCount, 1);
+    assert.deepEqual(origins, ['public-prune']);
+  } finally { doc.destroy(); }
 });

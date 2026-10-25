@@ -4,16 +4,26 @@
 # The application services are intentionally not published on host ports.
 # cloudflared is the sole ingress and reaches them over the private Compose
 # network, preventing direct-origin bypass of TLS, origin checks, and edge WAF.
+x-stack-cpu-set: &stack-cpu-set "0,1"
+
 services:
   volume-init:
+    cpuset: *stack-cpu-set
+    mem_limit: 128m
     build:
       context: .
       dockerfile: Dockerfile.volume-init
     user: "0:0"
-    command: ["sh", "-c", "chown -R 1000:1000 /data /uploads"]
+    command: ["sh", "-c", "chown -R 1000:1000 /data /uploads && chown 1000:1000 /public-data /public-uploads"]
     volumes:
       - yjs_data:/data
       - yjs_uploads:/uploads
+      - yjs_public_data:/public-data
+      - type: bind
+        source: /Volumes/ssd-fluke/BaseData/retro-board/public-wall-uploads
+        target: /public-uploads
+        bind:
+          create_host_path: false
     read_only: true
     cap_drop: [ALL]
     cap_add: [CHOWN]
@@ -27,7 +37,9 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  yjs:
+  yjs: &relay-service
+    cpuset: *stack-cpu-set
+    image: miro-yjs
     env_file:
       - ./config/room-capacity.env
     build:
@@ -44,7 +56,7 @@ services:
       - YJS_HOST=0.0.0.0
       # Lock the WS upgrade to the prod web origin(s). Override with your
       # public host(s) when deploying behind cloudflared / a CDN.
-      - YJS_ALLOWED_ORIGINS=https://retro.sagonzis.space
+      - YJS_ALLOWED_ORIGINS=https://retro.sagonzis.space,https://retroroom.party
       # Safe only because this production service has no published host port;
       # cloudflared is the exclusive ingress and supplies CF-Connecting-IP.
       - YJS_TRUST_PROXY=true
@@ -56,9 +68,8 @@ services:
       # them to at most once per room per minute under adversarial churn.
       - YJS_ROOM_COMPACTION_MIN_INTERVAL_MS=60000
       - YJS_DOCUMENT_REMEASURE_MIN_INTERVAL_MS=60000
-      # A portable backup can contain 1 GiB of images. Allow room headroom
-      # for retained uploads and repeated imports without changing WS limits.
-      - YJS_MAX_ROOM_UPLOAD_BYTES=2147483648
+      # Images use disk storage separately from the encoded CRDT budget.
+      - YJS_MAX_ROOM_UPLOAD_BYTES=5368709120
       - YJS_MAX_UPLOAD_STORAGE_BYTES=8589934592
       - YJS_MAX_ROOM_UPLOAD_FILES=10000
       - YJS_MAX_UPLOAD_FILES=50000
@@ -89,7 +100,39 @@ services:
       timeout: 3s
       retries: 3
 
+  yjs-public:
+    <<: *relay-service
+    env_file:
+      - ./config/room-capacity.env
+      - ./config/public-room-capacity.env
+    volumes:
+      - yjs_public_data:/data
+      - type: bind
+        source: /Volumes/ssd-fluke/BaseData/retro-board/public-wall-uploads
+        target: /uploads
+        bind:
+          create_host_path: false
+    environment:
+      - YJS_PUBLIC_WALL=true
+      - YJS_HOST=0.0.0.0
+      - YJS_DB_DIR=/data
+      - YJS_UPLOADS_DIR=/uploads
+      - YJS_ALLOWED_ORIGINS=https://retro.sagonzis.space,https://retroroom.party
+      - YJS_TRUST_PROXY=true
+      - YJS_MAX_REGISTERED_ROOMS=1
+      - YJS_MAX_CONNECTIONS_PER_ROOM=500
+      - YJS_MAX_DB_BYTES=268435456
+      - YJS_MAX_DOCUMENT_BYTES=33554432
+      - YJS_MAX_ACTIVE_DOCUMENT_BYTES=100663296
+      - YJS_ROOM_COMPACTION_MIN_INTERVAL_MS=60000
+      - YJS_DOCUMENT_REMEASURE_MIN_INTERVAL_MS=60000
+      - YJS_MAX_ROOM_UPLOAD_BYTES=5368709120
+      - YJS_MAX_UPLOAD_STORAGE_BYTES=8589934592
+      - YJS_MAX_ROOM_UPLOAD_FILES=10000
+      - YJS_MAX_UPLOAD_FILES=50000
+
   web:
+    cpuset: *stack-cpu-set
     build:
       context: .
       dockerfile: Dockerfile.web.prod
@@ -97,6 +140,8 @@ services:
         VITE_YJS_PORT: "1234"
     expose:
       - "8080"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       yjs:
         condition: service_healthy
@@ -119,10 +164,11 @@ services:
       - app_internal
 
   cloudflared:
+    cpuset: *stack-cpu-set
     build:
       context: .
       dockerfile: Dockerfile.cloudflared
-    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
+    command: tunnel --no-autoupdate --no-prechecks --config /etc/cloudflared/config.yml run
     volumes:
       - ./cloudflared.prod.yml:/etc/cloudflared/config.yml:ro
       # Set CLOUDFLARED_CREDENTIALS_FILE to the host credential JSON. The
@@ -133,6 +179,8 @@ services:
       web:
         condition: service_started
       yjs:
+        condition: service_healthy
+      yjs-public:
         condition: service_healthy
     restart: unless-stopped
     read_only: true
@@ -151,9 +199,18 @@ services:
       - app_internal
       - tunnel_egress
 
+  cloudflared-retroroom:
+    extends:
+      service: cloudflared
+    image: miro-cloudflared
+    volumes:
+      - ./cloudflared.retroroom.yml:/etc/cloudflared/config.yml:ro
+      - ${RETROROOM_CREDENTIALS_FILE:-./cloudflared-retroroom-credentials.json}:/etc/cloudflared/creds.json:ro
+
 volumes:
   yjs_data:
   yjs_uploads:
+  yjs_public_data:
 
 networks:
   app_internal:

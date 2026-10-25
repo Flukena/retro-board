@@ -1,0 +1,53 @@
+.rb-timer-dock {
+  box-sizing: border-box;
+  height: var(--rb-timer-dock-height);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-panel);
+  color: var(--text);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-banner);
+  box-shadow: var(--shadow-card);
+  animation: rb-banner-in 0.35s cubic-bezier(.2,1,.3,1) both;
+}
+
+.rb-timer-dock--urgent {
+  animation: rb-banner-in 0.35s cubic-bezier(.2,1,.3,1) both, rb-pulse 1s ease-in-out infinite;
+}
+
+.rb-timer-title,
+.rb-timer-votes {
+  padding: var(--space-1) var(--space-3);
+  background: var(--bg-panel-2);
+  color: var(--text-mid);
+  border-radius: var(--radius-pill);
+  font: 600 12px var(--font-ui);
+  white-space: nowrap;
+}
+
+.rb-timer-title {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rb-timer-clock {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-2);
+}
+
+.rb-timer-clock span {
+  font: 700 22px var(--font-display);
+  font-variant-numeric: tabular-nums;
+  min-width: 56px;
+  text-align: center;
+}
+
+.rb-timer-dock--urgent .rb-timer-clock {
+  color: var(--danger);
+}
+

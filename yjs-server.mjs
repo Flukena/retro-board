@@ -1,15 +1,18 @@
+import { coalesceAwarenessSends } from './src/server/relay-awareness-fanout.js';
+import { RoomSessions } from './src/server/relay-session.js';
+import { RelayProtocol } from './src/server/relay-protocol.js';
 // Yjs WebSocket relay with LevelDB persistence.
 // Single source of truth for collaborative state.
 
-import { envInt, envBool, readRelayConfig, MILLISECONDS_PER_SECOND, MILLISECONDS_PER_HOUR, ROOM_BLOCK_TTL_MS, BLOCKED_ROOM_ENTRIES_PER_ACTIVE_ROOM, ROOM_HANDLE_RE, LARGE_UPDATE_LOG_THRESHOLD_BYTES, VOTE_EXPIRY_RETRY_INTERVAL_MS, MAINTENANCE_INTERVAL_MS, STORE_OPERATION_OVERHEAD_BYTES, MAX_HTTP_TARGET_CHARACTERS, CORS_PREFLIGHT_MAX_AGE_SECONDS, MAX_REQUESTS_PER_SOCKET, RETRY_AFTER_SHORT_SECONDS, RETRY_AFTER_LONG_SECONDS } from './src/relay-config.js';
-import { evictOldestBucket, refillTokens, takeTrafficTokens, takeTrafficBudget, createTrafficBucket } from './src/relay-rate-bucket.js';
-import { isExactAllowedOrigin, acceptCredentialOrigin, readJsonBody, sendJson, sendIfWritable, sendUpgradeRejection } from './src/relay-http.js';
-import { roomLogId } from './src/relay-log-id.js';
-import { createUploadState, scanUploadUsage, createRelayUploads, createImageReadBudgets, MIME_EXT, matchesMagicBytes, UPLOAD_STORAGE_FAILURE_EVENT, ROOM_UPLOAD_USAGE_META } from './src/relay-uploads.js';
+import { envInt, envBool, readRelayConfig, syncResponseLimits, MILLISECONDS_PER_SECOND, MILLISECONDS_PER_HOUR, ROOM_BLOCK_TTL_MS, BLOCKED_ROOM_ENTRIES_PER_ACTIVE_ROOM, LARGE_UPDATE_LOG_THRESHOLD_BYTES, VOTE_EXPIRY_RETRY_INTERVAL_MS, MAINTENANCE_INTERVAL_MS, STORE_OPERATION_OVERHEAD_BYTES, MAX_HTTP_TARGET_CHARACTERS, CORS_PREFLIGHT_MAX_AGE_SECONDS, MAX_REQUESTS_PER_SOCKET, RETRY_AFTER_SHORT_SECONDS, RETRY_AFTER_LONG_SECONDS } from './src/server/relay-config.js';
+import { evictOldestBucket, refillTokens, takeTrafficTokens, takeTrafficBudget, createTrafficBucket } from './src/server/relay-rate-bucket.js';
+import { isExactAllowedOrigin, setCredentialCors, acceptCredentialOrigin, readJsonBody, sendJson, sendIfWritable, sendUpgradeRejection } from './src/server/relay-http.js';
+import { roomLogId } from './src/server/relay-log-id.js';
+import { createUploadState, scanUploadUsage, createRelayUploads, createImageReadBudgets, MIME_EXT, matchesMagicBytes, UPLOAD_STORAGE_FAILURE_EVENT, ROOM_UPLOAD_USAGE_META } from './src/server/relay-uploads.js';
 import http from 'http';
 import fs from 'fs';
 import { createRequire } from 'module';
-import { createHmac, randomBytes, randomUUID } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 import { isIP } from 'net';
 import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'url';
@@ -17,11 +20,15 @@ import { dirname, resolve, join } from 'path';
 import {
   createRelayLifecycle, drainRelay, isRelayReady, STORAGE_FAILURE_LOG, STORAGE_FAILURE_REASON,
   UNHANDLED_REJECTION_EVENT, UNCAUGHT_EXCEPTION_EVENT,
-} from './src/relay-lifecycle.js';
-import { finalizeRelayVotes } from './src/relay-vote-maintenance.js';
-import { RoomRegistry, REGISTRY_STORAGE_FAILURE_EVENT, TOKENIZED_ROOM_RE, fixedDigestEqual, databaseCapacityError } from './src/relay-room-registry.js';
-import { RelayMaintenance, MAINTENANCE_STORAGE_FAILURE_EVENT } from './src/relay-maintenance.js';
-import { createRejectionCounters } from './src/relay-rejection-counters.js';
+} from './src/server/relay-lifecycle.js';
+import { finalizeRelayVotes } from './src/server/relay-vote-maintenance.js';
+import { RoomRegistry, REGISTRY_STORAGE_FAILURE_EVENT, TOKENIZED_ROOM_RE, databaseCapacityError } from './src/server/relay-room-registry.js';
+import { RelayMaintenance, MAINTENANCE_STORAGE_FAILURE_EVENT } from './src/server/relay-maintenance.js';
+import { directorySizeSync, loadSessionSigningKey } from './src/server/relay-local-files.js';
+import { publicRelayEnvironment, isPublicWallEnabled, PUBLIC_RELAY_PREFIX, PUBLIC_SNAPSHOT_DIRECTORY } from './src/server/public-wall-config.js';
+import { claimPublicDirectory, PublicWallHistory } from './src/server/public-wall-history.js';
+import { provisionPublicWall, RelayPublicWall, retainPublicDocument } from './src/server/relay-public-wall.js';
+import { createRejectionCounters } from './src/server/relay-rejection-counters.js';
 
 // yjs, y-leveldb, and y-websocket must all resolve to the SAME yjs module
 // instance. y-websocket's bin/utils.js (below) is CJS and does
@@ -36,15 +43,17 @@ import { createRejectionCounters } from './src/relay-rejection-counters.js';
 const require = createRequire(import.meta.url);
 const Y = require('yjs');
 const { LeveldbPersistence } = require('y-leveldb');
-const decoding = require('lib0/decoding');
 
 
 
-
+Object.assign(process.env, publicRelayEnvironment(process.env));
+const PUBLIC_WALL = isPublicWallEnabled(process.env);
 const PORT = envInt('YJS_PORT', 1234, { min: 0, max: 65535 });
 const HOST = process.env.YJS_HOST || '127.0.0.1';
 if (!isIP(HOST)) throw new Error('YJS_HOST must be an IPv4 or IPv6 address');
 const DB_DIR = process.env.YJS_DB_DIR || './yjs-db';
+const databaseSizeBytes = () => directorySizeSync(DB_DIR, { excludedRootDirectories: PUBLIC_WALL ? [PUBLIC_SNAPSHOT_DIRECTORY] : [] });
+if (PUBLIC_WALL) claimPublicDirectory(DB_DIR);
 const ALLOW_LEGACY_ROOMS = envBool('YJS_ALLOW_LEGACY_ROOMS');
 const ALLOW_LEGACY_URL_TOKENS = envBool('YJS_ALLOW_LEGACY_URL_TOKENS');
 const ALLOW_INSECURE_HTTP = envBool('YJS_ALLOW_INSECURE_HTTP');
@@ -76,7 +85,7 @@ const roomTargetFromRequest = (req) => {
   const queryAt = target.indexOf('?');
   const path = queryAt < 0 ? target : target.slice(0, queryAt);
   const query = queryAt < 0 ? '' : target.slice(queryAt + 1);
-  const match = path.match(/^\/(?:yjs\/)?rooms\/([A-Za-z0-9_-]{32})$/);
+  const match = (PUBLIC_WALL ? path.replace(/^\/yjs-public(?=\/|$)/, '') : path).match(/^\/(?:yjs\/)?rooms\/([A-Za-z0-9_-]{32})$/);
   if (!match) return null;
   if (query === '') return { handle: match[1], awarenessClientId: null };
   const awarenessMatch = query.match(/^awarenessId=(0|[1-9]\d{0,9})$/);
@@ -106,60 +115,7 @@ const clientIpFromRequest = (req) => {
   return normalizeIp(typeof forwarded === 'string' ? forwarded.split(',')[0] : '') || socketIp;
 };
 
-const directorySizeSync = (root) => {
-  if (!fs.existsSync(root)) return 0;
-  let total = 0;
-  const pending = [root];
-  while (pending.length) {
-    const current = pending.pop();
-    let entries;
-    try { entries = fs.readdirSync(current, { withFileTypes: true }); }
-    catch { continue; }
-    for (const entry of entries) {
-      const path = join(current, entry.name);
-      if (entry.isDirectory()) pending.push(path);
-      else if (entry.isFile()) {
-        try { total += fs.statSync(path).size; } catch { /* raced with compaction */ }
-      }
-    }
-  }
-  return total;
-};
-
-const loadSessionSigningKey = () => {
-  const fromEnv = process.env.YJS_SESSION_SECRET;
-  if (fromEnv) {
-    const key = Buffer.from(fromEnv, 'utf8');
-    if (key.byteLength < 32) throw new Error('YJS_SESSION_SECRET must contain at least 32 bytes');
-    return key;
-  }
-  fs.mkdirSync(DB_DIR, { recursive: true, mode: 0o700 });
-  const keyPath = join(DB_DIR, '.room-session-key');
-  const readKey = () => {
-    const encoded = fs.readFileSync(keyPath, 'utf8').trim();
-    if (!/^[A-Za-z0-9_-]{43}$/.test(encoded)) throw new Error('invalid persisted room session key');
-    const key = Buffer.from(encoded, 'base64url');
-    if (key.byteLength !== 32) throw new Error('invalid persisted room session key');
-    return key;
-  };
-  try {
-    const key = readKey();
-    try { fs.chmodSync(keyPath, 0o600); } catch { /* best effort on mounted filesystems */ }
-    return key;
-  } catch (err) {
-    if (err.code !== 'ENOENT') throw err;
-  }
-  const encoded = randomBytes(32).toString('base64url');
-  try {
-    fs.writeFileSync(keyPath, `${encoded}\n`, { flag: 'wx', mode: 0o600 });
-    return Buffer.from(encoded, 'base64url');
-  } catch (err) {
-    if (err.code !== 'EEXIST') throw err;
-    return readKey();
-  }
-};
-
-const SESSION_SIGNING_KEY = loadSessionSigningKey();
+const SESSION_SIGNING_KEY = loadSessionSigningKey(DB_DIR);
 
 // y-websocket v1 ships server utils at bin/utils.js but doesn't expose them
 // in its package "exports" map, so we import the file directly.
@@ -238,14 +194,6 @@ const {
   MAX_AWARENESS_CLIENTS_PER_ROOM,
   MAX_AWARENESS_ROOM_BYTES,
   SYNC_RESPONSE_MIN_CHARGE_BYTES,
-  SYNC_RESPONSE_CONNECTION_BURST_BYTES,
-  SYNC_RESPONSE_ROOM_BURST_BYTES,
-  SYNC_RESPONSE_GLOBAL_BURST_BYTES,
-  SYNC_RESPONSE_CONNECTION_BYTES_PER_SECOND,
-  SYNC_RESPONSE_ROOM_BYTES_PER_SECOND,
-  SYNC_RESPONSE_GLOBAL_BYTES_PER_SECOND,
-  SYNC_RESPONSE_CONNECTION_BURST_MESSAGES,
-  SYNC_RESPONSES_PER_CONNECTION_PER_MINUTE,
   WS_EGRESS_CONNECTION_BURST_BYTES,
   WS_EGRESS_ROOM_BURST_BYTES,
   WS_EGRESS_GLOBAL_BURST_BYTES,
@@ -307,7 +255,7 @@ const initialUploadUsage = uploadState.initialUsage;
 const uploadBuckets = uploadState.buckets;
 
 const ldb = new LeveldbPersistence(DB_DIR);
-let dbUsageBytes = directorySizeSync(DB_DIR);
+let dbUsageBytes = databaseSizeBytes();
 let pendingStoreOps = 0;
 let pendingStoreBytes = 0;
 
@@ -400,7 +348,7 @@ const registryPersistence = {
     };
   },
   measureDatabase() {
-    dbUsageBytes = directorySizeSync(DB_DIR);
+    dbUsageBytes = databaseSizeBytes();
     return dbUsageBytes;
   },
 };
@@ -409,6 +357,8 @@ const roomRegistry = new RoomRegistry({
   maxDatabaseBytes: MAX_DB_BYTES, signingKey: SESSION_SIGNING_KEY,
 });
 await roomRegistry.hydrate(initialUploadUsage);
+const publicWall = PUBLIC_WALL ? new RelayPublicWall(await provisionPublicWall(roomRegistry)) : null;
+const publicHistory = PUBLIC_WALL ? new PublicWallHistory(DB_DIR, Y) : null;
 const { registeredDocs, registeredRoomsByHandle, roomUploadUsage, existingDocNames } = roomRegistry;
 const roomHandleForDoc = (docName) => roomRegistry.roomHandleForDoc(docName);
 
@@ -589,7 +539,7 @@ const scheduleRoomCompaction = (docName, { remeasure = false } = {}) => {
         churn.uncompactedBytes = Math.max(0, churn.uncompactedBytes - coveredBytes);
         churn.uncompactedUpdates = Math.max(0, churn.uncompactedUpdates - coveredUpdates);
         churn.lastCompactedAt = Date.now();
-        dbUsageBytes = directorySizeSync(DB_DIR);
+        dbUsageBytes = databaseSizeBytes();
       }
       activeDoc = docs.get(docName);
       const currentUsage = activeDoc ? roomUsage.get(activeDoc) : null;
@@ -953,62 +903,13 @@ for (const name of MIGRATE) {
 const createRegisteredRoom = () => roomRegistry.createRoom({ unavailable: shuttingDown || Boolean(storageFailure) });
 const registeredDocForCapability = (code, token) => roomRegistry.registeredDocForCapability(code, token);
 
-const ROOM_COOKIE_NAME = 'rb_room_session';
-const sessionSignature = (handle, expiresAt, docName) => createHmac('sha256', SESSION_SIGNING_KEY)
-  .update('room-session-v1\0')
-  .update(handle)
-  .update('\0')
-  .update(String(expiresAt))
-  .update('\0')
-  .update(docName)
-  .digest();
-
-const createSessionCookie = (handle, expiresAt, docName, path) => {
-  const signature = sessionSignature(handle, expiresAt, docName).toString('base64url');
-  const value = `v1.${handle}.${expiresAt}.${signature}`;
-  const maxAge = Math.max(1, Math.floor((expiresAt - Date.now()) / 1000));
-  return `${ROOM_COOKIE_NAME}=${value}; Path=${path}; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${ALLOW_INSECURE_HTTP ? '' : '; Secure'}`;
-};
-
-const cookieValueFromRequest = (req) => {
-  const header = req.headers.cookie;
-  if (typeof header !== 'string' || header.length > MAX_COOKIE_HEADER_BYTES) return null;
-  let found = null;
-  for (const part of header.split(';')) {
-    const separator = part.indexOf('=');
-    if (separator < 1) continue;
-    if (part.slice(0, separator).trim() !== ROOM_COOKIE_NAME) continue;
-    if (found !== null) return null;
-    found = part.slice(separator + 1).trim();
-  }
-  return found;
-};
-
-const authenticatedDocFromRequest = (req, requestedHandle) => {
-  if (!ROOM_HANDLE_RE.test(requestedHandle)) return null;
-  const docName = registeredRoomsByHandle.get(requestedHandle);
-  const value = cookieValueFromRequest(req);
-  if (!docName || !value || value.length > 160) return null;
-  const parts = value.split('.');
-  if (parts.length !== 4 || parts[0] !== 'v1') return null;
-  const [, cookieHandle, rawExpiry, rawSignature] = parts;
-  if (!ROOM_HANDLE_RE.test(cookieHandle)
-      || !/^\d{13}$/.test(rawExpiry)
-      || !/^[A-Za-z0-9_-]{43}$/.test(rawSignature)) return null;
-  const expiresAt = Number(rawExpiry);
-  const now = Date.now();
-  if (!Number.isSafeInteger(expiresAt) || expiresAt <= now || expiresAt > now + ROOM_SESSION_TTL_MS) return null;
-  const handleMatches = fixedDigestEqual(Buffer.from(cookieHandle), Buffer.from(requestedHandle));
-  const suppliedSignature = Buffer.from(rawSignature, 'base64url');
-  // Node's decoder accepts non-canonical final base64url characters whose
-  // unused padding bits differ but decode to the same bytes. Reject those
-  // alternate spellings so changing any cookie character is always tampering.
-  if (suppliedSignature.toString('base64url') !== rawSignature) return null;
-  const expectedSignature = sessionSignature(requestedHandle, expiresAt, docName);
-  return handleMatches && fixedDigestEqual(suppliedSignature, expectedSignature)
-    ? { docName, expiresAt }
-    : null;
-};
+const roomSessions = new RoomSessions({
+  signingKey: SESSION_SIGNING_KEY, rooms: registeredRoomsByHandle,
+  ttlMs: ROOM_SESSION_TTL_MS, maxCookieHeaderBytes: MAX_COOKIE_HEADER_BYTES,
+  allowInsecureHttp: ALLOW_INSECURE_HTTP,
+});
+const createSessionCookie = roomSessions.createCookie.bind(roomSessions);
+const authenticatedDocFromRequest = roomSessions.authenticate.bind(roomSessions);
 
 
 const rateBuckets = {
@@ -1214,28 +1115,12 @@ const imageReadRoomBuckets = imageReads.roomBuckets;
 const uploads = createRelayUploads({
   config: relayConfig, state: uploadState, roomUploadUsage, imageReads,
   storage: { setMeta: checkedSetMeta },
-  allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP,
+  allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, strictRasterValidation: PUBLIC_WALL,
 });
 uploadState.events.on(UPLOAD_STORAGE_FAILURE_EVENT, markStorageFailure);
 
-const syncResponseConnectionLimits = {
-  maxMessages: SYNC_RESPONSE_CONNECTION_BURST_MESSAGES,
-  messagesPerSecond: SYNC_RESPONSES_PER_CONNECTION_PER_MINUTE / 60,
-  maxBytes: SYNC_RESPONSE_CONNECTION_BURST_BYTES,
-  bytesPerSecond: SYNC_RESPONSE_CONNECTION_BYTES_PER_SECOND,
-};
-const syncResponseRoomLimits = {
-  maxMessages: 32,
-  messagesPerSecond: 8,
-  maxBytes: SYNC_RESPONSE_ROOM_BURST_BYTES,
-  bytesPerSecond: SYNC_RESPONSE_ROOM_BYTES_PER_SECOND,
-};
-const syncResponseGlobalLimits = {
-  maxMessages: 128,
-  messagesPerSecond: 32,
-  maxBytes: SYNC_RESPONSE_GLOBAL_BURST_BYTES,
-  bytesPerSecond: SYNC_RESPONSE_GLOBAL_BYTES_PER_SECOND,
-};
+const { connection: syncResponseConnectionLimits, room: syncResponseRoomLimits,
+  global: syncResponseGlobalLimits } = syncResponseLimits(relayConfig);
 const globalSyncResponseBucket = createTrafficBucket(
   syncResponseGlobalLimits.maxMessages,
   syncResponseGlobalLimits.maxBytes,
@@ -1267,85 +1152,13 @@ const globalEgressBucket = createTrafficBucket(
 const roomEgressBuckets = new Map();
 const MAX_WS_EGRESS_MESSAGE_BYTES = MAX_DOCUMENT_BYTES + MAX_AWARENESS_ROOM_BYTES + 64 * 1024;
 
-const MESSAGE_SYNC = 0;
-const MESSAGE_AWARENESS = 1;
-const SYNC_STEP_1 = 0;
-const SYNC_STEP_2 = 1;
-const SYNC_UPDATE = 2;
-const strictUtf8Decoder = new TextDecoder('utf-8', { fatal: true });
-
-const protocolBytes = (data) => {
-  if (data instanceof Uint8Array) {
-    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-  }
-  if (data instanceof ArrayBuffer) return new Uint8Array(data);
-  throw new Error('non-binary WebSocket message');
-};
-
-// Fully validate the framing before y-websocket mutates either a Y.Doc or its
-// Awareness maps. In particular, y-protocols otherwise applies awareness
-// entries incrementally, so a truncated multi-entry frame can retain a valid
-// prefix even though the rest of the frame is malformed.
-const inspectProtocolMessage = (data) => {
-  const bytes = protocolBytes(data);
-  if (bytes.byteLength === 0) throw new Error('empty protocol message');
-  const decoder = decoding.createDecoder(bytes);
-  const messageType = decoding.readVarUint(decoder);
-  if (messageType === MESSAGE_SYNC) {
-    const syncType = decoding.readVarUint(decoder);
-    if (syncType === SYNC_STEP_1) {
-      const stateVector = decoding.readVarUint8Array(decoder);
-      if (stateVector.byteLength > MAX_STATE_VECTOR_BYTES || decoding.hasContent(decoder)) {
-        throw new Error('invalid sync state vector');
-      }
-      return { kind: 'sync-step-1' };
-    }
-    if (syncType === SYNC_STEP_2 || syncType === SYNC_UPDATE) {
-      const update = decoding.readVarUint8Array(decoder);
-      if (update.byteLength > MAX_UPDATE_BYTES || decoding.hasContent(decoder)) {
-        throw new Error('invalid sync update');
-      }
-      return { kind: 'sync-update', updateBytes: update.byteLength };
-    }
-    throw new Error('unknown sync message');
-  }
-  if (messageType === MESSAGE_AWARENESS) {
-    if (bytes.byteLength > MAX_AWARENESS_MESSAGE_BYTES) throw new Error('awareness frame too large');
-    const update = decoding.readVarUint8Array(decoder);
-    if (decoding.hasContent(decoder)) throw new Error('invalid awareness envelope');
-    const inner = decoding.createDecoder(update);
-    const count = decoding.readVarUint(inner);
-    // A standard y-websocket client echoes the server's multi-client
-    // awareness snapshot back over its socket. Bound the envelope by the
-    // room-wide identity cap here; planAwarenessUpdate separately limits how
-    // many previously-unowned identities this connection may actually claim.
-    if (count < 1 || count > MAX_AWARENESS_CLIENTS_PER_ROOM) {
-      throw new Error('invalid awareness entry count');
-    }
-    const seen = new Set();
-    const entries = [];
-    for (let index = 0; index < count; index += 1) {
-      const clientId = decoding.readVarUint(inner);
-      const clock = decoding.readVarUint(inner);
-      const encodedState = decoding.readVarUint8Array(inner);
-      if (!Number.isSafeInteger(clientId) || clientId < 0 || clientId > 0xffffffff
-          || !Number.isSafeInteger(clock) || clock < 0
-          || encodedState.byteLength > MAX_AWARENESS_STATE_BYTES
-          || seen.has(clientId)) {
-        throw new Error('invalid awareness entry');
-      }
-      seen.add(clientId);
-      const state = JSON.parse(strictUtf8Decoder.decode(encodedState));
-      if (state !== null && (typeof state !== 'object' || Array.isArray(state))) {
-        throw new Error('invalid awareness state');
-      }
-      entries.push({ clientId, clock, stateIsNull: state === null, stateBytes: encodedState.byteLength });
-    }
-    if (decoding.hasContent(inner)) throw new Error('invalid awareness payload');
-    return { kind: 'awareness', entries };
-  }
-  throw new Error('unknown protocol message');
-};
+const relayProtocol = new RelayProtocol({
+  maxStateVectorBytes: MAX_STATE_VECTOR_BYTES, maxUpdateBytes: MAX_UPDATE_BYTES,
+  maxAwarenessMessageBytes: MAX_AWARENESS_MESSAGE_BYTES,
+  maxAwarenessClientsPerRoom: MAX_AWARENESS_CLIENTS_PER_ROOM,
+  maxAwarenessStateBytes: MAX_AWARENESS_STATE_BYTES,
+});
+const inspectProtocolMessage = relayProtocol.inspect.bind(relayProtocol);
 
 const awarenessPolicies = new WeakMap();
 const awarenessPolicyFor = (doc) => {
@@ -1534,6 +1347,11 @@ const reserveHttpRequest = (ip) => {
   };
 };
 
+if (publicWall) {
+  const publicDoc = getYDoc(publicWall.docName);
+  await roomReady.get(publicDoc);
+  retainPublicDocument(publicDoc);
+}
 const rejectionCounters = createRejectionCounters((message, counts) => console.log(message, counts));
 const rejectUpgrade = (socket, status) => {
   rejectionCounters.upgrade(status);
@@ -1543,6 +1361,7 @@ const rejectUpgrade = (socket, status) => {
 const maintenance = new RelayMaintenance();
 maintenance.on(MAINTENANCE_STORAGE_FAILURE_EVENT, markStorageFailure);
 const runMaintenance = () => maintenance.run({
+  publicWall: publicWall && { docName: publicWall.docName, history: publicHistory },
   config: relayConfig, log: console, uploadBuckets, rateBuckets, imageReadIpBuckets, imageReadRoomBuckets,
   roomPersistenceChurn, docs, blockedRooms, uploadState, rejectionCounters,
   compaction: { schedule: scheduleRoomCompaction },
@@ -1578,8 +1397,16 @@ const server = http.createServer({ maxHeaderSize: MAX_HEADER_BYTES }, (req, res)
   // Cloudflare Tunnel forwards the /yjs prefix through unstripped in prod;
   // capability, session and room-upload routes answer in bare and prefixed
   // forms so dev and production use the same server.
-  const routePath = pathname.replace(/^\/yjs(?=\/|$)/, '') || '/';
-  const prefixed = pathname === '/yjs' || pathname.startsWith('/yjs/');
+  const prefix = PUBLIC_WALL ? PUBLIC_RELAY_PREFIX : '/yjs';
+  const prefixed = pathname === prefix || pathname.startsWith(`${prefix}/`);
+  const routePath = (prefixed ? pathname.slice(prefix.length) : pathname) || '/';
+  if (publicWall && publicWall.handleRequest(req, res, routePath, prefixed, {
+    allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, uploads, clientIp, hasQueryOrFragment,
+    unavailable: hasQueryOrFragment || shuttingDown || Boolean(storageFailure),
+    doc: docs.get(publicWall.docName), writerCount: wsConnectionsByRoom.get(publicWall.docName) || 0,
+    takeSessionExchangeToken: () => takeSessionExchangeToken(clientIp),
+    sessionTtlMs: ROOM_SESSION_TTL_MS, createSessionCookie, sessionAuthenticated: Boolean(authenticatedDocFromRequest(req, publicWall.roomHandle)),
+  })) return;
   const uploadMatch = !hasQueryOrFragment
     ? routePath.match(/^\/rooms\/([A-Za-z0-9_-]{32})\/upload$/)
     : null;
@@ -1630,8 +1457,10 @@ const server = http.createServer({ maxHeaderSize: MAX_HEADER_BYTES }, (req, res)
   }
   if (req.method === 'GET' && roomImageMatch) {
     if (!registeredRoomsByHandle.has(roomImageMatch[1])) { res.writeHead(404); res.end(); return; }
+    if (isExactAllowedOrigin(req.headers.origin, ALLOWED_ORIGINS, ALLOW_INSECURE_HTTP)) setCredentialCors(req.headers.origin, res);
     const session = authenticatedDocFromRequest(req, roomImageMatch[1]);
     if (!session) { res.writeHead(401); res.end(); return; }
+    if (req.headers.origin && !acceptCredentialOrigin(req, res, ALLOWED_ORIGINS, ALLOW_INSECURE_HTTP)) return;
     uploads.handleGetRoomImage(roomImageMatch[1], roomImageMatch[2], clientIp, res);
     return;
   }
@@ -1757,6 +1586,8 @@ wss.on('connection', (conn, req) => {
     }
     return originalSend(data, ...args);
   };
+
+  if (PUBLIC_WALL) coalesceAwarenessSends(conn, doc, MAX_AWARENESS_MESSAGE_BYTES);
 
   const before = new Set(conn.listeners('message'));
   setupWSConnection(conn, req, { docName, gc: true });

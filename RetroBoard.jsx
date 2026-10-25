@@ -1,6 +1,7 @@
-// RetroBoard.jsx — Miro-style retrospective board (single-file artifact)
+// RetroBoard.jsx — application coordinator for the collaborative board
 // Yjs-backed realtime board with character-level collaborative text editing.
 
+import { BOARD_MODE } from './src/domain/public-wall-contract.js';
 import React, {
   useState, useEffect, useRef, useCallback, useMemo, startTransition,
 } from 'react';
@@ -10,118 +11,126 @@ import {
   MousePointer2, RotateCcw,
   Upload,
 } from 'lucide-react';
-import {
-  IMPORT_MAX_BUNDLE_BYTES,
-  IMPORT_MAX_ARCHIVE_FILE_BYTES,
-  IMPORT_MAX_CSV_FILE_BYTES,
-  IMPORT_MAX_FILE_BYTES,
-  importBundleByteLength,
-  normalizeImportManifest,
-} from './src/import-schema.js';
-import { parseBoardCsv } from './src/csv-import.js';
-import { createCsvExportArtifact, buildZoneCsv, buildBoardCsv } from './src/board-backup.js';
-import { geometryErrorForItem, geometryErrorForPatch, sizeForPlacement } from './src/board-geometry.js';
+import { createBoardExport, createCsvBoardExport, readBoardImport, prepareBoardImport, ImportBundleLimitError } from './src/client/transfer/board-transfer.js';
+import { downloadArtifact } from './src/client/transfer/browser-download.js';
+import { geometryErrorForItem, geometryErrorForPatch, sizeForPlacement } from './src/domain/board-geometry.js';
 import {
   BOARD_TEXT_MAX_LENGTH,
   IMAGE_MAX_BYTES,
   ZONE_TITLE_MAX_LENGTH,
   isSafeImageMime,
-  redactBoardExportForViewer,
-} from './src/security-boundaries.js';
+} from './src/domain/security-boundaries.js';
 import {
   ConfirmDialog, NameDialog, HelpDialog, CommentsDialog, AdminPinDialog, TemplateNameDialog, TEMPLATE_NAME_MODE,
-} from './src/Modals.jsx';
-import { MODAL_SIZE, BUTTON_VARIANT } from './src/ui-variants.js';
-import { CLEARED_VOTE_RESULTS, voteSessionScope, resetVoteSessionEntries } from './src/vote-session-lifecycle.js';
-import { confirmThenPin } from './src/confirm-then-pin.js';
-import { importWarningNotes } from './src/modal-model.js';
-import { ToolDock, TOOL_ID } from './src/ToolDock.jsx';
-import { ZoomControls } from './src/ZoomControls.jsx';
-import { TopCenterStack } from './src/TopCenterStack.jsx';
-import { templateRows, followBannerModel } from './src/chrome-model.js';
-import { SelectionToolbar, GroupSelectionToolbar } from './src/SelectionToolbar.jsx';
-import { selectionToolbarAnchor, groupSelectionToolbarAnchor } from './src/selection-toolbar-model.js';
-import { ZoneCard } from './src/ZoneCard.jsx';
-import { zoneEffectiveRevealed, zoneGroupIds, nestedZoneCount } from './src/zone-actions.js';
-import { useZoneHeaderActions } from './src/useZoneHeaderActions.js';
-import { Toast } from './src/Toast.jsx';
-import { TopBar } from './src/TopBar.jsx';
-import { adminPillModel, playerRows, shareLinkModel } from './src/topbar-model.js';
-import { hueFromId, playerAccentColor } from './src/player-colors.js';
-import { t, useLang } from './src/i18n.js';
-import { useTheme, nextThemePref } from './src/theme.js';
-import { PALETTE } from './src/palette.js';
-import { COMMENT_CAROUSEL_STYLE } from './src/card-look.js';
-import { stickyCreationFontSize } from './src/sticky-font.js';
-import { StickyCard } from './src/StickyCard.jsx';
-import { DEFAULT_STICKY_WIDTH_PX as STICKY_W, DEFAULT_STICKY_HEIGHT_PX as STICKY_H } from './src/board-geometry.js';
-import './src/board-cards.css';
+} from './src/client/ui/Modals.jsx';
+import { MODAL_SIZE, BUTTON_VARIANT } from './src/client/ui/ui-variants.js';
+import { CLEARED_VOTE_RESULTS, voteSessionScope, resetVoteSessionEntries } from './src/domain/vote-session-lifecycle.js';
+import { confirmThenPin } from './src/client/ui/confirm-then-pin.js';
+import { boardEditingAllowed, boardManagementPermissions, runSharedBoardAction } from './src/domain/public-board-permissions.js';
+import { publicZoneCreationSize, ZONE_MIN_WIDTH_PX as ZONE_MIN_W, ZONE_MIN_HEIGHT_PX as ZONE_MIN_H } from './src/domain/public-zone-layout.js';
+import { importWarningNotes } from './src/client/ui/modal-model.js';
+import { isEditableDrawingImage } from './src/domain/drawing-image-target.js';
+import { useDrawingMode } from './src/client/board/useDrawingMode.js';
+import { useDrawingSession } from './src/client/board/useDrawingSession.js';
+import { LiveDrawingPreviews } from './src/client/board/LiveDrawingPreviews.jsx';
+import { DrawingTool } from './src/client/board/DrawingTool.jsx';
+import { ToolDock, TOOL_ID } from './src/client/chrome/ToolDock.jsx';
+import { ZoomControls } from './src/client/chrome/ZoomControls.jsx';
+import { TopCenterStack } from './src/client/chrome/TopCenterStack.jsx';
+import { templateRows, followBannerModel } from './src/client/chrome/chrome-model.js';
+import { SelectionToolbar, GroupSelectionToolbar } from './src/client/board/SelectionToolbar.jsx';
+import { selectionToolbarAnchor, groupSelectionToolbarAnchor } from './src/client/board/selection-toolbar-model.js';
+import { ZoneCard } from './src/client/board/ZoneCard.jsx';
+import { zoneEffectiveRevealed, zoneGroupIds, nestedZoneCount } from './src/domain/zone-actions.js';
+import { useZoneHeaderActions } from './src/client/board/useZoneHeaderActions.js';
+import { Toast } from './src/client/ui/Toast.jsx';
+import { TopBar } from './src/client/chrome/TopBar.jsx';
+import { adminPillModel, playerRows, shareLinkModel } from './src/client/chrome/topbar-model.js';
+import { hueFromId, playerAccentColor } from './src/client/board/player-colors.js';
+import { t, useLang } from './src/client/ui/i18n.js';
+import { useTheme, nextThemePref } from './src/client/ui/theme.js';
+import { PALETTE } from './src/client/ui/palette.js';
+import { BoardCanvasStyles } from './src/client/board/BoardCanvasStyles.jsx';
+import { stickyCreationFontSize } from './src/client/board/sticky-font.js';
+import { BoardStickyCard } from './src/client/board/BoardStickyCard.jsx';
+import { DEFAULT_STICKY_WIDTH_PX as STICKY_W, DEFAULT_STICKY_HEIGHT_PX as STICKY_H } from './src/domain/board-geometry.js';
+import './src/client/board/board-cards.css';
 import {
   MINIMAP_W_PX, MINIMAP_H_PX, topStackHeightPx, Z,
-} from './src/chrome-layout.js';
-import { useUserIdentity } from './src/useUserIdentity.js';
-import { getTemplates } from './src/builtin-templates.js';
-import { templateRevealViewport } from './src/template-model.js';
-import { useBoardTemplates } from './src/use-board-templates.js';
-import { useAdminRole } from './src/useAdminRole.js';
-import { clientPointToWorld } from './src/board-coordinates.js';
-import { buildTopVotedRanks } from './src/voting-results.js';
+} from './src/client/chrome/chrome-layout.js';
+import { useUserIdentity } from './src/client/session/useUserIdentity.js';
+import { getTemplates } from './src/client/templates/builtin-templates.js';
+import { templateRevealViewport } from './src/domain/template-model.js';
+import { useBoardTemplates } from './src/client/templates/use-board-templates.js';
+import { activeVoteZone, zoneHasActiveGovernor } from './src/domain/vote-ownership.js';
+import { useAdminRole } from './src/client/session/useAdminRole.js';
+import { clientPointToWorld } from './src/domain/board-coordinates.js';
+import { buildTopVotedRanks } from './src/domain/voting-results.js';
 import {
   allowCanvasFileDrop,
   dragClientPoint,
   droppedImageBlobs,
   resolveDropClientPoint,
-} from './src/image-drop.js';
-import { unlockEntriesForSelection } from './src/selection-actions.js';
+} from './src/client/transfer/image-drop.js';
+import { unlockEntriesForSelection } from './src/client/board/selection-actions.js';
 import {
   buildMinimapModel,
   centerViewportOnWorld,
   minimapPointToWorld,
-  minimapViewportRect,
-} from './src/minimap.js';
+} from './src/domain/minimap.js';
 import {
   cursorScreenPosition,
   PLAYER_CURSOR_STALE_MS,
   playerViewFromViewport,
   visiblePlayerCursors,
-} from './src/player-cursors.js';
-import { summarizeRemoteEditors, summarizeRemoteSelectors } from './src/editing-presence.js';
-import { copyTextToClipboard } from './src/clipboard.js';
-import { MinimapPanel } from './src/MinimapPanel.jsx';
-import { zoomViewportAt, fitViewportToItems } from './src/viewport-framing.js';
-import { ZOOM_STEP_FACTOR, wheelZoomFactor, viewportNeedsCullRefresh } from './src/viewport-zoom.js';
-import { cardOverviewAtZoom } from './src/viewport-limits.js';
-import { gridBackgroundForZoom } from './src/grid-background.js';
-import { centerOf, insideZone, resolveOwnerZone, effectiveOwnerZone } from './src/board-ownership.js';
+} from './src/client/session/player-cursors.js';
+import { summarizeRemoteEditors, summarizeRemoteSelectors } from './src/client/session/editing-presence.js';
+import { copyTextToClipboard } from './src/client/transfer/clipboard.js';
+import { MinimapPanel } from './src/client/board/MinimapPanel.jsx';
+import { zoomViewportAt, fitViewportToItems } from './src/domain/viewport-framing.js';
+import { ZOOM_STEP_FACTOR, wheelZoomFactor, viewportNeedsCullRefresh } from './src/domain/viewport-zoom.js';
+import { selectionLayerAttributes } from './src/client/board/selection-overlay.js';
+import { paintViewport } from './src/client/board/viewport-renderer.js';
+import { visibleBoardItems, detailedStickyIds, usesCompactStickyPaint } from './src/domain/board-render-visibility.js';
+import { remoteEditingFrameStyle } from './src/client/board/editing-presence-look.js';
+import { BoardRasterLayer } from './src/client/board/BoardRasterLayer.jsx';
+import { useSettledViewport } from './src/client/board/use-settled-viewport.js';
+import { useProgressiveStickyDetails } from './src/client/board/use-progressive-sticky-details.js';
+import { reuseSnapshotMap } from './src/domain/snapshot-references.js';
+import { warmBoardFonts } from './src/client/ui/board-fonts.js';
+import { centerOf, insideZone, resolveOwnerZone, effectiveOwnerZone } from './src/domain/board-ownership.js';
 import {
   normalizeDisplayName,
   normalizeStoredUserId,
   normalizeViewport,
-} from './src/local-preferences.js';
-import { boardVoteIsOpen, timerDockModel, voteTimerIsOpen, voteTimerPhaseSignature } from './src/vote-timing.js';
-import { DEFAULT_BOARD, storage, adminRoleStorage } from './src/room-storage.js';
-import { effectiveZIndex, compareZOrder, swapZOrderEntries } from './src/z-order.js';
-import { IMAGE_MAX_MIB_LABEL, prepareImageBlob, readBackupImage, sanitizeImportedImages } from './src/image-upload.js';
-import { CollaborativeTextEditor } from './src/CollaborativeTextEditor.jsx';
-import { TextCard } from './src/TextCard.jsx';
-import { ImageCard } from './src/ImageCard.jsx';
-import { canvasCursor } from './src/board-cursor.js';
-import { protectedItemEntries, mergeItemEntries } from './src/move-concealment.js';
-import { reparentMoveEntries } from './src/move-reparenting.js';
-import { isStickyHiddenForUser, stickyEffectiveRevealed, stickyCloneRevealOverride } from './src/board-visibility.js';
-import { csvLabels } from './src/csv-labels.js';
+} from './src/client/session/local-preferences.js';
+import { boardVoteIsOpen, timerDockModel, voteTimerPhaseSignature } from './src/domain/vote-timing.js';
+import { storage, adminRoleStorage } from './src/client/session/room-storage.js';
+import { DEFAULT_BOARD } from './src/domain/board-state.js';
+import { reconcileBoardSnapshot } from './src/domain/board-reconciliation.js';
+import { effectiveZIndex, compareZOrder, swapZOrderEntries } from './src/domain/z-order.js';
+import { IMAGE_MAX_MIB_LABEL, prepareImageBlob } from './src/client/transfer/image-upload.js';
+import { CollaborativeTextEditor } from './src/client/board/CollaborativeTextEditor.jsx';
+import { TextCard } from './src/client/board/TextCard.jsx';
+import { ImageCard } from './src/client/board/ImageCard.jsx';
+import { canvasCursor } from './src/client/board/board-cursor.js';
+import { protectedItemEntries, mergeItemEntries } from './src/domain/move-concealment.js';
+import { reparentMoveEntries } from './src/domain/move-reparenting.js';
+import { isStickyHiddenForUser, stickyEffectiveRevealed, stickyCloneRevealOverride } from './src/domain/board-visibility.js';
+import { attachSafariGestures } from './src/client/board/safari-gestures.js';
+import { attachMobileGestures, isMobileGestureEvent } from './src/client/board/mobile-gestures.js';
+import { APP_VIEWPORT_CONTENT } from './src/client/ui/mobile-layout.js';
+import { shouldPreserveRecentLocalItem } from './src/domain/pending-local-items.js';
+import { MobileEditingControls } from './src/client/board/MobileEditingControls.jsx';
+import { attachMobileEditorViewport } from './src/client/board/mobile-editor-viewport.js';
 
-const loadBoardArchive = () => import('./src/board-archive.js');
 
 /* ============================================================
    Constants
    ============================================================ */
 
-
 const STICKY_MIN_W = 120;
 const STICKY_MIN_H = 100;
-const ZONE_MIN_W = 240;
-const ZONE_MIN_H = 200;
 const IMAGE_MIN_W = 60;
 const IMAGE_MIN_H = 40;
 const { w: TEXT_W, h: TEXT_H } = sizeForPlacement({ type: 'text' });
@@ -158,7 +167,6 @@ const RECENT_MOVE_WINDOW_MS = 8000;
 // cost when cards cluster. Cards stay separated by their borders.
 const DENSE_CARD_THRESHOLD = 60;
 const COMMENT_PREVIEW_TEXT_LIMIT = 120;
-const EMPTY_COMMENT_PREVIEWS = [];
 const EMPTY_COMMENTS = [];
 
 // Help modal sections, in display order. `color` indexes PALETTE so each
@@ -188,43 +196,13 @@ const readScrollWheelZoomEnabled = () => {
   } catch { return false; }
 };
 
-// Nearest zone — the item's own owner, or the nearest ancestor via the
-// ownership chain — that currently has an active voteTimer. Mutual exclusion
-// at start time guarantees at most one zone in a chain is active at once.
-const activeVoteZone = (item, allItems, atTime) => {
-  let zone = effectiveOwnerZone(item, allItems);
-  const visited = new Set();
-  while (zone && !visited.has(zone.id)) {
-    visited.add(zone.id);
-    const timer = zone.voteTimer;
-    if (voteTimerIsOpen(timer, atTime)) return zone;
-    zone = effectiveOwnerZone(zone, allItems);
-  }
-  return null;
-};
-
-// True if this zone, or any ancestor in its ownership chain, currently holds
-// a voteTimer — presence-based (not endsAt-gated) so a deeper untimered
-// descendant is still treated as "live" while its governing ancestor's
-// session hasn't been finalized yet. Used to keep a stale "finished" badge
-// from exposing a live in-progress tally anywhere beneath it, not just on
-// the zone that stores the timer.
-const zoneHasActiveGovernor = (zone, allItems) => {
-  let z = zone;
-  const visited = new Set();
-  while (z && !visited.has(z.id)) {
-    visited.add(z.id);
-    if (z.voteTimer) return true;
-    z = effectiveOwnerZone(z, allItems);
-  }
-  return false;
-};
-
 /* ============================================================
    Component
    ============================================================ */
 
-export default function RetroBoard({ boardCode = null, boardToken = null }) {
+export default function RetroBoard({ boardCode = null, boardToken = null, mode = BOARD_MODE.PRIVATE }) {
+  const publicMode = mode === BOARD_MODE.PUBLIC;
+  useEffect(() => { void warmBoardFonts(document); }, []);
   /* ---------- i18n + theme ---------- */
   const [lang, setLang] = useLang();
   const { pref: themePref, setThemePref } = useTheme();
@@ -236,7 +214,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     userId, userIdRef, userName,
     nameDraft, setNameDraft,
     nameModalOpen, setNameModalOpen,
-    hydrate: hydrateIdentity, saveName,
+    hydrate: hydrateIdentity, saveName, dismissName,
   } = useUserIdentity(storage);
 
   /* ---------- Board (shared) ---------- */
@@ -294,7 +272,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       : new Map()
   ));
   const commentPreviewCacheRef = useRef(new Map());
-  const [creationMode, setCreationMode] = useState(null); // 'zone' | 'select' | null
+  const [creationMode, setCreationMode, drawingExitRef] = useDrawingMode();
   const clipboardRef = useRef(null);
   const fileDragPointRef = useRef(null);
   const [zonePreview, setZonePreview] = useState(null); // {x,y,w,h} in world coords
@@ -389,10 +367,12 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
 
   /* ---------- Refs ---------- */
   const canvasRef = useRef(null);
+  const boardRootRef = useRef(null);
   // Imperative refs for the transformed world layer and the grid background.
   // Pan updates these directly to skip React's render cycle entirely while
   // dragging — see startPan/applyViewportToDom below.
   const worldRef = useRef(null);
+  const selectionLayerRef = useRef(null);
   const worldMeasureRef = useRef(null);
   const gridRef = useRef(null);
   const cursorLayerRef = useRef(null);
@@ -530,22 +510,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     ) >= DENSE_CARD_THRESHOLD,
     [board.items],
   );
-  const [compactRender, setCompactRender] = useState(false);
-  useEffect(() => {
-    let timer;
-    const settleDetails = () => {
-      // Culling snapshots change during a gesture, but card structure must
-      // not switch back and forth as zoom crosses the overview threshold.
-      if (wheelCommitRef.current != null || wheelRafRef.current != null
-        || interactionRef.current !== null) {
-        timer = setTimeout(settleDetails, 120);
-        return;
-      }
-      setCompactRender(cardOverviewAtZoom(viewportRef.current.zoom));
-    };
-    settleDetails();
-    return () => clearTimeout(timer);
-  }, [viewport.zoom]);
+  const { viewport: detailViewport, compact: compactRender } = useSettledViewport(viewport, viewportRef, interactionRef, wheelCommitRef, wheelRafRef);
   // Viewport size — tracked so we can cull off-screen items at render time.
   // Initialised lazily to handle SSR-style first paint with no window.
   const [viewportSize, setViewportSize] = useState(() => ({
@@ -560,11 +525,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
 
   const minimapModel = useMemo(() => buildMinimapModel({
     items: sortedItems,
-    viewport,
+    viewport: detailViewport,
     viewportSize,
     width: MINIMAP_W_PX,
     height: MINIMAP_H_PX,
-  }), [sortedItems, viewport, viewportSize]);
+  }), [sortedItems, detailViewport, viewportSize]);
   minimapModelRef.current = minimapModel;
 
   const revealMinimap = useCallback(() => {
@@ -702,22 +667,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   // Only render items whose AABB intersects the visible world rect (with a
   // generous margin so items don't pop in at the edge during pan/zoom). The
   // margin is wider than the snap step so culling lines never bite.
-  const visibleItems = useMemo(() => {
-    const z = cullViewport.zoom;
-    const wx0 = -cullViewport.x / z;
-    const wy0 = -cullViewport.y / z;
-    const wx1 = (viewportSize.w - cullViewport.x) / z;
-    const wy1 = (viewportSize.h - cullViewport.y) / z;
-    const margin = (z < 0.4 ? 320 : 600) / z;
-    return sortedItems.filter((it) => {
-      const iw = it.w || (it.type === 'sticky' ? STICKY_W : it.type === 'text' ? TEXT_W : 200);
-      const ih = it.h || (it.type === 'sticky' ? STICKY_H : it.type === 'text' ? TEXT_H : 200);
-      return it.x + iw >= wx0 - margin
-        && it.x <= wx1 + margin
-        && it.y + ih >= wy0 - margin
-        && it.y <= wy1 + margin;
-    });
-  }, [sortedItems, cullViewport, viewportSize]);
+  const visibleItems = useMemo(() => visibleBoardItems(sortedItems, cullViewport, viewportSize, denseRender),
+    [sortedItems, cullViewport, viewportSize, denseRender]);
+  const desiredStickyDetails = useMemo(() => detailedStickyIds(sortedItems, detailViewport, viewportSize, compactRender, denseRender),
+    [sortedItems, detailViewport, viewportSize, compactRender, denseRender]);
+  const stickyDetails = useProgressiveStickyDetails(desiredStickyDetails, interactionRef, wheelCommitRef, wheelRafRef);
 
   // Single O(n*z) pass instead of O(n) per zone on every render. Counts stickies
   // by their effective owner zone, keyed by zone id.
@@ -821,8 +775,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       // entire decision to the heartbeat tick is correct: it reads the
       // live adminUserId from yMeta via storage.getAdminUserId() and is
       // also triggered immediately after sync via storage.onSynced.
-      // Auto-open templates if empty
-      if ((bs.items?.length || 0) === 0) setTemplatesOpen(true);
     })();
     return () => { cancelled = true; };
   }, []);
@@ -890,11 +842,14 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   }, [reportWriteFailure]);
 
   const {
-    isAdmin, canClaim, pinPromptCfg, requireAdminPin, adminClaim, adminTransfer,
+    isAdmin: roleIsAdmin, canClaim, pinPromptCfg, requireAdminPin: requirePrivateAdminPin, adminClaim, adminTransfer,
   } = useAdminRole({
     userId, userName, board, boardRef, onlineUsers, presence,
     boardCode, boardToken, patchMeta, setToast, storage, liveStorage: adminRoleStorage,
   });
+
+  const { canManage: isAdmin, isPrivateAdmin } = boardManagementPermissions(mode, roleIsAdmin);
+  const requireAdminPin = useCallback((action) => runSharedBoardAction(mode, requirePrivateAdminPin, action), [mode, requirePrivateAdminPin]);
 
   // ---- Full board replace (import / clear) ----
   const replaceBoardLocal = useCallback((nextBoard, opts) => {
@@ -992,8 +947,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
      Realtime push: subscribe to storage change events.
      Polling kept as a long-interval safety net only.
      ============================================================ */
-  const applyRemoteBoard = useCallback((remote, isUndoRedo) => {
+  const applyRemoteBoard = useCallback((remote, isUndoRedo, deletedItemIds = []) => {
     if (!remote) return;
+    const pendingContext = { isUndoRedo, deletedItemIds: new Set(deletedItemIds), userId: userIdRef.current, nowMs: Date.now() };
     // Undo/redo is a deliberate, authoritative correction — never let the
     // "protect a just-finished local drag from a stale peer echo" grace
     // window (recentlyMovedRef, below) mask it back to the pre-undo
@@ -1003,79 +959,30 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     const focusedItemId = focusedTextIdRef.current?.split(':')[0] || null;
     if (focusedItemId && !remote.items?.some((it) => it.id === focusedItemId)) {
       const localFocused = boardRef.current.items.find((it) => it.id === focusedItemId);
-      // A "recent local create" is normally preserved against a stale peer
-      // echo that just hasn't caught up yet — but an undo/redo removing the
-      // item IS the authoritative state, not staleness, so it must win even
-      // if the create happened moments ago.
-      const isRecentLocalCreate = !isUndoRedo && localFocused
-        && localFocused.authorId === userIdRef.current
-        && (localFocused.createdAt || 0) > Date.now() - 8000;
+      // Pending creates survive stale snapshots; explicit peer deletions and
+      // undo/redo remain authoritative even for an item just created locally.
+      const isRecentLocalCreate = shouldPreserveRecentLocalItem(localFocused, pendingContext);
       if (!isRecentLocalCreate) updateFocusedText(null);
     }
-    setBoard((prev) => {
-      const next = { ...DEFAULT_BOARD, ...remote };
-      const dragIds = dragItemsRef.current; // Set<id> or null
-      const remoteIds = new Set(next.items.map((i) => i.id));
-      // Prune expired entries so a stale grace-period record can't outlive
-      // its window and mask a genuine later remote change to the same item.
-      const recentlyMoved = recentlyMovedRef.current;
-      const nowMs = Date.now();
-      recentlyMoved.forEach((v, id) => { if (v.until <= nowMs) recentlyMoved.delete(id); });
-      if ((dragIds && dragIds.size > 0) || recentlyMoved.size > 0) {
-        // Index prev items by id once (O(N)) so the merge below is O(N), not the
-        // O(N²) a per-item find() would cost during live collaboration.
-        const prevById = new Map(prev.items.map((p) => [p.id, p]));
-        next.items = next.items.map((i) => {
-          const localItem = prevById.get(i.id);
-          if (!localItem) return i;
-          let patched = i;
-          if (dragIds && dragIds.has(i.id)) {
-            // preserve local geometry mid-drag
-            patched = { ...patched, x: localItem.x, y: localItem.y };
-            if (localItem.w != null) patched.w = localItem.w;
-            if (localItem.h != null) patched.h = localItem.h;
-          } else if (recentlyMoved.has(i.id)) {
-            // preserve local geometry for a short grace period after a drag
-            // just ended — a concurrent peer write (e.g. the vote-finalize
-            // auto-sort) can otherwise land on the same item and win the
-            // Yjs conflict resolution despite happening earlier in real
-            // time (see RECENT_MOVE_WINDOW_MS).
-            const rm = recentlyMoved.get(i.id);
-            patched = { ...patched, x: rm.x, y: rm.y };
-            if (rm.w != null) patched.w = rm.w;
-            if (rm.h != null) patched.h = rm.h;
-          }
-          return patched;
-        });
-      }
-      // Preserve local-only items that the remote snapshot doesn't know about
-      // yet. Without this, a peer echo arriving in the gap between a local
-      // create and its WS flush silently strips the new item from React state.
-      // Only items WE just authored within the last few seconds qualify — older
-      // missing items are genuine peer-deletes that must be honored. An
-      // undo/redo removing the item is likewise authoritative, not a stale
-      // echo, so it's never re-added here either.
-      const RECENT_AUTHOR_WINDOW_MS = 8000;
-      const cutoff = Date.now() - RECENT_AUTHOR_WINDOW_MS;
-      const localOnly = isUndoRedo ? [] : prev.items.filter((p) => (
-        !remoteIds.has(p.id)
-        && p.authorId === userIdRef.current
-        && (p.createdAt || 0) > cutoff
-      ));
-      if (localOnly.length) next.items = [...next.items, ...localOnly];
-      return next;
+    setBoard((previous) => {
+      const result = reconcileBoardSnapshot(previous, remote, {
+        ...pendingContext, draggedIds: dragItemsRef.current,
+        recentMoves: recentlyMovedRef.current, moveNowMs: Date.now(),
+      });
+      recentlyMovedRef.current = result.recentMoves;
+      return result.board;
     });
   }, [updateFocusedText]);
 
   useEffect(() => {
     if (!loaded) return undefined;
     const handler = (e) => {
-      const { scope, key, value, isUndoRedo } = e.detail || {};
+      const { scope, key, value, isUndoRedo, deletedItemIds } = e.detail || {};
       if (scope !== 's') return;
       // applyRemoteBoard preserves geometry for items in dragItemsRef, while
       // collaborative Y.Text snapshots are always applied so simultaneous
       // editors see the merged text on every remote keystroke.
-      if (key === 'boardState') applyRemoteBoard(value, isUndoRedo);
+      if (key === 'boardState') applyRemoteBoard(value, isUndoRedo, deletedItemIds);
       else if (key === 'presence') setPresence(value || {});
     };
     if (typeof storage.on === 'function') storage.on(handler);
@@ -1087,12 +994,14 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     // Subscribe to vote-key changes (local + remote) and rebuild the snapshot.
     const voteHandler = () => {
       if (typeof window !== 'undefined' && window.storage?.snapshotVotes) {
-        setVotesByItem(window.storage.snapshotVotes());
+        const next = window.storage.snapshotVotes();
+        setVotesByItem(previous => reuseSnapshotMap(previous, next));
       }
     };
     const commentHandler = () => {
       if (typeof window !== 'undefined' && window.storage?.snapshotComments) {
-        setCommentsByItem(window.storage.snapshotComments());
+        const next = window.storage.snapshotComments();
+        setCommentsByItem(previous => reuseSnapshotMap(previous, next));
       }
     };
     const resync = () => {
@@ -1259,25 +1168,25 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const midDrag = () => !!(dragItemsRef.current && dragItemsRef.current.size > 0);
   const doUndo = useCallback(() => {
     if (midDrag()) { setToast({ msg: t('topbar.finishDragFirst'), type: 'warn' }); return; }
-    if (!isAdmin && boardRef.current.editingLocked) {
+    if (!boardEditingAllowed(mode, isPrivateAdmin, boardRef.current.editingLocked)) {
       setToast({ msg: t('common.warnLockEdit'), type: 'warn' });
       return;
     }
     if (!window.storage?.undo?.()) setToast({ msg: t('topbar.nothingToUndo'), type: 'warn' });
-  }, [isAdmin, t]);
+  }, [mode, isPrivateAdmin, t]);
   const doRedo = useCallback(() => {
     if (midDrag()) { setToast({ msg: t('topbar.finishDragFirst'), type: 'warn' }); return; }
-    if (!isAdmin && boardRef.current.editingLocked) {
+    if (!boardEditingAllowed(mode, isPrivateAdmin, boardRef.current.editingLocked)) {
       setToast({ msg: t('common.warnLockEdit'), type: 'warn' });
       return;
     }
     if (!window.storage?.redo?.()) setToast({ msg: t('topbar.nothingToRedo'), type: 'warn' });
-  }, [isAdmin, t]);
+  }, [mode, isPrivateAdmin, t]);
 
   /* ============================================================
      Block browser zoom outside the board canvas.
      The canvas onWheel handles its own zoom; this catches pinch /
-     ctrl+wheel over toolbars, keyboard zoom, and Safari gestures,
+     ctrl+wheel over toolbars and keyboard zoom,
      plus counter-scales any zoom applied via the browser menu.
      ============================================================ */
   useEffect(() => {
@@ -1286,7 +1195,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     if (meta) {
       meta.setAttribute(
         'content',
-        'width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no',
+        APP_VIEWPORT_CONTENT,
       );
     }
 
@@ -1299,13 +1208,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       if (!(e.ctrlKey || e.metaKey)) return;
       if (['+', '-', '=', '0'].includes(e.key)) e.preventDefault();
     };
-    const onGesture = (e) => e.preventDefault();
 
     window.addEventListener('wheel', onWheel, { passive: false });
     window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('gesturestart', onGesture);
-    window.addEventListener('gesturechange', onGesture);
-    window.addEventListener('gestureend', onGesture);
 
     const baseDPR = window.devicePixelRatio || 1;
     const counterZoom = () => {
@@ -1320,9 +1225,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       if (meta) meta.setAttribute('content', prevContent);
       window.removeEventListener('wheel', onWheel);
       window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('gesturestart', onGesture);
-      window.removeEventListener('gesturechange', onGesture);
-      window.removeEventListener('gestureend', onGesture);
       window.removeEventListener('resize', counterZoom);
       window.visualViewport?.removeEventListener('resize', counterZoom);
       document.body.style.zoom = '';
@@ -1409,14 +1311,14 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       text: '',
       color,
       parentZoneId: enclosingZone?.id ?? null,
-      private: true,
+      private: !publicMode,
       ...(fontSize ? { fontSize } : {}),
     };
     addItemLocal(it);
     setSelectedId(it.id);
     updateFocusedText(`${it.id}:text`);
     setTimeout(() => editAreaRef.current?.focus(), 20);
-  }, [userId, userName, addItemLocal, setSelectedId, updateFocusedText]);
+  }, [userId, userName, addItemLocal, setSelectedId, updateFocusedText, publicMode]);
 
   const addText = useCallback((wx, wy) => {
     const it = {
@@ -1527,7 +1429,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   /* ============================================================
      Admin gates
      ============================================================ */
-  const editingAllowed = isAdmin || !board.editingLocked;
+  const editingAllowed = boardEditingAllowed(mode, isPrivateAdmin, board.editingLocked);
   const canModifyOwnedItem = useCallback((item) => editingAllowed, [editingAllowed]);
 
   const canDeleteItem = useCallback((item) => (
@@ -1595,6 +1497,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     }
     return true;
   }, [editingAllowed]);
+
+  const drawingSession = useDrawingSession({ creationMode, setCreationMode, setSelectedIds, requireEdit, closeTemplates });
 
   const unlockSelectedItems = useCallback(() => {
     if (!editingAllowed) {
@@ -1720,31 +1624,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   // Apply a viewport directly to the DOM, bypassing React. Used during pan so
   // a board with hundreds of cards doesn't run the React commit phase on every
   // mousemove — pan becomes a single GPU-composited transform.
-  const applyViewportToDom = useCallback((v) => {
+  const applyViewportToDom = useCallback((v, live = false) => {
     revealMinimap();
-    if (worldRef.current) {
-      worldRef.current.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.zoom})`;
-    }
-    if (gridRef.current) {
-      Object.assign(gridRef.current.style, gridBackgroundForZoom(v.zoom));
-      gridRef.current.style.backgroundPosition = `${v.x}px ${v.y}px`;
-    }
-    if (cursorLayerRef.current) {
-      Array.from(cursorLayerRef.current.children).forEach((node) => {
-        const point = cursorScreenPosition({
-          x: Number(node.dataset.cursorX),
-          y: Number(node.dataset.cursorY),
-        }, v);
-        node.style.transform = `translate3d(${point.x}px, ${point.y}px, 0)`;
-      });
-    }
-    if (minimapViewportRef.current && minimapModelRef.current) {
-      const model = minimapModelRef.current;
-      const miniView = minimapViewportRect(v, model.viewportSize, model);
-      minimapViewportRef.current.style.transform = `translate3d(${miniView.x}px, ${miniView.y}px, 0)`;
-      minimapViewportRef.current.style.width = `${miniView.w}px`;
-      minimapViewportRef.current.style.height = `${miniView.h}px`;
-    }
+    paintViewport(v, { world: worldRef.current, grid: gridRef.current, cursorLayer: cursorLayerRef.current,
+      minimapViewport: minimapViewportRef.current, minimapModel: minimapModelRef.current, selectionLayer: selectionLayerRef.current }, { live });
   }, [revealMinimap]);
 
   // Keep the DOM in sync with React state for non-live changes (fit, reset,
@@ -1753,24 +1636,24 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   useEffect(() => {
     if (interactionRef.current === null && wheelCommitRef.current == null
       && wheelRafRef.current == null && !followedUserIdRef.current) applyViewportToDom(viewport);
-  }, [viewport, applyViewportToDom]);
+  }, [viewport, applyViewportToDom, loaded]);
 
   const liveApplyViewport = useCallback((next, { broadcastView = true } = {}) => {
     viewportRef.current = next;
-    applyViewportToDom(next);
+    applyViewportToDom(next, true);
     if (broadcastView) publishLocalView(next);
     // Refresh culling during long gestures without reconciling on every input
     // frame. Otherwise newly reached objects stay blank until mouseup.
     const rendered = renderedViewportRef.current;
     const nowMs = performance.now();
     if (nowMs - viewportCullCommitAtRef.current >= 100
-      && viewportNeedsCullRefresh(rendered, next, viewportSize)) {
+      && viewportNeedsCullRefresh(rendered, next, viewportSize, visibleItems.length === sortedItems.length)) {
       viewportCullCommitAtRef.current = nowMs;
       // The transform is already current. Let input frames preempt the
       // more expensive React work that mounts newly visible cards.
       startTransition(() => setViewport(next));
     }
-  }, [applyViewportToDom, publishLocalView, viewportSize]);
+  }, [applyViewportToDom, publishLocalView, viewportSize, visibleItems.length, sortedItems.length]);
 
   // Wheel input is the noisiest input on the page — trackpads / Magic Mice
   // can fire 120+ events/sec. Each event used to force a layout via
@@ -1994,6 +1877,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     return () => el.removeEventListener('wheel', onCanvasWheel);
   }, [onCanvasWheel, loaded]);
 
+  useEffect(() => attachSafariGestures(canvasRef.current, {
+    wheelZoomEnabled: () => scrollWheelZoomEnabledRef.current,
+  }), [loaded]);
+
   const startPan = useCallback((e) => {
     if (interactionRef.current !== null) return false;
     e.preventDefault();
@@ -2104,8 +1991,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         setCreationMode(null);
         const x = Math.min(start.x, lastWorld.x);
         const y = Math.min(start.y, lastWorld.y);
-        const w = Math.max(ZONE_MIN_W, Math.abs(lastWorld.x - start.x));
-        const h = Math.max(ZONE_MIN_H, Math.abs(lastWorld.y - start.y));
+        const { w, h } = publicZoneCreationSize(mode, Math.abs(lastWorld.x - start.x), Math.abs(lastWorld.y - start.y));
         const id = addZone(x, y, w, h);
         // Focus the new zone's title so the user can name it.
         updateFocusedText(`${id}:title`);
@@ -2123,7 +2009,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       return;
     }
     const selectTool = creationModeRef.current === 'select';
-    const useMarquee = !spaceHeldRef.current && (e.shiftKey || e.button === 2 || selectTool);
+    const useMarquee = !spaceHeldRef.current && !isMobileGestureEvent(e) && (e.shiftKey || e.button === 2 || selectTool);
     if (!e.shiftKey) setSelectedIds(new Set());
     if (useMarquee) {
       // Box select
@@ -2176,7 +2062,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     }
     if (e.button === 0) startPan(e);
   }, [
-    selectedIds, requireEdit, screenToWorld, addZone,
+    selectedIds, requireEdit, screenToWorld, addZone, mode,
     settleWheelBeforeInteraction, startPan, updateFocusedText,
   ]);
 
@@ -3289,7 +3175,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       editingLocked: false,
     })) return;
     setConfirmClear(false);
-    setTemplatesOpen(true);
   }, [isAdmin, replaceBoardLocal]);
 
   const adminResetVotes = useCallback(() => {
@@ -3342,51 +3227,16 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     if (exportBusy) return;
     setExportBusy(true);
     setToast({ msg: t('export.processing'), type: 'info' });
-    const b = boardRef.current;
-    const voteSnap = window.storage?.snapshotVotes?.() || new Map();
-    const votes = Object.create(null);
-    voteSnap.forEach((set, itemId) => { votes[itemId] = Array.from(set); });
-    const commentSnap = window.storage?.snapshotComments?.() || new Map();
-    const comments = Object.create(null);
-    commentSnap.forEach((entries, itemId) => { comments[itemId] = entries; });
-    const redacted = redactBoardExportForViewer(
-      b.items,
-      comments,
-      (sticky) => isStickyHiddenForUser(sticky, b.items, b.allRevealed, userId),
-    );
     let artifact;
     try {
-      artifact = await (await loadBoardArchive()).createBoardArchiveArtifact({
-        fallbackBoardCode: boardCode,
-        board: {
-          items: redacted.items,
-          timer: b.timer,
-          editingLocked: b.editingLocked,
-          votingLocked: b.votingLocked,
-          allRevealed: b.allRevealed,
-          lastResultsAt: b.lastResultsAt,
-        },
-        votes,
-        comments: redacted.comments,
-        customTemplates: window.storage?.snapshotTemplates?.() || [],
-      }, readBackupImage);
+      artifact = await createBoardExport(boardRef.current, { boardCode, userId });
     } catch (err) {
       setExportBusy(false);
       setToast({ msg: t('export.fail', { err: err.message }), type: 'warn' });
       return;
     }
     setExportBusy(false);
-    const blob = artifact.blob;
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = artifact.fileName;
-    a.click();
-    // Some browsers (Firefox/Safari) start the download asynchronously after
-    // `a.click()` returns. Revoking on the same tick can leave the request
-    // pointing at a freed blob → empty file. Defer past the current task so
-    // the download has time to grab the blob first.
-    setTimeout(() => URL.revokeObjectURL(url), 0);
+    downloadArtifact(artifact);
     const { positions, zoneDimensions } = artifact.geometryRepairs;
     setToast({
       msg: positions || zoneDimensions
@@ -3401,21 +3251,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   // column's output without the rest of the board.
   const exportZoneCsv = useCallback((zone) => {
     if (!zone || zone.type !== 'zone') return;
-    const b = boardRef.current;
-    const voteSnap = window.storage?.snapshotVotes?.() || new Map();
-    const csv = buildZoneCsv(zone, b, voteSnap, userId, csvLabels());
-    const artifact = createCsvExportArtifact({
-      csv,
-      fallbackBoardCode: boardCode,
-      zoneTitle: zone.title,
-    });
-    const blob = new Blob([artifact.contents], { type: artifact.mimeType });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = artifact.fileName;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 0);
+    const artifact = createCsvBoardExport(boardRef.current, { boardCode, userId, zone });
+    downloadArtifact(artifact);
     setToast({ msg: t('export.done', { file: artifact.fileName }), type: 'info' });
   }, [boardCode, userId]);
 
@@ -3424,17 +3261,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   // enclosing zone, same convention as the timer's auto-sort-by-vote feature.
   // Stickies outside every zone land in a "(no zone)" group.
   const exportBoardCsv = useCallback(() => {
-    const b = boardRef.current;
-    const voteSnap = window.storage?.snapshotVotes?.() || new Map();
-    const csv = buildBoardCsv(b, voteSnap, userId, csvLabels());
-    const artifact = createCsvExportArtifact({ csv, fallbackBoardCode: boardCode });
-    const blob = new Blob([artifact.contents], { type: artifact.mimeType });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = artifact.fileName;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 0);
+    const artifact = createCsvBoardExport(boardRef.current, { boardCode, userId });
+    downloadArtifact(artifact);
     setToast({ msg: t('export.done', { file: artifact.fileName }), type: 'info' });
   }, [boardCode, userId]);
 
@@ -3453,24 +3281,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     e.target.value = ''; // allow re-picking the same file later
     if (!file) return;
     try {
-      const isCsv = file.name.toLowerCase().endsWith('.csv') || /text\/csv/i.test(file.type);
-      const isArchive = file.name.toLowerCase().endsWith('.zip') || /application\/zip/i.test(file.type);
-      const maxFileBytes = isArchive ? IMPORT_MAX_ARCHIVE_FILE_BYTES
-        : isCsv ? IMPORT_MAX_CSV_FILE_BYTES : IMPORT_MAX_FILE_BYTES;
-      if (file.size > maxFileBytes) {
-        throw new Error(`file exceeds ${(maxFileBytes / 1024 / 1024).toFixed(0)} MB`);
-      }
-      const importedAt = Date.now();
-      const text = isArchive ? null : await file.text();
-      const csvImport = isCsv ? parseBoardCsv(text, importedAt) : null;
-      const manifest = isArchive ? await (await loadBoardArchive()).readBoardArchive(file, importedAt)
-        : normalizeImportManifest(csvImport ? csvImport.payload : JSON.parse(text), importedAt);
-      setPendingImport({
-        name: file.name,
-        ...manifest,
-        sourceFormat: isArchive ? 'zip' : isCsv ? 'csv' : 'json',
-        csvSummary: csvImport?.summary ?? null,
-      });
+      setPendingImport(await readBoardImport(file));
     } catch (err) {
       setToast({ msg: t('import.fail', { err: err.message }), type: 'warn' });
     }
@@ -3479,48 +3290,16 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   const confirmImport = useCallback(async () => {
     if (!pendingImport || !isAdmin || importBusy) return;
     const {
-      items, voteEntries, commentEntries, customTemplates: importedTemplates, boardMeta,
+      voteEntries, commentEntries, customTemplates: importedTemplates,
     } = pendingImport;
-    const rawItems = items.map((item) => (
-      item.type === 'zone'
-        ? { ...item, voteTimer: null, lastResultsAt: null, voteResults: null, votingLocked: false }
-        : item
-    ));
     setImportBusy(true);
-    let importedItems;
+    let nextBoard;
     try {
-      importedItems = await sanitizeImportedImages(rawItems, pendingImport.readImageBlob);
+      nextBoard = await prepareBoardImport(pendingImport, boardRef.current);
     } catch (err) {
       setImportBusy(false);
-      setToast({ msg: t('import.fail', { err: err.message }), type: 'warn' });
-      return;
-    }
-    const nextBoard = {
-      ...DEFAULT_BOARD,
-      items: importedItems,
-      timer: boardMeta.timer,
-      editingLocked: boardMeta.editingLocked,
-      votingLocked: boardMeta.votingLocked,
-      allRevealed: boardMeta.allRevealed,
-      lastResultsAt: boardMeta.lastResultsAt,
-      // Preserve identity-of-the-room across import: who's admin, what their
-      // display name is, and the PIN gate. Otherwise an admin importing a
-      // backup would silently wipe their own PIN and re-prompt to set a new
-      // one on the next destructive action.
-      adminUserId: boardRef.current.adminUserId,
-      adminName: boardRef.current.adminName,
-      adminPinHash: boardRef.current.adminPinHash,
-    };
-    const snapshotBytes = importBundleByteLength({
-      board: nextBoard,
-      votes: voteEntries,
-      comments: commentEntries,
-      customTemplates: importedTemplates,
-    });
-    if (snapshotBytes > IMPORT_MAX_BUNDLE_BYTES) {
-      setImportBusy(false);
       setToast({
-        msg: t('import.tooLarge', { mb: (IMPORT_MAX_BUNDLE_BYTES / 1024 / 1024).toFixed(1) }),
+        msg: err instanceof ImportBundleLimitError ? t('import.tooLarge', { mb: err.maximumMiB }) : t('import.fail', { err: err.message }),
         type: 'warn',
       });
       return;
@@ -3534,7 +3313,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       return;
     }
     setBoard(nextBoard);
-    const n = importedItems.length;
+    const n = nextBoard.items.length;
     setPendingImport(null);
     setImportBusy(false);
     setToast({
@@ -3551,7 +3330,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     updateFocusedText, setTimerSetupZoneId, adminStopTimer, adminStartTimer, updateItem,
     exportZoneCsv, openSaveTemplate, bringToFront, sendToBack, deleteItemsIfAllowed });
   const renderZone = (it) => (
-    <ZoneCard
+    <ZoneCard mode={mode} zoom={viewport.zoom}
       key={it.id}
       item={it}
       selected={selectedIds.has(it.id)}
@@ -3593,39 +3372,15 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     />
   );
 
-  const renderSticky = (it) => (
-    <StickyCard
-      TextEditor={CollaborativeTextEditor}
-      key={it.id}
-      item={it}
-      selected={selectedIds.has(it.id) && !remoteSelectorsByItem.has(it.id)}
-      remoteSelected={remoteSelectorsByItem.has(it.id)}
-      remoteSelectionHue={hueFromId(remoteSelectorsByItem.get(it.id)?.userId || '')}
-      isEditing={focusedTextId === `${it.id}:text`}
-      isOwner={it.authorId === userId}
-      allRevealed={stickyVotingContext.get(it.id)?.revealed ?? board.allRevealed}
-      dense={denseRender}
-      compact={compactRender}
-      voted={didUserVoteOn(it.id)}
-      voteCount={voteCountOf(it.id)}
-      voteFlash={voteFlashes[it.id] || null}
-      voteRank={topVotedRanks.get(it.id)}
-      votingAllowedNow={stickyVotingContext.get(it.id)?.votingAllowedNow ?? false}
-      showVoteCount={!(stickyVotingContext.get(it.id)?.hideVoteCounts ?? false)}
-      inZone={stickyVotingContext.get(it.id)?.inZone ?? false}
-      commentCount={commentCountOf(it.id)}
-      commentPreviews={commentPreviewsByItem.get(it.id) ?? EMPTY_COMMENT_PREVIEWS}
-      lang={lang}
-      onStartDrag={startItemDrag}
-      onBeginFocus={beginFocus}
-      onTextChange={onTextChange}
-      onTextKeyDown={onTextKeyDown}
-      onTextBlur={onTextBlur}
-      onToggleVote={toggleVote}
-      onOpenComments={openComments}
-      editAreaRef={editAreaRef}
-    />
-  );
+  const stickyCardContext = useMemo(() => ({
+    selectedIds, remoteSelectorsByItem, focusedTextId, userId, stickyVotingContext,
+    allRevealed: board.allRevealed, denseRender, didUserVoteOn, voteCountOf, voteFlashes,
+    topVotedRanks, commentCountOf, commentPreviewsByItem, lang, startItemDrag, beginFocus,
+    onTextChange, onTextKeyDown, onTextBlur, toggleVote, openComments, editAreaRef,
+  }), [selectedIds, remoteSelectorsByItem, focusedTextId, userId, stickyVotingContext,
+    board.allRevealed, denseRender, didUserVoteOn, voteCountOf, voteFlashes,
+    topVotedRanks, commentCountOf, commentPreviewsByItem, lang, startItemDrag, beginFocus,
+    onTextChange, onTextKeyDown, onTextBlur, toggleVote, openComments]);
 
   /* ============================================================
      Action toolbar (screen space, above selected item)
@@ -3661,7 +3416,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       remoteSelected={remoteSelectorsByItem.has(it.id)}
       remoteSelectionHue={hueFromId(remoteSelectorsByItem.get(it.id)?.userId || '')}
       dense={denseRender}
-      onStartDrag={startItemDrag}
+      onStartDrag={startItemDrag} zoom={viewport.zoom} viewportSize={viewportSize}
     />
   );
 
@@ -3670,15 +3425,18 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
   // closes over; if none of those change, React reuses the same element array
   // and skips reconciliation entirely for the cards.
   const renderedItems = useMemo(
-    () => visibleItems.map((it) => {
+    () => <BoardRasterLayer items={sortedItems} detailedIds={stickyDetails} compact={compactRender} dense={denseRender} selectedIds={selectedIds}
+      remoteSelectors={remoteSelectorsByItem} focusedTextId={focusedTextId} contexts={stickyVotingContext}
+      allRevealed={board.allRevealed} userId={userId} winners={topVotedRanks} lang={lang}>{visibleItems.map((it) => {
       if (it.type === 'image') return renderImage(it);
       if (it.type === 'zone') return renderZone(it);
       if (it.type === 'text') return renderText(it);
-      return renderSticky(it);
-    }),
+      return <BoardStickyCard key={it.id} item={it} context={stickyCardContext}
+        compact={usesCompactStickyPaint(it.id, compactRender, stickyDetails)} />;
+    })}</BoardRasterLayer>,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
-      visibleItems,
+      visibleItems, sortedItems,
       selectedIds,
       remoteSelectorsByItem,
       focusedTextId,
@@ -3689,8 +3447,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       topVotedRanks,
       stickyVotingContext,
       userId,
-      denseRender,
-      compactRender,
+      denseRender, viewport.zoom, viewportSize,
+      compactRender, stickyDetails, stickyCardContext,
       lang,
       zoneChildCount, isAdmin, board.items, board.allRevealed, zoneHeaderActions,
       canModifyOwnedItem, canDeleteItem, timerSetupZoneId,
@@ -3710,7 +3468,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       selectedIds.has(item.id) && item.locked ? count + 1 : count
     ), 0);
     return (
-      <GroupSelectionToolbar
+      <GroupSelectionToolbar mode={mode}
         anchor={groupSelectionToolbarAnchor(groupBBox, viewport, stackHeightPx)}
         lockedCount={lockedCount}
         zoneCount={selectedZoneCount}
@@ -3729,7 +3487,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     const can = canModifyOwnedItem(selectedItem);
     const canDelete = canDeleteItem(selectedItem);
     return (
-      <SelectionToolbar
+      <SelectionToolbar mode={mode}
         anchor={selectionToolbarAnchor(selectedItem, viewport, stackHeightPx)}
         item={{
           type: selectedItem.type, colorIndex: selectedItem.color,
@@ -3738,6 +3496,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         }}
         can={can}
         canDelete={canDelete}
+        onEditDrawing={isEditableDrawingImage(selectedItem) ? () => drawingSession.edit(selectedItem) : undefined}
         onColor={(index) => can && updateItem(selectedItem.id, { color: index })}
         onFontSize={(fontSize) => can && updateItem(selectedItem.id, { fontSize })}
         onFontColor={(fontColor) => updateItem(selectedItem.id, { fontColor })}
@@ -3765,6 +3524,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       return (
         <>
           <div
+            data-selection-bounds="true"
             style={{
               position: 'fixed',
               left: x * v.zoom + v.x,
@@ -3780,15 +3540,16 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
           {corners.map((c) => (
             <div
               key={c.k}
+              data-mobile-resize="true" data-selection-corner={c.k}
               onMouseDown={(e) => startGroupResize(e, c.k)}
               style={{
                 position: 'fixed',
-                left: c.sx * v.zoom + v.x - 7,
-                top: c.sy * v.zoom + v.y - 7,
-                width: 14,
-                height: 14,
-                background: 'var(--bg-panel)',
-                border: '2px solid #2563eb',
+                left: c.sx * v.zoom + v.x,
+                top: c.sy * v.zoom + v.y,
+                width: 'var(--rb-resize-target-px, 14px)', height: 'var(--rb-resize-target-px, 14px)',
+                transform: 'translate(-50%, -50%)', touchAction: 'none',
+                background: 'var(--rb-resize-bg, var(--bg-panel))',
+                border: 'var(--rb-resize-border, 2px solid #2563eb)',
                 borderRadius: 'var(--radius-round)',
                 cursor: c.cursor,
                 zIndex: Z.SELECTION_HANDLE,
@@ -3814,15 +3575,16 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     return corners.map((c) => (
       <div
         key={c.k}
+        data-mobile-resize="true" data-selection-corner={c.k}
         onMouseDown={(e) => startItemResize(e, selectedItem, c.k)}
         style={{
           position: 'fixed',
-          left: c.sx * v.zoom + v.x - 7,
-          top: c.sy * v.zoom + v.y - 7,
-          width: 14,
-          height: 14,
-          background: 'var(--bg-panel)',
-          border: '2px solid #2563eb',
+          left: c.sx * v.zoom + v.x,
+          top: c.sy * v.zoom + v.y,
+          width: 'var(--rb-resize-target-px, 14px)', height: 'var(--rb-resize-target-px, 14px)',
+          transform: 'translate(-50%, -50%)', touchAction: 'none',
+          background: 'var(--rb-resize-bg, var(--bg-panel))',
+          border: 'var(--rb-resize-border, 2px solid #2563eb)',
           borderRadius: 'var(--radius-round)',
           cursor: c.cursor,
           zIndex: Z.SELECTION_HANDLE,
@@ -3847,7 +3609,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     action();
   };
   const renderTopBar = () => (
-    <TopBar
+    <TopBar mode={mode}
       code={boardCode}
       canUndo={undoState.canUndo}
       canRedo={undoState.canRedo}
@@ -3892,7 +3654,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       onUnlockAll={() => topbarAdminAction(() => setConfirmUnlockAll(true))}
       onResetVotes={() => topbarAdminAction(() => setConfirmResetVotes(true))}
       onClear={() => topbarAdminAction(() => setConfirmClear(true))}
-      onTransferAdmin={(targetUserId) => requireAdminPin(() => adminTransfer(targetUserId))}
+      onTransferAdmin={(targetUserId) => requirePrivateAdminPin(() => adminTransfer(targetUserId))}
       onFollow={startFollowing}
       onStopFollowing={stopFollowing}
     />
@@ -3910,24 +3672,55 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
     />
   );
 
+  const createAtViewportCenter = (create) => {
+    if (!requireEdit() || !canvasRef.current) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    const world = screenToWorld(rect.width / 2, rect.height / 2);
+    create(world.x, world.y);
+  };
   const toolHandlers = {
     [TOOL_ID.SELECT]: () => {
       setCreationMode((mode) => (mode === TOOL_ID.SELECT ? null : TOOL_ID.SELECT));
       setSelectedIds(new Set());
     },
-    [TOOL_ID.TEXT]: () => {
-      if (!requireEdit() || !canvasRef.current) return;
-      const rect = canvasRef.current.getBoundingClientRect();
-      const world = screenToWorld(rect.width / 2, rect.height / 2);
-      addText(world.x, world.y);
-    },
+    [TOOL_ID.TEXT]: () => createAtViewportCenter(addText),
     [TOOL_ID.ZONE]: () => {
       if (!requireEdit()) return;
       setCreationMode((mode) => (mode === TOOL_ID.ZONE ? null : TOOL_ID.ZONE));
       setSelectedIds(new Set());
     },
     [TOOL_ID.IMAGE]: pickImageFile,
+    [TOOL_ID.DRAW]: drawingSession.toggle,
   };
+
+  useEffect(() => {
+    if (!loaded || !boardRootRef.current || !canvasRef.current) return undefined;
+    return attachMobileGestures(boardRootRef.current, {
+      getViewport: () => viewportRef.current,
+      beginGesture: () => {
+        window.storage?.stopUndoCapture?.();
+        stopFollowing(); settleWheelBeforeInteraction();
+      },
+      endGesture: () => window.storage?.stopUndoCapture?.(),
+      cancelGesture: () => {
+        activeGeometryFinalizerRef.current?.();
+        activeViewportFinalizerRef.current?.();
+      },
+      applyViewport: liveApplyViewport,
+      commitViewport: commitViewportImmediately,
+    }, { canvas: canvasRef.current });
+  }, [loaded, stopFollowing, settleWheelBeforeInteraction, liveApplyViewport, commitViewportImmediately]);
+
+  useEffect(() => {
+    if (!loaded || !boardRootRef.current) return undefined;
+    return attachMobileEditorViewport(boardRootRef.current, {
+      getViewport: () => viewportRef.current,
+      commitViewport: (next) => {
+        stopFollowing(); settleWheelBeforeInteraction();
+        commitViewportImmediately(next);
+      },
+    });
+  }, [loaded, stopFollowing, settleWheelBeforeInteraction, commitViewportImmediately]);
 
   /* ============================================================
      Render
@@ -3948,91 +3741,20 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
 
   return (
     <div
+      ref={boardRootRef}
       onContextMenu={(e) => e.preventDefault()}
-      style={{ position: 'fixed', inset: 0, overflow: 'hidden', fontFamily: 'var(--font-ui)' }}
+      style={{ position: 'fixed', inset: 0, overflow: 'clip', fontFamily: 'var(--font-ui)' }}
     >
-      <style>{`
-        @keyframes rb-appear {
-          0%   { opacity: 0; transform: scale(0.78); }
-          60%  { opacity: 1; transform: scale(1.04); }
-          100% { opacity: 1; transform: scale(1); }
-        }
-        @keyframes rb-bump {
-          0%   { transform: scale(1); }
-          40%  { transform: scale(1.28); }
-          100% { transform: scale(1); }
-        }
-        @keyframes rb-editing-pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.35; }
-        }
-        @keyframes rb-selection-aura {
-          0%, 100% {
-            box-shadow:
-              0 0 0 2px hsl(var(--rb-selector-hue) 78% 52% / 0.72),
-              0 0 12px 3px hsl(var(--rb-selector-hue) 82% 55% / 0.42),
-              0 0 24px 7px hsl(var(--rb-selector-hue) 86% 60% / 0.18);
-          }
-          50% {
-            box-shadow:
-              0 0 0 3px hsl(var(--rb-selector-hue) 82% 50% / 0.90),
-              0 0 20px 6px hsl(var(--rb-selector-hue) 86% 55% / 0.58),
-              0 0 34px 12px hsl(var(--rb-selector-hue) 90% 62% / 0.28);
-          }
-        }
-        @keyframes rb-sticky__vote-float {
-          0%   { opacity: 0; transform: translate(-50%, 0) scale(0.6); }
-          20%  { opacity: 1; transform: translate(-50%, -10px) scale(1.1); }
-          100% { opacity: 0; transform: translate(-50%, -55px) scale(1.1); }
-        }
-        @keyframes rb-toast-in {
-          0%   { opacity: 0; transform: translate(-50%, 14px) scale(0.96); }
-          100% { opacity: 1; transform: translate(-50%, 0) scale(1); }
-        }
-        @keyframes rb-pop {
-          0%   { opacity: 0; transform: scale(0.9); }
-          100% { opacity: 1; transform: scale(1); }
-        }
-        @keyframes rb-glow {
-          0%, 100% { box-shadow: var(--shadow-winner); }
-          50%      { box-shadow: var(--shadow-winner-peak); }
-        }
-        @keyframes rb-sticky__comment-slide {
-          0%   { opacity: 0; transform: translateX(10px); }
-          18%  { opacity: 1; transform: translateX(0); }
-          82%  { opacity: 1; transform: translateX(0); }
-          100% { opacity: 0; transform: translateX(-10px); }
-        }
-        ${COMMENT_CAROUSEL_STYLE}
-        .rb-editing-dot {
-          animation: rb-editing-pulse 1.1s ease-in-out infinite;
-        }
-        .rb-remote-selected-card {
-          --rb-selector-hue: 200;
-          box-shadow:
-            0 0 0 2px hsl(var(--rb-selector-hue) 78% 52% / 0.72),
-            0 0 12px 3px hsl(var(--rb-selector-hue) 82% 55% / 0.42),
-            0 0 24px 7px hsl(var(--rb-selector-hue) 86% 60% / 0.18);
-          animation: rb-selection-aura 1.8s ease-in-out infinite;
-        }
-        @media (prefers-reduced-motion: reduce) {
-          .rb-sticky__comment-slide { animation: none !important; }
-          .rb-player-cursor { transition: none !important; }
-          .rb-editing-dot { animation: none !important; }
-          .rb-remote-selected-card { animation: none !important; }
-        }
-        .rb-no-select * { user-select: none; }
-      `}</style>
+      <BoardCanvasStyles />
 
-      {/* Grid background (screen-space, behind everything). backgroundSize
-          and backgroundPosition are applied imperatively (see
-          applyViewportToDom) so pan/zoom don't go through React. */}
+      {/* Grid background (screen-space, behind everything). Texture and
+          compositor transform are applied only imperatively (see
+          applyViewportToDom) so a render mid-gesture cannot reset them. */}
       <div
         ref={gridRef}
         style={{
           position: 'absolute', inset: 0, zIndex: Z.GRID,
           backgroundColor: 'var(--bg)',
-          ...gridBackgroundForZoom(viewport.zoom),
         }}
       />
 
@@ -4050,6 +3772,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         className="rb-no-select"
         style={{
           position: 'absolute', inset: 0, zIndex: Z.CANVAS,
+          touchAction: focusedTextId ? 'pan-y' : 'none',
           cursor: canvasCursor(interactionRef.current?.kind, spaceHeldRef.current, creationMode),
         }}
       >
@@ -4075,6 +3798,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
             }}
           />
           {renderedItems}
+          <LiveDrawingPreviews />
 
           {/* Remote card selection label. The glow itself is applied directly
               to each selected card instead of drawing a second card-sized
@@ -4117,7 +3841,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
               scaled so names stay readable at every board zoom level. */}
           {editingIndicators.map(({ item, editor }) => {
             const zoom = Math.max(viewport.zoom, 0.01);
-            const width = item.w || (item.type === 'sticky' ? STICKY_W : item.type === 'text' ? TEXT_W : 200);
             const height = item.h || (item.type === 'sticky' ? STICKY_H : item.type === 'text' ? TEXT_H : 200);
             const editorHue = hueFromId(editor.userId);
             const color = playerAccentColor(editorHue);
@@ -4129,14 +3852,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
               <React.Fragment key={`editing:${item.id}`}>
                 <div
                   aria-hidden="true"
-                  style={{
-                    position: 'absolute', left: item.x, top: item.y,
-                    width, height, boxSizing: 'border-box',
-                    border: `${2 / zoom}px solid ${color}`,
-                    borderRadius: `${7 / zoom}px`,
-                    boxShadow: `0 0 0 ${3 / zoom}px ${glow}`,
-                    pointerEvents: 'none', zIndex: Z.REMOTE_EDITOR_BOX,
-                  }}
+                  style={remoteEditingFrameStyle(item, { zoom, color, glow })}
                 />
                 <div
                   role="status"
@@ -4187,7 +3903,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         </div>
 
         {/* Empty hint */}
-        {board.items.length === 0 && (
+        {board.items.length === 0 && creationMode !== TOOL_ID.DRAW && (
           <div
             style={{
               position: 'absolute', top: '50%', left: '50%',
@@ -4197,7 +3913,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
             }}
           >
             <div style={{ fontSize: 28, marginBottom: 8 }}>✨</div>
-            {t('empty.hint')}
+            <span className="rb-desktop-only">{t('empty.hint')}</span>
+            <span className="rb-mobile-only">{t('mobile.emptyHint')}</span>
           </div>
         )}
       </div>
@@ -4268,7 +3985,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         onExtendTimer={adminExtendTimer}
         onStopTimer={adminStopTimer}
       />
-      <ToolDock
+      <ToolDock mode={mode}
+        onAddSticky={() => createAtViewportCenter(addSticky)}
         creationMode={creationMode}
         templatesOpen={templatesOpen}
         rows={templateRows(getTemplates(), customTemplates)}
@@ -4279,6 +3997,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         onDeleteCustomTemplate={deleteCustomTemplate} onRenameCustomTemplate={openRenameTemplate}
         onSaveTemplate={saveSelectedTemplate}
       />
+      <DrawingTool exitRef={drawingExitRef} active={creationMode === TOOL_ID.DRAW} lang={lang} editingAllowed={editingAllowed} requireEdit={requireEdit}
+        viewportRef={viewportRef} boardRef={boardRef} boardCanvasRef={canvasRef} storage={storage} target={drawingSession.target} onUpdateItem={updateItem} onRemoveItem={id => storage.removeItem(id)}
+        userId={userId} userName={userName} onAddItem={addItemLocal} onSelectItem={setSelectedId}
+        onClose={drawingSession.close} onApplyViewport={liveApplyViewport} onCommitViewport={commitViewportImmediately}
+        onBeginGesture={settleWheelBeforeInteraction} onStopFollowing={stopFollowing} />
       <ZoomControls
         percentage={Math.round(viewport.zoom * 100)}
         onZoomOut={() => zoomBy(1 / ZOOM_STEP_FACTOR)}
@@ -4287,8 +4010,16 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
         onFitToContent={fitToContent}
       />
       {renderMinimap()}
-      {renderActionToolbar()}
-      {renderResizeHandles()}
+      <div ref={selectionLayerRef} style={{ display: 'contents' }}
+        {...selectionLayerAttributes({ item: selectedItem, groupBBox, selectedCount: selectedIds.size,
+          stackHeightPx, editing: Boolean(focusedTextId) })}>
+        {renderActionToolbar()}
+        <MobileEditingControls item={selectedItem} isEditing={Boolean(focusedTextId)}
+          editorRef={editAreaRef}
+          editingAllowed={editingAllowed && !isStickyHiddenForUser(selectedItem, board.items, board.allRevealed, userId)}
+          onBeginFocus={beginFocus} lang={lang} />
+        {renderResizeHandles()}
+      </div>
 
       {/* Marquee selection box */}
       {marquee && (
@@ -4313,7 +4044,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null }) {
       {renameTarget && <TemplateNameDialog key={renameTarget.id} mode={TEMPLATE_NAME_MODE.RENAME}
         initialName={renameTarget.name} onSubmit={renameCustomTemplate} onClose={closeRenameDialog} />}
       {nameModalOpen && (
-        <NameDialog draft={nameDraft} onDraftChange={setNameDraft} onSave={saveName} />
+        <NameDialog draft={nameDraft} onDraftChange={setNameDraft} onSave={saveName} onClose={dismissName} hasName={Boolean(userName)} />
       )}
       {confirmUnlockAll && (
         <ConfirmDialog

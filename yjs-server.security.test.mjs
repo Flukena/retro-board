@@ -10,9 +10,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
-import { planVoteFinalization } from './src/vote-finalization.js';
-import { zoneHeaderClearancePx } from './src/zone-title.js';
-import { createMotionPublisher, sendOnlyLocalAwareness } from './src/awareness-transport.js';
+import { planVoteFinalization } from './src/domain/vote-finalization.js';
+import { zoneHeaderClearancePx } from './src/domain/zone-title.js';
+import { createMotionPublisher, sendOnlyLocalAwareness } from './src/client/session/awareness-transport.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -588,8 +588,10 @@ test('rejects unauthenticated upload before writing and atomically publishes an 
 
   const unauthenticatedRead = await fetch(`${server.httpUrl}${imageUrl}`);
   assert.equal(unauthenticatedRead.status, 401);
-  const authenticatedRead = await fetch(`${server.httpUrl}${imageUrl}`, { headers: { cookie: session.cookie } });
+  const authenticatedRead = await fetch(`${server.httpUrl}${imageUrl}`, { headers: { cookie: session.cookie, origin: ALLOWED_ORIGIN } });
   assert.equal(authenticatedRead.status, 200);
+  assert.equal(authenticatedRead.headers.get('access-control-allow-origin'), ALLOWED_ORIGIN);
+  assert.equal(authenticatedRead.headers.get('access-control-allow-credentials'), 'true');
   assert.equal(authenticatedRead.headers.get('cache-control'), 'private, no-store');
   assert.deepEqual(Buffer.from(await authenticatedRead.arrayBuffer()), image);
 

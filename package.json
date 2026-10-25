@@ -7,13 +7,15 @@
     "dev": "vite",
     "yjs": "node yjs-server.mjs",
     "yjs:dev": "YJS_ALLOW_INSECURE_HTTP=true YJS_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173 node yjs-server.mjs",
+    "yjs:public:dev": "(test -d /Volumes/ssd-fluke/BaseData || { echo 'Public Wall data volume missing or unavailable: /Volumes/ssd-fluke/BaseData' >&2; exit 1; }) && YJS_PUBLIC_WALL=true YJS_PORT=1235 YJS_DB_DIR=/Volumes/ssd-fluke/BaseData/retro-board/public-wall-dev/db YJS_ALLOW_INSECURE_HTTP=true YJS_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173 node yjs-server.mjs",
     "start": "vite",
-    "test": "node --test src/*.test.js *.test.mjs",
+    "test": "node scripts/test.mjs",
     "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
     "@zip.js/zip.js": "2.18.2",
+    "html-to-image": "1.11.13",
     "lucide-react": "^0.453.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -24,7 +26,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^6.1.1",
-    "vite": "^8.2.2"
+    "vite": "^8.2.4"
   },
   "overrides": {
     "y-websocket": {

@@ -9,9 +9,10 @@ public channels unless everyone who can obtain the link is intended to have
 full board access.
 
 This is not a multi-tenant identity or authorization system. There are no user
-accounts, per-user ACLs, revocation, or server-enforced admin roles. An open
-room shared with mutually untrusted participants is therefore unsupported; it
-would require authenticated identities and server-side authorization.
+accounts, per-user ACLs, revocation, or server-enforced admin roles. Private
+rooms shared with mutually untrusted participants are unsupported;
+they would require authenticated identities and server-side authorization.
+The separate Public Wall below deliberately accepts anonymous shared editing.
 
 ## Room capability and session flow
 
@@ -172,3 +173,74 @@ restart. Separately review retained uploads as described above.
 Do not include live room links, fragment tokens, cookies, board exports,
 browser traces, or tunnel credentials in bug reports. Redact them before
 sharing diagnostics.
+
+## Public wall
+
+Public Wall is one intentionally public room for anonymous, mutually untrusted
+writers. `/public` exchanges no capability: `POST /yjs-public/api/public-session`
+uses the same exact Origin checks, session-exchange rate buckets and signed,
+room-scoped HMAC cookies as private rooms. The internal room capability never
+leaves the relay. `/` polls a geometry-validated read-only JSON preview every
+10 seconds; it needs no room session or WebSocket. The JSON is publicly
+cacheable for 10 seconds. Private sticky text is omitted from this preview;
+this remains a display control, not confidentiality against room writers.
+
+Run it as a separate relay process (`YJS_PUBLIC_WALL=true`), with a dedicated,
+marked LevelDB directory/volume, memory limit and independent traffic/storage
+budgets. Startup refuses an unmarked nonempty directory, provisions through
+the existing RoomRegistry marker-last commit/quarantine path, and allows
+exactly one registered room. Room creation, private capability exchange and
+legacy image routes are disabled. Room-bound uploads require an exact Origin
+and signed Public session; PNG/JPEG/WebP/GIF files retain the 5 MiB limit,
+magic-byte checks, streamed atomic publication, rate limits and reservation
+accounting used by private rooms. Public files additionally pass the shared
+dimension/pixel/frame inspection before publication; animated PNG/WebP are
+rejected and GIF animation stays within its frame and pixel budgets.
+Public image reads need no session so the
+landing preview can render them, and retain image-read byte/request budgets.
+Only the active Public room handle is served. Legacy URL-token admission is
+also disabled. The per-room admission mechanism caps connections at500; the
+session endpoint returns 429 when full. Signed existing writers renew through
+`POST /yjs-public/rooms/<handle>/public-session`, within the normal cookie
+path, so a full wall does not prevent session renewal. Admission is checked again at the
+WebSocket upgrade to close session/admission races.
+
+Maintenance prunes excess items to 1,500 in one `public-prune` transaction.
+Oldest means ascending client-supplied `createdAt` milliseconds, then item ID;
+Missing, invalid, and more than 60 seconds in the future timestamps sort first.
+Writers can still forge plausible dates within that bounded clock skew. The cap bounds
+live items after maintenance, not the entire CRDT history or arbitrary metadata;
+the relay's existing byte, persistence and traffic quotas remain essential.
+
+Changed encoded document states are atomically snapshotted hourly, retaining
+at most 48 files and 256 MiB in the public data directory. Oldest files are
+removed before/after writes to enforce the separate history byte budget.
+`scripts/public-wall-restore.sh` accepts
+only a marked public directory and a snapshot within it. LevelDB's exclusive
+lock refuses restoration while that relay is running. Restore publishes the
+complete snapshot as a new document and room handle through RoomRegistry's
+marker-last creation path, then quarantines/removes the previous room. Stale
+handles/cookies are rejected; the public client re-establishes its session and
+reloads a fresh Y.Doc rather than reconnecting its old replica to the new handle.
+Stop the public relay before restoration. If interrupted between publication
+and retirement, startup fails closed on the two-room invariant for operator
+recovery.
+Hourly snapshots are recovery points, not an off-volume backup. Their bytes
+have a separate 256 MiB history budget; the public database quota excludes
+only the root snapshots directory. Retention may therefore be fewer than 48
+large states. Production Public uploads are isolated on the operator SSD at
+`/Volumes/ssd-fluke/BaseData/retro-board/public-wall-uploads`; a missing host
+directory prevents Compose startup. Each room has 5 GiB / 10,000 retained
+image files, within an 8 GiB / 50,000 file relay budget. Encoded CRDT limits
+remain separate. Removing a card does not reclaim its retained upload.
+Off-volume backups include private data/uploads and public data/uploads;
+verification checks referenced public image files as well as both databases.
+
+Residual risk: anyone can edit or delete others' cards, including clearing
+all items with a custom client. All Public writers can use the shared board
+tools, including import/export, locks, reveal, voting/timers and confirmed
+clearing/resetting. These actions have no owner/PIN gate in Public; private
+room owner/PIN behavior is unchanged. Admin claiming and transfer remain
+private-room concepts. UI locks are workflow controls, not a server ACL. Snapshots
+support owner recovery but cannot prevent deliberate vandalism or content
+abuse. Public content must not contain secrets or personal data.

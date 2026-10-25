@@ -16,11 +16,11 @@ import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { pathToFileURL } from 'node:url';
-import { Z } from '../src/chrome-layout.js';
+import { Z } from '../src/client/chrome/chrome-layout.js';
 
 const DEFAULT_BASE_URL = 'http://127.0.0.1:5180';
-const BASE_DATA_DIR = '/Volumes/ssd-fluke/BaseData';
-const SSD_MOUNT_DIR = '/Volumes/ssd-fluke';
+const BASE_DATA_DIR = '/Volumes/BaseDisk/Base';
+const SSD_MOUNT_DIR = '/Volumes/BaseDisk';
 const VIEWPORT_DESKTOP = { width: 1440, height: 900 };
 const VIEWPORT_NARROW = { width: 390, height: 844 };
 const ACTION_TIMEOUT_MS = 15_000;

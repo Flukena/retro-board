@@ -1,0 +1,41 @@
+.rb-mobile-edit-control,
+.rb-mobile-editor__done {
+  display: none;
+  min-height: var(--rb-mobile-touch-target-px, 44px);
+  padding: 0 calc(var(--rb-mobile-gap-px) * 2);
+  border: 1px solid var(--btn-primary-border);
+  border-radius: var(--radius-pill);
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-fg);
+  font: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.rb-mobile-editor__input {
+  box-sizing: border-box;
+  max-width: var(--rb-inline-editor-max-width-px, none);
+  max-height: var(--rb-inline-editor-max-height-px, none);
+  min-height: 0;
+  overflow-y: auto;
+  touch-action: auto;
+  user-select: text;
+}
+
+@media (max-width: 767px), (max-width: 1024px) and (pointer: coarse) {
+  .rb-mobile-edit-control {
+    position: fixed;
+    display: block;
+    left: var(--rb-mobile-canvas-left-px);
+    bottom: calc(var(--rb-mobile-selection-bottom-px) + var(--rb-mobile-selection-height-px) + var(--rb-mobile-gap-px));
+    font-family: var(--font-ui);
+  }
+
+  .rb-mobile-editor__done {
+    position: fixed;
+    display: block;
+    right: var(--rb-mobile-right-px);
+    bottom: calc(var(--rb-mobile-keyboard-bottom-px, 0px) + var(--rb-mobile-bottom-px));
+    font-family: var(--font-ui);
+  }
+}

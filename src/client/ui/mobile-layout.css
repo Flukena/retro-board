@@ -1,0 +1,303 @@
+.rb-mobile-only {
+  display: none;
+}
+
+@media (max-width: 767px), (max-width: 1024px) and (pointer: coarse) {
+  :root {
+    --rb-mobile-touch-target-px: 44px;
+    --rb-mobile-rail-width-px: 76px;
+    --rb-mobile-rail-padding-px: 4px;
+    --rb-mobile-rail-tile-height-px: 56px;
+    --rb-mobile-resize-knob-px: 14px;
+    --rb-mobile-resize-border-px: 2px;
+    --rb-mobile-gap-px: 8px;
+    --rb-mobile-zoom-height-px: 55px;
+    --rb-mobile-selection-height-px: 60px;
+    --rb-mobile-header-clearance-px: 68px;
+    --rb-mobile-bottom-px: calc(env(safe-area-inset-bottom, 0px) + var(--rb-mobile-gap-px));
+    --rb-mobile-left-px: calc(env(safe-area-inset-left, 0px) + var(--rb-mobile-gap-px));
+    --rb-mobile-right-px: calc(env(safe-area-inset-right, 0px) + var(--rb-mobile-gap-px));
+    --rb-mobile-top-px: calc(env(safe-area-inset-top, 0px) + var(--rb-mobile-gap-px));
+    --rb-mobile-zoom-bottom-px: var(--rb-mobile-bottom-px);
+    --rb-mobile-canvas-left-px: calc(var(--rb-mobile-left-px) + var(--rb-mobile-rail-width-px) + var(--rb-mobile-gap-px));
+    --rb-mobile-canvas-top-px: calc(var(--rb-mobile-top-px) + var(--rb-mobile-header-clearance-px));
+    --rb-mobile-canvas-bottom-px: calc(var(--rb-mobile-zoom-bottom-px) + var(--rb-mobile-zoom-height-px) + var(--rb-mobile-gap-px));
+    --rb-mobile-selection-bottom-px: calc(var(--rb-mobile-zoom-bottom-px) + var(--rb-mobile-zoom-height-px) + var(--rb-mobile-gap-px));
+    --rb-mobile-minimap-bottom-px: var(--rb-mobile-selection-bottom-px);
+  }
+
+  .rb-mobile-only {
+    display: flex;
+  }
+
+  .rb-desktop-only {
+    display: none;
+  }
+
+  [data-mobile-resize="true"] {
+    --rb-resize-target-px: var(--rb-mobile-touch-target-px);
+    --rb-resize-bg: transparent;
+    --rb-resize-border: none;
+  }
+
+  [data-mobile-resize="true"]::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    translate: -50% -50%;
+    width: var(--rb-mobile-resize-knob-px);
+    height: var(--rb-mobile-resize-knob-px);
+    box-sizing: border-box;
+    border: var(--rb-mobile-resize-border-px) solid var(--selection);
+    border-radius: var(--radius-round);
+    background: var(--bg-panel);
+    pointer-events: none;
+  }
+
+  .rb-topbar.rb-topbar {
+    top: var(--rb-mobile-top-px);
+    left: var(--rb-mobile-left-px);
+    right: var(--rb-mobile-right-px);
+    overflow: visible;
+    padding-inline: var(--rb-mobile-gap-px);
+    gap: var(--rb-mobile-gap-px);
+  }
+
+  .rb-topbar-scroll {
+    height: 100%;
+    overflow-y: hidden;
+    display: flex;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
+    gap: var(--rb-mobile-gap-px);
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+  }
+
+  .rb-topbar .rb-topbar-brand > span:last-child,
+  .rb-topbar .rb-topbar-spacer {
+    display: none;
+  }
+
+  .rb-topbar .rb-btn,
+  .rb-topbar-brand,
+  .rb-topbar-code,
+  .rb-topbar-presence,
+  .rb-template-popover .rb-btn,
+  .rb-template-popover .rb-menu-item,
+  .rb-topbar-popover .rb-btn,
+  .rb-topbar-popover .rb-menu-item,
+  .rb-zoom-controls .rb-btn {
+    min-width: var(--rb-mobile-touch-target-px);
+    min-height: var(--rb-mobile-touch-target-px);
+  }
+
+  .rb-topbar-popover.rb-topbar-popover,
+  .rb-template-popover.rb-template-popover {
+    position: fixed;
+    top: auto;
+    left: var(--rb-mobile-left-px);
+    right: var(--rb-mobile-right-px);
+    bottom: var(--rb-mobile-bottom-px);
+    box-sizing: border-box;
+    min-width: 0;
+    width: auto;
+    max-width: none;
+    max-height: 65vh;
+    max-height: 65dvh;
+    overflow: auto;
+    overscroll-behavior: contain;
+    border-radius: var(--radius-xl);
+    padding: var(--rb-mobile-gap-px);
+    white-space: normal;
+  }
+
+  .rb-topbar-popover.rb-topbar-popover {
+    bottom: auto;
+    top: calc(var(--rb-mobile-top-px) + var(--rb-mobile-header-clearance-px));
+  }
+
+  .rb-zone, .rb-zone__tool-popup {
+    --zone-tool-target-min: var(--rb-mobile-touch-target-px);
+  }
+  .rb-zone__tool-popup { max-height: 65dvh; overflow-y: auto; overscroll-behavior: contain; }
+  .rb-zone__menu { display: inline-flex; }
+  .rb-zone__tool-popup .rb-color-swatch {
+    width: var(--rb-mobile-touch-target-px);
+    height: var(--rb-mobile-touch-target-px);
+  }
+  .rb-zone__tool-popup .rb-selection-toolbar__swatches { flex-wrap: wrap; }
+
+  .rb-tool-dock.rb-tool-dock {
+    top: var(--rb-mobile-canvas-top-px);
+    bottom: auto;
+    left: var(--rb-mobile-left-px);
+    right: auto;
+    width: var(--rb-mobile-rail-width-px);
+    max-width: none;
+  }
+
+  .rb-tool-dock__body {
+    padding: var(--rb-mobile-rail-padding-px);
+    max-height: calc(100dvh - var(--rb-mobile-canvas-top-px) - var(--rb-mobile-bottom-px));
+    overflow-y: auto;
+    gap: 0;
+  }
+
+  .rb-tool-dock__body > .rb-divider--vertical {
+    display: none;
+  }
+
+  .rb-tool-dock .rb-dock-tile {
+    min-width: var(--rb-mobile-touch-target-px);
+    min-height: var(--rb-mobile-touch-target-px);
+    height: var(--rb-mobile-rail-tile-height-px);
+    width: 100%;
+    padding-inline: 2px;
+    font-size: 11px;
+  }
+
+  .rb-dock-tile__label {
+    display: block;
+    max-width: 100%;
+    white-space: nowrap;
+    overflow-wrap: normal;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.1;
+  }
+
+  .rb-dock-tile__label > svg[aria-hidden="true"] {
+    display: none;
+  }
+
+  .rb-template-custom > .rb-menu-item {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .rb-zoom-controls.rb-zoom-controls {
+    bottom: var(--rb-mobile-zoom-bottom-px);
+    right: var(--rb-mobile-right-px);
+    --rb-zoom-button-height: var(--rb-mobile-touch-target-px);
+  }
+
+  .rb-minimap.rb-minimap {
+    bottom: var(--rb-mobile-minimap-bottom-px);
+    right: var(--rb-mobile-right-px);
+    transform: scale(0.55);
+    transform-origin: bottom right;
+  }
+  :root:has(.rb-selection-toolbar) {
+    --rb-mobile-minimap-bottom-px: calc(var(--rb-mobile-selection-bottom-px) + var(--rb-mobile-selection-height-px) + var(--rb-mobile-gap-px));
+  }
+
+  .rb-sync-banner.rb-sync-banner {
+    bottom: auto;
+    top: calc(var(--rb-mobile-top-px) + var(--rb-mobile-header-clearance-px));
+    left: var(--rb-mobile-canvas-left-px);
+    right: var(--rb-mobile-right-px);
+    transform: none;
+    width: auto;
+    max-width: none;
+    max-height: 35dvh;
+    overflow-y: auto;
+    pointer-events: none;
+  }
+
+  .rb-sync-banner .rb-btn {
+    pointer-events: auto;
+    min-height: var(--rb-mobile-touch-target-px);
+    min-width: var(--rb-mobile-touch-target-px);
+  }
+
+  .rb-selection-toolbar.rb-selection-toolbar {
+    left: var(--rb-mobile-canvas-left-px);
+    right: var(--rb-mobile-right-px);
+    top: auto;
+    bottom: var(--rb-mobile-selection-bottom-px);
+    translate: none;
+    box-sizing: border-box;
+    min-height: var(--rb-mobile-selection-height-px);
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+  }
+
+  :root:has(.rb-mobile-editor__input:focus) .rb-zoom-controls,
+  :root:has(.rb-mobile-editor__input:focus) .rb-minimap,
+  :root:has(.rb-mobile-editor__input:focus) .rb-selection-toolbar {
+    display: none;
+  }
+
+  .rb-selection-toolbar > * {
+    flex-shrink: 0;
+  }
+
+  .rb-selection-toolbar button {
+    min-height: var(--rb-mobile-touch-target-px);
+    min-width: var(--rb-mobile-touch-target-px);
+    flex-shrink: 0;
+  }
+
+  .rb-font-color-picker.rb-font-color-picker {
+    position: fixed;
+    left: var(--rb-mobile-canvas-left-px);
+    right: var(--rb-mobile-right-px);
+    top: auto;
+    bottom: calc(var(--rb-mobile-selection-bottom-px) + var(--rb-mobile-selection-height-px) + var(--rb-mobile-gap-px));
+    translate: none;
+    grid-template-columns: repeat(auto-fit, minmax(var(--rb-mobile-touch-target-px), 1fr));
+    max-height: 40dvh;
+    overflow: auto;
+  }
+
+  .rb-top-center-stack.rb-top-center-stack {
+    top: calc(var(--rb-mobile-top-px) + var(--rb-mobile-header-clearance-px));
+    left: var(--rb-mobile-canvas-left-px);
+    right: var(--rb-mobile-right-px);
+    transform: none;
+    align-items: stretch;
+    max-height: 28dvh;
+    overflow-y: auto;
+  }
+
+  .rb-top-center-stack .rb-results-stack {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .rb-top-center-stack .rb-results {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .rb-top-center-stack .rb-timer-dock,
+  .rb-top-center-stack .rb-follow-banner {
+    max-width: 100%;
+    min-height: var(--rb-mobile-selection-height-px);
+    flex-shrink: 0;
+    overflow-x: auto;
+  }
+
+  .rb-top-center-stack .rb-timer-dock > *,
+  .rb-top-center-stack .rb-follow-banner > * {
+    flex-shrink: 0;
+  }
+
+  .rb-top-center-stack .rb-btn {
+    min-width: var(--rb-mobile-touch-target-px);
+    min-height: var(--rb-mobile-touch-target-px);
+  }
+
+}
+
+@media (max-width: 767px) and (max-height: 500px), (max-width: 1024px) and (pointer: coarse) and (max-height: 500px) {
+  .rb-minimap.rb-minimap {
+    transform: scale(0.35);
+  }
+}

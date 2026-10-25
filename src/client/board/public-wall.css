@@ -1,0 +1,75 @@
+.rb-public-wall__preview {
+  display: block;
+  position: relative;
+  aspect-ratio: var(--rb-public-scene-aspect-ratio);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  margin-block: var(--space-4);
+}
+
+.rb-public-wall__image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.rb-public-wall__capture {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--rb-public-scene-width-px);
+  height: var(--rb-public-scene-height-px);
+  transform: scale(var(--rb-public-preview-scale));
+  transform-origin: top left;
+  pointer-events: none;
+}
+
+.rb-public-wall__capture--offscreen {
+  position: fixed;
+  left: calc(-1 * var(--rb-public-scene-width-px));
+  transform: none;
+}
+
+.rb-public-wall__scene {
+  position: relative;
+  overflow: hidden;
+  pointer-events: none;
+  background-color: var(--bg);
+  font-family: var(--font-ui);
+  color: var(--text);
+}
+
+.rb-public-wall__scene * {
+  animation: none !important;
+  transition: none !important;
+}
+
+.rb-public-wall__scene button,
+.rb-public-wall__scene .rb-zone__actions,
+.rb-public-wall__scene .rb-zone__edge,
+.rb-public-wall__scene .rb-sticky__footer {
+  display: none;
+}
+
+.rb-public-wall__world {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: top left;
+}
+
+.rb-public-wall__status {
+  font-family: var(--font-ui);
+  color: var(--text-muted);
+}
+
+.rb-public-wall__join {
+  display: inline-flex;
+  height: var(--landing-control-height);
+  padding: var(--landing-action-padding);
+  font-size: var(--landing-control-font-size);
+  text-decoration: none;
+}

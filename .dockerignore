@@ -9,6 +9,8 @@ yjs-db
 uploads
 cloudflared*.yml
 cloudflared-credentials.json
+cloudflared-retroroom-credentials.json
+.cloudflare-dns.token
 *.pem
 *.key
 *.p12

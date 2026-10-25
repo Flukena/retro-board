@@ -1,0 +1,69 @@
+.rb-selection-toolbar {
+  position: fixed;
+  left: var(--rb-selection-anchor-x-px);
+  top: var(--rb-selection-anchor-y-px);
+  translate: -50% -100%;
+  display: flex;
+  box-sizing: border-box;
+  max-width: var(--rb-selection-max-width-px, none);
+  overflow: visible;
+  align-items: center;
+  gap: var(--space-2);
+  pointer-events: auto;
+  font-family: var(--font-ui);
+}
+.rb-surface.rb-selection-toolbar {
+  background: var(--tool-frame-bg);
+  border-color: var(--tool-frame-border);
+  box-shadow: var(--tool-frame-shadow);
+}
+.rb-selection-toolbar[data-toolbar-overflow="true"] { overflow-x: auto; }
+.rb-selection-toolbar > * { flex-shrink: 0; }
+.rb-selection-toolbar__unlock { width: auto; height: auto; gap: var(--space-2); padding: var(--space-2) var(--space-3); }
+.rb-selection-toolbar__unlock span { font-size: 12px; font-weight: 600; }
+.rb-selection-toolbar__swatches { display: flex; gap: 4px; }
+.rb-color-swatch,
+.rb-font-color-swatch {
+  border-radius: var(--radius-round);
+  padding: 0;
+  cursor: pointer;
+}
+.rb-color-swatch { width: 18px; height: 18px; border: 2px solid; }
+.rb-color-swatch:disabled { cursor: not-allowed; }
+.rb-color-swatch:focus-visible,
+.rb-font-color-swatch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.rb-selection-toolbar__font-size {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-left: 1px solid var(--border-soft);
+  padding-left: var(--space-2);
+  margin-left: var(--space-1);
+}
+.rb-selection-toolbar__font-size span {
+  min-width: 24px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.rb-selection-toolbar__popover-anchor { position: relative; }
+.rb-font-color-backdrop { position: fixed; inset: 0; }
+.rb-font-color-picker {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  translate: -50% 0;
+  margin-top: var(--space-2);
+  display: grid;
+  grid-template-columns: repeat(5, 22px);
+  gap: var(--space-2);
+}
+.rb-font-color-swatch { width: 22px; height: 22px; border: 1px solid var(--border); }
+.rb-font-color-swatch[aria-pressed="true"] { border: 2px solid var(--accent); }
+
+@media (max-width: 767px), (max-width: 1024px) and (pointer: coarse) {
+  /* Transparent toolbar padding must not intercept card resize handles. */
+  .rb-selection-toolbar { pointer-events: none; }
+  .rb-selection-toolbar > * { pointer-events: auto; }
+}

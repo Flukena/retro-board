@@ -1,0 +1,16 @@
+@media (pointer: coarse) {
+  html,
+  body,
+  #root {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+
+  #root :is(input, textarea, [contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"]),
+  #root :is([contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"]) * {
+    -webkit-user-select: text;
+    user-select: text;
+    -webkit-touch-callout: default;
+  }
+}
