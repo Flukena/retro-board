@@ -2,7 +2,7 @@
 # Compiles the React app to static assets with Vite. Build-time VITE_* values
 # are supplied explicitly through build args instead of copying .env files.
 # VITE_YJS_PORT tells the bundle which host port exposes the yjs relay.
-FROM node:24-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf AS build
+FROM node:26-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS build
 
 WORKDIR /app
 
