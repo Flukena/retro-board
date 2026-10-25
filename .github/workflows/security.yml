@@ -100,7 +100,8 @@ jobs:
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           version: v0.74.0
-          image-ref: retroboardci-yjs:latest
+          # yjs and yjs-public share the explicit Compose image name.
+          image-ref: miro-yjs:latest
           scanners: vuln
           vuln-type: os,library
           severity: HIGH,CRITICAL
