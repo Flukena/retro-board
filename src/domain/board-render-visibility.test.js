@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { visibleBoardItems, OVERVIEW_PRELOAD_ITEM_LIMIT, detailedStickyIds, usesCompactStickyPaint, nextStickyDetailBatch, STICKY_DETAIL_BATCH_ITEM_LIMIT } from './board-render-visibility.js';
+import { visibleBoardItems, preloadsOverview, OVERVIEW_PRELOAD_ITEM_LIMIT, detailedStickyIds, usesCompactStickyPaint, nextStickyDetailBatch, STICKY_DETAIL_BATCH_ITEM_LIMIT } from './board-render-visibility.js';
 
 const viewport = { x: 0, y: 0, zoom: 0.1 }, size = { w: 390, h: 844 };
 const near = { id: 'near', type: 'sticky', x: 0, y: 0, w: 280, h: 240 };
@@ -79,4 +79,13 @@ test('native detail batches remove stale controls first and converge without mut
   assert.equal(current.size, itemCount); assert.equal(target.size, itemCount);
   assert.equal(nextStickyDetailBatch(value, null), null);
   assert.equal(nextStickyDetailBatch(null, target).size, STICKY_DETAIL_BATCH_ITEM_LIMIT);
+});
+
+test('phones never preload offscreen cards, so a full board does not mount every card at once', () => {
+  assert.equal(preloadsOverview({ dense: true, phoneLayout: false }), true);
+  assert.equal(preloadsOverview({ dense: true, phoneLayout: true }), false);
+  assert.equal(preloadsOverview({ dense: false, phoneLayout: false }), false);
+  const items = [near, far];
+  const preload = preloadsOverview({ dense: true, phoneLayout: true });
+  assert.deepEqual(visibleBoardItems(items, viewport, size, preload), [near], 'only the card near the screen is mounted');
 });

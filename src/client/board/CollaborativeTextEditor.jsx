@@ -1,7 +1,8 @@
 import React, { useRef, useCallback } from 'react';
 import { useBrowserLayoutEffect } from '../ui/use-browser-layout-effect.js';
 import { describeTextReplacement, mapSelectionIndexThroughReplacement } from '../session/collaborative-text.js';
-import { useMobileEditorVisibility, useMobileEditing } from './MobileEditingControls.jsx';
+import { useMobileEditorVisibility } from './MobileEditingControls.jsx';
+import { useMobileLayout } from '../ui/use-mobile-layout.js';
 import { editorContentOverflowPx } from './mobile-editing.js';
 
 // A controlled input normally moves its caret when a remote value replaces
@@ -11,7 +12,7 @@ export const CollaborativeTextEditor = ({
   kind = 'textarea', editorRef, value, onValueChange, onContentOverflow, ...props
 }) => {
   const elementRef = useRef(null);
-  const mobile = useMobileEditing();
+  const mobile = useMobileLayout();
   const textValue = String(value ?? '');
   const selectionRef = useRef({ start: textValue.length, end: textValue.length });
   const selectionValueRef = useRef(textValue);

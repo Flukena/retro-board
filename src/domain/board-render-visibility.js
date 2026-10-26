@@ -22,6 +22,10 @@ export function viewportCullBounds(viewport, size) {
   return worldViewportBounds(viewport, size, viewport.zoom < LOW_ZOOM_THRESHOLD ? OVERVIEW_OVERSCAN_PX : DETAIL_OVERSCAN_PX);
 }
 
+// Phones mount only cards near the screen: on iPhone a full public wall
+// (1,500 cards) mounted at once made Safari reload the page repeatedly.
+export const preloadsOverview = ({ dense, phoneLayout }) => dense && !phoneLayout;
+
 export function visibleBoardItems(items, viewport, size, preloadOverview = false) {
   const preloadCards = preloadOverview && items.length <= OVERVIEW_PRELOAD_ITEM_LIMIT;
   if (preloadCards && items.every(item => item.type === 'sticky')) return items;

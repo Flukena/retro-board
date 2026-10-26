@@ -93,7 +93,7 @@ import { zoomViewportAt, fitViewportToItems } from './src/domain/viewport-framin
 import { ZOOM_STEP_FACTOR, wheelZoomFactor, viewportNeedsCullRefresh } from './src/domain/viewport-zoom.js';
 import { selectionLayerAttributes } from './src/client/board/selection-overlay.js';
 import { paintViewport } from './src/client/board/viewport-renderer.js';
-import { visibleBoardItems, detailedStickyIds, usesCompactStickyPaint } from './src/domain/board-render-visibility.js';
+import { visibleBoardItems, preloadsOverview, detailedStickyIds, usesCompactStickyPaint } from './src/domain/board-render-visibility.js';
 import { remoteEditingFrameStyle } from './src/client/board/editing-presence-look.js';
 import { BoardRasterLayer } from './src/client/board/BoardRasterLayer.jsx';
 import { useSettledViewport } from './src/client/board/use-settled-viewport.js';
@@ -123,6 +123,7 @@ import { isStickyHiddenForUser, stickyEffectiveRevealed, stickyCloneRevealOverri
 import { attachSafariGestures } from './src/client/board/safari-gestures.js';
 import { attachMobileGestures, isMobileGestureEvent } from './src/client/board/mobile-gestures.js';
 import { APP_VIEWPORT_CONTENT } from './src/client/ui/mobile-layout.js';
+import { useMobileLayout } from './src/client/ui/use-mobile-layout.js';
 import { shouldPreserveRecentLocalItem } from './src/domain/pending-local-items.js';
 import { attachMobileEditorViewport } from './src/client/board/mobile-editor-viewport.js';
 
@@ -665,8 +666,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
   // Only render items whose AABB intersects the visible world rect (with a
   // generous margin so items don't pop in at the edge during pan/zoom). The
   // margin is wider than the snap step so culling lines never bite.
-  const visibleItems = useMemo(() => visibleBoardItems(sortedItems, cullViewport, viewportSize, denseRender),
-    [sortedItems, cullViewport, viewportSize, denseRender]);
+  const phoneLayout = useMobileLayout(), preloadCards = preloadsOverview({ dense: denseRender, phoneLayout });
+  const visibleItems = useMemo(() => visibleBoardItems(sortedItems, cullViewport, viewportSize, preloadCards),
+    [sortedItems, cullViewport, viewportSize, preloadCards]);
   const desiredStickyDetails = useMemo(() => detailedStickyIds(sortedItems, detailViewport, viewportSize, compactRender, denseRender),
     [sortedItems, detailViewport, viewportSize, compactRender, denseRender]);
   const stickyDetails = useProgressiveStickyDetails(desiredStickyDetails, interactionRef, wheelCommitRef, wheelRafRef);
