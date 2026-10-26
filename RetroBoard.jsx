@@ -27,7 +27,8 @@ import { MODAL_SIZE, BUTTON_VARIANT } from './src/client/ui/ui-variants.js';
 import { CLEARED_VOTE_RESULTS, voteSessionScope, resetVoteSessionEntries } from './src/domain/vote-session-lifecycle.js';
 import { confirmThenPin } from './src/client/ui/confirm-then-pin.js';
 import { boardEditingAllowed, boardManagementPermissions, runSharedBoardAction } from './src/domain/public-board-permissions.js';
-import { publicZoneCreationSize, ZONE_MIN_WIDTH_PX as ZONE_MIN_W, ZONE_MIN_HEIGHT_PX as ZONE_MIN_H } from './src/domain/public-zone-layout.js';
+import { publicZoneCreationSize } from './src/domain/public-zone-layout.js';
+import { ITEM_MIN_SIZE_PX, itemSizeBounds, clampCornerResize, clampAspectScale, groupScaleRange } from './src/domain/item-size-limits.js';
 import { importWarningNotes } from './src/client/ui/modal-model.js';
 import { isEditableDrawingImage } from './src/domain/drawing-image-target.js';
 import { useDrawingMode } from './src/client/board/useDrawingMode.js';
@@ -133,13 +134,7 @@ import { worldMotionProps } from './src/client/board/world-motion.js';
    Constants
    ============================================================ */
 
-const STICKY_MIN_W = 120;
-const STICKY_MIN_H = 100;
-const IMAGE_MIN_W = 60;
-const IMAGE_MIN_H = 40;
 const { w: TEXT_W, h: TEXT_H } = sizeForPlacement({ type: 'text' });
-const TEXT_MIN_W = 60;
-const TEXT_MIN_H = 30;
 // A full board import writes every item in one Yjs transaction, which the
 // WebsocketProvider then sends as a single WS frame. Must stay safely under
 // the server's per-frame cap (RL_MAX_BYTES in yjs-server.mjs, 2MB) — legacy
@@ -1296,7 +1291,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
       const ratio = STICKY_W / STICKY_H;
       const targetArea = enclosingZone.w * enclosingZone.h * 0.025;
       const targetW = Math.sqrt(targetArea * ratio);
-      w = Math.round(Math.max(STICKY_MIN_W, Math.min(600, targetW)));
+      w = Math.round(Math.max(ITEM_MIN_SIZE_PX.sticky.w, Math.min(600, targetW)));
       h = Math.round(w / ratio);
       fontSize = stickyCreationFontSize(w);
     }
@@ -2557,16 +2552,12 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     if (spaceHeldRef.current || e.button === 1) { startPan(e); return; }
     if (item.type === 'zone' && item.locked) return;
     e.stopPropagation();
-    let minW = ZONE_MIN_W;
-    let minH = ZONE_MIN_H;
-    if (item.type === 'sticky') { minW = STICKY_MIN_W; minH = STICKY_MIN_H; }
-    else if (item.type === 'image') { minW = IMAGE_MIN_W; minH = IMAGE_MIN_H; }
-    else if (item.type === 'text') { minW = TEXT_MIN_W; minH = TEXT_MIN_H; }
     const aspectLock = item.type === 'image' && !e.altKey;
     const w0 = item.w || (item.type === 'sticky' ? STICKY_W : item.type === 'text' ? TEXT_W : 200);
     const h0 = item.h || (item.type === 'sticky' ? STICKY_H : item.type === 'text' ? TEXT_H : 200);
     const start = { x: e.clientX, y: e.clientY };
     const initial = { x: item.x, y: item.y, w: w0, h: h0 };
+    const bounds = itemSizeBounds(item.type, initial);
     if (!requireMove([item.id])) return;
     settleWheelBeforeInteraction();
     interactionRef.current = { kind: 'drag' };
@@ -2585,7 +2576,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
         const sx = (initial.w + signX * dx) / initial.w;
         const sy = (initial.h + signY * dy) / initial.h;
         // Drive by whichever axis deviated more from 1.0 (proportional drag).
-        const scale = Math.abs(sx - 1) > Math.abs(sy - 1) ? sx : sy;
+        const scale = clampAspectScale(Math.abs(sx - 1) > Math.abs(sy - 1) ? sx : sy, initial, bounds);
         dx = signX * initial.w * (scale - 1);
         dy = signY * initial.h * (scale - 1);
       }
@@ -2599,15 +2590,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
       } else if (corner === 'se') {
         w = initial.w + dx; h = initial.h + dy;
       }
-      if (w < minW) {
-        if (corner === 'nw' || corner === 'sw') x = initial.x + (initial.w - minW);
-        w = minW;
-      }
-      if (h < minH) {
-        if (corner === 'nw' || corner === 'ne') y = initial.y + (initial.h - minH);
-        h = minH;
-      }
-      lastEntries = [{ id: item.id, patch: { x, y, w, h } }];
+      lastEntries = [{ id: item.id, patch: clampCornerResize(initial, corner, { x, y, w, h }, bounds) }];
       commitGeometry(lastEntries);
     };
     const removeListeners = () => {
@@ -2696,19 +2679,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     const start = { x: e.clientX, y: e.clientY };
     const aspectLock = !e.altKey; // hold Alt to scale freely on both axes
     const aspect = initBBox.w / initBBox.h;
-    // Smallest allowed scale so no item drops below its per-type minimum.
-    let minScaleX = 0.1;
-    let minScaleY = 0.1;
-    seeds.forEach((s) => {
-      if (s.w > 0) {
-        const mw = s.type === 'sticky' ? STICKY_MIN_W : s.type === 'image' ? IMAGE_MIN_W : s.type === 'text' ? TEXT_MIN_W : ZONE_MIN_W;
-        minScaleX = Math.max(minScaleX, mw / s.w);
-      }
-      if (s.h > 0) {
-        const mh = s.type === 'sticky' ? STICKY_MIN_H : s.type === 'image' ? IMAGE_MIN_H : s.type === 'text' ? TEXT_MIN_H : ZONE_MIN_H;
-        minScaleY = Math.max(minScaleY, mh / s.h);
-      }
-    });
+    // Scale range so no item leaves its per-type minimum or cap.
+    const { minX: minScaleX, minY: minScaleY, maxX: maxScaleX, maxY: maxScaleY } = groupScaleRange(seeds.values());
     if (!requireMove(seeds.keys())) return;
     settleWheelBeforeInteraction();
     interactionRef.current = { kind: 'drag' };
@@ -2742,8 +2714,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
       // Floor at the per-axis minimum. When locked, raise both to the larger
       // floor so the ratio stays exact.
       const floor = aspectLock ? Math.max(minScaleX, minScaleY) : null;
-      sx = aspectLock ? Math.max(sx, floor) : Math.max(sx, minScaleX);
-      sy = aspectLock ? Math.max(sy, floor) : Math.max(sy, minScaleY);
+      const ceiling = aspectLock ? Math.min(maxScaleX, maxScaleY) : null;
+      sx = aspectLock ? Math.min(Math.max(sx, floor), ceiling) : Math.min(Math.max(sx, minScaleX), maxScaleX);
+      sy = aspectLock ? Math.min(Math.max(sy, floor), ceiling) : Math.min(Math.max(sy, minScaleY), maxScaleY);
       const entries = [];
       seeds.forEach((seed, id) => {
         const patch = {

@@ -1,15 +1,16 @@
 import { BOARD_MODE } from './public-wall-contract.js';
 import { geometryErrorForBoard, sizeForPlacement } from './board-geometry.js';
+import { ZONE_MIN_WIDTH_PX, ZONE_MIN_HEIGHT_PX, ZONE_MAX_SIDE_PX } from './item-size-limits.js';
 
-export const ZONE_MIN_WIDTH_PX = 240;
-export const ZONE_MIN_HEIGHT_PX = 200;
+export { ZONE_MIN_WIDTH_PX, ZONE_MIN_HEIGHT_PX };
 export const PUBLIC_ZONE_LAYOUT_SCALE_FACTOR = 2;
 const CENTER_DIVISOR = 2;
 
 export function publicZoneCreationSize(mode, widthPx, heightPx) {
   const minimum = mode === BOARD_MODE.PUBLIC
     ? sizeForPlacement({ type: 'zone' }) : { w: ZONE_MIN_WIDTH_PX, h: ZONE_MIN_HEIGHT_PX };
-  return { w: Math.max(minimum.w, widthPx), h: Math.max(minimum.h, heightPx) };
+  return { w: Math.min(ZONE_MAX_SIDE_PX, Math.max(minimum.w, widthPx)),
+    h: Math.min(ZONE_MAX_SIDE_PX, Math.max(minimum.h, heightPx)) };
 }
 
 export function enlargedZoneGeometry(zone, origin = { x: 0, y: 0 }) {
