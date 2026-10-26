@@ -621,3 +621,9 @@
 .rb-overview-layer { display: contents; }
 .rb-overview-atlas { position: absolute; pointer-events: none; font-family: var(--font-ui); }
 .rb-card-overview__text--rasterized { visibility: hidden; }
+
+/* Dense boards on WebKit: no motion inside the world (see world-motion.js). */
+[data-world-motion="still"] * {
+  animation: none !important;
+  transition: none !important;
+}

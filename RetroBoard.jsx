@@ -126,6 +126,7 @@ import { APP_VIEWPORT_CONTENT } from './src/client/ui/mobile-layout.js';
 import { useMobileLayout } from './src/client/ui/use-mobile-layout.js';
 import { shouldPreserveRecentLocalItem } from './src/domain/pending-local-items.js';
 import { attachMobileEditorViewport } from './src/client/board/mobile-editor-viewport.js';
+import { worldMotionProps } from './src/client/board/world-motion.js';
 
 
 /* ============================================================
@@ -3790,7 +3791,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
         {/* Transformed world — transform applied imperatively (see
             applyViewportToDom) so pan/zoom skip React reconciliation. */}
         <div
-          ref={worldRef}
+          ref={worldRef} {...worldMotionProps(denseRender)}
           style={{
             position: 'absolute', top: 0, left: 0,
             transformOrigin: '0 0',
