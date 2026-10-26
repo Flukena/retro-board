@@ -28,7 +28,7 @@ import { CLEARED_VOTE_RESULTS, voteSessionScope, resetVoteSessionEntries } from 
 import { confirmThenPin } from './src/client/ui/confirm-then-pin.js';
 import { boardEditingAllowed, boardManagementPermissions, runSharedBoardAction } from './src/domain/public-board-permissions.js';
 import { publicZoneCreationSize } from './src/domain/public-zone-layout.js';
-import { ITEM_MIN_SIZE_PX, itemSizeBounds, clampCornerResize, clampAspectScale, groupScaleRange } from './src/domain/item-size-limits.js';
+import { itemSizeBounds, clampCornerResize, clampAspectScale, groupScaleRange } from './src/domain/item-size-limits.js';
 import { importWarningNotes } from './src/client/ui/modal-model.js';
 import { isEditableDrawingImage } from './src/domain/drawing-image-target.js';
 import { useDrawingMode } from './src/client/board/useDrawingMode.js';
@@ -52,7 +52,7 @@ import { t, useLang } from './src/client/ui/i18n.js';
 import { useTheme, nextThemePref } from './src/client/ui/theme.js';
 import { PALETTE } from './src/client/ui/palette.js';
 import { BoardCanvasStyles } from './src/client/board/BoardCanvasStyles.jsx';
-import { stickyCreationFontSize } from './src/client/board/sticky-font.js';
+import { stickyCreationSize } from './src/client/board/sticky-font.js';
 import { BoardStickyCard } from './src/client/board/BoardStickyCard.jsx';
 import { DEFAULT_STICKY_WIDTH_PX as STICKY_W, DEFAULT_STICKY_HEIGHT_PX as STICKY_H } from './src/domain/board-geometry.js';
 import './src/client/board/board-cards.css';
@@ -1280,21 +1280,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     const color = enclosingZone
       ? enclosingZone.color
       : Math.floor(Math.random() * PALETTE.length);
-    // Target each sticky at ~2.5% of the enclosing zone's area, keeping the
-    // default sticky aspect ratio so ~40 cards fit comfortably per zone.
-    // Font size scales with sticky width so text stays readable on small
-    // zones and isn't dwarfed on big ones.
-    let w = STICKY_W;
-    let h = STICKY_H;
-    let fontSize;
-    if (enclosingZone) {
-      const ratio = STICKY_W / STICKY_H;
-      const targetArea = enclosingZone.w * enclosingZone.h * 0.025;
-      const targetW = Math.sqrt(targetArea * ratio);
-      w = Math.round(Math.max(ITEM_MIN_SIZE_PX.sticky.w, Math.min(600, targetW)));
-      h = Math.round(w / ratio);
-      fontSize = stickyCreationFontSize(w);
-    }
+    const { w, h, fontSize } = stickyCreationSize(enclosingZone);
     const it = {
       id: uid(),
       type: 'sticky',
