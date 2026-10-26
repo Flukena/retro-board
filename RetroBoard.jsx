@@ -86,6 +86,7 @@ import {
   visiblePlayerCursors,
 } from './src/client/session/player-cursors.js';
 import { summarizeRemoteEditors, summarizeRemoteSelectors } from './src/client/session/editing-presence.js';
+import { remoteSelectionLabels, selectionLabelMessage } from './src/client/board/selection-labels.js';
 import { copyTextToClipboard } from './src/client/transfer/clipboard.js';
 import { MinimapPanel } from './src/client/board/MinimapPanel.jsx';
 import { zoomViewportAt, fitViewportToItems } from './src/domain/viewport-framing.js';
@@ -458,11 +459,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     return editor ? [{ item, editor }] : [];
   }), [board.items, remoteEditorsByItem]);
 
-  const selectionIndicators = useMemo(() => board.items.flatMap((item) => {
-    if (item.type === 'zone') return [];
-    const selector = remoteSelectorsByItem.get(item.id);
-    return selector ? [{ item, selector }] : [];
-  }), [board.items, remoteSelectorsByItem]);
+  const selectionLabels = useMemo(() => remoteSelectionLabels(board.items, remoteSelectorsByItem), [board.items, remoteSelectorsByItem]);
 
   useEffect(() => {
     if (!loaded) return undefined;
@@ -3815,21 +3812,18 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
           {/* Remote card selection label. The glow itself is applied directly
               to each selected card instead of drawing a second card-sized
               layer over it. */}
-          {selectionIndicators.map(({ item, selector }) => {
+          {selectionLabels.map((group) => {
             const zoom = Math.max(viewport.zoom, 0.01);
-            const selectorHue = hueFromId(selector.userId);
-            const color = playerAccentColor(selectorHue);
-            const label = selector.extraCount > 0
-              ? t('selection.byMany', { name: selector.name, n: selector.extraCount })
-              : t('selection.by', { name: selector.name });
+            const color = playerAccentColor(hueFromId(group.selector.userId));
+            const label = t(...selectionLabelMessage(group));
             return (
-              <React.Fragment key={`selection:${item.id}`}>
+              <React.Fragment key={`selection:${group.key}`}>
                 <div
                   role="status"
                   aria-label={label}
                   style={{
-                    position: 'absolute', left: item.x,
-                    top: item.y - (34 / zoom),
+                    position: 'absolute', left: group.x,
+                    top: group.y - (34 / zoom),
                     transform: `scale(${1 / zoom})`, transformOrigin: 'top left',
                     display: 'inline-flex', alignItems: 'center', gap: 7,
                     maxWidth: 240, padding: '5px 9px 5px 7px',

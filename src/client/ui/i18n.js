@@ -399,6 +399,7 @@ const dict = {
     'editing.byMany': '{name} และอีก {n} คน กำลังแก้ไข',
     'selection.by': '{name} กำลังเลือก',
     'selection.byMany': '{name} และอีก {n} คน กำลังเลือก',
+    'selection.byCount': '{name} กำลังเลือก {n} ใบ',
 
     // settings
     'settings.lang': 'ภาษา',
@@ -847,6 +848,7 @@ const dict = {
     'editing.byMany': '{name} and {n} more are editing',
     'selection.by': '{name} is selecting',
     'selection.byMany': '{name} and {n} more are selecting',
+    'selection.byCount': '{name} is selecting {n} cards',
 
     'settings.lang': 'Language',
     'settings.lang.th': 'TH',

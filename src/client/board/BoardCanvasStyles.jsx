@@ -18,20 +18,6 @@ export function BoardCanvasStyles() {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.35; }
         }
-        @keyframes rb-selection-aura {
-          0%, 100% {
-            box-shadow:
-              0 0 0 2px hsl(var(--rb-selector-hue) 78% 52% / 0.72),
-              0 0 12px 3px hsl(var(--rb-selector-hue) 82% 55% / 0.42),
-              0 0 24px 7px hsl(var(--rb-selector-hue) 86% 60% / 0.18);
-          }
-          50% {
-            box-shadow:
-              0 0 0 3px hsl(var(--rb-selector-hue) 82% 50% / 0.90),
-              0 0 20px 6px hsl(var(--rb-selector-hue) 86% 55% / 0.58),
-              0 0 34px 12px hsl(var(--rb-selector-hue) 90% 62% / 0.28);
-          }
-        }
         @keyframes rb-sticky__vote-float {
           0%   { opacity: 0; transform: translate(-50%, 0) scale(0.6); }
           20%  { opacity: 1; transform: translate(-50%, -10px) scale(1.1); }
@@ -65,13 +51,11 @@ export function BoardCanvasStyles() {
             0 0 0 2px hsl(var(--rb-selector-hue) 78% 52% / 0.72),
             0 0 12px 3px hsl(var(--rb-selector-hue) 82% 55% / 0.42),
             0 0 24px 7px hsl(var(--rb-selector-hue) 86% 60% / 0.18);
-          animation: rb-selection-aura 1.8s ease-in-out infinite;
         }
         @media (prefers-reduced-motion: reduce) {
           .rb-sticky__comment-slide { animation: none !important; }
           .rb-player-cursor { transition: none !important; }
           .rb-editing-dot { animation: none !important; }
-          .rb-remote-selected-card { animation: none !important; }
         }
         .rb-no-select * { user-select: none; }
       `}</style>
