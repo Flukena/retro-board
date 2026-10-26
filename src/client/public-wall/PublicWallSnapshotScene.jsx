@@ -40,7 +40,7 @@ export function PublicWallSnapshotScene({ snapshot, sceneRef, lang }) {
   const scene = publicWallScene(snapshot);
   const { x, y, zoom } = scene.viewport;
   return (
-    <div ref={sceneRef} className="rb-public-wall__scene" inert="" aria-hidden="true"
+    <div ref={sceneRef} className="rb-public-wall__scene" inert="" aria-hidden="true" data-item-count={scene.items.length}
       style={{ width: scene.width, height: scene.height, ...gridBackgroundForZoom(zoom),
         backgroundPosition: `${x}px ${y}px` }}>
       <div className="rb-public-wall__world" style={{ transform: `translate(${x}px, ${y}px) scale(${zoom})` }}>

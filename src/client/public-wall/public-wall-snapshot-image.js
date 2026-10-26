@@ -1,5 +1,6 @@
 import { toBlob as rasterizeScene } from 'html-to-image';
 import { SnapshotImageResources, blobDataURL } from './snapshot-image-resource.js';
+import { renderSceneCanvas } from './scene-canvas.js';
 import { PUBLIC_SNAPSHOT_IMAGE_WIDTH_PX, PUBLIC_SNAPSHOT_IMAGE_HEIGHT_PX } from '../../domain/public-wall-contract.js';
 
 export { PUBLIC_SNAPSHOT_IMAGE_WIDTH_PX, PUBLIC_SNAPSHOT_IMAGE_HEIGHT_PX };
@@ -8,6 +9,18 @@ const FONT_CSS_PATH = '/fonts/board-snapshot/fonts.css';
 const FONT_RESOURCE_TIMEOUT_MS = 10_000;
 const SNAPSHOT_RENDER_TIMEOUT_MS = 15_000;
 const FONT_URL_PATTERN = /url\(\s*['"]?([^'")]+)['"]?\s*\)/g;
+// Converting the DOM costs about 22ms per card in desktop Chromium (50 cards
+// 1.4s, 100 cards 2.4s, 800 cards 27s), and phones are slower. Larger boards
+// are measured and painted on a canvas instead.
+export const PUBLIC_DOM_RASTER_MAX_ITEMS = 60;
+export const SNAPSHOT_RENDERER = Object.freeze({ DOM: 'dom', CANVAS: 'canvas' });
+export const snapshotRenderer = itemCount => (
+  itemCount > PUBLIC_DOM_RASTER_MAX_ITEMS ? SNAPSHOT_RENDERER.CANVAS : SNAPSHOT_RENDERER.DOM);
+const sceneItemCount = node => Number(node?.dataset?.itemCount) || 0;
+function nonEmptyImage(blob) {
+  if (!blob || !blob.size) throw new Error('Board snapshot conversion produced no image');
+  return blob;
+}
 let embeddedFontCSS;
 
 async function fetchResource(url, fetcher) {
@@ -64,6 +77,7 @@ function imageOptions(fontEmbedCSS) {
 
 export class SnapshotImageCapture extends EventTarget {
   #toBlob;
+  #toCanvasBlob;
   #loadFontCSS;
   #urls;
   #imageResources;
@@ -75,9 +89,11 @@ export class SnapshotImageCapture extends EventTarget {
   #disposed = false;
   #renderController = null;
 
-  constructor({ toBlob = rasterizeScene, loadFontCSS = loadSnapshotFontCSS, urlApi = URL, imageResources = new SnapshotImageResources() } = {}) {
+  constructor({ toBlob = rasterizeScene, toCanvasBlob = renderSceneCanvas, loadFontCSS = loadSnapshotFontCSS,
+    urlApi = URL, imageResources = new SnapshotImageResources() } = {}) {
     super();
     this.#toBlob = toBlob;
+    this.#toCanvasBlob = toCanvasBlob;
     this.#loadFontCSS = loadFontCSS;
     this.#urls = urlApi;
     this.#imageResources = imageResources;
@@ -112,14 +128,15 @@ export class SnapshotImageCapture extends EventTarget {
   }
 
   async #render(job, signal) {
+    if (snapshotRenderer(sceneItemCount(job.node)) === SNAPSHOT_RENDERER.CANVAS) {
+      return nonEmptyImage(await this.#toCanvasBlob(job.node, { signal, imageResources: this.#imageResources }));
+    }
     const fontCSS = await this.#loadFontCSS();
     signal.throwIfAborted();
     const prepared = await this.#imageResources.prepare(job.node, signal);
     try {
       signal.throwIfAborted();
-      const blob = await this.#toBlob(prepared.node, imageOptions(fontCSS));
-      if (!blob || !blob.size) throw new Error('Board snapshot conversion produced no image');
-      return blob;
+      return nonEmptyImage(await this.#toBlob(prepared.node, imageOptions(fontCSS)));
     } finally { prepared.dispose(); }
   }
 

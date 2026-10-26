@@ -304,3 +304,20 @@ test('default fetch preserves the browser global receiver required by WebIDL', a
     assert.equal(calls, 1);
   } finally { resources.dispose(); globalThis.fetch = originalFetch; }
 });
+
+test('canvas snapshots get decoded images by public URL without cloning the scene', async () => {
+  const { scene, document } = sceneFixture([imagePath(1), imagePath(2), imagePath(1)]);
+  let requests = 0;
+  const resources = new SnapshotImageResources({ fetcher: async () => { requests++; return response(); } });
+  const images = await resources.decodedImages(scene, new AbortController().signal);
+  assert.deepEqual([...images.keys()], [`${ORIGIN}${imagePath(1)}`, `${ORIGIN}${imagePath(2)}`]);
+  for (const image of images.values()) assert.match(image.src, /^data:image\/png;base64,/, 'decoded image stays drawable');
+  assert.equal(requests, 2, 'repeated images are fetched once');
+  assert.equal(document.body.children.length, 1, 'no scene clone is attached');
+  const empty = sceneFixture([]);
+  assert.deepEqual(await resources.decodedImages(empty.scene, new AbortController().signal), new Map());
+  const invalid = sceneFixture(['/yjs/rooms/private/images/abcdef01.png']);
+  await assert.rejects(resources.decodedImages(invalid.scene, new AbortController().signal));
+  resources.dispose();
+  await assert.rejects(resources.decodedImages(scene, new AbortController().signal), /disposed/);
+});

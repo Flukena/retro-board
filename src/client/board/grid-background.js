@@ -1,7 +1,7 @@
 import { GRID_PITCH_PX } from '../chrome/chrome-layout.js';
 import { GRID_DOTS_MIN_ZOOM } from '../../domain/viewport-limits.js';
 
-const GRID_DOT_RADIUS_PX = 1;
+export const GRID_DOT_RADIUS_PX = 1;
 const GRID_DOTS_IMAGE = `radial-gradient(circle, var(--grid-dot) ${GRID_DOT_RADIUS_PX}px, transparent ${GRID_DOT_RADIUS_PX}px)`;
 
 export function gridBackgroundForZoom(zoom) {

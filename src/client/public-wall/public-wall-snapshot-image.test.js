@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setImmediate as nextEventLoopTurn } from 'node:timers/promises';
 import { SnapshotImageCapture, embedSnapshotFonts, loadSnapshotFontCSS, PUBLIC_SNAPSHOT_IMAGE_WIDTH_PX,
-  PUBLIC_SNAPSHOT_IMAGE_HEIGHT_PX } from './public-wall-snapshot-image.js';
+  PUBLIC_SNAPSHOT_IMAGE_HEIGHT_PX, PUBLIC_DOM_RASTER_MAX_ITEMS, SNAPSHOT_RENDERER, snapshotRenderer } from './public-wall-snapshot-image.js';
 
 const FONT_CSS = '@font-face{font-family:Sarabun;src:url(data:font/woff2;base64,Zm9udA==)}';
 const FONT_CSS_URL = 'https://retroroom.party/fonts/board-snapshot/fonts.css';
@@ -15,12 +15,13 @@ function deferred() {
   return { promise, resolve };
 }
 
-function captureFixture(toBlob, loadFontCSS = async () => FONT_CSS) {
+const IMAGE_RESOURCES_FAKE = Object.freeze({ async prepare(node) { return { node, dispose() {} }; }, dispose() {} });
+
+function captureFixture(toBlob, loadFontCSS = async () => FONT_CSS, { toCanvasBlob, imageResources = IMAGE_RESOURCES_FAKE } = {}) {
   const created = [];
   const revoked = [];
   const capture = new SnapshotImageCapture({
-    toBlob, loadFontCSS,
-    imageResources: { async prepare(node) { return { node, dispose() {} }; }, dispose() {} },
+    toBlob, loadFontCSS, toCanvasBlob, imageResources,
     urlApi: {
       createObjectURL(blob) { created.push(blob); return `blob:snapshot-${created.length}`; },
       revokeObjectURL(url) { revoked.push(url); },
@@ -245,4 +246,50 @@ test('font stylesheet embedding is shared and cached after success and retries a
     if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
     else delete globalThis.window;
   }
+});
+
+const sceneWithItems = count => ({ dataset: { itemCount: String(count) } });
+
+test('boards above the DOM raster limit are painted on canvas instead of converting every card', () => {
+  assert.equal(snapshotRenderer(0), SNAPSHOT_RENDERER.DOM);
+  assert.equal(snapshotRenderer(PUBLIC_DOM_RASTER_MAX_ITEMS), SNAPSHOT_RENDERER.DOM);
+  assert.equal(snapshotRenderer(PUBLIC_DOM_RASTER_MAX_ITEMS + 1), SNAPSHOT_RENDERER.CANVAS);
+});
+
+test('a 1,500-card scene is captured by the canvas painter and never by the slow DOM converter', async () => {
+  const domCalls = [];
+  const canvasCalls = [];
+  const imageResources = { ...IMAGE_RESOURCES_FAKE };
+  const fixture = captureFixture(async (...args) => { domCalls.push(args); return makeBlob('dom'); }, undefined, {
+    imageResources,
+    toCanvasBlob: async (...args) => { canvasCalls.push(args); return makeBlob('canvas'); },
+  });
+  try {
+    const scene = sceneWithItems(1500);
+    await fixture.capture.capture(scene, 'big board');
+    assert.equal(domCalls.length, 0);
+    assert.equal(canvasCalls.length, 1);
+    assert.equal(canvasCalls[0][0], scene);
+    assert.equal(canvasCalls[0][1].imageResources, imageResources);
+    assert.ok(canvasCalls[0][1].signal instanceof AbortSignal);
+    assert.equal(await fixture.created[0].text(), 'canvas');
+    assert.deepEqual(fixture.capture.state, { imageUrl: 'blob:snapshot-1', status: 'ready' });
+  } finally { fixture.capture.dispose(); }
+});
+
+test('small boards keep the exact DOM conversion and an empty canvas image is reported unavailable', async () => {
+  const domCalls = [];
+  const small = captureFixture(async (...args) => { domCalls.push(args); return makeBlob('dom'); }, undefined, {
+    toCanvasBlob: async () => assert.fail('small boards must not use the canvas painter'),
+  });
+  const empty = captureFixture(async () => assert.fail('large boards must not use DOM conversion'), undefined, {
+    toCanvasBlob: async () => new Blob([], { type: 'image/png' }),
+  });
+  try {
+    await small.capture.capture(sceneWithItems(PUBLIC_DOM_RASTER_MAX_ITEMS), 'small board');
+    assert.equal(domCalls.length, 1);
+    await empty.capture.capture(sceneWithItems(PUBLIC_DOM_RASTER_MAX_ITEMS + 1), 'large board');
+    assert.deepEqual(empty.capture.state, { imageUrl: null, status: 'unavailable' });
+    assert.equal(empty.created.length, 0);
+  } finally { small.capture.dispose(); empty.capture.dispose(); }
 });

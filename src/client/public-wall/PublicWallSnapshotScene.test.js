@@ -65,3 +65,13 @@ test('actual snapshot keeps normal board shadows and renders validated custom fo
     assert.match(markup, /color:#ffffff/);
   });
 });
+
+test('the scene tells the snapshot capture how many cards it shows', async () => {
+  await withChromeModule('/src/client/public-wall/PublicWallSnapshotScene.jsx', ({ PublicWallSnapshotScene }) => {
+    const markup = renderToStaticMarkup(React.createElement(PublicWallSnapshotScene, { snapshot: SNAPSHOT, lang: 'en' }));
+    assert.match(markup, /class="rb-public-wall__scene"[^>]*data-item-count="3"/);
+    const invalid = { items: [...SNAPSHOT.items, { id: 'broken', type: 'sticky', x: Number.NaN, y: 0 }] };
+    assert.match(renderToStaticMarkup(React.createElement(PublicWallSnapshotScene, { snapshot: invalid, lang: 'en' })),
+      /data-item-count="3"/, 'only cards that are actually drawn are counted');
+  });
+});

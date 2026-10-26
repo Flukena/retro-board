@@ -18,7 +18,7 @@ export async function blobDataURL(blob) {
   return `data:${blob.type};base64,${btoa(binary)}`;
 }
 
-function publicImageURL(source, document) {
+export function publicImageURL(source, document) {
   const url = new URL(source, document.baseURI);
   const page = new URL(document.baseURI);
   const canonical = canonicalPublicImageSource(source);
@@ -53,7 +53,7 @@ async function boundedImageBlob(response, signal) {
   }
 }
 
-async function decodeImage(dataURL, document, signal) {
+async function decodedImage(dataURL, document, signal) {
   const image = document.createElement('img');
   let cancel;
   try {
@@ -65,11 +65,21 @@ async function decodeImage(dataURL, document, signal) {
       image.decode().then(resolve, reject);
     });
     signal.throwIfAborted();
+    return image;
+  } catch (error) {
+    image.removeAttribute('src');
+    throw error;
   } finally {
     signal.removeEventListener('abort', cancel);
-    image.removeAttribute('src');
   }
 }
+
+async function decodeImage(dataURL, document, signal) {
+  (await decodedImage(dataURL, document, signal)).removeAttribute('src');
+}
+
+const sceneImageSources = node => Array.from(node.querySelectorAll('img'),
+  image => publicImageURL(image.getAttribute('src'), node.ownerDocument));
 
 function styledClone(node, images) {
   const clone = node.cloneNode(true);
@@ -162,15 +172,27 @@ export class SnapshotImageResources {
     return images;
   }
 
-  async prepare(node, signal) {
+  // An abort controller tied to the caller's signal and tracked for disposal.
+  #link(signal) {
     if (this.#disposed) throw new Error('Snapshot image resources have been disposed');
-    const sources = Array.from(node.querySelectorAll('img'), image => publicImageURL(image.getAttribute('src'), node.ownerDocument));
-    if (!sources.length) return { node, dispose() {} };
     const controller = new AbortController();
     this.#active.add(controller);
     const abort = () => controller.abort(signal.reason);
     signal.addEventListener('abort', abort, { once: true });
     if (signal.aborted) abort();
+    const release = () => {
+      signal.removeEventListener('abort', abort);
+      controller.abort();
+      this.#active.delete(controller);
+    };
+    return { controller, release };
+  }
+
+  async prepare(node, signal) {
+    if (this.#disposed) throw new Error('Snapshot image resources have been disposed');
+    const sources = sceneImageSources(node);
+    if (!sources.length) return { node, dispose() {} };
+    const { controller, release } = this.#link(signal);
     let clone;
     let ready = false;
     let released = false;
@@ -178,9 +200,7 @@ export class SnapshotImageResources {
       if (released) return;
       released = true;
       clone?.remove();
-      signal.removeEventListener('abort', abort);
-      controller.abort();
-      this.#active.delete(controller);
+      release();
     };
     controller.signal.addEventListener('abort', dispose, { once: true });
     try {
@@ -191,6 +211,20 @@ export class SnapshotImageResources {
       ready = true;
       return { node: clone, dispose };
     } finally { if (!ready) dispose(); }
+  }
+
+  /** Decoded uploaded images of a scene, keyed by public URL, without cloning the scene. */
+  async decodedImages(node, signal) {
+    if (this.#disposed) throw new Error('Snapshot image resources have been disposed');
+    const sources = sceneImageSources(node);
+    if (!sources.length) return new Map();
+    const { controller, release } = this.#link(signal);
+    try {
+      const dataURLs = await this.#images(sources, node.ownerDocument, controller);
+      const decoded = await Promise.all(Array.from(dataURLs, async ([url, dataURL]) => (
+        [url, await decodedImage(dataURL, node.ownerDocument, controller.signal)])));
+      return new Map(decoded);
+    } finally { release(); }
   }
 
   dispose() {
