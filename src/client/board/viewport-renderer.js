@@ -3,8 +3,7 @@ import { paintGrid } from './grid-background.js';
 import { cursorScreenPosition } from '../session/player-cursors.js';
 import { minimapViewportRect } from '../../domain/minimap.js';
 import { holdLiveLayer, releaseLiveLayer } from './live-layer-hint.js';
-
-const nativeGestureBrowser = view => typeof view?.GestureEvent === 'function';
+import { webkitCompositing as nativeGestureBrowser } from './webkit-compositing.js';
 
 function worldTransform(viewport, view) {
   // WebKit's forced 3D layer allocates a backing surface across the whole board.

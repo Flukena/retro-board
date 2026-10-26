@@ -71,3 +71,19 @@ test('large-board overview keeps its bounded atlas while native detail fallback 
     assert.doesNotMatch(renderLayer(BoardRasterLayer, cards(), { detailedIds: null, compact: false }), /<canvas/);
   });
 });
+
+test('WebKit shows the overview atlas as an image so nothing in the zoomed world becomes a composited layer', async () => {
+  await withChromeModule('/src/client/board/BoardRasterLayer.jsx', ({ BoardRasterLayer }) => {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, 'GestureEvent');
+    globalThis.GestureEvent = class {};
+    try {
+      const html = renderLayer(BoardRasterLayer, cards(), { detailedIds: null, compact: true });
+      assert.doesNotMatch(html, /<canvas/);
+      assert.match(html, /<img[^>]*class="rb-overview-atlas"[^>]*aria-hidden="true"/);
+      assert.equal((html.match(/data-card-id=/g) || []).length, CARD_COUNT);
+    } finally {
+      if (previous) Object.defineProperty(globalThis, 'GestureEvent', previous);
+      else delete globalThis.GestureEvent;
+    }
+  });
+});
