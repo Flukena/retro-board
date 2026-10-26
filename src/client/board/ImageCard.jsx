@@ -2,6 +2,7 @@ import React from 'react';
 import { imageFitsPaintLayer } from './image-paint.js';
 import { sizeForPlacement } from '../../domain/board-geometry.js';
 import { safeRuntimeImageSource } from '../transfer/image-upload.js';
+import { appearAnimation } from './appear-animation.js';
 
 const { w: IMAGE_DEFAULT_WIDTH_PX, h: IMAGE_DEFAULT_HEIGHT_PX } = sizeForPlacement({ type: 'image' });
 
@@ -36,7 +37,7 @@ export const ImageCard = React.memo(function ImageCard({
         outlineOffset: 6,
         cursor: 'grab',
         userSelect: 'none',
-        animation: remoteSelected || dense ? undefined : 'rb-appear 0.28s ease-out',
+        animation: remoteSelected || dense ? undefined : appearAnimation({ w, h }),
         contain: remoteSelected ? 'layout style' : 'layout paint style',
       }}
     >

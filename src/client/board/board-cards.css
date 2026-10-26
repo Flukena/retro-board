@@ -325,6 +325,9 @@
   border: var(--rb-zone-border-w) dashed rgba(var(--rb-zone-rgb), var(--zone-border-alpha));
   border-radius: inherit;
   box-sizing: border-box;
+}
+
+.rb-zone__surface--appear {
   animation: rb-appear 0.28s ease-out;
 }
 

@@ -46,3 +46,12 @@ test('image cache follows projected viewport area without promoting large images
     }
   });
 });
+
+test('an image too large to animate safely mounts without the appear pop on small boards too', async () => {
+  await withChromeModule('/src/client/board/ImageCard.jsx', ({ ImageCard }) => {
+    const item = { x: 0, y: 0, src: '/uploads/a.png' };
+    assert.match(renderToStaticMarkup(React.createElement(ImageCard, { item: { ...item, w: 600, h: 400 } })), /animation:rb-appear/);
+    const huge = renderToStaticMarkup(React.createElement(ImageCard, { item: { ...item, w: 9_520, h: 7_140 } }));
+    assert.doesNotMatch(huge, /animation:/);
+  });
+});

@@ -15,6 +15,7 @@ import { useDismiss } from '../ui/useDismiss.js';
 import { useZoneMenuViewport } from './zone-menu-viewport.js';
 import './board-cards.css';
 import { useTapToEdit } from './tap-to-edit.js';
+import { appearAnimation } from './appear-animation.js';
 
 const SINGLE_CARD_COUNT = 1;
 const ZONE_EDGE_SIDES = ['top', 'bottom', 'left', 'right'];
@@ -134,7 +135,7 @@ export const ZoneCard = React.memo(function ZoneCard({
           onToggleMenu={() => setMenuOpen((open) => !open)}
           timerSetupOpen={timerSetupOpen} nestedZoneCount={nestedZoneCount} />
       </div>
-      <div data-surface="1" className="rb-zone__surface" />
+      <div data-surface="1" className={appearAnimation(it) ? 'rb-zone__surface rb-zone__surface--appear' : 'rb-zone__surface'} />
       {ZONE_EDGE_SIDES.map((side) => (
         <div key={side} className="rb-zone__edge" data-edge={side} data-locked={!!it.locked}
           onMouseDown={(event) => onStartZoneDrag(event, it)}

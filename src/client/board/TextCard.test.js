@@ -20,3 +20,12 @@ test('text card preserves geometry, text, selection and editor in both languages
     }
   });
 });
+
+test('a text item too large to animate safely mounts without the appear pop', async () => {
+  await withChromeModule('/src/client/board/TextCard.jsx', ({ TextCard }) => {
+    const item = { id: 'text', x: 0, y: 0, text: 'Heading' };
+    assert.match(renderToStaticMarkup(React.createElement(TextCard, { item })), /animation:rb-appear/);
+    const huge = renderToStaticMarkup(React.createElement(TextCard, { item: { ...item, w: 9_000, h: 3_000 } }));
+    assert.doesNotMatch(huge, /animation:/);
+  });
+});

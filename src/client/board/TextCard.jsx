@@ -4,6 +4,7 @@ import { sizeForPlacement } from '../../domain/board-geometry.js';
 import { fontSizeForItem } from './selection-toolbar-model.js';
 import { CollaborativeTextEditor } from './CollaborativeTextEditor.jsx';
 import { useTapToEdit } from './tap-to-edit.js';
+import { appearAnimation } from './appear-animation.js';
 
 const { w: TEXT_WIDTH_PX, h: TEXT_HEIGHT_PX } = sizeForPlacement({ type: 'text' });
 const TEXT_FONT_SIZE_PX = fontSizeForItem({ type: 'text' });
@@ -44,7 +45,7 @@ export const TextCard = React.memo(function TextCard({
         outline: selected ? '2px dashed #2563eb' : 'none',
         outlineOffset: 6,
         borderRadius: 'var(--radius-text-card)',
-        animation: remoteSelected ? undefined : 'rb-appear 0.28s ease-out',
+        animation: remoteSelected ? undefined : appearAnimation({ w: it.w || TEXT_WIDTH_PX, h: it.h || TEXT_HEIGHT_PX }),
       }}
     >
       {isEditing ? (

@@ -211,7 +211,8 @@ test('tab appearance uses tokens, an auto-width chip and a fully rounded body', 
   assert.equal(row['z-index'], 'var(--z-zone-header)');
   assert.equal(row['pointer-events'], 'none');
   assert.equal(body.animation, undefined);
-  assert.equal(declarations(css, '.rb-zone__surface').animation, 'rb-appear 0.28s ease-out');
+  assert.equal(declarations(css, '.rb-zone__surface').animation, undefined);
+  assert.equal(declarations(css, '.rb-zone__surface--appear').animation, 'rb-appear 0.28s ease-out');
   assert.equal(tab['pointer-events'], 'auto');
   assert.equal(row['align-items'], 'flex-start');
   assert.equal(row['box-sizing'], 'border-box');
@@ -446,4 +447,14 @@ test('zone ellipsis retains the original unfilled presentation without a raised 
   const glyph = declarations(css, '.rb-zone__menu svg');
   assert.equal(glyph.width, 'var(--zone-icon-size)');
   assert.equal(glyph.height, 'var(--zone-icon-size)');
+});
+
+test('a zone too large to animate safely mounts without the appear pop', async () => {
+  await withChromeModule('/src/client/board/ZoneCard.jsx', ({ ZoneCard }) => {
+    const small = renderToStaticMarkup(cardTree(ZoneCard));
+    assert.match(small, /class="rb-zone__surface rb-zone__surface--appear"/);
+    const huge = renderToStaticMarkup(cardTree(ZoneCard, { item: { ...ITEM, w: 10_031, h: 7_207 } }));
+    assert.match(huge, /class="rb-zone__surface"/);
+    assert.doesNotMatch(huge, /rb-zone__surface--appear/);
+  });
 });
