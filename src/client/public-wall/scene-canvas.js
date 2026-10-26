@@ -140,6 +140,9 @@ function canvasBlob(canvas) {
 
 /** Paint the scene on a snapshot-sized canvas, with uploaded images loaded the same way as the DOM path. */
 export async function renderSceneCanvas(node, { signal, imageResources }) {
+  // Canvas text uses whatever font is loaded now; wait so it is not a fallback.
+  await node.ownerDocument.fonts?.ready;
+  signal.throwIfAborted();
   const scene = readScene(node);
   const images = await imageResources.decodedImages(node, signal);
   signal.throwIfAborted();

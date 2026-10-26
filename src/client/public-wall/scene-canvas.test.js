@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readScene } from './scene-canvas.js';
+import { readScene, renderSceneCanvas } from './scene-canvas.js';
 import { GRID_DOT_RADIUS_PX } from '../board/grid-background.js';
 
 const TEXT_NODE = 3;
@@ -153,4 +153,23 @@ test('positioned elements with z-index paint above later cards, like a zone titl
   root.append(world);
   const order = readScene(root).plates.map(plate => plate.background || plate.text.content);
   assert.deepEqual(order, ['zone', 'sticky', 'badge', 'Sprint 42', 'chip']);
+});
+
+test('the canvas is painted only after the page fonts are ready, so text uses the board fonts', async () => {
+  const document = fakeDocument();
+  let releaseFonts;
+  document.fonts = { ready: new Promise(resolve => { releaseFonts = resolve; }) };
+  const painted = [];
+  const ctx = new Proxy({}, { get: (target, name) => target[name] ?? (() => ({ width: 0 })),
+    set: (target, name, value) => { painted.push(name); target[name] = value; return true; } });
+  document.createElement = () => ({ getContext: () => ctx, toBlob: callback => callback({ size: 1 }) });
+  const root = new FakeElement(document, { rect: rect(0, 0, 1200, 720) });
+  root.append(new FakeElement(document, { rect: rect(0, 0, 100, 100), text: 'hello' }));
+  const imageResources = { decodedImages: async () => new Map() };
+  const blob = renderSceneCanvas(root, { signal: new AbortController().signal, imageResources });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(painted, [], 'nothing is painted while fonts are still loading');
+  releaseFonts();
+  assert.deepEqual(await blob, { size: 1 });
+  assert.ok(painted.includes('font'));
 });
