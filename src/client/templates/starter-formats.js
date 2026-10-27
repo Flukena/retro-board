@@ -1,10 +1,13 @@
 import { t } from '../ui/i18n.js';
+import { getTemplates } from './builtin-templates.js';
 
 // Retrospective formats offered on the public template pages. Each one opens a
-// new board with its zones ready. They are not in the in-app template list,
-// which the owner keeps to Retro Loop only.
+// new board with its zones ready. Only Retro Loop is also in the in-app
+// template list (the owner keeps that list to Retro Loop); its layout comes
+// from that built-in template so the two never drift apart.
 
 export const STARTER_FORMAT = Object.freeze({
+  RETRO_LOOP: 'retro-loop',
   START_STOP_CONTINUE: 'start-stop-continue',
   MAD_SAD_GLAD: 'mad-sad-glad',
   FOUR_LS: '4ls-retrospective',
@@ -35,6 +38,10 @@ const grid = (colors) => colors.map((color, index) => ({
 }));
 
 const FORMATS = Object.freeze({
+  [STARTER_FORMAT.RETRO_LOOP]: {
+    key: 'loop', columnIds: ['prev', 'good', 'bad', 'try', 'next'],
+    builtinKey: 'retroLoop', zoneKeyBase: 'tmpl.loop',
+  },
   [STARTER_FORMAT.START_STOP_CONTINUE]: {
     key: 'ssc', columnIds: ['start', 'stop', 'continue'],
     layout: columns([ZONE_COLOR.GREEN, ZONE_COLOR.RED, ZONE_COLOR.BLUE]),
@@ -56,6 +63,7 @@ export function starterFormat(slug) {
   const format = Object.hasOwn(FORMATS, slug) ? FORMATS[slug] : null;
   if (!format) return null;
   const base = `tpl.${format.key}`;
+  const zoneKeyBase = format.zoneKeyBase ?? `${base}.zone`;
   return {
     slug,
     path: templatePath(slug),
@@ -66,7 +74,7 @@ export function starterFormat(slug) {
     stepKeys: range(STEP_COUNT).map((n) => `${base}.step${n}`),
     columns: format.columnIds.map((id) => ({
       id,
-      zoneKey: `${base}.zone.${id}`,
+      zoneKey: `${zoneKeyBase}.${id}`,
       descKey: `${base}.col.${id}`,
       promptKeys: range(PROMPTS_PER_COLUMN).map((n) => `${base}.prompt.${id}${n}`),
     })),
@@ -80,6 +88,7 @@ export function starterTemplate(slug) {
   const format = Object.hasOwn(FORMATS, slug) ? FORMATS[slug] : null;
   const copy = starterFormat(slug);
   if (!format || !copy) return null;
+  if (format.builtinKey) return getTemplates()[format.builtinKey];
   return {
     name: t(copy.nameKey),
     zones: format.layout.map((zone, index) => ({ ...zone, title: t(copy.columns[index].zoneKey) })),

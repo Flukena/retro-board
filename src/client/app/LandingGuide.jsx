@@ -1,58 +1,97 @@
 import React from 'react';
+import { StickyNote, EyeOff, ThumbsUp, MessageSquare, Smartphone, Download, ArrowRight } from 'lucide-react';
 import { t } from '../ui/i18n.js';
-import { Surface } from '../ui/UiPrimitives.jsx';
-import { SURFACE_KIND } from '../ui/ui-variants.js';
-import { starterFormat, starterSlugs } from '../templates/starter-formats.js';
+import { paletteStyleVars } from '../ui/palette.js';
+import { TemplateThumbnail } from '../templates/TemplateThumbnail.jsx';
+import { starterFormat, starterSlugs, starterTemplate } from '../templates/starter-formats.js';
+import CreateBoardError from './CreateBoardError.jsx';
 
-// Plain-language guide below the room cards: what the board does, how to run a
-// retrospective, links to the template guides and an FAQ. It is static content,
+// Plain-language guide below the hero: what the board does, how to run a
+// retrospective, the template guides and an FAQ. It renders without scripts,
 // so it is also pre-rendered into the page HTML.
 
-export const GUIDE_FEATURE_KEYS = Object.freeze(['notes', 'reveal', 'vote', 'extras', 'devices', 'export']);
+const FEATURE_ICON_SIZE_PX = 18;
+// Indexes into PALETTE (src/client/ui/palette.js).
+const PALETTE_INDEX = Object.freeze({ YELLOW: 0, RED: 1, GREEN: 2, BLUE: 3, PURPLE: 4, ORANGE: 5 });
+const LINK_ICON_SIZE_PX = 14;
+export const GUIDE_FEATURES = Object.freeze([
+  { key: 'notes', Icon: StickyNote, color: PALETTE_INDEX.YELLOW },
+  { key: 'reveal', Icon: EyeOff, color: PALETTE_INDEX.PURPLE },
+  { key: 'vote', Icon: ThumbsUp, color: PALETTE_INDEX.GREEN },
+  { key: 'extras', Icon: MessageSquare, color: PALETTE_INDEX.BLUE },
+  { key: 'devices', Icon: Smartphone, color: PALETTE_INDEX.RED },
+  { key: 'export', Icon: Download, color: PALETTE_INDEX.ORANGE },
+]);
 export const GUIDE_STEP_KEYS = Object.freeze(['create', 'share', 'run']);
 export const GUIDE_FAQ_KEYS = Object.freeze(['free', 'signup', 'access', 'keep', 'phone', 'lang']);
 
 function GuideSection({ id, titleKey, children }) {
   return (
-    <Surface kind={SURFACE_KIND.CARD} className="rb-landing__card rb-landing__guide" role="region" aria-labelledby={id}>
-      <h2 id={id} className="rb-landing__section-head">{t(titleKey)}</h2>
+    <section className="rb-landing__section" id={id} aria-labelledby={`${id}-title`} tabIndex={-1}>
+      <h2 id={`${id}-title`} className="rb-landing__section-title">{t(titleKey)}</h2>
       {children}
-    </Surface>
+    </section>
   );
 }
 
-export default function LandingGuide() {
+function TemplateCard({ slug, onStart, creating }) {
+  const format = starterFormat(slug);
+  const name = t(format.nameKey);
   return (
-    <>
+    <li className="rb-landing__template">
+      <TemplateThumbnail zones={starterTemplate(slug).zones} />
+      <h3>{t(format.headingKey)}</h3>
+      <p>{t(format.ledeKey)}</p>
+      <div className="rb-landing__template-actions">
+        <a href={format.path}>{t('guide.templates.read')} <ArrowRight size={LINK_ICON_SIZE_PX} aria-hidden="true" /></a>
+        <button type="button" className="rb-btn rb-landing__template-start" disabled={creating}
+          aria-label={t('tpl.start', { name })} onClick={() => onStart?.(slug)}>
+          {t('guide.templates.start')}
+        </button>
+      </div>
+    </li>
+  );
+}
+
+export default function LandingGuide({ onStartFormat, creating = false, createError = null }) {
+  return (
+    <div className="rb-landing__guide">
       <GuideSection id="landing-guide-intro" titleKey="guide.intro.title">
-        <p className="rb-landing__guide-text">{t('guide.intro.body')}</p>
-        <h3 className="rb-landing__guide-subhead">{t('guide.features.title')}</h3>
-        <ul className="rb-landing__guide-list">
-          {GUIDE_FEATURE_KEYS.map((key) => <li key={key}>{t(`guide.features.${key}`)}</li>)}
+        <p className="rb-landing__lede">{t('guide.intro.body')}</p>
+      </GuideSection>
+      <GuideSection id="landing-guide-features" titleKey="guide.features.title">
+        <ul className="rb-landing__features">
+          {GUIDE_FEATURES.map(({ key, Icon, color }) => (
+            <li key={key} className="rb-landing__feature">
+              <span className="rb-landing__feature-icon" style={paletteStyleVars(color, 'rb-feature')}><Icon size={FEATURE_ICON_SIZE_PX} aria-hidden="true" /></span>
+              <h3>{t(`guide.features.${key}.title`)}</h3>
+              <p>{t(`guide.features.${key}`)}</p>
+            </li>
+          ))}
         </ul>
       </GuideSection>
       <GuideSection id="landing-guide-steps" titleKey="guide.steps.title">
-        <ol className="rb-landing__guide-list">
+        <ol className="rb-landing__steps">
           {GUIDE_STEP_KEYS.map((key) => <li key={key}>{t(`guide.steps.${key}`)}</li>)}
         </ol>
       </GuideSection>
       <GuideSection id="landing-guide-templates" titleKey="guide.templates.title">
-        <p className="rb-landing__guide-text">{t('guide.templates.body')}</p>
-        <ul className="rb-landing__guide-links">
-          {starterSlugs().map((slug) => {
-            const format = starterFormat(slug);
-            return <li key={slug}><a href={format.path}>{t(format.headingKey)}</a></li>;
-          })}
+        <p className="rb-landing__lede">{t('guide.templates.body')}</p>
+        <ul className="rb-landing__templates">
+          {starterSlugs().map((slug) => <TemplateCard key={slug} slug={slug} onStart={onStartFormat} creating={creating} />)}
         </ul>
+        <CreateBoardError error={createError} />
       </GuideSection>
       <GuideSection id="landing-guide-faq" titleKey="guide.faq.title">
-        {GUIDE_FAQ_KEYS.map((key) => (
-          <div key={key} className="rb-landing__faq">
-            <h3 className="rb-landing__guide-subhead">{t(`guide.faq.${key}.q`)}</h3>
-            <p className="rb-landing__guide-text">{t(`guide.faq.${key}.a`)}</p>
-          </div>
-        ))}
+        <div className="rb-landing__faqs">
+          {GUIDE_FAQ_KEYS.map((key, index) => (
+            <details key={key} className="rb-landing__faq" open={index === 0}>
+              <summary>{t(`guide.faq.${key}.q`)}</summary>
+              <p>{t(`guide.faq.${key}.a`)}</p>
+            </details>
+          ))}
+        </div>
       </GuideSection>
-    </>
+    </div>
   );
 }

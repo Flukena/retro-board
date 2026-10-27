@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowUpRight, ChevronDown, Globe2 } from 'lucide-react';
+import { ArrowUpRight, Globe2, PenLine } from 'lucide-react';
 import { t, useLang } from '../ui/i18n.js';
 import { useTheme } from '../ui/theme.js';
 import { publicWallView, PUBLIC_SCENE_WIDTH_PX, PUBLIC_SCENE_HEIGHT_PX } from './public-wall-view.js';
@@ -9,38 +9,35 @@ import { useBrowserLayoutEffect } from '../ui/use-browser-layout-effect.js';
 import { PUBLIC_PATH, PUBLIC_RELAY_PREFIX, PUBLIC_SNAPSHOT_INTERVAL_MS, PUBLIC_SNAPSHOT_ROUTE } from '../../domain/public-wall-contract.js';
 import '../board/public-wall.css';
 
-function usePreviewScale(previewRef, cover) {
+function usePreviewScale(previewRef) {
   const [scale, setScale] = useState(1);
   useBrowserLayoutEffect(() => {
     const preview = previewRef.current;
     if (!preview) return undefined;
     const measure = () => {
-      if (preview.clientWidth > 0) setScale(Math.max(preview.clientWidth / PUBLIC_SCENE_WIDTH_PX,
-        cover ? preview.clientHeight / PUBLIC_SCENE_HEIGHT_PX : 0));
+      if (preview.clientWidth > 0) setScale(preview.clientWidth / PUBLIC_SCENE_WIDTH_PX);
     };
     const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null;
     observer?.observe(preview);
     measure();
     return () => observer?.disconnect();
-  }, [previewRef, cover]);
+  }, [previewRef]);
   return scale;
 }
 
-export function PublicWallPreviewFrame({ snapshot, lang, sceneRef, imageUrl, decorative = false }) {
+export function PublicWallPreviewFrame({ snapshot, lang, sceneRef, imageUrl }) {
   const previewRef = useRef(null);
-  const scale = usePreviewScale(previewRef, decorative);
-  const PreviewRoot = decorative ? 'div' : 'a';
+  const scale = usePreviewScale(previewRef);
   return (
-    <PreviewRoot ref={previewRef} className="rb-public-wall__preview" href={decorative ? undefined : PUBLIC_PATH}
-      aria-label={decorative ? undefined : t('public.title')}
+    <a ref={previewRef} className="rb-public-wall__preview" href={PUBLIC_PATH} aria-label={t('public.join')}
       style={{ '--rb-public-preview-scale': scale, '--rb-public-scene-width-px': `${PUBLIC_SCENE_WIDTH_PX}px`,
         '--rb-public-scene-height-px': `${PUBLIC_SCENE_HEIGHT_PX}px`,
         '--rb-public-scene-aspect-ratio': `${PUBLIC_SCENE_WIDTH_PX} / ${PUBLIC_SCENE_HEIGHT_PX}` }}>
-      {imageUrl && <img className="rb-public-wall__image" src={imageUrl} alt={decorative ? '' : t('public.title')} draggable={false} />}
+      {imageUrl && <img className="rb-public-wall__image" src={imageUrl} alt={t('public.title')} draggable={false} />}
       <div className={`rb-public-wall__capture${imageUrl ? ' rb-public-wall__capture--offscreen' : ''}`}>
         <PublicWallSnapshotScene snapshot={snapshot} sceneRef={sceneRef} lang={lang} />
       </div>
-    </PreviewRoot>
+    </a>
   );
 }
 
@@ -49,48 +46,58 @@ function heroCaptionKey(hasItems, status) {
   return hasItems ? 'public.description' : 'public.empty';
 }
 
-function scrollToControlledSection(event) {
-  event.preventDefault();
-  const sectionId = event.currentTarget.getAttribute('aria-controls');
-  const section = event.currentTarget.ownerDocument.getElementById(sectionId);
-  section?.scrollIntoView({ block: 'start' });
-  section?.focus({ preventScroll: true });
+const MS_PER_SECOND = 1000;
+const SNAPSHOT_INTERVAL_SECONDS = PUBLIC_SNAPSHOT_INTERVAL_MS / MS_PER_SECOND;
+
+// Live view of the Public Wall in the hero, so visitors see it before joining.
+function PublicWallWindow({ snapshot, status, hasItems, lang, sceneRef, image }) {
+  const live = status === 'ready' && hasItems;
+  return (
+    <section className="rb-landing__wall" aria-labelledby="landing-wall-title">
+      <div className="rb-landing__wall-head">
+        <span className="rb-landing__public-icon"><Globe2 aria-hidden="true" /></span>
+        <div className="rb-landing__wall-copy">
+          <h2 id="landing-wall-title">{t('public.title')}</h2>
+          <p>{t('public.description')}</p>
+        </div>
+        {live && <span className="rb-landing__live"><span aria-hidden="true" />{t('public.live')}</span>}
+      </div>
+      {hasItems
+        ? <PublicWallPreviewFrame snapshot={snapshot} lang={lang} sceneRef={sceneRef} imageUrl={image.imageUrl} />
+        : <a className="rb-landing__wall-empty" href={PUBLIC_PATH}><PenLine aria-hidden="true" />{t(heroCaptionKey(hasItems, status))}</a>}
+      <p className="rb-landing__wall-note" role={live ? undefined : 'status'}>
+        {live ? t('public.updates', { seconds: SNAPSHOT_INTERVAL_SECONDS }) : t('public.openHint')}
+      </p>
+    </section>
+  );
 }
 
-function PublicWallHero({ snapshot, status, hasItems, lang, sceneRef, image, children, belowHero }) {
-  const caption = heroCaptionKey(hasItems, status);
+// The masthead scrolls with the page; the Public dock stays pinned below the scroll pane.
+function PublicWallHero({ children, belowHero, masthead, ...wall }) {
   return (
     <>
       <div className="rb-landing__scroll">
         <section className="rb-landing__hero" aria-labelledby="landing-hero-title">
-          <div className="rb-landing__backdrop" aria-hidden="true">
-            {hasItems && <PublicWallPreviewFrame snapshot={snapshot} lang={lang} sceneRef={sceneRef}
-              imageUrl={image.imageUrl} decorative />}
-          </div>
-          <div className="rb-landing__hero-layout">{children}</div>
+          {masthead}
+          <div className="rb-landing__hero-layout">{children}<PublicWallWindow {...wall} /></div>
         </section>
         {belowHero}
       </div>
       <div className="rb-landing__public-bar">
-        {belowHero && <a className="rb-landing__scroll-cue" href="#landing-recents" aria-controls="landing-recents" onClick={scrollToControlledSection}>
-          {t('landing.recents.scroll')} <ChevronDown aria-hidden="true" />
-        </a>}
-        <div className="rb-landing__public-row">
-          <span className="rb-landing__public-icon"><Globe2 aria-hidden="true" /></span>
-          <div className="rb-landing__public-copy">
-            <h2>{t('public.title')}</h2>
-            <p role={status === 'ready' && hasItems ? undefined : 'status'}>{t(caption)}</p>
-          </div>
-          <a className="rb-btn rb-btn--primary rb-public-wall__join" href={PUBLIC_PATH}>
-            {t('public.join')} <ArrowUpRight aria-hidden="true" />
-          </a>
+        <span className="rb-landing__public-icon"><Globe2 aria-hidden="true" /></span>
+        <div className="rb-landing__public-copy">
+          <h2>{t('public.title')}</h2>
+          <p>{t(heroCaptionKey(wall.hasItems, wall.status))}</p>
         </div>
+        <a className="rb-btn rb-public-wall__join" href={PUBLIC_PATH}>
+          {t('public.join')} <ArrowUpRight aria-hidden="true" />
+        </a>
       </div>
     </>
   );
 }
 
-export function PublicWallPreviewContent({ snapshot, status = 'ready', variant = 'card', children, belowHero }) {
+export function PublicWallPreviewContent({ snapshot, status = 'ready', variant = 'card', children, belowHero, masthead }) {
   const [lang] = useLang();
   const { resolved } = useTheme();
   const sceneRef = useRef(null);
@@ -98,7 +105,7 @@ export function PublicWallPreviewContent({ snapshot, status = 'ready', variant =
   const revision = JSON.stringify([view.items, lang, resolved]);
   const image = usePublicWallSnapshotImage(sceneRef, revision, snapshot);
   if (variant === 'hero') return <PublicWallHero snapshot={snapshot} status={status} hasItems={view.items.length > 0}
-    lang={lang} sceneRef={sceneRef} image={image} belowHero={belowHero}>{children}</PublicWallHero>;
+    lang={lang} sceneRef={sceneRef} image={image} belowHero={belowHero} masthead={masthead}>{children}</PublicWallHero>;
   return (
     <section className="rb-landing__card rb-public-wall" aria-label={t('public.title')}>
       <h2 className="rb-landing__section-head">{t('public.title')}</h2>
@@ -114,7 +121,7 @@ export function PublicWallPreviewContent({ snapshot, status = 'ready', variant =
   );
 }
 
-export default function PublicWallPreview({ variant = 'card', children, belowHero }) {
+export default function PublicWallPreview({ variant = 'card', children, belowHero, masthead }) {
   const [state, setState] = useState({ snapshot: null, status: 'loading' });
   useEffect(() => {
     let stopped = false;
@@ -140,5 +147,5 @@ export default function PublicWallPreview({ variant = 'card', children, belowHer
     void poll();
     return () => { stopped = true; clearTimeout(timer); controller?.abort(); };
   }, []);
-  return <PublicWallPreviewContent {...state} variant={variant} belowHero={belowHero}>{children}</PublicWallPreviewContent>;
+  return <PublicWallPreviewContent {...state} variant={variant} belowHero={belowHero} masthead={masthead}>{children}</PublicWallPreviewContent>;
 }

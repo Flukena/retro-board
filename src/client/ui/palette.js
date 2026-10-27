@@ -82,3 +82,12 @@ export const MEDAL_COLORS = Object.freeze({
   2: Object.freeze({ bg: '#d4dae2', fg: '#1f2937' }),
   3: Object.freeze({ bg: '#e0965c', fg: '#3b1d06' }),
 });
+
+const FALLBACK_PALETTE_INDEX = 0;
+
+/** CSS variables `--<prefix>-bg/-border/-ink/-fill` for a palette colour, for decorative swatches. */
+export function paletteStyleVars(index, prefix) {
+  const palette = PALETTE[index] || PALETTE[FALLBACK_PALETTE_INDEX];
+  return { [`--${prefix}-bg`]: palette.bg, [`--${prefix}-border`]: palette.border,
+    [`--${prefix}-ink`]: palette.ink, [`--${prefix}-fill`]: palette.zoneBg };
+}

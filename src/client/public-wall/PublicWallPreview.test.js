@@ -9,37 +9,41 @@ import { publicWallView } from './public-wall-view.js';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { withChromeModule } from '../../test-support/chrome-test-helper.js';
 
-test('hero keeps lower content in its scroll pane and Public actions outside that pane', async () => {
-  await withChromeModule('/src/client/public-wall/PublicWallPreview.jsx', ({ PublicWallPreviewContent }, { t, setLang }) => {
+test('hero keeps the masthead and lower content in its scroll pane and a slim Public dock outside it', async () => {
+  await withChromeModule('/src/client/public-wall/PublicWallPreview.jsx', ({ PublicWallPreviewContent }, { setLang }) => {
     for (const lang of ['th', 'en']) {
       setLang(lang);
       const html = renderToStaticMarkup(React.createElement(PublicWallPreviewContent, {
-        variant: 'hero', belowHero: React.createElement('section', { id: 'landing-recents' }, 'Recent workspace'),
+        variant: 'hero', masthead: React.createElement('header', null, 'Brand'),
+        belowHero: React.createElement('section', { id: 'landing-recents' }, 'Recent workspace'),
       }, React.createElement('h1', { id: 'landing-hero-title' }, 'Team space')));
       assert.match(html, /class="rb-landing__scroll"/);
+      assert.match(html, /aria-labelledby="landing-hero-title"><header>Brand<\/header><div class="rb-landing__hero-layout">/);
       assert.match(html, /<\/section><section id="landing-recents">Recent workspace<\/section><\/div><div class="rb-landing__public-bar">/);
-      assert.match(html, /href="#landing-recents" aria-controls="landing-recents"/);
-      assert.ok(html.includes(t('landing.recents.scroll')));
-      assert.equal((html.match(/href="\/public"/g) || []).length, 1);
+      assert.doesNotMatch(html, /rb-landing__scroll-cue/);
+      // The empty wall window and the dock both lead into the room.
+      assert.equal((html.match(/href="\/public"/g) || []).length, 2);
     }
   });
 });
 
-test('hero presents the real snapshot decoratively with one accessible Public entry and usable children', async () => {
+test('hero shows the live Public Wall beside the start panel so visitors see it before joining', async () => {
   await withChromeModule('/src/client/public-wall/PublicWallPreview.jsx', ({ PublicWallPreviewContent }, { t, setLang }) => {
     for (const lang of ['th', 'en']) {
       setLang(lang);
       const html = renderToStaticMarkup(React.createElement(PublicWallPreviewContent, {
         variant: 'hero', snapshot: { items: [{ id: 'real-note', type: 'sticky', x: 0, y: 0, w: 280, h: 240, color: 3, text: 'From the actual room' }] },
       }, React.createElement('h1', { id: 'landing-hero-title' }, 'Team space')));
-      assert.match(html, /class="rb-landing__hero"/);
-      assert.match(html, /aria-labelledby="landing-hero-title"/);
-      assert.match(html, /aria-hidden="true"/);
-      assert.match(html, /From the actual room/);
-      assert.equal((html.match(/href="\/public"/g) || []).length, 1);
-      assert.match(html, /<a class="rb-btn rb-btn--primary rb-public-wall__join" href="\/public"/);
-      assert.ok(html.includes(t('public.join')));
-      assert.match(html, /<h1 id="landing-hero-title">Team space<\/h1>/);
+      const layout = html.slice(html.indexOf('rb-landing__hero-layout'), html.indexOf('rb-landing__public-bar'));
+      assert.match(layout, /<h1 id="landing-hero-title">Team space<\/h1>/);
+      const wall = layout.slice(layout.indexOf('class="rb-landing__wall"'));
+      assert.match(wall, /aria-labelledby="landing-wall-title"/);
+      assert.ok(wall.includes(`<h2 id="landing-wall-title">${t('public.title')}</h2>`));
+      assert.ok(wall.includes(t('public.live')));
+      assert.match(wall, /From the actual room/);
+      assert.doesNotMatch(wall, /aria-hidden="true"[^>]*class="rb-public-wall__preview"|class="rb-public-wall__preview"[^>]*aria-hidden/);
+      assert.match(wall, new RegExp(`<a class="rb-public-wall__preview" href="/public" aria-label="${t('public.join')}"`));
+      assert.match(html, /<a class="rb-btn rb-public-wall__join" href="\/public"/);
     }
   });
 });

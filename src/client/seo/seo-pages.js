@@ -13,6 +13,7 @@ const page = (path, key, kind, extra = {}) => Object.freeze({
 
 export const SEO_PAGES = Object.freeze([
   page('/', 'home', SEO_PAGE_KIND.LANDING),
+  page(templatePath(STARTER_FORMAT.RETRO_LOOP), 'loop', SEO_PAGE_KIND.TEMPLATE, { slug: STARTER_FORMAT.RETRO_LOOP }),
   page(templatePath(STARTER_FORMAT.START_STOP_CONTINUE), 'ssc', SEO_PAGE_KIND.TEMPLATE, { slug: STARTER_FORMAT.START_STOP_CONTINUE }),
   page(templatePath(STARTER_FORMAT.MAD_SAD_GLAD), 'msg', SEO_PAGE_KIND.TEMPLATE, { slug: STARTER_FORMAT.MAD_SAD_GLAD }),
   page(templatePath(STARTER_FORMAT.FOUR_LS), '4ls', SEO_PAGE_KIND.TEMPLATE, { slug: STARTER_FORMAT.FOUR_LS }),

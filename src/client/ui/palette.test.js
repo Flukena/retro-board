@@ -77,3 +77,11 @@ test('palette rejects missing and invalid ink', () => {
     assert.throws(() => paletteColor({ ...valid, ink }), /ink/);
   }
 });
+
+test('palette style variables name each colour part and fall back to the first colour', () => {
+  const { paletteStyleVars } = palette;
+  assert.deepEqual(paletteStyleVars(2, 'chip'), {
+    '--chip-bg': PALETTE[2].bg, '--chip-border': PALETTE[2].border, '--chip-ink': PALETTE[2].ink, '--chip-fill': PALETTE[2].zoneBg,
+  });
+  assert.equal(paletteStyleVars(99, 'chip')['--chip-bg'], PALETTE[0].bg);
+});

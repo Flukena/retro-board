@@ -5,18 +5,54 @@ import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { withChromeModule } from '../../test-support/chrome-test-helper.js';
 
-test('landing exposes the recent-room destination and localized empty state before any rooms exist', async () => {
+const renderLanding = (Landing) => renderToStaticMarkup(React.createElement(Landing));
+
+test('first-time visitors see no empty recent-rooms card and no scroll cue', async () => {
+  await withChromeModule('/src/client/app/Landing.jsx', ({ default: Landing }, { setLang }) => {
+    for (const lang of ['th', 'en']) {
+      setLang(lang);
+      const html = renderLanding(Landing);
+      assert.doesNotMatch(html, /id="landing-recents"/);
+      assert.doesNotMatch(html, /href="#landing-recents"/);
+    }
+  });
+});
+
+test('the hero offers one primary Create, format chips that start a room, and trust chips', async () => {
   await withChromeModule('/src/client/app/Landing.jsx', ({ default: Landing }, { setLang, t }) => {
     for (const lang of ['th', 'en']) {
       setLang(lang);
-      const html = renderToStaticMarkup(React.createElement(Landing));
-      assert.match(html, /id="landing-recents"/);
-      assert.match(html, /href="#landing-recents"/);
-      assert.ok(html.includes(t('landing.recents.empty')));
-      assert.ok(html.includes(t('landing.recents.scroll')));
-      assert.doesNotMatch(html, /landing\.recents\./);
+      const html = renderLanding(Landing);
+      const hero = html.slice(html.indexOf('rb-landing__hero-layout'), html.indexOf('rb-landing__public-bar'));
+      assert.equal((hero.match(/rb-btn--primary/g) || []).length, 1, `${lang}: Create is the only primary action`);
+      for (const name of ['Retro Loop', 'Start Stop Continue', 'Mad Sad Glad', '4Ls']) {
+        assert.ok(hero.includes(`aria-label="${t('tpl.start', { name })}"`), `${lang}: ${name} chip`);
+      }
+      for (const key of ['landing.trust.free', 'landing.trust.signup', 'landing.trust.realtime']) assert.ok(hero.includes(t(key)));
+      assert.ok(hero.includes(t('landing.join.or')));
     }
   });
+});
+
+test('the masthead sits inside the scrolling hero instead of floating over it', async () => {
+  await withChromeModule('/src/client/app/Landing.jsx', ({ default: Landing }, { setLang, t }) => {
+    setLang('en');
+    const html = renderLanding(Landing);
+    assert.match(html, /<section class="rb-landing__hero"[^>]*>[\s\S]*<header class="rb-landing__masthead">/);
+    assert.ok(html.includes(`>${t('app.title')}<`));
+  });
+  const css = readFileSync(new URL('./landing.css', import.meta.url), 'utf8');
+  const rule = css.slice(css.indexOf('.rb-landing__masthead {'), css.indexOf('}', css.indexOf('.rb-landing__masthead {')));
+  assert.doesNotMatch(rule, /position:\s*(absolute|fixed)/);
+});
+
+test('the brand is RetroRoom in both languages', async () => {
+  const { setLang, t } = await import('../ui/i18n.js');
+  for (const lang of ['th', 'en']) {
+    setLang(lang);
+    assert.equal(t('app.title'), 'RetroRoom');
+  }
+  assert.doesNotMatch(readFileSync(new URL('../ui/i18n.js', import.meta.url), 'utf8'), /Retro Board/);
 });
 
 test('landing uses primary create, disabled empty join and display-font hero in both languages', async () => {
@@ -35,7 +71,6 @@ test('landing uses primary create, disabled empty join and display-font hero in 
         assert.match(html, /class="rb-landing__title"/);
         assert.ok(html.includes(t('app.title')));
         assert.ok(html.includes(t('landing.create.head')));
-        assert.ok(html.includes(t('landing.join.head')));
         assert.doesNotMatch(html, /landing\./);
         const themeTitle = `${t('settings.theme')}: ${t('settings.theme.auto')}`;
         assert.ok(buttons.some((button) => button.includes(`title="${themeTitle}"`)
@@ -91,9 +126,9 @@ test('landing CSS matches design C surfaces, filled inputs and top column', () =
 });
 
 test('Join is secondary, enabled for text, and forwards click and Enter', async () => {
-  await withChromeModule('/src/client/app/Landing.jsx', ({ JoinCard }) => {
+  await withChromeModule('/src/client/app/Landing.jsx', ({ JoinRow }) => {
     let joins = 0;
-    const card = JoinCard({ joinCode: ' room-code ', onCodeChange: () => {}, onJoin: () => { joins += 1; } });
+    const card = JoinRow({ joinCode: ' room-code ', onCodeChange: () => {}, onJoin: () => { joins += 1; } });
     const html = renderToStaticMarkup(card);
     assert.doesNotMatch(html, /disabled=""|rb-btn--primary/);
     assert.match(html, /class="rb-btn rb-landing__action"/);

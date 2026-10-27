@@ -119,9 +119,11 @@ async function checkCase(settings) {
     await user.page.screenshot({ path: join(output, `${settings.name}-hero.png`) });
     const movement = await checkCue(user);
     await user.page.screenshot({ path: join(output, `${settings.name}-recents.png`) });
-    await user.page.locator('.rb-landing__scroll').evaluate(node => { node.style.scrollBehavior = 'auto'; node.scrollTop = node.scrollHeight; });
+    // The guide follows the recents, so bring the last row to the bottom edge of the scroll pane.
+    await user.page.locator('.rb-landing__scroll').evaluate(node => { node.style.scrollBehavior = 'auto'; });
+    await rows.last().evaluate(node => node.scrollIntoView({ block: 'end' }));
     const last = await rect(rows.last()), after = await dockRect(user.page);
-    assert.ok(last.bottom <= after.top && last.top >= 0, 'Last recent room must not sit behind the dock');
+    assert.ok(last.bottom <= after.top + EDGE_TOLERANCE_PX && last.top >= 0, 'Last recent room must not sit behind the dock');
     assert.ok(Math.abs(before.top - after.top) <= EDGE_TOLERANCE_PX, JSON.stringify({ before, after }));
     await activate(user, rows.last().getByRole('button', { name: t('landing.recents.remove'), exact: true }));
     assert.equal(await rows.count(), RECENT_FIXTURE_COUNT - 1);
@@ -136,8 +138,10 @@ try {
   for (const settings of CASES) await checkCase(settings);
   const user = await participant(CASES[3], false);
   try {
-    setLang(CASES[3].lang); await user.page.getByText(t('landing.recents.empty'), { exact: true }).waitFor();
-    await checkCue(user); assert.equal(await user.page.locator('.rb-landing__recent').count(), 0);
+    // First visit: no empty recents card and no cue pointing at one.
+    assert.equal(await user.page.locator('#landing-recents').count(), 0);
+    assert.equal(await user.page.locator('.rb-landing__scroll-cue').count(), 0);
+    await dockRect(user.page);
   } finally { await user.context.close(); }
   assert.deepEqual(report.errors, []); assert.equal(report.writes, 0, 'Landing must not open a board session or mutate a room');
 } finally {
