@@ -254,3 +254,16 @@ test('election continuation stops toast after a rejected write', () => {
   assert.deepEqual(writes, []);
   assert.deepEqual(events, []);
 });
+
+test('automatic election is a derived write, so undo never takes the admin role away', () => {
+  // `silent` writes use the 'system' origin that the board UndoManager ignores.
+  // A manual claim stays an ordinary, undoable edit.
+  const calls = [];
+  const patchMeta = (patch, opts) => { calls.push({ patch, opts }); return true; };
+  finishAdminElection({ decision: true, userId: SELF, adminName: ADMIN_NAME, patchMeta, notify: () => {} });
+  assert.deepEqual(calls, [{ patch: { adminUserId: SELF, adminName: ADMIN_NAME }, opts: { silent: true } }]);
+  calls.length = 0;
+  const decision = { status: ADMIN_PIN_RESULT.READY, patch: { adminUserId: SELF, adminPinHash: HASH } };
+  finishAdminClaim({ decision, adminName: ADMIN_NAME, patchMeta, markPinOk: () => {}, onSuccess: () => {}, notify: () => {} });
+  assert.equal(calls[0].opts, undefined);
+});

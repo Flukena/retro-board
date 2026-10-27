@@ -90,6 +90,9 @@ export function finishAdminClaim({ decision, adminName, patchMeta, markPinOk, on
 export function finishAdminElection({ decision, userId, adminName, patchMeta, notify }) {
   if (!decision) return;
   // Flush before notifying so the next claimant sees this write immediately.
-  if (!patchMeta({ adminUserId: userId, adminName })) return;
+  // Silent: the election is automatic, so undo must not revert it. Otherwise
+  // the creator's first undo drops admin, the next heartbeat re-elects, and
+  // that new write clears the redo stack.
+  if (!patchMeta({ adminUserId: userId, adminName }, { silent: true })) return;
   notify();
 }
