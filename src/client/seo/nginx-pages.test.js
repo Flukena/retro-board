@@ -25,3 +25,7 @@ test('no location adds its own headers, so every response keeps the server secur
   assert.ok(locations.length > 0);
   for (const body of locations) assert.doesNotMatch(body, /add_header/);
 });
+
+test('every HTML file, however it is reached, is served with revalidation', () => {
+  assert.match(locationBody('~ \\\\\\.html\\$'), /expires -1;/);
+});
