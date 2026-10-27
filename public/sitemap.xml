@@ -4,21 +4,42 @@
     <loc>https://retroroom.party/</loc>
   </url>
   <url>
+    <loc>https://retroroom.party/th</loc>
+  </url>
+  <url>
     <loc>https://retroroom.party/templates/retro-loop</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/th/templates/retro-loop</loc>
   </url>
   <url>
     <loc>https://retroroom.party/templates/start-stop-continue</loc>
   </url>
   <url>
+    <loc>https://retroroom.party/th/templates/start-stop-continue</loc>
+  </url>
+  <url>
     <loc>https://retroroom.party/templates/mad-sad-glad</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/th/templates/mad-sad-glad</loc>
   </url>
   <url>
     <loc>https://retroroom.party/templates/4ls-retrospective</loc>
   </url>
   <url>
+    <loc>https://retroroom.party/th/templates/4ls-retrospective</loc>
+  </url>
+  <url>
     <loc>https://retroroom.party/privacy</loc>
   </url>
   <url>
+    <loc>https://retroroom.party/th/privacy</loc>
+  </url>
+  <url>
     <loc>https://retroroom.party/terms</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/th/terms</loc>
   </url>
 </urlset>

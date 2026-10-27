@@ -45,3 +45,12 @@ test('a noindex page gets no preview image even when one is passed', () => {
   const html = pageDocument(TEMPLATE, { lang: 'en', title: 'Shell', robots: 'noindex', image });
   assert.doesNotMatch(html, /og:image|twitter:card/);
 });
+
+test('an indexable page lists its language alternates; a noindex page lists none', () => {
+  const alternates = [{ hreflang: 'en', href: 'https://retroroom.party/x' }, { hreflang: 'th', href: 'https://retroroom.party/th/x' }];
+  const html = pageDocument(TEMPLATE, { lang: 'th', title: 'X', canonical: 'https://retroroom.party/th/x', alternates });
+  assert.match(html, /<link rel="alternate" hreflang="en" href="https:\/\/retroroom.party\/x" \/>/);
+  assert.match(html, /<link rel="alternate" hreflang="th" href="https:\/\/retroroom.party\/th\/x" \/>/);
+  const shell = pageDocument(TEMPLATE, { lang: 'en', title: 'Shell', robots: 'noindex', alternates });
+  assert.doesNotMatch(shell, /hreflang/);
+});

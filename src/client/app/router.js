@@ -4,6 +4,7 @@
 import { PUBLIC_PATH } from '../../domain/public-wall-contract.js';
 import { legalPageForPath } from '../legal/legal-content.js';
 import { TEMPLATE_PATH_PREFIX, starterFormat } from '../templates/starter-formats.js';
+import { splitLangPath } from '../seo/seo-pages.js';
 
 const BOARD_PATH = /^\/b\/([A-Za-z0-9_-]{3,32})\/?$/;
 // Tokens are 16 alphanumeric chars (Web Crypto generated). The pattern is
@@ -18,17 +19,27 @@ function readTokenFromHash() {
   return TOKEN_RE.test(raw) ? raw : null;
 }
 
+// Content pages also exist under a language prefix (/th/...), which sets the
+// page language. Boards and the Public Wall have no language prefix.
 export function parseRoute() {
-  const path = (typeof window !== 'undefined' ? window.location.pathname : '/') || '/';
+  const urlPath = (typeof window !== 'undefined' ? window.location.pathname : '/') || '/';
+  const { lang, path } = splitLangPath(urlPath);
+  const content = contentRoute(path);
+  if (content) return lang ? { ...content, lang } : content;
+  if (lang) return { kind: 'notFound' };
   if (path === PUBLIC_PATH || path === `${PUBLIC_PATH}/`) return { kind: 'public' };
-  const legalPage = legalPageForPath(path);
-  if (legalPage) return { kind: 'legal', page: legalPage };
   const m = path.match(BOARD_PATH);
   if (m) return { kind: 'board', code: m[1], token: readTokenFromHash() };
+  return { kind: 'notFound' };
+}
+
+function contentRoute(path) {
+  const legalPage = legalPageForPath(path);
+  if (legalPage) return { kind: 'legal', page: legalPage };
   if (LANDING_PATHS.has(path)) return { kind: 'landing' };
   const slug = templateSlugForPath(path);
   if (slug) return { kind: 'template', slug };
-  return { kind: 'notFound' };
+  return null;
 }
 
 const LANDING_PATHS = new Set(['/', '/index.html']);

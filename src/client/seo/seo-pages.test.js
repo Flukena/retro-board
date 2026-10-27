@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { withChromeModule } from '../../test-support/chrome-test-helper.js';
-import { SEO_PAGES, SITE_ORIGIN, canonicalUrl, seoPageForPath, sitemapXml } from './seo-pages.js';
+import {
+  SEO_PAGES, SITE_ORIGIN, canonicalUrl, localizedPath, pageAlternates, seoPageForPath, sitemapXml, splitLangPath,
+} from './seo-pages.js';
 
 const read = (path) => readFileSync(new URL(`../../../${path}`, import.meta.url), 'utf8');
 
@@ -10,10 +12,11 @@ test('the sitemap lists exactly the indexable pages and nothing private or user-
   const sitemap = read('public/sitemap.xml');
   assert.equal(sitemap, sitemapXml());
   const locs = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]);
-  assert.deepEqual(locs, SEO_PAGES.map((page) => canonicalUrl(page.path)));
+  assert.deepEqual(locs, SEO_PAGES.flatMap((page) => [canonicalUrl(page.path), canonicalUrl(localizedPath(page.path, 'th'))]));
   assert.ok(locs.every((loc) => loc.startsWith(`${SITE_ORIGIN}/`)));
   assert.ok(!locs.some((loc) => /\/(b|public)(\/|$)/.test(new URL(loc).pathname)), 'boards and the Public Wall stay out');
-  for (const path of ['/', '/templates/start-stop-continue', '/templates/mad-sad-glad', '/templates/4ls-retrospective']) {
+  for (const path of ['/', '/templates/start-stop-continue', '/templates/mad-sad-glad', '/templates/4ls-retrospective',
+    '/th', '/th/templates/retro-loop', '/th/privacy']) {
     assert.ok(locs.includes(canonicalUrl(path)), path);
   }
 });
@@ -44,4 +47,25 @@ test('page lookup ignores a trailing slash and knows nothing about boards', () =
   assert.equal(seoPageForPath('/templates/mad-sad-glad/').path, '/templates/mad-sad-glad');
   assert.equal(seoPageForPath('/b/Room1234'), null);
   assert.equal(seoPageForPath('/public'), null);
+});
+
+test('Thai pages live under /th and the lookup finds the same page through the prefix', () => {
+  assert.equal(localizedPath('/', 'th'), '/th');
+  assert.equal(localizedPath('/templates/mad-sad-glad', 'th'), '/th/templates/mad-sad-glad');
+  assert.equal(localizedPath('/privacy', 'en'), '/privacy');
+  assert.deepEqual(splitLangPath('/th'), { lang: 'th', path: '/' });
+  assert.deepEqual(splitLangPath('/th/'), { lang: 'th', path: '/' });
+  assert.deepEqual(splitLangPath('/th/terms'), { lang: 'th', path: '/terms' });
+  assert.deepEqual(splitLangPath('/thai'), { lang: null, path: '/thai' }, 'only a whole /th segment is a prefix');
+  assert.equal(seoPageForPath('/th/templates/mad-sad-glad/').path, '/templates/mad-sad-glad');
+  assert.equal(seoPageForPath('/th').path, '/');
+  assert.equal(seoPageForPath('/th/b/Room1234'), null);
+});
+
+test('every language version of a page points at all versions, with English as x-default', () => {
+  assert.deepEqual(pageAlternates('/privacy'), [
+    { hreflang: 'en', href: 'https://retroroom.party/privacy' },
+    { hreflang: 'th', href: 'https://retroroom.party/th/privacy' },
+    { hreflang: 'x-default', href: 'https://retroroom.party/privacy' },
+  ]);
 });

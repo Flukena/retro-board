@@ -26,18 +26,53 @@ export const NOT_FOUND_TITLE_KEY = 'seo.notFound.title';
 
 export const canonicalUrl = (path) => `${SITE_ORIGIN}${path}`;
 
+// Each indexable page exists once per language. English stays at the root and
+// is also the x-default for other languages; Thai lives under /th.
+export const SEO_LANG = Object.freeze({ EN: 'en', TH: 'th' });
+export const SEO_LANGS = Object.freeze([SEO_LANG.EN, SEO_LANG.TH]);
+export const DEFAULT_SEO_LANG = SEO_LANG.EN;
+const LANG_PATH_PREFIX = Object.freeze({ [SEO_LANG.EN]: '', [SEO_LANG.TH]: '/th' });
+const ROOT_PATH = '/';
+const HREFLANG_DEFAULT = 'x-default';
+
+/** The page path in a language: '/' → '/th', '/privacy' → '/th/privacy'. */
+export const localizedPath = (path, lang) => {
+  const prefix = LANG_PATH_PREFIX[lang];
+  if (!prefix) return path;
+  return path === ROOT_PATH ? prefix : `${prefix}${path}`;
+};
+
+/** Splits a URL path into its language prefix (null when unprefixed) and the page path. */
+export function splitLangPath(pathname) {
+  for (const lang of SEO_LANGS) {
+    const prefix = LANG_PATH_PREFIX[lang];
+    if (!prefix) continue;
+    if (pathname === prefix || pathname === `${prefix}/`) return { lang, path: ROOT_PATH };
+    if (pathname.startsWith(`${prefix}/`)) return { lang, path: pathname.slice(prefix.length) };
+  }
+  return { lang: null, path: pathname };
+}
+
+/** hreflang links shared by every language version of one page. */
+export const pageAlternates = (path) => [
+  ...SEO_LANGS.map((lang) => ({ hreflang: lang, href: canonicalUrl(localizedPath(path, lang)) })),
+  { hreflang: HREFLANG_DEFAULT, href: canonicalUrl(localizedPath(path, DEFAULT_SEO_LANG)) },
+];
+
 // Link-preview card for chat apps and social sites; 1200×630 is the Open Graph
 // large-image size. The file lives in public/.
 export const SOCIAL_IMAGE = Object.freeze({
   path: '/og-image.png', type: 'image/png', widthPx: 1200, heightPx: 630,
 });
 
-export const seoPageForPath = (path) => {
+export const seoPageForPath = (urlPath) => {
+  const { path } = splitLangPath(urlPath);
   const trimmed = path.length > 1 ? path.replace(/\/$/, '') : path;
   return SEO_PAGES.find((entry) => entry.path === trimmed) ?? null;
 };
 
 export function sitemapXml() {
-  const urls = SEO_PAGES.map((entry) => `  <url>\n    <loc>${canonicalUrl(entry.path)}</loc>\n  </url>`).join('\n');
+  const urls = SEO_PAGES.flatMap((entry) => SEO_LANGS.map((lang) => localizedPath(entry.path, lang)))
+    .map((path) => `  <url>\n    <loc>${canonicalUrl(path)}</loc>\n  </url>`).join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`;
 }

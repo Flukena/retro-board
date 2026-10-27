@@ -92,3 +92,23 @@ test('template guides route by slug, and unknown paths route to the not-found pa
     globalThis.window = original;
   }
 });
+
+test('content pages under /th route in Thai; boards and the Public Wall have no Thai prefix', async () => {
+  const { parseRoute } = await import('./router.js');
+  const original = globalThis.window;
+  try {
+    const route = (pathname) => { globalThis.window = { location: { pathname, hash: '' } }; return parseRoute(); };
+    assert.deepEqual(route('/th'), { kind: 'landing', lang: 'th' });
+    assert.deepEqual(route('/th/'), { kind: 'landing', lang: 'th' });
+    assert.deepEqual(route('/th/templates/retro-loop'), { kind: 'template', slug: 'retro-loop', lang: 'th' });
+    assert.deepEqual(route('/th/privacy'), { kind: 'legal', page: 'privacy', lang: 'th' });
+    for (const pathname of ['/th/nope', '/th/templates/unknown', '/th/b/Room1234', '/th/public']) {
+      assert.deepEqual(route(pathname), { kind: 'notFound' }, pathname);
+    }
+    assert.deepEqual(route('/thai'), { kind: 'notFound' });
+    assert.deepEqual(route('/public'), { kind: 'public' });
+    assert.equal(route('/b/Room1234').kind, 'board');
+  } finally {
+    globalThis.window = original;
+  }
+});

@@ -27,12 +27,15 @@ const imageTags = ({ url, type, widthPx, heightPx }) => [
   `<meta name="twitter:card" content="${TWITTER_CARD_LARGE_IMAGE}" />`,
 ];
 
-function headTags({ title, description, canonical, robots, image }) {
+const alternateTags = (alternates) => alternates.map(({ hreflang, href }) =>
+  `<link rel="alternate" hreflang="${escapeHtml(hreflang)}" href="${escapeHtml(href)}" />`);
+
+function headTags({ title, description, canonical, robots, image, alternates }) {
   const tags = [`<title>${escapeHtml(title)}</title>`];
   if (description) tags.push(`<meta name="description" content="${escapeHtml(description)}" />`);
   if (robots) tags.push(`<meta name="robots" content="${escapeHtml(robots)}" />`);
   if (canonical) {
-    tags.push(`<link rel="canonical" href="${escapeHtml(canonical)}" />`,
+    tags.push(`<link rel="canonical" href="${escapeHtml(canonical)}" />`, ...alternateTags(alternates),
       '<meta property="og:type" content="website" />',
       `<meta property="og:url" content="${escapeHtml(canonical)}" />`,
       `<meta property="og:title" content="${escapeHtml(title)}" />`);
@@ -49,9 +52,9 @@ const replaceOnce = (html, pattern, replacement, label) => {
 };
 
 /** Build one page's HTML from the built index.html template. */
-export function pageDocument(template, { lang, title, description = null, canonical = null, robots = null, image = null, body = '', css = '' }) {
+export function pageDocument(template, { lang, title, description = null, canonical = null, robots = null, image = null, alternates = [], body = '', css = '' }) {
   let html = replaceOnce(template, HTML_OPEN, `<html lang="${escapeHtml(lang)}">`, '<html lang>');
-  html = replaceOnce(html, TITLE_ELEMENT, headTags({ title, description, canonical, robots, image })
+  html = replaceOnce(html, TITLE_ELEMENT, headTags({ title, description, canonical, robots, image, alternates })
     + (css ? `\n    <style>${css}</style>` : ''), '<title>');
   return replaceOnce(html, ROOT_ELEMENT, `<div id="root">${body}</div>`, 'root element');
 }

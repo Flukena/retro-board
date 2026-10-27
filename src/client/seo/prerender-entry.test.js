@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { withChromeModule } from '../../test-support/chrome-test-helper.js';
 import { pageDocument } from './page-document.js';
-import { SEO_PAGES, SITE_ORIGIN, SOCIAL_IMAGE, canonicalUrl } from './seo-pages.js';
+import { SEO_PAGES, SITE_ORIGIN, SOCIAL_IMAGE, canonicalUrl, localizedPath, pageAlternates } from './seo-pages.js';
 
 const TEMPLATE = readFileSync(new URL('../../../index.html', import.meta.url), 'utf8');
 const hrefs = (html) => new Set([...html.matchAll(/<a [^>]*href="([^"]+)"/g)].map((match) => match[1]));
@@ -55,6 +55,47 @@ test('each template guide links home, the other guides and offers a start button
       assert.match(html, /How to facilitate it/);
       assert.match(html, /Example prompts/);
     }
+  });
+});
+
+const fileFor = (path) => (path === '/' ? 'index.html' : `${path.slice(1)}/index.html`);
+const THAI_TEXT = /[\u0E00-\u0E7F]/;
+const linkTags = (html, rel) => [...html.matchAll(new RegExp(`<link rel="${rel}"[^>]*>`, 'g'))].map((match) => match[0]);
+
+test('every public page also ships a Thai version under /th with Thai head and content', async () => {
+  await renderAll((pages) => {
+    const thaiTitles = new Set();
+    for (const page of SEO_PAGES) {
+      const path = localizedPath(page.path, 'th');
+      const html = pages.get(fileFor(path));
+      assert.ok(html, path);
+      assert.match(html, /<html lang="th">/, path);
+      assert.match(html, new RegExp(`<link rel="canonical" href="${canonicalUrl(path)}" />`), path);
+      const title = html.match(/<title>([^<]+)<\/title>/)[1];
+      assert.match(title, THAI_TEXT, `${path}: Thai title`);
+      thaiTitles.add(title);
+      assert.match(html.match(/<meta name="description" content="([^"]+)"/)[1], THAI_TEXT, `${path}: Thai description`);
+      assert.equal((html.match(/<h1[\s>]/g) || []).length, 1, `${path}: one h1`);
+      assert.match(html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/)[1], THAI_TEXT, `${path}: Thai h1`);
+      assert.match(html, /property="og:image"/, path);
+      assert.doesNotMatch(html, /<div id="root"><\/div>/, `${path}: content is pre-rendered`);
+    }
+    assert.equal(thaiTitles.size, SEO_PAGES.length);
+    assert.doesNotMatch(pages.get('index.html').match(/<h1[^>]*>([\s\S]*?)<\/h1>/)[1], THAI_TEXT, 'English home stays English');
+  });
+});
+
+test('both language versions of a page carry the same reciprocal hreflang set', async () => {
+  await renderAll((pages) => {
+    for (const page of SEO_PAGES) {
+      const expected = pageAlternates(page.path)
+        .map(({ hreflang, href }) => `<link rel="alternate" hreflang="${hreflang}" href="${href}" />`);
+      for (const lang of ['en', 'th']) {
+        const html = pages.get(fileFor(localizedPath(page.path, lang)));
+        assert.deepEqual(linkTags(html, 'alternate'), expected, `${lang} ${page.path}`);
+      }
+    }
+    for (const file of ['404.html', 'app.html']) assert.deepEqual(linkTags(pages.get(file), 'alternate'), [], file);
   });
 });
 

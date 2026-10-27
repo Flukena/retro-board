@@ -13,7 +13,7 @@ import { NOT_FOUND_TITLE_KEY, seoPageForPath } from '../seo/seo-pages.js';
 import { usePageHead } from '../seo/use-page-head.js';
 import { BoardErrorBoundary } from './BoardErrorBoundary.jsx';
 import { SyncBanner } from '../session/SyncBanner.jsx';
-import { t } from '../ui/i18n.js';
+import { setLang, t } from '../ui/i18n.js';
 import {
   isBoardCreatedByMe, gotoLanding, parseRoute, recentBoardName, rememberRecent,
 } from './router.js';
@@ -24,6 +24,8 @@ import {
 } from '../session/room-session.js';
 
 const route = parseRoute();
+// A language-prefixed page (/th/...) is shown in that language from the first paint.
+if (route.lang) setLang(route.lang);
 
 const statusCopy = (status, retryAfterSeconds) => {
   if (status === ROOM_SESSION_ERROR.INVALID) {
