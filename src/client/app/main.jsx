@@ -7,6 +7,10 @@ import RetroBoard from '../../../RetroBoard.jsx';
 import { establishPublicRoomSession } from '../public-wall/public-room-session.js';
 import Landing from './Landing.jsx';
 import LegalPage from '../legal/LegalPage.jsx';
+import TemplatePage from '../templates/TemplatePage.jsx';
+import NotFoundPage from './NotFoundPage.jsx';
+import { NOT_FOUND_TITLE_KEY, seoPageForPath } from '../seo/seo-pages.js';
+import { usePageHead } from '../seo/use-page-head.js';
 import { BoardErrorBoundary } from './BoardErrorBoundary.jsx';
 import { SyncBanner } from '../session/SyncBanner.jsx';
 import { t } from '../ui/i18n.js';
@@ -155,9 +159,18 @@ const ROUTE_VIEWS = {
   board: () => <BoardBootstrap code={route.code} token={route.token} />,
   public: () => <BoardBootstrap mode={BOARD_MODE.PUBLIC} />,
   legal: () => <LegalPage page={route.page} />,
+  template: () => <TemplatePage slug={route.slug} />,
+  notFound: () => <NotFoundPage />,
 };
 const App = (ROUTE_VIEWS[route.kind] ?? (() => <Landing />))();
+// Boards name their own tab; content pages use their search title.
+const pageTitleKey = route.kind === 'notFound' ? NOT_FOUND_TITLE_KEY : seoPageForPath(window.location.pathname)?.titleKey ?? null;
+
+function PageHead() {
+  usePageHead(pageTitleKey);
+  return null;
+}
 
 createRoot(document.getElementById('root')).render(
-  <React.StrictMode><BoardErrorBoundary>{App}</BoardErrorBoundary></React.StrictMode>,
+  <React.StrictMode><BoardErrorBoundary><PageHead />{App}</BoardErrorBoundary></React.StrictMode>,
 );

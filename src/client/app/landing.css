@@ -274,6 +274,16 @@
 .rb-landing__error { margin: var(--landing-error-margin); color: var(--danger); font-size: var(--landing-body-font-size); }
 .rb-landing__page .rb-landing__card--recents { padding: var(--landing-recents-padding); margin: var(--space-6); }
 .rb-landing__card--recents .rb-landing__section-head { margin: var(--landing-recents-heading-margin); }
+.rb-landing__page .rb-landing__guide { margin: var(--space-6); }
+.rb-landing__guide .rb-landing__section-head { margin: var(--landing-recents-heading-margin); }
+.rb-landing__guide-subhead { font-size: var(--landing-body-font-size); font-weight: var(--landing-title-font-weight); margin: var(--space-4) 0 var(--space-2); }
+.rb-landing__guide-text,
+.rb-landing__guide-list { font-size: var(--landing-body-font-size); line-height: var(--landing-footer-line-height); color: var(--text-muted); margin: 0; }
+.rb-landing__guide-list { padding-inline-start: var(--space-6); }
+.rb-landing__guide-list li + li { margin-top: var(--space-2); }
+.rb-landing__guide-links { list-style: none; display: flex; flex-wrap: wrap; gap: var(--space-3); padding: 0; margin: var(--space-4) 0 0; }
+.rb-landing__guide-links a,
+.rb-landing__faq a { color: var(--accent-text); font-weight: var(--landing-title-font-weight); }
 .rb-landing__recent {
   display: flex;
   align-items: center;

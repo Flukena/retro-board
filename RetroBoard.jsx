@@ -64,6 +64,7 @@ import { getTemplates } from './src/client/templates/builtin-templates.js';
 import { templateRevealViewport } from './src/domain/template-model.js';
 import { useBoardTemplates } from './src/client/templates/use-board-templates.js';
 import { useBoardTitle } from './src/client/app/use-board-title.js';
+import { usePendingStarter } from './src/client/templates/pending-starter.js';
 import { activeVoteZone, zoneHasActiveGovernor } from './src/domain/vote-ownership.js';
 import { useAdminRole } from './src/client/session/useAdminRole.js';
 import { clientPointToWorld } from './src/domain/board-coordinates.js';
@@ -2068,6 +2069,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
       viewportSize: { w: rect.width, h: rect.height } });
     if (next) { stopFollowing(); commitViewportImmediately(next); }
   }, [placeTemplate, screenToWorld, stopFollowing, commitViewportImmediately]);
+  usePendingStarter({ storage, liveStorage: adminRoleStorage, boardCode, applyTemplate, ready: loaded });
 
   const fitToContent = useCallback(() => {
     if (interactionRef.current !== null || !canvasRef.current) return;
@@ -2664,7 +2666,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     const ay = (corner === 'nw' || corner === 'ne') ? initBBox.y + initBBox.h : initBBox.y;
     const start = { x: e.clientX, y: e.clientY };
     const aspectLock = !e.altKey; // hold Alt to scale freely on both axes
-    const aspect = initBBox.w / initBBox.h;
     // Scale range so no item leaves its per-type minimum or cap.
     const { minX: minScaleX, minY: minScaleY, maxX: maxScaleX, maxY: maxScaleY } = groupScaleRange(seeds.values());
     if (!requireMove(seeds.keys())) return;
@@ -2676,7 +2677,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     // Signs that map a corner's outward direction onto positive growth — using
     // these on raw deltas (not abs) keeps shrink and grow symmetric so the
     // aspect lock holds in both directions.
-    void aspect;
     const signX = (corner === 'nw' || corner === 'sw') ? -1 : 1;
     const signY = (corner === 'nw' || corner === 'ne') ? -1 : 1;
     const onMove = (ev) => {

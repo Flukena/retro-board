@@ -3,6 +3,7 @@
 
 import { PUBLIC_PATH } from '../../domain/public-wall-contract.js';
 import { legalPageForPath } from '../legal/legal-content.js';
+import { TEMPLATE_PATH_PREFIX, starterFormat } from '../templates/starter-formats.js';
 
 const BOARD_PATH = /^\/b\/([A-Za-z0-9_-]{3,32})\/?$/;
 // Tokens are 16 alphanumeric chars (Web Crypto generated). The pattern is
@@ -24,7 +25,18 @@ export function parseRoute() {
   if (legalPage) return { kind: 'legal', page: legalPage };
   const m = path.match(BOARD_PATH);
   if (m) return { kind: 'board', code: m[1], token: readTokenFromHash() };
-  return { kind: 'landing' };
+  if (LANDING_PATHS.has(path)) return { kind: 'landing' };
+  const slug = templateSlugForPath(path);
+  if (slug) return { kind: 'template', slug };
+  return { kind: 'notFound' };
+}
+
+const LANDING_PATHS = new Set(['/', '/index.html']);
+
+function templateSlugForPath(path) {
+  if (!path.startsWith(TEMPLATE_PATH_PREFIX)) return null;
+  const slug = path.slice(TEMPLATE_PATH_PREFIX.length).replace(/\/$/, '');
+  return starterFormat(slug) ? slug : null;
 }
 
 export function generateBoardCode() {

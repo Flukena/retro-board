@@ -76,3 +76,19 @@ test('recent board name is found by code and token', () => {
   assert.equal(recentBoardName('Room1234', 'zzzzzzzzzzzzzzzz'), null);
   assert.equal(recentBoardName('Other123', 'abcdefghijklmnop'), null);
 });
+
+test('template guides route by slug, and unknown paths route to the not-found page', async () => {
+  const { parseRoute } = await import('./router.js');
+  const original = globalThis.window;
+  try {
+    const route = (pathname) => { globalThis.window = { location: { pathname, hash: '' } }; return parseRoute(); };
+    assert.deepEqual(route('/templates/mad-sad-glad'), { kind: 'template', slug: 'mad-sad-glad' });
+    assert.deepEqual(route('/templates/4ls-retrospective/'), { kind: 'template', slug: '4ls-retrospective' });
+    for (const pathname of ['/templates/unknown', '/templates/', '/nope', '/b/x', '/b/Room1234/extra']) {
+      assert.deepEqual(route(pathname), { kind: 'notFound' }, pathname);
+    }
+    assert.deepEqual(route('/index.html'), { kind: 'landing' });
+  } finally {
+    globalThis.window = original;
+  }
+});

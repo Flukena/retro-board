@@ -4,7 +4,13 @@
     <loc>https://retroroom.party/</loc>
   </url>
   <url>
-    <loc>https://retroroom.party/public</loc>
+    <loc>https://retroroom.party/templates/start-stop-continue</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/templates/mad-sad-glad</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/templates/4ls-retrospective</loc>
   </url>
   <url>
     <loc>https://retroroom.party/privacy</loc>

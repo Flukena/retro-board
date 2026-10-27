@@ -85,8 +85,10 @@ export const createTemplateActions = ({
   const deleteCustomTemplate = (id) => {
     if (!storage?.removeTemplate?.(id)) warn('tmpl.saveFailed');
   };
+  // `key` names a built-in or custom template, or is a template itself (template pages).
   const applyTemplate = (key, { viewportCenter, items }) => {
-    const template = getTemplates()[key] || storage?.snapshotTemplates?.().find((entry) => entry.id === key);
+    const template = typeof key === 'object' ? key
+      : getTemplates()[key] || storage?.snapshotTemplates?.().find((entry) => entry.id === key);
     if (!template) return null;
     const offset = templatePlacementOffset({
       templateZones: template.zones, viewportCenter, occupiedRects: templateOccupiedRects(items),

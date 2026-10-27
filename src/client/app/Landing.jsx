@@ -1,10 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Sparkles, Plus, ArrowRight, X, Languages, Sun, Moon, Monitor,
 } from 'lucide-react';
-import {
-  gotoBoard, loadRecents, forgetRecent, markBoardCreated, rememberRecent,
-} from './router.js';
+import { gotoBoard, loadRecents, forgetRecent } from './router.js';
 import { t, useLang } from '../ui/i18n.js';
 import { useTheme, nextThemePref } from '../ui/theme.js';
 import { Button, IconButton, Surface } from '../ui/UiPrimitives.jsx';
@@ -14,16 +12,13 @@ import { formatRelativeTime } from '../ui/relative-time.js';
 import { parseJoinInput } from './join-input.js';
 import { DISPLAY_NAME_MAX_LENGTH } from '../../domain/security-boundaries.js';
 import { APP_VIEWPORT_CONTENT } from '../ui/mobile-layout.js';
-import {
-  ROOM_SESSION_ERROR,
-  RoomSessionError,
-  createRoom,
-} from '../session/room-session.js';
+import { useCreateBoard } from './use-create-board.js';
+import CreateBoardError from './CreateBoardError.jsx';
+import LandingGuide from './LandingGuide.jsx';
 import PublicWallPreview from '../public-wall/PublicWallPreview.jsx';
 import { LEGAL_PAGE, LEGAL_PATH } from '../legal/legal-content.js';
 import './landing.css';
 
-const CREATE_RETRY_FALLBACK_SECONDS = 2;
 const LANDING_ICON_SIZE_PX = Object.freeze({ BRAND: 22, ACTION: 16, REMOVE: 15 });
 const THEME_ICONS = Object.freeze({ auto: Monitor, dark: Moon, light: Sun });
 
@@ -31,9 +26,7 @@ export default function Landing() {
   const [recents, setRecents] = useState([]);
   const [joinCode, setJoinCode] = useState('');
   const [boardName, setBoardName] = useState('');
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState(null);
-  const creatingRef = useRef(false);
+  const { creating, createError, createBoard: createRoomAndOpen } = useCreateBoard();
   const [lang, setLang] = useLang();
   const { pref: themePref, setThemePref } = useTheme();
 
@@ -89,30 +82,7 @@ export default function Landing() {
     };
   }, []);
 
-  const createBoard = async () => {
-    if (creatingRef.current) return;
-    creatingRef.current = true;
-    setCreating(true);
-    setCreateError(null);
-    try {
-      // The relay, not the browser, allocates and registers the room. Only
-      // after a successful 201 do we remember creator status and navigate.
-      const { code, token } = await createRoom();
-      markBoardCreated(code, token);
-      rememberRecent(code, boardName, token);
-      gotoBoard(code, token);
-    } catch (error) {
-      const rateLimited = error instanceof RoomSessionError
-        && error.code === ROOM_SESSION_ERROR.RATE_LIMITED;
-      setCreateError({
-        code: rateLimited ? ROOM_SESSION_ERROR.RATE_LIMITED : ROOM_SESSION_ERROR.UNAVAILABLE,
-        retryAfterSeconds: rateLimited ? error.retryAfterSeconds : null,
-      });
-    } finally {
-      creatingRef.current = false;
-      setCreating(false);
-    }
-  };
+  const createBoard = () => createRoomAndOpen({ name: boardName });
 
   const join = () => {
     const destination = parseJoinInput(joinCode);
@@ -152,6 +122,7 @@ export default function Landing() {
                 <RecentRow key={`${recent.code}#${recent.token || ''}`} recent={recent} onRemove={removeRecent} />
               )) : <p className="rb-landing__description">{t('landing.recents.empty')}</p>}
             </Surface>
+            <LandingGuide />
             <div className="rb-landing__footer">
               {t('landing.footer')}
               <nav className="rb-landing__legal" aria-label={t('legal.footer.nav')}>
@@ -229,15 +200,7 @@ function CreateCard({ boardName, onNameChange, onCreate, creating, error }) {
           {creating ? t('landing.create.creating') : t('landing.create.btn')}
         </Button>
       </div>
-      {error && (
-        <div role="alert" className="rb-landing__error">
-          {error.code === ROOM_SESSION_ERROR.RATE_LIMITED
-            ? t('landing.create.error.rateLimited', {
-              seconds: error.retryAfterSeconds || CREATE_RETRY_FALLBACK_SECONDS,
-            })
-            : t('landing.create.error.unavailable')}
-        </div>
-      )}
+      <CreateBoardError error={error} />
     </Surface>
   );
 }

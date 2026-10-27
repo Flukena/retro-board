@@ -10,7 +10,7 @@
     "yjs:public:dev": "(test -d /Volumes/ssd-fluke/BaseData || { echo 'Public Wall data volume missing or unavailable: /Volumes/ssd-fluke/BaseData' >&2; exit 1; }) && YJS_PUBLIC_WALL=true YJS_PORT=1235 YJS_DB_DIR=/Volumes/ssd-fluke/BaseData/retro-board/public-wall-dev/db YJS_ALLOW_INSECURE_HTTP=true YJS_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173 node yjs-server.mjs",
     "start": "vite",
     "test": "node scripts/test.mjs",
-    "build": "vite build",
+    "build": "vite build && vite build --ssr src/client/seo/prerender-entry.jsx --outDir .prerender --emptyOutDir && node scripts/prerender-pages.mjs dist .prerender",
     "preview": "vite preview"
   },
   "dependencies": {
