@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { getTemplates } from './builtin-templates.js';
+import { getLang, setLang } from '../ui/i18n.js';
 import { withChromeModule } from '../../test-support/chrome-test-helper.js';
 import { geometryErrorForBoard } from '../../domain/board-geometry.js';
 import { STARTER_FORMAT, starterFormat, starterSlugs, starterTemplate, templatePath } from './starter-formats.js';
@@ -24,8 +26,7 @@ test('each format lays out one valid zone per column; zones either nest or do no
   }
 });
 
-test('Retro Loop uses exactly the in-app Retro Loop layout', async () => {
-  const { getTemplates } = await import('./builtin-templates.js');
+test('Retro Loop uses exactly the in-app Retro Loop layout', () => {
   assert.deepEqual(starterTemplate(STARTER_FORMAT.RETRO_LOOP), getTemplates().retroLoop);
 });
 
@@ -53,7 +54,17 @@ test('every format has its explanation, steps, column notes, prompts and zone ti
   });
 });
 
-test('the in-app template list still offers only Retro Loop', async () => {
-  const { getTemplates } = await import('./builtin-templates.js');
-  assert.deepEqual(Object.keys(getTemplates()), ['retroLoop']);
+test('the in-app list offers every website format using the same translated layout', context => {
+  const originalLang = getLang();
+  context.after(() => setLang(originalLang));
+  for (const lang of ['th', 'en']) {
+    setLang(lang);
+    const templates = Object.values(getTemplates());
+    assert.equal(templates.length, starterSlugs().length);
+    for (const slug of starterSlugs()) {
+      const expected = starterTemplate(slug);
+      const template = templates.find(candidate => candidate.name === expected.name);
+      assert.deepEqual(template, expected, `${lang}: ${slug} missing from room picker`);
+    }
+  }
 });

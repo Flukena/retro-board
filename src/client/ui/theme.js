@@ -75,7 +75,7 @@ const MODE_INDEPENDENT_TOKENS = Object.freeze({
   '--modal-close-inset': '8px',
   '--modal-touch-target': '44px',
   '--modal-input-font-size': '16px',
-  '--font-handwriting': '"Caveat", "Sarabun", cursive',
+  '--font-handwriting': '"Caveat", "Anuphan", cursive',
   '--image-card-filter': 'drop-shadow(0 3px 6px rgba(0,0,0,0.18))',
   '--collaboration-foreground': '#ffffff',
   '--shadow-remote-selection-label': '0 3px 10px rgba(0,0,0,0.22)',
@@ -116,7 +116,7 @@ const MODE_INDEPENDENT_TOKENS = Object.freeze({
   '--landing-hero-margin': '0 0 8px',
   '--landing-logo-size': '52px',
   '--landing-title-font-size': '34px',
-  '--landing-title-font-weight': '500',
+  '--landing-title-font-weight': '700',
   '--landing-title-line-height': '1.2',
   '--landing-subtitle-margin': '4px 0 0',
   '--landing-body-font-size': '13px',
@@ -277,7 +277,7 @@ const MODE_INDEPENDENT_TOKENS = Object.freeze({
   '--zone-title-font-size': `${ZONE_AUTO_TITLE_MAX_FONT_PX}px`,
   '--zone-title-font-weight': '500',
   '--zone-title-line-height': String(ZONE_TITLE_LINE_HEIGHT_RATIO),
-  '--zone-title-ink-clearance': '0.15em', // Thai stacked marks extend above the Mitr ascent.
+  '--zone-title-ink-clearance': '0.15em', // Thai stacked marks extend above the display font's ascent.
   '--zone-count-font-size': `${ZONE_COUNT_FONT_PX}px`,
   '--zone-lock-size': '0.8125em',
   '--zone-title-shadow': '0 2px 0 rgba(0,0,0,0.08)',
@@ -314,8 +314,8 @@ const MODE_INDEPENDENT_TOKENS = Object.freeze({
   '--resilience-recovery-max-width-px': '480px',
   '--radius-sm': '10px',
   '--radius-md': '12px',
-  '--font-ui': '"Sarabun", system-ui, -apple-system, "Segoe UI", sans-serif',
-  '--font-display': '"Mitr", "Sarabun", sans-serif',
+  '--font-ui': '"Anuphan", system-ui, -apple-system, "Segoe UI", sans-serif',
+  '--font-display': '"Anuphan", sans-serif',
   '--font-mono': '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace',
 });
 const LIGHT_RAISED_SHADOW = '0 2px 0 #e2d5bf, 0 12px 24px -14px rgba(110,80,40,0.35)';

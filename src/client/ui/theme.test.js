@@ -237,8 +237,8 @@ test('design C sticky tokens preserve geometry, typography, signals and mode-spe
   };
   for (const tokens of Object.values(TOKENS)) {
     for (const [name, value] of Object.entries(shared)) assert.equal(tokens[name], value, name);
-    assert.ok(tokens['--font-ui'].includes('Sarabun'));
-    assert.ok(tokens['--font-display'].includes('Mitr'));
+    assert.ok(tokens['--font-ui'].includes('Anuphan'));
+    assert.ok(tokens['--font-display'].includes('Anuphan'));
   }
   assert.equal(TOKENS.light['--sticky-vote-bg'], '#2b2118');
   assert.equal(TOKENS.light['--sticky-vote-text'], '#ffffff');
@@ -353,7 +353,7 @@ test('B1 keeps white light canvas, dark canvas and orange signals with independe
     assert.equal(tokens['--landing-gap'], '0px');
     assert.equal(tokens['--landing-logo-size'], '52px');
     assert.equal(tokens['--landing-title-font-size'], '34px');
-    assert.equal(tokens['--landing-title-font-weight'], '500');
+    assert.equal(tokens['--landing-title-font-weight'], '700');
     assert.equal(tokens['--brand-tile-bg'], '#fed7aa');
     assert.equal(tokens['--brand-tile-fg'], '#7c2d12');
   }

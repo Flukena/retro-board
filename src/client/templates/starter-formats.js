@@ -1,10 +1,7 @@
 import { t } from '../ui/i18n.js';
-import { getTemplates } from './builtin-templates.js';
+import { retroLoopTemplate } from './retro-loop-template.js';
 
-// Retrospective formats offered on the public template pages. Each one opens a
-// new board with its zones ready. Only Retro Loop is also in the in-app
-// template list (the owner keeps that list to Retro Loop); its layout comes
-// from that built-in template so the two never drift apart.
+// Public template pages and the in-room picker share these formats and layouts.
 
 export const STARTER_FORMAT = Object.freeze({
   RETRO_LOOP: 'retro-loop',
@@ -88,7 +85,7 @@ export function starterTemplate(slug) {
   const format = Object.hasOwn(FORMATS, slug) ? FORMATS[slug] : null;
   const copy = starterFormat(slug);
   if (!format || !copy) return null;
-  if (format.builtinKey) return getTemplates()[format.builtinKey];
+  if (format.builtinKey) return retroLoopTemplate();
   return {
     name: t(copy.nameKey),
     zones: format.layout.map((zone, index) => ({ ...zone, title: t(copy.columns[index].zoneKey) })),
