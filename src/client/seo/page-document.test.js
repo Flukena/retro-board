@@ -29,3 +29,19 @@ test('inline tokens define light values and override only what dark changes', ()
   assert.equal(css, ':root{--bg:white;--gap:4px}@media (prefers-color-scheme: dark){:root{--bg:black}}');
   assert.equal(escapeHtml(`<a href='x'>`), '&lt;a href=&#39;x&#39;&gt;');
 });
+
+test('an indexable page with an image gets the Open Graph image and a large Twitter/X card', () => {
+  const image = { url: 'https://retroroom.party/card.png', type: 'image/png', widthPx: 1200, heightPx: 630 };
+  const html = pageDocument(TEMPLATE, { lang: 'en', title: 'X', canonical: 'https://retroroom.party/x', image });
+  assert.match(html, /<meta property="og:image" content="https:\/\/retroroom.party\/card.png" \/>/);
+  assert.match(html, /<meta property="og:image:type" content="image\/png" \/>/);
+  assert.match(html, /<meta property="og:image:width" content="1200" \/>/);
+  assert.match(html, /<meta property="og:image:height" content="630" \/>/);
+  assert.match(html, /<meta name="twitter:card" content="summary_large_image" \/>/);
+});
+
+test('a noindex page gets no preview image even when one is passed', () => {
+  const image = { url: 'https://retroroom.party/card.png', type: 'image/png', widthPx: 1200, heightPx: 630 };
+  const html = pageDocument(TEMPLATE, { lang: 'en', title: 'Shell', robots: 'noindex', image });
+  assert.doesNotMatch(html, /og:image|twitter:card/);
+});

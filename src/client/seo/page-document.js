@@ -5,6 +5,7 @@ const ESCAPES = Object.freeze({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&q
 export const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ESCAPES[char]);
 
 export const ROBOTS_NOINDEX = 'noindex';
+const TWITTER_CARD_LARGE_IMAGE = 'summary_large_image';
 const ROOT_ELEMENT = '<div id="root"></div>';
 const TITLE_ELEMENT = /<title>[^<]*<\/title>/;
 const HTML_OPEN = /<html lang="[^"]*">/;
@@ -17,7 +18,16 @@ export function themeTokenCss({ light, dark }) {
   return `:root{${tokenBlock(light)}}@media (prefers-color-scheme: dark){:root{${tokenBlock(darkOnly)}}}`;
 }
 
-function headTags({ title, description, canonical, robots }) {
+// Open Graph image plus the Twitter/X card; X reads title and description from og:*.
+const imageTags = ({ url, type, widthPx, heightPx }) => [
+  `<meta property="og:image" content="${escapeHtml(url)}" />`,
+  `<meta property="og:image:type" content="${escapeHtml(type)}" />`,
+  `<meta property="og:image:width" content="${widthPx}" />`,
+  `<meta property="og:image:height" content="${heightPx}" />`,
+  `<meta name="twitter:card" content="${TWITTER_CARD_LARGE_IMAGE}" />`,
+];
+
+function headTags({ title, description, canonical, robots, image }) {
   const tags = [`<title>${escapeHtml(title)}</title>`];
   if (description) tags.push(`<meta name="description" content="${escapeHtml(description)}" />`);
   if (robots) tags.push(`<meta name="robots" content="${escapeHtml(robots)}" />`);
@@ -27,6 +37,7 @@ function headTags({ title, description, canonical, robots }) {
       `<meta property="og:url" content="${escapeHtml(canonical)}" />`,
       `<meta property="og:title" content="${escapeHtml(title)}" />`);
     if (description) tags.push(`<meta property="og:description" content="${escapeHtml(description)}" />`);
+    if (image) tags.push(...imageTags(image));
   }
   return tags.join('\n    ');
 }
@@ -38,9 +49,9 @@ const replaceOnce = (html, pattern, replacement, label) => {
 };
 
 /** Build one page's HTML from the built index.html template. */
-export function pageDocument(template, { lang, title, description = null, canonical = null, robots = null, body = '', css = '' }) {
+export function pageDocument(template, { lang, title, description = null, canonical = null, robots = null, image = null, body = '', css = '' }) {
   let html = replaceOnce(template, HTML_OPEN, `<html lang="${escapeHtml(lang)}">`, '<html lang>');
-  html = replaceOnce(html, TITLE_ELEMENT, headTags({ title, description, canonical, robots })
+  html = replaceOnce(html, TITLE_ELEMENT, headTags({ title, description, canonical, robots, image })
     + (css ? `\n    <style>${css}</style>` : ''), '<title>');
   return replaceOnce(html, ROOT_ELEMENT, `<div id="root">${body}</div>`, 'root element');
 }

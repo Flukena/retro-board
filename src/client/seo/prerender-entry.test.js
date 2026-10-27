@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { withChromeModule } from '../../test-support/chrome-test-helper.js';
 import { pageDocument } from './page-document.js';
-import { SEO_PAGES, canonicalUrl } from './seo-pages.js';
+import { SEO_PAGES, SITE_ORIGIN, SOCIAL_IMAGE, canonicalUrl } from './seo-pages.js';
 
 const TEMPLATE = readFileSync(new URL('../../../index.html', import.meta.url), 'utf8');
 const hrefs = (html) => new Set([...html.matchAll(/<a [^>]*href="([^"]+)"/g)].map((match) => match[1]));
@@ -67,4 +67,33 @@ test('the not-found page and the board shell are never indexed', async () => {
     assert.match(pages.get('404.html'), /Page not found/);
     assert.match(pages.get('app.html'), /<div id="root"><\/div>/, 'boards render on the client only');
   });
+});
+
+// PNG layout: 8-byte signature, then the IHDR chunk with width and height as
+// big-endian 32-bit integers at bytes 16 and 20.
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const PNG_WIDTH_OFFSET = 16;
+const PNG_HEIGHT_OFFSET = 20;
+// Facebook and X reject preview images above this size.
+const MAX_SOCIAL_IMAGE_BYTES = 5 * 1024 * 1024;
+
+test('every public page links the same absolute preview image and a large card; 404 and app shell do not', async () => {
+  await renderAll((pages) => {
+    const imageUrl = `${SITE_ORIGIN}${SOCIAL_IMAGE.path}`;
+    for (const page of SEO_PAGES) {
+      const html = pages.get(page.path === '/' ? 'index.html' : `${page.path.slice(1)}/index.html`);
+      assert.ok(html.includes(`<meta property="og:image" content="${imageUrl}" />`), page.path);
+      assert.match(html, /<meta name="twitter:card" content="summary_large_image" \/>/, page.path);
+    }
+    for (const file of ['404.html', 'app.html']) assert.doesNotMatch(pages.get(file), /og:image|twitter:card/, file);
+  });
+});
+
+test('the preview image file is a PNG of the declared size and small enough for social sites', () => {
+  const png = readFileSync(new URL(`../../../public${SOCIAL_IMAGE.path}`, import.meta.url));
+  assert.equal(SOCIAL_IMAGE.type, 'image/png');
+  assert.ok(png.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE));
+  assert.equal(png.readUInt32BE(PNG_WIDTH_OFFSET), SOCIAL_IMAGE.widthPx);
+  assert.equal(png.readUInt32BE(PNG_HEIGHT_OFFSET), SOCIAL_IMAGE.heightPx);
+  assert.ok(png.length < MAX_SOCIAL_IMAGE_BYTES);
 });

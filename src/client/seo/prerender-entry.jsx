@@ -6,7 +6,7 @@ import Landing from '../app/Landing.jsx';
 import LegalPage from '../legal/LegalPage.jsx';
 import TemplatePage from '../templates/TemplatePage.jsx';
 import NotFoundPage from '../app/NotFoundPage.jsx';
-import { NOT_FOUND_TITLE_KEY, SEO_PAGES, SEO_PAGE_KIND, canonicalUrl } from './seo-pages.js';
+import { NOT_FOUND_TITLE_KEY, SEO_PAGES, SEO_PAGE_KIND, SOCIAL_IMAGE, canonicalUrl } from './seo-pages.js';
 import { ROBOTS_NOINDEX, themeTokenCss } from './page-document.js';
 
 // Build-time entry (vite build --ssr): renders every public page in English,
@@ -25,10 +25,11 @@ const outputFile = (path) => (path === '/' ? 'index.html' : `${path.slice(1)}/in
 export function prerenderedPages() {
   setLang(PRERENDER_LANG);
   const css = themeTokenCss({ light: TOKENS.light, dark: TOKENS.dark });
+  const image = { ...SOCIAL_IMAGE, url: canonicalUrl(SOCIAL_IMAGE.path) };
   const pages = SEO_PAGES.map((page) => ({
     file: outputFile(page.path),
     options: { lang: PRERENDER_LANG, title: t(page.titleKey), description: t(page.descriptionKey),
-      canonical: canonicalUrl(page.path), body: renderToStaticMarkup(VIEWS[page.kind](page)), css },
+      canonical: canonicalUrl(page.path), image, body: renderToStaticMarkup(VIEWS[page.kind](page)), css },
   }));
   return [
     ...pages,

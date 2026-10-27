@@ -26,6 +26,12 @@ export const NOT_FOUND_TITLE_KEY = 'seo.notFound.title';
 
 export const canonicalUrl = (path) => `${SITE_ORIGIN}${path}`;
 
+// Link-preview card for chat apps and social sites; 1200×630 is the Open Graph
+// large-image size. The file lives in public/.
+export const SOCIAL_IMAGE = Object.freeze({
+  path: '/og-image.png', type: 'image/png', widthPx: 1200, heightPx: 630,
+});
+
 export const seoPageForPath = (path) => {
   const trimmed = path.length > 1 ? path.replace(/\/$/, '') : path;
   return SEO_PAGES.find((entry) => entry.path === trimmed) ?? null;
