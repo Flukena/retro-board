@@ -1,7 +1,12 @@
 import { DEFAULT_STICKY_WIDTH_PX, DEFAULT_STICKY_HEIGHT_PX } from './board-geometry.js';
 import { VIEWPORT_ZOOM_MIN, VIEWPORT_ZOOM_MAX } from './viewport-limits.js';
 
-const FIT_TOTAL_PADDING_PX = 160; // 80 px on each side, matching the existing fit behavior.
+// Screen pixels on each side, whatever the zoom: clears the 72 px top bar.
+// Narrow screens use at most a tenth of the side so content stays readable.
+const FIT_SCREEN_PADDING_PX = 80;
+const FIT_PADDING_MAX_FRACTION = 0.1;
+const FIT_PADDING_SIDES = 2;
+const MIN_FIT_AREA_PX = 1;
 const DEFAULT_ITEM_WIDTH_PX = 200;
 const DEFAULT_ITEM_HEIGHT_PX = 60;
 const DEFAULT_IMAGE_SIZE_PX = 200;
@@ -44,9 +49,11 @@ export const fitViewportToItems = (items, width, height) => {
     minX = Math.min(minX, item.x); minY = Math.min(minY, item.y);
     maxX = Math.max(maxX, item.x + w); maxY = Math.max(maxY, item.y + h);
   });
-  const contentWidth = (maxX - minX) + FIT_TOTAL_PADDING_PX;
-  const contentHeight = (maxY - minY) + FIT_TOTAL_PADDING_PX;
-  const zoom = clampZoom(Math.min(width / contentWidth, height / contentHeight));
+  const fitArea = (side) => {
+    const padding = Math.min(FIT_SCREEN_PADDING_PX, side * FIT_PADDING_MAX_FRACTION);
+    return Math.max(MIN_FIT_AREA_PX, side - padding * FIT_PADDING_SIDES);
+  };
+  const zoom = clampZoom(Math.min(fitArea(width) / (maxX - minX), fitArea(height) / (maxY - minY)));
   const cx = (minX + maxX) * VIEW_CENTER_FRACTION;
   const cy = (minY + maxY) * VIEW_CENTER_FRACTION;
   return {
