@@ -200,7 +200,7 @@ async function checkDesktopNativeGestures(user) {
   await toggleWheelZoom(user);
   try {await nativePinch(user,'.rb-no-select');}finally{await toggleWheelZoom(user);}
   await openDrawing(user);await nativePinch(user,'.rb-drawing-canvas');
-  await activate(user,drawingToolbar(user).getByRole('button',{name:drawingWord(user,'draw.cancel'),exact:true}));
+  await activate(user,drawingToolbar(user).getByRole('button',{name:drawingWord(user,'draw.close'),exact:true}));
   await drawingToolbar(user).waitFor({state:'hidden'});await activate(user,user.page.locator('.rb-zoom-percentage'));
 }
 
@@ -1334,7 +1334,7 @@ async function checkSavedDrawingEdit(user, peer, fixture) {
   await exitDrawing(user);
   await drawingToolbar(user).getByText(drawingWord(user, 'draw.conflict'), { exact: true }).waitFor();
   assert.equal((await canonicalItems(peer)).find(item => item.id === fixture.id).src, edited.src, 'Conflicting edit must not overwrite the peer image');
-  await activate(user, drawingToolbar(user).getByRole('button', { name: drawingWord(user, 'draw.cancel'), exact: true }));
+  await activate(user, drawingToolbar(user).getByRole('button', { name: drawingWord(user, 'draw.close'), exact: true }));
   assert.equal(await uploadedImageItem(user, fixture).evaluate(node => node.style.visibility), '', 'Cancel restores the existing image');
 }
 async function checkSavedDrawingLoadRecovery(user, fixture) {
@@ -1347,13 +1347,13 @@ async function checkSavedDrawingLoadRecovery(user, fixture) {
   await user.page.unroute(routePattern);
   await activate(user, drawingToolbar(user).getByRole('button', { name: drawingWord(user, 'draw.retryLoad'), exact: true }));
   await eventually(() => drawingToolbar(user).locator('[data-drawing-tool="eraser"]').isEnabled(), 'Image load failure must be retryable');
-  await activate(user, drawingToolbar(user).getByRole('button', { name: drawingWord(user, 'draw.cancel'), exact: true }));
+  await activate(user, drawingToolbar(user).getByRole('button', { name: drawingWord(user, 'draw.close'), exact: true }));
   let started;
   const requestStarted = new Promise(resolve => { started = resolve; });
   await user.page.route(routePattern, route => started(route));
   await openSavedDrawing(user, fixture);
   const route = await requestStarted;
-  await activate(user, drawingToolbar(user).getByRole('button', { name: drawingWord(user, 'draw.cancel'), exact: true }));
+  await activate(user, drawingToolbar(user).getByRole('button', { name: drawingWord(user, 'draw.close'), exact: true }));
   await route.abort(); await user.page.unroute(routePattern);
   await drawingToolbar(user).waitFor({ state: 'hidden' });
   assert.equal(await uploadedImageItem(user, fixture).evaluate(node => node.style.visibility), '', 'Cancel during loading must leave the original image visible');
@@ -1396,7 +1396,7 @@ async function checkDrawingCancellation(user, peer, initialIds) {
   await user.page.route('**/upload', route => { started(route); });
   await exitDrawing(user);
   const route = await waiting;
-  await activate(user, drawingToolbar(user).getByRole('button', { name: drawingWord(user, 'draw.cancel'), exact: true }));
+  await activate(user, drawingToolbar(user).getByRole('button', { name: drawingWord(user, 'draw.close'), exact: true }));
   await route.abort(); await user.page.unroute('**/upload');
   await drawingToolbar(user).waitFor({ state: 'hidden' });
   await openDrawing(user);

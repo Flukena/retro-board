@@ -13,21 +13,21 @@ const buttonsIn = (markup, groupLabel) => {
   return group.match(/<button[^>]*>/g) ?? [];
 };
 
-test('Draw has an accessible compact toolbar in both languages, has no Done button and keeps cancellation available', async () => {
+test('Draw has an accessible compact toolbar in both languages, has no Done button and keeps closing available', async () => {
   await withChromeModule('/src/client/board/DrawingTool.jsx', ({ DrawingTool }, { t, setLang, getLang }) => {
     const previous = getLang();
     try {
       for (const lang of ['th', 'en']) {
         setLang(lang);
         const markup = renderToStaticMarkup(React.createElement(DrawingTool, { active: true, editingAllowed: true, lang }));
-        for (const key of ['draw.canvas', 'draw.color', 'draw.width', 'draw.cancel']) {
+        for (const key of ['draw.canvas', 'draw.color', 'draw.width', 'draw.close']) {
           assert.notEqual(t(key), key); assert.ok(markup.includes(t(key)));
         }
         assert.doesNotMatch(markup, /role="dialog"/);
         const save = markup.match(/<button[^>]*>[\s\S]*?<\/button>/g).find(button => button.includes('lucide-check'));
         assert.equal(save, undefined, 'Automatic drawing must not display a Done button');
         assert.ok(!markup.includes('>Done<') && !markup.includes('>เสร็จสิ้น<'));
-        const cancel = markup.match(new RegExp(`<button[^>]*aria-label="${t('draw.cancel')}"[^>]*>`))?.[0];
+        const cancel = markup.match(new RegExp(`<button[^>]*aria-label="${t('draw.close')}"[^>]*>`))?.[0];
         assert.ok(cancel); assert.doesNotMatch(cancel, /disabled/);
         assert.equal(renderToStaticMarkup(React.createElement(DrawingTool, { active: false, lang })), '');
       }
