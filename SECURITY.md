@@ -16,6 +16,16 @@ The separate Public Wall below deliberately accepts anonymous shared editing.
 
 ## Room capability and session flow
 
+The optional [private maintainer console](docs/maintainer.md) has a separate
+listener and owner key, disabled by default. Its status API exposes operational
+metadata only. An authenticated owner can explicitly request a registered room
+link through a same-origin POST and enter as a read/write collaborator. The
+owner key therefore grants access to every registered room on that relay.
+Room links are returned only for the selected room, never in status snapshots;
+Public Wall entry never reveals its internal capability. Production
+activation requires owner approval and loopback-only host publication, with
+Tailscale Serve and owner-only tailnet policy for remote access.
+
 New rooms are created by `POST /yjs/api/rooms`. The relay rate-limits creation,
 registers the room in persistent LevelDB metadata, and returns a random room
 code and capability token. Unknown WebSocket paths never create documents.

@@ -29,6 +29,8 @@ import { publicRelayEnvironment, isPublicWallEnabled, PUBLIC_RELAY_PREFIX, PUBLI
 import { claimPublicDirectory, PublicWallHistory } from './src/server/public-wall-history.js';
 import { provisionPublicWall, RelayPublicWall, retainPublicDocument } from './src/server/relay-public-wall.js';
 import { createRejectionCounters } from './src/server/relay-rejection-counters.js';
+import { startMaintainer } from './src/server/maintainer-server.js';
+import { maintainerSnapshot } from './src/server/maintainer-snapshot.js';
 
 // yjs, y-leveldb, and y-websocket must all resolve to the SAME yjs module
 // instance. y-websocket's bin/utils.js (below) is CJS and does
@@ -1359,6 +1361,13 @@ const rejectUpgrade = (socket, status) => {
 };
 
 const maintenance = new RelayMaintenance();
+const maintainer = await startMaintainer(process.env, () => maintainerSnapshot({
+  registry: roomRegistry, docs, connections: wsConnectionsByRoom, blockedRooms, roomUsage,
+  ready: isRelayReady(storageFailure, shuttingDown), publicWall: PUBLIC_WALL,
+  databaseBytes: dbUsageBytes, uploadBytes: uploadState.bytes,
+  pendingStoreOps, pendingStoreBytes, activeDocumentBytes,
+  limits: { databaseBytes: MAX_DB_BYTES, uploadBytes: MAX_UPLOAD_STORAGE_BYTES, activeDocumentBytes: MAX_ACTIVE_DOCUMENT_BYTES, pendingStoreBytes: MAX_PENDING_STORE_BYTES, pendingStoreOps: MAX_PENDING_STORE_OPS },
+}), { registry: roomRegistry, boardOrigin: ALLOWED_ORIGINS[0], publicWall: PUBLIC_WALL });
 maintenance.on(MAINTENANCE_STORAGE_FAILURE_EVENT, markStorageFailure);
 const runMaintenance = () => maintenance.run({
   publicWall: publicWall && { docName: publicWall.docName, history: publicHistory },
@@ -1824,6 +1833,7 @@ const lifecycle = createRelayLifecycle({
   onStart: (signal) => {
     shuttingDown = true;
     clearInterval(maintenanceTimer);
+    maintainer?.close(); maintainer?.closeAllConnections();
     console.log('[yjs] draining', { signal, rooms: docs.size });
   },
   drain: async () => {

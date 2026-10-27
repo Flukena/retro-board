@@ -1,3 +1,13 @@
+FROM node:24-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf AS maintainer-ui
+WORKDIR /build
+COPY package.json package-lock.json ./
+RUN npm ci --ignore-scripts --no-audit --no-fund
+COPY vite.maintainer.config.js ./
+COPY maintainer ./maintainer
+COPY src/client ./src/client
+COPY src/domain ./src/domain
+RUN npm run maintainer:build
+
 FROM node:24-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf
 
 WORKDIR /app
@@ -17,6 +27,7 @@ RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
 
 # Server entrypoint and its shared pure domain modules.
 COPY --chown=node:node yjs-server.mjs ./
+COPY --from=maintainer-ui --chown=node:node /build/dist-maintainer ./dist-maintainer
 COPY --chown=node:node \
     src/domain/awareness-liveness.js src/domain/board-coordinates.js src/domain/board-geometry.js \
     src/domain/board-ownership.js src/domain/board-reconciliation.js src/domain/board-state.js \
@@ -34,6 +45,7 @@ COPY --chown=node:node \
     ./src/domain/
 
 COPY --chown=node:node \
+    src/server/maintainer-room-access.js src/server/maintainer-server.js src/server/maintainer-session.js src/server/maintainer-snapshot.js \
     src/server/public-restore-images.js src/server/public-upload-backup.js src/server/public-wall-config.js \
     src/server/public-wall-history.js src/server/public-wall-prune.js src/server/public-wall-restore.js \
     src/server/public-wall-snapshot.js src/server/relay-awareness-fanout.js src/server/relay-config.js src/server/relay-http.js \
