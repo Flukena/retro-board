@@ -48,7 +48,6 @@ const STICKY_POSITION_A_PX = { x: 480, y: 360 };
 const STICKY_POSITION_B_PX = { x: 960, y: 360 };
 const PARTICIPANT_NAME_A = 'UI check A';
 const PARTICIPANT_NAME_B = 'UI check B';
-const CREATE_BUTTON_LABEL = 'Create';
 const SYNC_DIRECTION_A_TO_B = 'A→B';
 const SYNC_DIRECTION_B_TO_A = 'B→A';
 const STEP_NAMES = {
@@ -59,7 +58,7 @@ const STEP_NAMES = {
 };
 const LABELS = {
   en: {
-    landingTagline: 'Create or join a real-time retrospective room',
+    landingTitle: 'Free online retrospective board.', createButton: 'Create',
     namePlaceholder: 'e.g. "Fluke"', nameConfirm: 'Enter room',
     stickyPlaceholder: 'Double-click to edit',
     revealTitle: 'Off: hide in the normal UI (not encrypted)',
@@ -67,7 +66,7 @@ const LABELS = {
     nothingToUndoTitle: 'Nothing to undo (only reverts your own edits from this tab)',
   },
   th: {
-    landingTagline: 'สร้างหรือเข้าร่วมห้อง retrospective แบบ real-time',
+    landingTitle: 'บอร์ด retrospective ออนไลน์ฟรี', createButton: 'สร้างห้อง',
     namePlaceholder: 'เช่น "ฟลุค"', nameConfirm: 'เข้าห้อง',
     stickyPlaceholder: 'ดับเบิลคลิกเพื่อแก้ไข',
     revealTitle: 'ปิด: ซ่อนในหน้าจอปกติ (ไม่ได้เข้ารหัส)',
@@ -206,8 +205,9 @@ async function captureScreenshot(page, filename, report, out) {
 async function landingScreenshot(page, options, appearance, report) {
   await page.goto(options.baseUrl, { waitUntil: 'domcontentloaded' });
   await applyAppearance(page, appearance);
-  await page.getByRole('button', { name: CREATE_BUTTON_LABEL, exact: true }).waitFor();
-  await page.getByText(LABELS[appearance.lang].landingTagline, { exact: true }).waitFor();
+  const labels = LABELS[appearance.lang];
+  await page.getByRole('button', { name: labels.createButton, exact: true }).waitFor();
+  await page.getByRole('heading', { level: 1 }).filter({ hasText: labels.landingTitle }).waitFor();
   return captureScreenshot(page, `landing-${appearance.lang}-${appearance.theme}.png`, report, options.out);
 }
 
@@ -266,7 +266,7 @@ async function assertCanvasReceivesPointer(page, positionPx) {
 async function createBoard(page, options, report) {
   await page.goto(options.baseUrl, { waitUntil: 'domcontentloaded' });
   await applyAppearance(page, INITIAL_APPEARANCE_A);
-  await page.getByRole('button', { name: CREATE_BUTTON_LABEL, exact: true }).click();
+  await page.getByRole('button', { name: LABELS[INITIAL_APPEARANCE_A.lang].createButton, exact: true }).click();
   await page.waitForURL(BOARD_URL_PATTERN, { waitUntil: 'domcontentloaded' });
   report.boardUrl = page.url();
   await passNamePrompt(page, INITIAL_APPEARANCE_A.lang, PARTICIPANT_NAME_A);
