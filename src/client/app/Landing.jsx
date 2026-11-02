@@ -1,15 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Sparkles, Plus, ArrowRight, Sun, Moon, Monitor, Check, ChevronDown,
+  Sparkles, Plus, ArrowRight, Check, ChevronDown,
 } from 'lucide-react';
 import { ROOM_KIND, gotoBoard } from './router.js';
 import RecentRooms, { useRecentRooms } from './RecentRooms.jsx';
-import { t, useLang } from '../ui/i18n.js';
-import { LanguagePicker } from '../ui/LanguagePicker.jsx';
-import { useTheme, nextThemePref } from '../ui/theme.js';
+import { t } from '../ui/i18n.js';
 import { Button, Surface } from '../ui/UiPrimitives.jsx';
 import { BUTTON_VARIANT, SURFACE_KIND } from '../ui/ui-variants.js';
-import { TOPBAR_ICON_SIZE_PX } from '../chrome/chrome-layout.js';
 import { parseJoinInput } from './join-input.js';
 import { DISPLAY_NAME_MAX_LENGTH } from '../../domain/security-boundaries.js';
 import { APP_VIEWPORT_CONTENT } from '../ui/mobile-layout.js';
@@ -21,12 +18,17 @@ import PublicWallPreview from '../public-wall/PublicWallPreview.jsx';
 import PokerFeature from '../poker/PokerFeature.jsx';
 import { PLANNING_POKER_PATH } from '../seo/seo-pages.js';
 import { LEGAL_PAGE, LEGAL_PATH } from '../legal/legal-content.js';
+import SiteMasthead from './SiteMasthead.jsx';
 import './landing.css';
 
-const LANDING_ICON_SIZE_PX = Object.freeze({ BRAND: 22, ACTION: 16, TRUST: 14 });
-const THEME_ICONS = Object.freeze({ auto: Monitor, dark: Moon, light: Sun });
+const LANDING_ICON_SIZE_PX = Object.freeze({ ACTION: 16, TRUST: 14 });
 const TRUST_KEYS = Object.freeze(['landing.trust.free', 'landing.trust.signup', 'landing.trust.realtime']);
 export const RECENTS_SECTION_ID = 'landing-recents';
+const LANDING_LINKS = Object.freeze([
+  { href: '#landing-guide-templates', labelKey: 'landing.nav.templates' },
+  { href: '#landing-guide-faq', labelKey: 'landing.nav.faq' },
+  { href: PLANNING_POKER_PATH, labelKey: 'poker.title' },
+]);
 
 function useBlockBrowserZoom() {
   // Block browser zoom on Landing only — board has its own zoom logic.
@@ -103,7 +105,7 @@ export default function Landing() {
   return (
     <div className="rb-landing__page" onContextMenu={(e) => e.preventDefault()}>
       <main className="rb-landing__content">
-        <PublicWallPreview variant="hero" masthead={<LandingMasthead />} belowHero={
+        <PublicWallPreview variant="hero" masthead={<SiteMasthead homeHref="/" BrandIcon={Sparkles} titleKey="app.title" links={LANDING_LINKS} />} belowHero={
           <>
             <div className="rb-landing__feature">
               <PokerFeature titleKey="landing.poker.head" ledeKey="landing.poker.desc" showGuideLink buttonVariant={BUTTON_VARIANT.DEFAULT} />
@@ -138,25 +140,6 @@ export default function Landing() {
   );
 }
 
-function LandingMasthead() {
-  useLang();
-  const { pref: themePref, setThemePref } = useTheme();
-  return (
-    <header className="rb-landing__masthead">
-      <a className="rb-landing__identity" href="/">
-        <span className="rb-landing__brand"><Sparkles size={LANDING_ICON_SIZE_PX.BRAND} /></span>
-        <span className="rb-landing__wordmark">{t('app.title')}</span>
-      </a>
-      <nav className="rb-landing__nav" aria-label={t('tpl.linksNav')}>
-        <a href="#landing-guide-templates">{t('landing.nav.templates')}</a>
-        <a href="#landing-guide-faq">{t('landing.nav.faq')}</a>
-        <a href={PLANNING_POKER_PATH}>{t('poker.title')}</a>
-      </nav>
-      <CornerToggles themePref={themePref} onTheme={() => setThemePref(nextThemePref(themePref))} />
-    </header>
-  );
-}
-
 function LandingFooter() {
   return (
     <footer className="rb-landing__footer">
@@ -170,24 +153,6 @@ function LandingFooter() {
         <a href={LEGAL_PATH[LEGAL_PAGE.TERMS]}>{t('legal.footer.terms')}</a>
       </nav>
     </footer>
-  );
-}
-
-function CornerToggles({ themePref, onTheme }) {
-  const ThemeIcon = THEME_ICONS[themePref];
-  const themeTitle = `${t('settings.theme')}: ${t(`settings.theme.${themePref}`)}`;
-  return (
-    <div className="rb-landing__corner">
-      <LanguagePicker />
-      <Button
-        className="rb-btn--pill"
-        onClick={onTheme}
-        title={themeTitle}
-        aria-label={themeTitle}
-      >
-        <ThemeIcon size={TOPBAR_ICON_SIZE_PX.TOGGLE} />
-      </Button>
-    </div>
   );
 }
 

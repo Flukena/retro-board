@@ -762,5 +762,6 @@ export default Object.freeze({
   "pokerPage.section.decks": "Barajas disponibles",
   "pokerPage.decks": "Fibonacci (0–21), Fibonacci modificada (0, ½, 1–100), tallas de camiseta (XS–XXL) y potencias de 2. Todas las barajas incluyen ? para \"no estoy seguro\" y ☕ para \"necesito un descanso\".",
   "pokerPage.section.why": "Por qué ocultar las cartas",
-  "pokerPage.why": "Cuando la gente ve un número primero, tiende a seguirlo. Voltear todas a la vez recoge la opinión real de cada persona y muestra de inmediato qué historias entiende el equipo de forma distinta."
+  "pokerPage.why": "Cuando la gente ve un número primero, tiende a seguirlo. Voltear todas a la vez recoge la opinión real de cada persona y muestra de inmediato qué historias entiende el equipo de forma distinta.",
+  "pokerPage.retroLink": "Tablero de retro"
 });

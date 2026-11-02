@@ -762,5 +762,6 @@ export default Object.freeze({
   "pokerPage.section.decks": "使えるデッキ",
   "pokerPage.decks": "Fibonacci(0〜21)、Modified Fibonacci(0、½、1〜100)、Tシャツサイズ(XS〜XXL)、2の累乗。どのデッキにも、「わからない」の ? と「休憩したい」の ☕ があります。",
   "pokerPage.section.why": "カードを伏せる理由",
-  "pokerPage.why": "先に数字を見てしまうと、人はそれに引っ張られがちです。一斉にめくることで全員の本当の意見が集まり、チームの理解が食い違っているストーリーがすぐにわかります。"
+  "pokerPage.why": "先に数字を見てしまうと、人はそれに引っ張られがちです。一斉にめくることで全員の本当の意見が集まり、チームの理解が食い違っているストーリーがすぐにわかります。",
+  "pokerPage.retroLink": "ふりかえりボード"
 });

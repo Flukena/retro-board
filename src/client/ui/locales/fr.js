@@ -762,5 +762,6 @@ export default Object.freeze({
   "pokerPage.section.decks": "Jeux disponibles",
   "pokerPage.decks": "Fibonacci (0–21), Fibonacci modifié (0, ½, 1–100), tailles de T-shirt (XS–XXL) et puissances de 2. Chaque jeu comprend ? pour « pas sûr » et ☕ pour « besoin d’une pause ».",
   "pokerPage.section.why": "Pourquoi cacher les cartes",
-  "pokerPage.why": "Quand on voit d’abord un chiffre, on a tendance à le suivre. Retourner les cartes ensemble capte l’avis réel de chacun et montre aussitôt quelles stories l’équipe comprend différemment."
+  "pokerPage.why": "Quand on voit d’abord un chiffre, on a tendance à le suivre. Retourner les cartes ensemble capte l’avis réel de chacun et montre aussitôt quelles stories l’équipe comprend différemment.",
+  "pokerPage.retroLink": "Tableau de rétro"
 });

@@ -762,5 +762,6 @@ export default Object.freeze({
   "pokerPage.section.decks": "可用牌组",
   "pokerPage.decks": "Fibonacci（0–21）、改良 Fibonacci（0、½、1–100）、T 恤尺码（XS–XXL）和 2 的幂。每个牌组都有表示“不确定”的 ? 和表示“需要休息”的 ☕。",
   "pokerPage.section.why": "为什么要隐藏牌面",
-  "pokerPage.why": "人们先看到一个数字时，往往会跟着它走。同时翻牌能获得每个人的真实想法，并立刻显示团队对哪些故事的理解不一致。"
+  "pokerPage.why": "人们先看到一个数字时，往往会跟着它走。同时翻牌能获得每个人的真实想法，并立刻显示团队对哪些故事的理解不一致。",
+  "pokerPage.retroLink": "回顾看板"
 });

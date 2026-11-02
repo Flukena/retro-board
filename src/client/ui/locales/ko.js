@@ -762,5 +762,6 @@ export default Object.freeze({
   "pokerPage.section.decks": "사용 가능한 덱",
   "pokerPage.decks": "Fibonacci(0–21), 수정된 Fibonacci(0, ½, 1–100), 티셔츠 사이즈(XS–XXL), 2의 거듭제곱. 모든 덱에 \"잘 모르겠음\"을 뜻하는 ?와 \"휴식 필요\"를 뜻하는 ☕가 있습니다.",
   "pokerPage.section.why": "카드를 숨기는 이유",
-  "pokerPage.why": "사람들은 숫자를 먼저 보면 그 숫자를 따라가기 쉽습니다. 함께 뒤집으면 모두의 진짜 의견을 얻을 수 있고, 어떤 스토리를 팀이 서로 다르게 이해하는지 바로 알 수 있습니다."
+  "pokerPage.why": "사람들은 숫자를 먼저 보면 그 숫자를 따라가기 쉽습니다. 함께 뒤집으면 모두의 진짜 의견을 얻을 수 있고, 어떤 스토리를 팀이 서로 다르게 이해하는지 바로 알 수 있습니다.",
+  "pokerPage.retroLink": "회고 보드"
 });

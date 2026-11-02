@@ -762,5 +762,6 @@ export default Object.freeze({
   "pokerPage.section.decks": "Các bộ bài có sẵn",
   "pokerPage.decks": "Fibonacci (0–21), Fibonacci cải tiến (0, ½, 1–100), cỡ áo T-shirt (XS–XXL) và lũy thừa của 2. Mọi bộ bài đều có ? cho \"chưa chắc\" và ☕ cho \"cần nghỉ giải lao\".",
   "pokerPage.section.why": "Vì sao nên ẩn thẻ",
-  "pokerPage.why": "Khi thấy một con số trước, mọi người có xu hướng làm theo. Lật cùng lúc giúp ghi nhận ý kiến thật của từng người và cho thấy ngay những story mà nhóm hiểu khác nhau."
+  "pokerPage.why": "Khi thấy một con số trước, mọi người có xu hướng làm theo. Lật cùng lúc giúp ghi nhận ý kiến thật của từng người và cho thấy ngay những story mà nhóm hiểu khác nhau.",
+  "pokerPage.retroLink": "Bảng retro"
 });

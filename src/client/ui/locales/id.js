@@ -762,5 +762,6 @@ export default Object.freeze({
   "pokerPage.section.decks": "Deck yang tersedia",
   "pokerPage.decks": "Fibonacci (0–21), Modified Fibonacci (0, ½, 1–100), ukuran kaos (XS–XXL), dan pangkat 2. Setiap deck punya ? untuk \"tidak yakin\" dan ☕ untuk \"perlu istirahat\".",
   "pokerPage.section.why": "Mengapa kartu disembunyikan",
-  "pokerPage.why": "Saat orang melihat angka lebih dulu, mereka cenderung mengikutinya. Membuka bersamaan menangkap pendapat asli semua orang dan langsung menunjukkan story mana yang dipahami berbeda oleh tim."
+  "pokerPage.why": "Saat orang melihat angka lebih dulu, mereka cenderung mengikutinya. Membuka bersamaan menangkap pendapat asli semua orang dan langsung menunjukkan story mana yang dipahami berbeda oleh tim.",
+  "pokerPage.retroLink": "Papan retro"
 });

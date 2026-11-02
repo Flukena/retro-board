@@ -312,8 +312,27 @@
 }
 
 /* Planning Poker showcase (home lead feature and /planning-poker hero) */
-/* The guide page lists your poker rooms right under the start card. */
-.rb-poker-feature + .rb-landing__card--recents { margin-top: var(--space-4); }
+/* Planning Poker home: unlike the retro hero, this page scrolls as one column. */
+.rb-poker-home { height: auto; overflow: visible; padding-bottom: var(--space-6); }
+.rb-poker-home__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  box-sizing: border-box;
+  width: calc(100% - 2 * var(--landing-hero-padding));
+  max-width: calc(var(--landing-content-max-width) - 2 * var(--landing-hero-padding));
+  margin: var(--space-8) auto 0;
+}
+.rb-poker-home .rb-poker-home__main .rb-landing__card--recents { width: 100%; margin: 0; }
+/* The guide card's own padding replaces the first heading's top margin. */
+.rb-poker-home__guide > .rb-legal__section:first-child h2 { margin-top: 0; }
+.rb-poker-home__retro { display: inline-flex; align-items: center; gap: var(--space-2); text-decoration: none; white-space: nowrap; }
+/* Phones keep the logo and the way back to the retro board as icons (the link keeps its
+   name); the page heading right below already says Planning Poker. */
+@media (max-width: 599px) {
+  .rb-poker-home__retro-label,
+  .rb-poker-home .rb-landing__wordmark { display: none; }
+}
 
 .rb-poker-feature {
   display: grid;

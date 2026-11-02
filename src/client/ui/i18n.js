@@ -803,6 +803,7 @@ const dict = {
     'pokerPage.section.decks': 'ชุดการ์ดที่มีให้',
     'pokerPage.decks': 'Fibonacci (0–21), Modified Fibonacci (0, ½, 1–100), ไซซ์เสื้อ (XS–XXL) และเลขยกกำลังสอง ทุกชุดมีการ์ด ? สำหรับไม่แน่ใจ และ ☕ สำหรับขอพัก',
     'pokerPage.section.why': 'ทำไมต้องซ่อนการ์ด',
+    'pokerPage.retroLink': 'บอร์ด Retro',
     'pokerPage.why': 'ถ้าเห็นตัวเลขของคนอื่นก่อน คนมักเลือกตาม การเปิดพร้อมกันทำให้ได้ความเห็นจริงของทุกคน และรู้ทันทีว่างานไหนยังเข้าใจไม่ตรงกัน',
   },
   en: {
@@ -1587,6 +1588,7 @@ const dict = {
     'pokerPage.section.decks': 'Available decks',
     'pokerPage.decks': 'Fibonacci (0–21), Modified Fibonacci (0, ½, 1–100), T-shirt sizes (XS–XXL) and powers of 2. Every deck has ? for "not sure" and ☕ for "need a break".',
     'pokerPage.section.why': 'Why hide the cards',
+    'pokerPage.retroLink': 'Retro board',
     'pokerPage.why': 'When people see a number first they tend to follow it. Flipping together captures everyone’s real opinion and shows at once which stories the team understands differently.',
   },
 };

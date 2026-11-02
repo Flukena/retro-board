@@ -762,5 +762,6 @@ export default Object.freeze({
   "pokerPage.section.decks": "Verfügbare Decks",
   "pokerPage.decks": "Fibonacci (0–21), Modifiziertes Fibonacci (0, ½, 1–100), T-Shirt-Größen (XS–XXL) und Zweierpotenzen. Jedes Deck hat ? für „unsicher“ und ☕ für „Pause nötig“.",
   "pokerPage.section.why": "Warum die Karten verdeckt bleiben",
-  "pokerPage.why": "Wer zuerst eine Zahl sieht, orientiert sich meist daran. Gemeinsames Aufdecken erfasst die echte Meinung aller und zeigt sofort, welche Stories das Team unterschiedlich versteht."
+  "pokerPage.why": "Wer zuerst eine Zahl sieht, orientiert sich meist daran. Gemeinsames Aufdecken erfasst die echte Meinung aller und zeigt sofort, welche Stories das Team unterschiedlich versteht.",
+  "pokerPage.retroLink": "Retro-Board"
 });
