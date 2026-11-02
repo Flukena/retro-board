@@ -83,13 +83,13 @@ test('Select is pressed at rest; an armed placement tool keeps its own label and
         const select = dockButton(resting, TOOL_ID.SELECT);
         assert.match(select, /aria-pressed="true"/);
         assert.ok(select.includes(`>${t('tool.select')}</span>`));
-        assert.ok(select.includes(`title="${t('tool.select.title')}"`));
+        assert.ok(select.includes(`title="${t('tool.select.title')} (V)"`));
         assert.match(select, /lucide-mouse-pointer2/);
         const selecting = renderToStaticMarkup(React.createElement(ToolDock, { creationMode: TOOL_ID.SELECT }));
         const explicitSelect = dockButton(selecting, TOOL_ID.SELECT);
         assert.match(explicitSelect, /aria-pressed="true"/);
         assert.ok(explicitSelect.includes(`>${t('tool.select')}</span>`));
-        assert.ok(explicitSelect.includes(`title="${t('tool.select.title')}"`));
+        assert.ok(explicitSelect.includes(`title="${t('tool.select.title')} (V)"`));
         assert.doesNotMatch(resting, /rb-placement-hint/);
         for (const toolId of [TOOL_ID.TEXT, TOOL_ID.ZONE]) {
           assert.match(dockButton(resting, toolId), /aria-pressed="false"/);

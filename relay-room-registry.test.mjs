@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { ROOM_ACTIVITY_META } from './src/server/room-activity.js';
 import { ROOM_HANDLE_RE, STORE_OPERATION_OVERHEAD_BYTES } from './src/server/relay-config.js';
 import { RoomRegistry, REGISTRY_STORAGE_FAILURE_EVENT, databaseCapacityError } from './src/server/relay-room-registry.js';
 
@@ -122,7 +123,7 @@ test('registry creation reserves synchronously and publishes only after the fina
   assert.equal(registry.registeredDocs.size, 0);
   releaseSeed();
   const room = await creating;
-  assert.deepEqual(trace, [SEED_STEP_LABEL, HANDLE_KEY, USAGE_KEY, FLUSH_STEP_LABEL, DISK_STEP_LABEL, REGISTRATION_KEY]);
+  assert.deepEqual(trace, [SEED_STEP_LABEL, HANDLE_KEY, USAGE_KEY, ROOM_ACTIVITY_META, FLUSH_STEP_LABEL, DISK_STEP_LABEL, REGISTRATION_KEY]);
   const name = registry.registeredDocForCapability(room.code, room.token);
   assert.ok(name);
   assert.equal(registry.registeredDocs.size, 1);
@@ -132,7 +133,7 @@ test('registry creation reserves synchronously and publishes only after the fina
   assert.equal(registry.registeredDocForCapability(room.code, `${room.token}x`), null);
 });
 
-for (const failAt of [SEED_STEP_LABEL, HANDLE_KEY, USAGE_KEY, FLUSH_STEP_LABEL, REGISTRATION_KEY]) {
+for (const failAt of [SEED_STEP_LABEL, HANDLE_KEY, USAGE_KEY, ROOM_ACTIVITY_META, FLUSH_STEP_LABEL, REGISTRATION_KEY]) {
   test(`registry creation preserves the original ${failAt} failure and releases reservations`, async () => {
     const error = Object.assign(new Error('injected storage error'), { code: STORAGE_FAILURE_CODE });
     const { registry, trace, metadata } = await registryFixture({ failAt, error });
@@ -182,7 +183,7 @@ test('registry disk quota failure precedes marker and latches before rollback fa
   assert.equal(trace.includes(REGISTRATION_KEY), false);
   assert.equal(failures.length, 1);
   assert.equal(failures[0].code, ROOM_CAPACITY_CODE);
-  assert.deepEqual(trace, [SEED_STEP_LABEL, HANDLE_KEY, USAGE_KEY, FLUSH_STEP_LABEL, DISK_STEP_LABEL, ROLLBACK_STEP_LABEL]);
+  assert.deepEqual(trace, [SEED_STEP_LABEL, HANDLE_KEY, USAGE_KEY, ROOM_ACTIVITY_META, FLUSH_STEP_LABEL, DISK_STEP_LABEL, ROLLBACK_STEP_LABEL]);
   assertReservationsReleased(registry);
 });
 
@@ -241,7 +242,7 @@ test('registry rollback disk scan failure latches without replacing the write er
   assertReservationsReleased(registry);
 });
 
-for (const key of [REGISTRATION_KEY, HANDLE_KEY, USAGE_KEY]) {
+for (const key of [REGISTRATION_KEY, HANDLE_KEY, USAGE_KEY, ROOM_ACTIVITY_META]) {
   test(`registry startup propagates ${key} read failures`, async () => {
     const error = new Error('metadata read failed');
     const metadata = new Map([[`${DOC_NAME}:${REGISTRATION_KEY}`, 1], [`${DOC_NAME}:${HANDLE_KEY}`, HANDLE]]);

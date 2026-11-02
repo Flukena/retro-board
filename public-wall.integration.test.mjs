@@ -71,8 +71,8 @@ async function session(server) {
   assert.equal(response.status, 200);
   return { ...await response.json(), cookie: response.headers.get('set-cookie').split(';')[0] };
 }
-async function writer(t, server, credentials) {
-  const ws = new WebSocket(`${server.base.replace('http:', 'ws:')}/yjs-public/rooms/${credentials.roomHandle}`, {
+async function writer(t, server, credentials, query = '') {
+  const ws = new WebSocket(`${server.base.replace('http:', 'ws:')}/yjs-public/rooms/${credentials.roomHandle}${query}`, {
     headers: { origin: ORIGIN, cookie: credentials.cookie },
   });
   t.after(() => ws.terminate());
@@ -280,4 +280,80 @@ test('public flood cannot consume the main relay session or health budgets', asy
   assert.equal(authenticatedImage.status, 200);
   assert.deepEqual(Buffer.from(await authenticatedImage.arrayBuffer()), PNG_BYTES);
   assert.equal((await fetch(`${main.base}/readyz`)).status, 200);
+});
+
+test('public relay enforces the IP creation quota across connections but permits deletions', async t => {
+  const server = await relay(t);
+  const credentials = await session(server);
+  const first = await writer(t, server, credentials);
+  const doc = new Y.Doc();
+  const deletion = new Y.Doc();
+  t.after(() => { doc.destroy(); deletion.destroy(); });
+  doc.transact(() => {
+    for (let index = 0; index < 10; index += 1) {
+      doc.getMap('items').set(`limited-${index}`, new Y.Map([['type', 'sticky'], ['x', 0], ['y', 0]]));
+    }
+  });
+  await sendBoardUpdate(first, doc);
+  Y.applyUpdate(deletion, Y.encodeStateAsUpdate(doc));
+  const second = await writer(t, server, credentials);
+  const closed = once(second, 'close');
+  doc.getMap('items').set('limited-over', new Y.Map([['type', 'sticky'], ['x', 0], ['y', 0]]));
+  const message = encoding.createEncoder();
+  encoding.writeVarUint(message, SYNC_MESSAGE_TYPE);
+  encoding.writeVarUint(message, SYNC_UPDATE_TYPE);
+  encoding.writeVarUint8Array(message, Y.encodeStateAsUpdate(doc));
+  second.send(encoding.toUint8Array(message));
+  const [code, reason] = await closed;
+  assert.equal(code, 1008);
+  assert.equal(reason.toString(), 'public action limit');
+  deletion.getMap('items').delete('limited-0');
+  await sendBoardUpdate(first, deletion);
+});
+
+test('public relay admits one image creation per IP per minute across connections', async t => {
+  const server = await relay(t);
+  const credentials = await session(server);
+  const first = await writer(t, server, credentials);
+  const doc = new Y.Doc();
+  t.after(() => doc.destroy());
+  doc.getMap('items').set('image-one', new Y.Map([['type', 'image'], ['x', 0], ['y', 0]]));
+  await sendBoardUpdate(first, doc);
+  const second = await writer(t, server, credentials);
+  const closed = once(second, 'close');
+  doc.getMap('items').set('image-two', new Y.Map([['type', 'image'], ['x', 0], ['y', 0]]));
+  const message = encoding.createEncoder();
+  encoding.writeVarUint(message, SYNC_MESSAGE_TYPE);
+  encoding.writeVarUint(message, SYNC_UPDATE_TYPE);
+  encoding.writeVarUint8Array(message, Y.encodeStateAsUpdate(doc));
+  second.send(encoding.toUint8Array(message));
+  const [code, reason] = await closed;
+  assert.equal(code, 1008);
+  assert.equal(reason.toString(), 'public action limit');
+});
+
+test('Public clients sharing an IP receive the updated creation budget and sender acknowledgement', async t => {
+  const server = await relay(t);
+  const credentials = await session(server);
+  const first = await writer(t, server, credentials, '?awarenessId=101&quota=1');
+  const second = await writer(t, server, credentials, '?awarenessId=102&quota=1');
+  const quota = socket => new Promise(resolveQuota => {
+    const inspect = data => {
+      const decoder = decoding.createDecoder(new Uint8Array(data));
+      if (decoding.readVarUint(decoder) !== 4) return;
+      const value = JSON.parse(decoding.readVarString(decoder));
+      if (!value.entries.length) return;
+      socket.off('message', inspect);
+      resolveQuota(value);
+    };
+    socket.on('message', inspect);
+  });
+  const firstQuota = quota(first), secondQuota = quota(second);
+  const doc = new Y.Doc(); t.after(() => doc.destroy());
+  doc.getMap('items').set('quota-message-item', new Y.Map([['type', 'sticky'], ['x', 0], ['y', 0]]));
+  await sendBoardUpdate(second, doc);
+  const [observer, sender] = await Promise.all([firstQuota, secondQuota]);
+  assert.equal(observer.entries[0].creations, 1);
+  assert.deepEqual(observer.acceptedIds, []);
+  assert.deepEqual(sender.acceptedIds, ['quota-message-item']);
 });

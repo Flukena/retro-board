@@ -64,7 +64,7 @@ Every implementation, fix, refactor and test, in all repos and roles (including 
 - Helpers: name repeated snippets; reuse existing helpers/constants first.
 - Constants: no magic numbers/strings; name every bound, interval, cap and label with its unit in the name (e.g. `POLL_INTERVAL_MS`); add a comment only for a non-obvious source (spec/ICD/plan line).
 - One-way dependencies, top → down: no lower-to-owner/caller calls, parent callbacks, back-references (e.g. Rc/Weak or a stored parent handle), circular imports or module cycles. Report upward only by return, event/message, or interface/trait owned by the lower layer. A coordinator calls mutually dependent peers.
-- Imports at the top, never mid-file or left behind by moved/deleted blocks. Inline only to break a circular dependency; comment why.
+- Imports at the top, never mid-file or left behind by moved/deleted blocks. Inline only to break a circular dependency or to defer a heavy optional library (e.g. `pandas`, `pyarrow`); comment why.
 - Report duplication/cycles you could not remove in files you own.
 - Never silence a gate to pass: no new `noqa`/`NOSONAR`/`type: ignore`/`#[allow]`, `skip`/`xfail`, raised ratchet baselines or lowered coverage/quality thresholds. If a rule looks wrong, report it with the reason.
 - Reuse tooling first: check the repo's `scripts/` (and its script catalog, if any) before writing a probe/check script. A new script likely to be reused goes in `scripts/` and its catalog entry.

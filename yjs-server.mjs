@@ -4,8 +4,8 @@ import { RelayProtocol } from './src/server/relay-protocol.js';
 // Yjs WebSocket relay with LevelDB persistence.
 // Single source of truth for collaborative state.
 
-import { envInt, envBool, readRelayConfig, syncResponseLimits, MILLISECONDS_PER_SECOND, MILLISECONDS_PER_HOUR, ROOM_BLOCK_TTL_MS, BLOCKED_ROOM_ENTRIES_PER_ACTIVE_ROOM, LARGE_UPDATE_LOG_THRESHOLD_BYTES, VOTE_EXPIRY_RETRY_INTERVAL_MS, MAINTENANCE_INTERVAL_MS, STORE_OPERATION_OVERHEAD_BYTES, MAX_HTTP_TARGET_CHARACTERS, CORS_PREFLIGHT_MAX_AGE_SECONDS, MAX_REQUESTS_PER_SOCKET, RETRY_AFTER_SHORT_SECONDS, RETRY_AFTER_LONG_SECONDS } from './src/server/relay-config.js';
-import { evictOldestBucket, refillTokens, takeTrafficTokens, takeTrafficBudget, createTrafficBucket } from './src/server/relay-rate-bucket.js';
+import { envInt, envBool, readRelayConfig, syncResponseLimits, MILLISECONDS_PER_SECOND, MILLISECONDS_PER_MINUTE, MILLISECONDS_PER_HOUR, ROOM_BLOCK_TTL_MS, BLOCKED_ROOM_ENTRIES_PER_ACTIVE_ROOM, LARGE_UPDATE_LOG_THRESHOLD_BYTES, VOTE_EXPIRY_RETRY_INTERVAL_MS, MAINTENANCE_INTERVAL_MS, STORE_OPERATION_OVERHEAD_BYTES, MAX_HTTP_TARGET_CHARACTERS, CORS_PREFLIGHT_MAX_AGE_SECONDS, MAX_REQUESTS_PER_SOCKET, RETRY_AFTER_SHORT_SECONDS, RETRY_AFTER_LONG_SECONDS } from './src/server/relay-config.js';
+import { evictOldestBucket, refillTokens, takeTrafficTokens, takeTrafficBudget, createTrafficBucket, tokenWaitSeconds } from './src/server/relay-rate-bucket.js';
 import { isExactAllowedOrigin, setCredentialCors, acceptCredentialOrigin, readJsonBody, sendJson, sendIfWritable, sendUpgradeRejection } from './src/server/relay-http.js';
 import { roomLogId } from './src/server/relay-log-id.js';
 import { createUploadState, scanUploadUsage, createRelayUploads, createImageReadBudgets, MIME_EXT, matchesMagicBytes, UPLOAD_STORAGE_FAILURE_EVENT, ROOM_UPLOAD_USAGE_META } from './src/server/relay-uploads.js';
@@ -25,12 +25,13 @@ import { finalizeRelayVotes } from './src/server/relay-vote-maintenance.js';
 import { RoomRegistry, REGISTRY_STORAGE_FAILURE_EVENT, TOKENIZED_ROOM_RE, databaseCapacityError } from './src/server/relay-room-registry.js';
 import { RelayMaintenance, MAINTENANCE_STORAGE_FAILURE_EVENT } from './src/server/relay-maintenance.js';
 import { directorySizeSync, loadSessionSigningKey } from './src/server/relay-local-files.js';
-import { publicRelayEnvironment, isPublicWallEnabled, PUBLIC_RELAY_PREFIX, PUBLIC_SNAPSHOT_DIRECTORY } from './src/server/public-wall-config.js';
+import { publicRelayEnvironment, isPublicWallEnabled, PUBLIC_RELAY_PREFIX, PUBLIC_SNAPSHOT_DIRECTORY, PUBLIC_ACTION_LIMIT_REASON } from './src/server/public-wall-config.js';
 import { claimPublicDirectory, PublicWallHistory } from './src/server/public-wall-history.js';
 import { provisionPublicWall, RelayPublicWall, retainPublicDocument } from './src/server/relay-public-wall.js';
 import { createRejectionCounters } from './src/server/relay-rejection-counters.js';
 import { startMaintainer } from './src/server/maintainer-server.js';
 import { maintainerSnapshot } from './src/server/maintainer-snapshot.js';
+import { admitPublicAction, registerPublicQuotaClient, notifyPublicQuota } from './src/server/public-action-limit.js';
 
 // yjs, y-leveldb, and y-websocket must all resolve to the SAME yjs module
 // instance. y-websocket's bin/utils.js (below) is CJS and does
@@ -90,11 +91,11 @@ const roomTargetFromRequest = (req) => {
   const match = (PUBLIC_WALL ? path.replace(/^\/yjs-public(?=\/|$)/, '') : path).match(/^\/(?:yjs\/)?rooms\/([A-Za-z0-9_-]{32})$/);
   if (!match) return null;
   if (query === '') return { handle: match[1], awarenessClientId: null };
-  const awarenessMatch = query.match(/^awarenessId=(0|[1-9]\d{0,9})$/);
+  const awarenessMatch = query.match(PUBLIC_WALL ? /^awarenessId=(0|[1-9]\d{0,9})(?:&quota=1)?$/ : /^awarenessId=(0|[1-9]\d{0,9})$/);
   if (!awarenessMatch) return null;
   const awarenessClientId = Number(awarenessMatch[1]);
   if (!Number.isSafeInteger(awarenessClientId) || awarenessClientId > 0xffffffff) return null;
-  return { handle: match[1], awarenessClientId };
+  return { handle: match[1], awarenessClientId, supportsQuota: PUBLIC_WALL && query.endsWith('&quota=1') };
 };
 
 const normalizeIp = (value) => {
@@ -942,16 +943,18 @@ const getRateBucket = (map, key, burst, perHour) => {
 };
 const takeCreateToken = (ip) => {
   const ipBucket = getRateBucket(rateBuckets.roomCreate, ip, ROOM_CREATE_BURST, ROOM_CREATES_PER_HOUR);
+  const globalRefillPerHour = GLOBAL_ROOM_CREATES_PER_MINUTE * MILLISECONDS_PER_HOUR / MILLISECONDS_PER_MINUTE;
   const globalBucket = getRateBucket(
     rateBuckets.roomCreateGlobal,
     'global',
     GLOBAL_ROOM_CREATE_BURST,
-    GLOBAL_ROOM_CREATES_PER_MINUTE * 60,
+    globalRefillPerHour,
   );
-  if (ipBucket.tokens < 1 || globalBucket.tokens < 1) return false;
+  const wait = Math.max(tokenWaitSeconds(ipBucket.tokens, ROOM_CREATES_PER_HOUR), tokenWaitSeconds(globalBucket.tokens, globalRefillPerHour));
+  if (wait) return wait;
   ipBucket.tokens -= 1;
   globalBucket.tokens -= 1;
-  return true;
+  return 0;
 };
 const takeSessionExchangeToken = (ip) => {
   const ipBucket = getRateBucket(
@@ -1032,7 +1035,8 @@ const handleCreateRoom = async (req, res, clientIp) => {
   if (!acceptCredentialOrigin(req, res, ALLOWED_ORIGINS, ALLOW_INSECURE_HTTP)) return;
   res.setHeader('cache-control', 'no-store');
   if (shuttingDown || storageFailure) { res.writeHead(503); res.end(); return; }
-  if (!takeCreateToken(clientIp)) { res.writeHead(429, { 'retry-after': RETRY_AFTER_LONG_SECONDS }); res.end(); return; }
+  const retryAfterSeconds = takeCreateToken(clientIp);
+  if (retryAfterSeconds) { res.writeHead(429, { 'retry-after': String(retryAfterSeconds) }); res.end(); return; }
   let body;
   try {
     body = await readJsonBody(req, MAX_API_BODY_BYTES, { allowEmpty: true });
@@ -1505,6 +1509,7 @@ server.on('clientError', (err, socket) => {
 // the bucket holds at most that many bytes, so a larger frame could never
 // have been admitted anyway.
 const wss = new WebSocketServer({ noServer: true, maxPayload: RL_MAX_BYTES });
+roomRegistry.activity.watch(wss, (error) => roomRegistry.reportStorageFailure(error));
 wss.on('connection', (conn, req) => {
   const context = req.wsSecurityContext;
   if (!context?.docName) {
@@ -1597,6 +1602,7 @@ wss.on('connection', (conn, req) => {
   };
 
   if (PUBLIC_WALL) coalesceAwarenessSends(conn, doc, MAX_AWARENESS_MESSAGE_BYTES);
+  if (PUBLIC_WALL && context.supportsQuota) registerPublicQuotaClient(Y, doc, clientIp, conn);
 
   const before = new Set(conn.listeners('message'));
   setupWSConnection(conn, req, { docName, gc: true });
@@ -1685,17 +1691,20 @@ wss.on('connection', (conn, req) => {
         awarenessPlan = planAwarenessUpdate(doc, conn, context, inspection.entries);
         if (awarenessPlan.dropFrame) return;
       }
+      if (PUBLIC_WALL && inspection.kind === 'sync-update' && !admitPublicAction(Y, doc, clientIp, data)) throw Object.assign(new Error(PUBLIC_ACTION_LIMIT_REASON), { closeReason: PUBLIC_ACTION_LIMIT_REASON });
     } catch (err) {
       limited = true;
-      console.warn('[yjs] protocol-policy close', {
+      if (err.closeReason === PUBLIC_ACTION_LIMIT_REASON) rejectionCounters.increment(PUBLIC_ACTION_LIMIT_REASON, 1008);
+      else console.warn('[yjs] protocol-policy close', {
         docName: roomLogId(docName),
         reason: err.message,
         size,
       });
-      try { conn.close(err.closeCode || 1008, 'protocol policy'); } catch { /* already closing */ }
+      try { conn.close(err.closeCode || 1008, err.closeReason || 'protocol policy'); } catch { /* already closing */ }
       return;
     }
     parseYjsMessage(data);
+    if (PUBLIC_WALL && inspection.kind === 'sync-update') notifyPublicQuota(doc, clientIp, conn);
     if (awarenessPlan) commitAwarenessPlan(context, awarenessPlan);
     for (const peer of doc.conns.keys()) {
       if (peer.bufferedAmount > MAX_WS_BUFFERED_BYTES) {
@@ -1767,6 +1776,7 @@ server.on('upgrade', (req, socket, head) => {
     clientIp,
     expiresAt,
     expectedAwarenessClientId: roomTarget?.awarenessClientId ?? null,
+    supportsQuota: roomTarget?.supportsQuota ?? false,
   };
   const upgradeTimer = setTimeout(() => {
     if (!socket.destroyed) socket.destroy();
@@ -1842,7 +1852,7 @@ const lifecycle = createRelayLifecycle({
       server, clients: wss.clients, httpGraceMs: HTTP_SHUTDOWN_GRACE_MS,
       isBusy: () => maintenance.running || roomRegistry.pendingRoomCreations > 0 || uploadState.active > 0 || pendingStoreOps > 0,
       compactions: () => [...roomPersistenceChurn.values()].map((churn) => churn.compactionPromise).filter(Boolean),
-      destroyStorage: () => ldb.destroy(),
+      destroyStorage: async () => { await roomRegistry.activity.stop(); await ldb.destroy(); },
     });
     console.log('[yjs] drained', { rooms: roomCount });
   },
@@ -1852,7 +1862,6 @@ process.on('SIGTERM', () => { shutdown('SIGTERM'); });
 process.on('SIGINT', () => { shutdown('SIGINT'); });
 process.on(UNHANDLED_REJECTION_EVENT, (err) => { lifecycle.fatal(UNHANDLED_REJECTION_EVENT, err); });
 process.on(UNCAUGHT_EXCEPTION_EVENT, (err) => { lifecycle.fatal(UNCAUGHT_EXCEPTION_EVENT, err); });
-
 server.listen(PORT, HOST, () => {
   const address = server.address();
   const boundPort = typeof address === 'object' && address ? address.port : PORT;

@@ -21,6 +21,12 @@ const ROOM_IMAGE_ROUTE = /^\/(?:(?:yjs|yjs-public)\/)?rooms\/[A-Za-z0-9_-]{32}\/
 const UPLOAD_RATE_LIMIT_ERROR = /: 429$/;
 const delayImageRetry = () => new Promise((resolve) => { setTimeout(resolve, IMAGE_RETRY_DELAY_MS); });
 
+export function canStartImageImport(blob, storage) {
+  if (!blob?.type?.startsWith('image/')) return false;
+  if (!isSafeImageMime(blob.type) || blob.size > IMAGE_MAX_BYTES) return true;
+  return !storage?.canCreateItems || storage.canCreateItems([{ type: 'image' }]);
+}
+
 const decodedDimensionsMatch = (width, height, info) => (
   Number.isSafeInteger(width) && Number.isSafeInteger(height)
   && width >= MIN_IMAGE_DIMENSION_PX && height >= MIN_IMAGE_DIMENSION_PX

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import { evictOldestBucket, refillTokens, refillTrafficBucket, takeTrafficTokens, takeTrafficBudget, trafficBucketFor } from './relay-rate-bucket.js';
+import { evictOldestBucket, refillTokens, refillTrafficBucket, takeTrafficTokens, takeTrafficBudget, trafficBucketFor, tokenWaitSeconds } from './relay-rate-bucket.js';
 
 const LIMITS = { maxMessages: 4, messagesPerSecond: 2, maxBytes: 100, bytesPerSecond: 20 };
 const AT_TIME_MS = 1_000;
@@ -127,4 +127,11 @@ test('actual inbound entrypoint charges connection then global then room without
     assert.equal(room.lastSeen === 0, failsAtGlobal);
     assert.deepEqual(closed, [[1008, 'rate-limit']]);
   }
+});
+
+test('creation wait reflects fractional refill and is zero when a token is available', () => {
+  assert.equal(tokenWaitSeconds(0, 60), 60);
+  assert.equal(tokenWaitSeconds(0.5, 60), 30);
+  assert.equal(tokenWaitSeconds(0, 1), 3600);
+  assert.equal(tokenWaitSeconds(1, 60), 0);
 });

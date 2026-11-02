@@ -46,6 +46,17 @@ live totals and per-room counts, updated every five seconds. Filters select
 connected, blocked, resident or cold rooms; sorting prioritizes clients, image
 storage or known document size (unknown cold sizes remain last).
 
+Room rows show server-recorded creation time and room age, the latest accepted
+WebSocket session connection, and last activity. An open connection is shown as
+connected now; this indicates a connected tab, not proof of a person editing.
+After disconnect the last activity records the close time. Old rooms without
+creation metadata show no timestamp recorded; their age is never guessed from
+file timestamps or board content. These fields contain no per-user identifiers.
+Activity updates coalesce to at most one metadata write per dirty room per
+60-second flush, with a final flush after sockets close during graceful shutdown.
+An abrupt crash can lose the final interval of activity, but not room creation.
+Opening the console alone never marks a room active or hydrates its document.
+
 Resource alerts begin at 80% of each configured budget and become critical at
 95%. Database, uploads, resident documents, V8 heap ceiling and pending writes
 are checked; readiness and failed polling remain visible independently. RSS is
@@ -97,6 +108,49 @@ Tailscale Serve is enabled on this host:
 
 - Private: `https://sakons-mac-studio.tail522f6a.ts.net:8440/`
 - Public: `https://sakons-mac-studio.tail522f6a.ts.net:8441/`
+
+The owner can also enter **`http://100.92.238.57:1241/` directly** for the Public console. Tailscale TCP Serve forwards this owner-restricted port to the loopback-only gateway on `127.0.0.1:1243`, which validates the exact public-console Host and Origin and forwards to `127.0.0.1:1241`. The user LaunchAgent `party.retroroom.maintainer-public-ip` runs the installed `scripts/maintainer-public-ip-gateway.mjs`; it uses the same gateway module and owner key requirement as the private path. Disable only this route with `tailscale serve --tcp=1241 off`.
+
+The owner can also enter **`http://100.92.238.57:1240/` directly**. This path
+keeps the IP address throughout login, polling and logout; it does not require
+MagicDNS or redirect to the `.ts.net` hostname. The port-80 entry redirects to
+this IP address. Traffic is restricted to the tailnet and encrypted by Tailscale;
+the direct-IP HTTP cookie is HttpOnly/SameSite=Strict without Secure, while the
+existing HTTPS consoles retain Secure cookies. Owner credentials remain required.
+
+Serve's IP handler proxies to the host-only `127.0.0.1:1242` gateway, which forwards
+to the existing private console on `127.0.0.1:1240`. The gateway validates the
+exact external IP Host and Origin, rejects cross-site requests, duplicate
+credentials, unknown paths and request bodies, then translates Host/Origin to
+the already-allowed loopback console origin. It never reads the owner key.
+Existing owner-only tailnet rules remain unchanged. Ports 8080, 8440 and 8441
+are preserved; no production containers were recreated for this IP path.
+
+`src/server/maintainer-ip-gateway.js` owns the gateway; the host entry is
+`scripts/maintainer-ip-gateway.mjs`. A stable copy of those two files lives in
+`~/.config/retro-board/maintainer-ip-gateway/` and is run by the user LaunchAgent
+`~/Library/LaunchAgents/party.retroroom.maintainer-ip.plist` at login, with
+KeepAlive enabled. Standard output/error go to `/dev/null`; no request, cookie
+or owner-key logs are written. Update the installed copy explicitly when
+changing gateway source. `launchctl print gui/501/party.retroroom.maintainer-ip`
+shows its process state. It listens on loopback only, with bounded connections,
+header size and timeouts.
+
+This Tailscale version appends the tailnet suffix during HTTP Host lookup.
+The IP route key is `100.92.238.57.tail522f6a.ts.net:1240`, with a native Proxy
+handler to `http://127.0.0.1:1242`; this lookup is internal and performs no DNS
+resolution. Port 80 uses the same host key suffix with a fixed Redirect to
+`http://100.92.238.57:1240/`. The pre-change configuration is saved at
+`~/.config/retro-board/tailscale-serve-before-direct-ip-20261027.json` for
+rollback; merge subsequent Serve changes before restoring it through LocalAPI.
+
+Verification reproduced the original failure in Chromium with `.ts.net` DNS
+resolution blocked, then confirmed direct-IP login rendering in Thai/English,
+unauthenticated status rejection and invalid-key rejection under the same
+blocked DNS. Integration tests exercise valid login, cookie authentication,
+room-entry authorization, logout and rejected foreign requests against the
+real console server with an isolated test key. Client-device reachability
+still depends on that device's Tailscale connection and identity.
 
 The exact HTTPS origins are configured as `YJS_MAINTAINER_ORIGIN` in the private
 Compose override. Effective tailnet rules allow the owner's devices on these

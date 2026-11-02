@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Lock, Trash2, MessageSquare, HelpCircle } from 'lucide-react';
+import { BOARD_SHORTCUTS } from '../board/board-shortcuts.js';
 import { ModalShell } from './ModalShell.jsx';
 import { Button, IconButton } from './UiPrimitives.jsx';
 import { BUTTON_VARIANT, MODAL_SIZE, MODAL_LAYER } from './ui-variants.js';
@@ -270,6 +271,16 @@ export function HelpDialog({ sections, onClose }) {
               </ul>
             </div>
           ))}
+          <div>
+            <div className="rb-dialog__help-title">{t('shortcut.title')}</div>
+            <ul className="rb-dialog__help-list">
+              {BOARD_SHORTCUTS.map((shortcut) => (
+                <li key={shortcut.action} className="rb-dialog__help-line">
+                  {t(shortcut.labelKey)}: <kbd>{shortcut.display}</kbd>
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
       </div>
     </ModalShell>

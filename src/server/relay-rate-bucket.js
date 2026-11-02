@@ -1,4 +1,4 @@
-import { MILLISECONDS_PER_SECOND } from './relay-config.js';
+import { MILLISECONDS_PER_HOUR, MILLISECONDS_PER_SECOND } from './relay-config.js';
 
 export const evictOldestBucket = (map, maxBuckets) => {
   if (map.size < maxBuckets) return;
@@ -55,3 +55,7 @@ export const trafficBucketFor = (map, key, limits, maxBuckets) => {
   map.set(key, bucket);
   return bucket;
 };
+
+export const tokenWaitSeconds = (tokens, refillPerHour) => (
+  tokens >= 1 ? 0 : Math.ceil((1 - tokens) * MILLISECONDS_PER_HOUR / MILLISECONDS_PER_SECOND / refillPerHour)
+);

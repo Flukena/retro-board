@@ -95,3 +95,15 @@ test('backup reads reject foreign sources and sanitization preserves non-image i
   const items = [{ id: 'sticky', type: 'sticky', text: 'keep' }];
   assert.deepEqual(await sanitizeImportedImages(items), items);
 });
+
+test('image creation preflight stops over-quota uploads without hiding file validation errors', async () => {
+  const { canStartImageImport } = await import('./image-upload.js');
+  let checks = 0;
+  const storage = { canCreateItems: () => { checks += 1; return false; } };
+  assert.equal(canStartImageImport(null, storage), false);
+  assert.equal(canStartImageImport({ type: 'image/png', size: 100 }, storage), false);
+  assert.equal(checks, 1);
+  assert.equal(canStartImageImport({ type: 'image/svg+xml', size: 100 }, storage), true);
+  assert.equal(checks, 1);
+  assert.equal(canStartImageImport({ type: 'image/png', size: 100 }, null), true);
+});

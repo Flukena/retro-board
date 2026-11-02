@@ -56,6 +56,9 @@ test('mouse drawing uses live world coordinates, screen brush width, draft histo
   f.view.dispatchEvent(undo); assert.equal(f.draft.empty, true); assert.equal(undo.defaultPrevented, true);
   const redo = new Event('keydown', { cancelable: true }); Object.assign(redo, { key: 'Z', ctrlKey: true, shiftKey: true });
   f.view.dispatchEvent(redo); assert.equal(f.draft.strokes.length, 1);
+  f.view.dispatchEvent(undo);
+  const redoY = new Event('keydown', { cancelable: true }); Object.assign(redoY, { key: 'y', ctrlKey: true });
+  f.view.dispatchEvent(redoY); assert.equal(f.draft.strokes.length, 1); assert.equal(redoY.defaultPrevented, true);
   f.dispose(); assert.equal(f.frames.size, 0); assert.equal(f.canvas.width, 0);
   f.mouse(f.canvas, 'mousedown', 100, 100); assert.equal(f.draft.strokes.length, 1);
 });
@@ -100,4 +103,15 @@ test('Safari native pinch over the drawing surface reaches the board wheel pipel
     }
     assert.equal(wheels.length,1);assert.ok(Math.abs(wheelZoomFactor(wheels[0].deltaY,wheels[0].ctrlKey)-1.5)<1e-10);assert.equal(f.frames.size,1);
   }finally{detach();f.dispose();}
+});
+
+test('eraser cursor follows the selected tool and gives way to panning', () => {
+  let tool = 'pen';
+  const f = fixture({ settings: () => ({ color: '#112233', width: 24, tool }) });
+  try {
+    f.controller.cursor(); assert.equal(f.canvas.style.cursor, 'crosshair');
+    tool = 'eraser'; f.controller.cursor(); assert.match(f.canvas.style.cursor, /eraser-cursor\.svg/);
+    f.mouse(f.canvas, 'mousedown', 30, 60, { button: 1 }); assert.equal(f.canvas.style.cursor, 'grabbing');
+    f.mouse(f.view, 'mouseup', 30, 60, { button: 1 }); assert.match(f.canvas.style.cursor, /eraser-cursor\.svg/);
+  } finally { f.dispose(); }
 });

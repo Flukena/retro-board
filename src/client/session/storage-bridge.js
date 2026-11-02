@@ -38,6 +38,9 @@ import { planVoteFinalization } from '../../domain/vote-finalization.js';
 import * as Y from 'yjs';
 import { createDrawingPreviews } from './drawing-previews.js';
 import { attachClientSync } from './client-sync.js';
+import { SYNC_STATE } from './sync-status.js';
+import { PublicCreationGuard, PUBLIC_CREATION_LIMIT_EVENT } from './public-creation-guard.js';
+import { attachPublicCreationBudget } from './public-creation-budget.js';
 import { decodeRemoteBoard } from '../board/remote-board-decoder.js';
 import { LOCAL_ONLY_KEYS, readLocalPreference, writeLocalPreference } from './local-preferences.js';
 import { WebsocketProvider } from 'y-websocket';
@@ -146,6 +149,7 @@ const ymap = ydoc.getMap('kv');
 const yItems = ydoc.getMap('items');
 const yMeta = ydoc.getMap('meta');
 
+const publicCreationGuard = route.kind === 'public' ? new PublicCreationGuard() : null;
 let provider = null;
 if (['board', 'public'].includes(route.kind)) {
   provider = new WebsocketProvider(WS_URL, ROOM, ydoc, {
@@ -153,12 +157,42 @@ if (['board', 'public'].includes(route.kind)) {
     // Bind the relay connection to this one Yjs awareness identity. The ID is
     // not a credential; it lets the server distinguish our own state from
     // y-websocket's legitimate BroadcastChannel/snapshot echoes.
-    params: { awarenessId: String(ydoc.clientID) },
+    params: { awarenessId: String(ydoc.clientID), ...(publicCreationGuard ? { quota: '1' } : {}) },
   });
+  if (publicCreationGuard) attachPublicCreationBudget(provider, publicCreationGuard);
   sendOnlyLocalAwareness(provider);
-  provider.connect();
 }
 const syncStatus = provider ? attachClientSync(provider, ydoc, window) : null;
+if (publicCreationGuard) {
+  const observeCreations = (event, transaction) => {
+    if (!transaction.local) return;
+    const created = [];
+    for (const [id, change] of event.changes.keys) {
+      if (change.action !== 'delete') created.push({ id, type: yItems.get(id)?.get?.('type') });
+    }
+    publicCreationGuard.record(created);
+  };
+  yItems.observe(observeCreations);
+  ydoc.on('destroy', () => yItems.unobserve(observeCreations));
+}
+let publicCreationFailure = false;
+const rejectPublicCreation = () => {
+  publicCreationFailure = true;
+  queueMicrotask(() => { publicCreationFailure = false; });
+  return false;
+};
+const permitPublicCreations = (items) => {
+  if (!publicCreationGuard || items.length === 0) return true;
+  if (syncStatus?.getSnapshot().status === SYNC_STATE.ACTION_LIMIT) return rejectPublicCreation();
+  const result = publicCreationGuard.check(items);
+  if (!result.allowed) {
+    window.dispatchEvent(new CustomEvent(PUBLIC_CREATION_LIMIT_EVENT, { detail: result }));
+    return rejectPublicCreation();
+  }
+  return true;
+};
+const newSnapshotItems = items => items.filter(item => item?.id && !(yItems.get(item.id) instanceof Y.Map));
+if (provider) provider.connect();
 const motionPublisher = provider ? createMotionPublisher(provider.awareness) : null;
 ydoc.on('destroy', () => motionPublisher?.destroy());
 
@@ -266,6 +300,7 @@ const readRemoteBoardSnapshot = () => {
 const writeBoardSnapshot = (newBoard, origin = 'local') => {
   if (!newBoard || typeof newBoard !== 'object' || !Array.isArray(newBoard.items)) return false;
   if (boardItemsWriteError(newBoard.items)) return false;
+  if (!permitPublicCreations(newSnapshotItems(newBoard.items))) return false;
   const cur = readBoardSnapshot();
   const curById = new Map();
   cur.items.forEach((it) => curById.set(it.id, it));
@@ -970,8 +1005,15 @@ if (provider) {
     },
 
     // --- Granular board writes (delta-only; see helpers above) ---
+    canCreateItems(items) { return Array.isArray(items) && permitPublicCreations(items); },
+    consumePublicCreationFailure() {
+      const failed = publicCreationFailure;
+      publicCreationFailure = false;
+      return failed;
+    },
     addItem(item, opts) {
       if (boardItemWriteError(item) || geometryErrorForItem(item) || yItems.has(item.id)) return false;
+      if (!permitPublicCreations([item])) return false;
       const concealed = concealForAdditions([item]);
       ydoc.transact(() => { createItem(item.id, item); patchProtectedItems(concealed); }, originOf(opts));
       return true;
@@ -979,6 +1021,7 @@ if (provider) {
     addItems(items, opts) {
       if (!Array.isArray(items) || !items.length) return false;
       if (boardItemsWriteError(items) || items.some((item) => yItems.has(item.id))) return false;
+      if (!permitPublicCreations(items)) return false;
       const concealed = concealForAdditions(items);
       ydoc.transact(() => {
         items.forEach((item) => createItem(item.id, item));
@@ -1070,6 +1113,7 @@ if (provider) {
         normalizedComments.push({ key, comment });
       }
 
+      if (!permitPublicCreations(newSnapshotItems(board.items))) return false;
       const relatedKeys = [];
       ymap.forEach((_value, key) => {
         if (key.startsWith(VOTE_PREFIX) || key.startsWith(COMMENT_PREFIX)) relatedKeys.push(key);

@@ -9,10 +9,16 @@ import {
 } from './chrome-layout.js';
 import { t } from '../ui/i18n.js';
 import { TemplateThumbnail } from '../templates/TemplateThumbnail.jsx';
+import { BOARD_SHORTCUTS } from '../board/board-shortcuts.js';
 import './tool-dock.css';
 
 export const TOOL_ID = Object.freeze({ SELECT: 'select', TEXT: 'text', ZONE: 'zone', IMAGE: 'image', DRAW: 'draw' });
 const TEMPLATE_TOOL_ID = 'templates';
+const TOOL_SHORTCUT_ACTION = Object.freeze({ select: 'selectTool', text: 'textTool', zone: 'zoneTool', image: 'imageTool', draw: 'drawTool', sticky: 'stickyTool' });
+const shortcutTitle = (title, toolId) => {
+  const shortcut = BOARD_SHORTCUTS.find(item => item.action === TOOL_SHORTCUT_ACTION[toolId]);
+  return shortcut ? `${title} (${shortcut.display})` : title;
+};
 const TOOL_ICONS = Object.freeze({
   [TOOL_ID.SELECT]: MousePointer2,
   [TOOL_ID.TEXT]: Type,
@@ -49,7 +55,7 @@ export function ToolTile({ toolId, active, onTool }) {
       toolId={toolId}
       icon={TOOL_ICONS[toolId]}
       label={t(`tool.${toolId}`)}
-      title={t(`tool.${toolId}.title`)}
+      title={shortcutTitle(t(`tool.${toolId}.title`), toolId)}
       aria-pressed={active}
       onClick={() => onTool(toolId)}
     />
@@ -144,7 +150,7 @@ export function ToolDock({
           icon={StickyNote}
           paletteIndex={DOCK_TILE_INDEX.text}
           label={t('tool.sticky')}
-          title={t('tool.sticky.title')}
+          title={shortcutTitle(t('tool.sticky.title'), 'sticky')}
           aria-label={t('tool.sticky.title')}
           onClick={onAddSticky}
         />}

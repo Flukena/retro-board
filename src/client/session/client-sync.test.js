@@ -104,3 +104,18 @@ test('scheduled refresh then old-socket expiry recovers after the replacement so
   doc.transact(() => doc.getMap('meta').set('editingLocked', true), 'local');
   assert.equal(state.getSnapshot().hasUnsyncedLocalChanges, false, 'online edits remain online after recovery');
 });
+
+test('a public creation limit disconnects safely and marks the rejected local change as unsynced', (context) => {
+  const { provider, state } = setup(context);
+  let disconnected = 0;
+  provider.disconnect = () => { disconnected += 1; };
+  provider.wsconnected = true;
+  provider.synced = true;
+  provider.emit('sync', [true]);
+  provider.emit('connection-close', [{ code: 1008, reason: 'public action limit' }]);
+  assert.equal(disconnected, 1);
+  assert.equal(state.getSnapshot().status, 'action-limit');
+  assert.equal(state.getSnapshot().hasUnsyncedLocalChanges, true);
+  provider.emit('sync', [true]);
+  assert.equal(state.getSnapshot().status, 'action-limit');
+});

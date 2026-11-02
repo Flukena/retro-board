@@ -34,10 +34,12 @@ RUN go mod edit -require=golang.org/x/crypto@v0.57.0 \
     && go mod edit -require=golang.org/x/net@v0.60.0 \
     && go mod edit -require=google.golang.org/grpc@v1.83.2 \
     && go mod edit -require=github.com/klauspost/compress@v1.18.7 \
+    && go mod edit -require=github.com/go-jose/go-jose/v4@v4.1.6 \
     && go mod tidy \
     && go mod verify \
-    && echo "8668f6cee9347911f35aaf03247b49eca138331c89520bf6e751ba73bef73cef  go.mod" | sha256sum -c - \
-    && echo "9cb2310d7282750205f38dc0e01a392b262d036a21df8094ee4dd4ebb97a58e9  go.sum" | sha256sum -c - \
+    && echo "175b2d88c95154b91d498a0968e5be5b48717e3d4d5181f8fddac1dd7a181b5f  go.mod" | sha256sum -c - \
+    && echo "b7ca3256777155288d3eaf42f0f4216a8934ddc3fb6261a0507520348f5d7fd8  go.sum" | sha256sum -c - \
+    && test "$(go list -mod=mod -m -f '{{.Version}}' github.com/go-jose/go-jose/v4)" = "v4.1.6" \
     && test "$(go list -mod=mod -m -f '{{.Version}}' golang.org/x/crypto)" = "v0.57.0" \
     && test "$(go list -mod=mod -m -f '{{.Version}}' golang.org/x/net)" = "v0.60.0" \
     && test "$(go list -mod=mod -m -f '{{.Version}}' google.golang.org/grpc)" = "v1.83.2" \

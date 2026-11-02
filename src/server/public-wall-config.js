@@ -3,7 +3,7 @@ import { resolve, relative, isAbsolute, sep } from 'node:path';
 import { envBool, MILLISECONDS_PER_HOUR, MILLISECONDS_PER_MINUTE } from './relay-config.js';
 import { PUBLIC_WRITER_CAP } from '../domain/public-wall-contract.js';
 
-export { PUBLIC_SNAPSHOT_INTERVAL_MS, PUBLIC_MAX_ITEMS, PUBLIC_WRITER_CAP, PUBLIC_RELAY_PREFIX, PUBLIC_PATH } from '../domain/public-wall-contract.js';
+export { PUBLIC_SNAPSHOT_INTERVAL_MS, PUBLIC_MAX_ITEMS, PUBLIC_WRITER_CAP, PUBLIC_RELAY_PREFIX, PUBLIC_PATH, PUBLIC_ACTION_LIMIT_REASON } from '../domain/public-wall-contract.js';
 export const PUBLIC_BACKUP_INTERVAL_MS = MILLISECONDS_PER_HOUR;
 export const PUBLIC_BACKUP_RETENTION_COUNT = 48;
 export const PUBLIC_BACKUP_MAX_TOTAL_BYTES = 256 * 1024 * 1024;
