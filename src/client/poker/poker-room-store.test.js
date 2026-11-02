@@ -5,6 +5,7 @@ import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate } from 'y-protoc
 
 import { createStoryUndoManager, initPokerRoom } from './poker-actions.js';
 import { createPokerRoomStore } from './poker-room-store.js';
+import { POKER_REACTIONS, POKER_REACTION_COOLDOWN_MS, POKER_REACTION_TTL_MS } from '../../domain/poker-reactions.js';
 
 const NOW_MS = 1_700_000_000_000;
 
@@ -114,4 +115,51 @@ test('a participant without a name is not announced until they pick one', (conte
   assert.equal(alice.awareness.getLocalState()?.user, undefined);
   alice.store.setName('Alice');
   assert.equal(alice.awareness.getLocalState().user.name, 'Alice');
+});
+
+function timedParticipant(context, userId, userName, clock) {
+  const doc = new Y.Doc();
+  const awareness = new Awareness(doc);
+  const undoManager = createStoryUndoManager(doc);
+  const store = createPokerRoomStore({ doc, awareness, undoManager }, { userId, userName }, {
+    now: () => clock.now,
+    createId: () => `${userId}-story`,
+    setTimer: (callback, delayMs) => { clock.timers.push({ callback, dueAt: clock.now + delayMs }); return clock.timers.length; },
+    clearTimer: () => {},
+  });
+  context.after(() => { store.destroy(); undoManager.destroy(); awareness.destroy(); doc.destroy(); });
+  return { doc, awareness, store };
+}
+
+function advance(clock, ms) {
+  clock.now += ms;
+  for (const timer of clock.timers.filter(({ dueAt }) => dueAt <= clock.now)) timer.callback();
+  clock.timers = clock.timers.filter(({ dueAt }) => dueAt > clock.now);
+}
+
+test('a reaction appears on the target seat for both participants and clears itself', (context) => {
+  const clock = { now: NOW_MS, timers: [] };
+  const alice = timedParticipant(context, 'alice', 'Alice', clock);
+  const bob = timedParticipant(context, 'bob', 'Bob', clock);
+  link(alice, bob);
+  alice.store.react('bob', POKER_REACTIONS[0]);
+  for (const viewer of [alice, bob]) {
+    const onBob = viewer.store.getSnapshot().reactions.get('bob');
+    assert.deepEqual(onBob.map(({ emoji, fromUserId }) => [emoji, fromUserId]), [[POKER_REACTIONS[0], 'alice']]);
+  }
+  advance(clock, POKER_REACTION_TTL_MS);
+  assert.equal(bob.store.getSnapshot().reactions.size, 0, 'gone after the TTL');
+});
+
+test('reactions inside the cooldown are ignored, then allowed again', (context) => {
+  const clock = { now: NOW_MS, timers: [] };
+  const alice = timedParticipant(context, 'alice', 'Alice', clock);
+  const bob = timedParticipant(context, 'bob', 'Bob', clock);
+  link(alice, bob);
+  alice.store.react('bob', POKER_REACTIONS[0]);
+  alice.store.react('bob', POKER_REACTIONS[1]);
+  assert.equal(bob.store.getSnapshot().reactions.get('bob')[0].emoji, POKER_REACTIONS[0]);
+  advance(clock, POKER_REACTION_COOLDOWN_MS);
+  alice.store.react('bob', POKER_REACTIONS[1]);
+  assert.equal(bob.store.getSnapshot().reactions.get('bob')[0].emoji, POKER_REACTIONS[1]);
 });

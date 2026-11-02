@@ -4,6 +4,9 @@
 import { normalizeResultParticipants } from '../../domain/vote-results.js';
 import { readVoteResultParticipants } from '../../domain/vote-result-participants.js';
 import { decodePokerRoom, nextStoryId } from '../../domain/poker-schema.js';
+import {
+  POKER_REACTION_COOLDOWN_MS, POKER_REACTION_FIELD, POKER_REACTION_TTL_MS, activeReactions, pokerReaction,
+} from '../../domain/poker-reactions.js';
 import * as actions from './poker-actions.js';
 
 // storage-bridge.js keeps board items in `items` and marks `meta.__migrated`
@@ -14,18 +17,24 @@ const BOARD_META_MAP_NAME = 'meta';
 const BOARD_OPENED_META_KEY = '__migrated';
 const isBoardRoom = (doc) => doc.getMap(BOARD_ITEMS_MAP_NAME).size > 0 || doc.getMap(BOARD_META_MAP_NAME).has(BOARD_OPENED_META_KEY);
 
-export function createPokerRoomStore({ doc, awareness, undoManager }, { userId, userName }, { now = Date.now, createId }) {
+export function createPokerRoomStore({ doc, awareness, undoManager }, { userId, userName }, {
+  now = Date.now, createId, setTimer = setTimeout, clearTimer = clearTimeout,
+}) {
   const listeners = new Set();
   let snapshot = null;
 
-  const build = () => Object.freeze({
-    room: decodePokerRoom(actions.readPokerSnapshot(doc)),
-    names: normalizeResultParticipants(readVoteResultParticipants(awareness, now())),
-    userId,
-    canUndo: undoManager.canUndo(),
-    canRedo: undoManager.canRedo(),
-    hasBoardContent: isBoardRoom(doc),
-  });
+  const build = () => {
+    const names = normalizeResultParticipants(readVoteResultParticipants(awareness, now()));
+    return Object.freeze({
+      room: decodePokerRoom(actions.readPokerSnapshot(doc)),
+      names,
+      reactions: activeReactions(awareness.getStates().values(), new Set(names.keys())),
+      userId,
+      canUndo: undoManager.canUndo(),
+      canRedo: undoManager.canRedo(),
+      hasBoardContent: isBoardRoom(doc),
+    });
+  };
   const publish = () => {
     snapshot = build();
     listeners.forEach((listener) => listener());
@@ -39,6 +48,23 @@ export function createPokerRoomStore({ doc, awareness, undoManager }, { userId, 
   undoManager.on('stack-item-popped', publish);
   if (userName) announce(userName);
 
+  // One reaction at a time per participant: a new one replaces the old, and
+  // the sender clears it after the TTL so peers never keep a stale emoji.
+  let reactionCount = 0;
+  let lastReactionAt = -Infinity;
+  let clearReactionTimer = null;
+  const react = (toUserId, emoji) => {
+    const at = now();
+    if (at - lastReactionAt < POKER_REACTION_COOLDOWN_MS) return;
+    reactionCount += 1;
+    const reaction = pokerReaction(toUserId, emoji, String(reactionCount));
+    if (!reaction) return;
+    lastReactionAt = at;
+    clearTimer(clearReactionTimer);
+    awareness.setLocalStateField(POKER_REACTION_FIELD, reaction);
+    clearReactionTimer = setTimer(() => awareness.setLocalStateField(POKER_REACTION_FIELD, null), POKER_REACTION_TTL_MS);
+  };
+
   const activeId = () => snapshot.room.activeStoryId;
   return {
     getSnapshot: () => snapshot,
@@ -47,6 +73,7 @@ export function createPokerRoomStore({ doc, awareness, undoManager }, { userId, 
       return () => listeners.delete(listener);
     },
     setName: announce,
+    react,
     vote: (cardId) => actions.castVote(doc, activeId(), userId, cardId),
     clearVote: () => actions.clearVote(doc, activeId(), userId),
     reveal: () => actions.revealStory(doc, activeId(), now()),
@@ -65,6 +92,7 @@ export function createPokerRoomStore({ doc, awareness, undoManager }, { userId, 
     undo: () => undoManager.undo(),
     redo: () => undoManager.redo(),
     destroy() {
+      clearTimer(clearReactionTimer);
       doc.off('update', publish);
       awareness.off('change', publish);
       undoManager.off('stack-item-added', publish);

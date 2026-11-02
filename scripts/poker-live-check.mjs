@@ -7,6 +7,7 @@ import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { setLang, t } from '../src/client/ui/i18n.js';
+import { POKER_REACTIONS, POKER_REACTION_TTL_MS } from '../src/domain/poker-reactions.js';
 
 const SSD_ROOT = '/Volumes/ssd-fluke/BaseData';
 const PLAYWRIGHT_MODULE = '/opt/homebrew/lib/node_modules/playwright/index.mjs';
@@ -24,6 +25,7 @@ const VOTE_B = '8';
 const EXPECTED_AVERAGE = '6.5';
 const EXPECTED_SUGGESTION = '8';
 const JSON_INDENT_SPACES = 2;
+const REACTION_EMOJI = POKER_REACTIONS[1];
 
 const [baseArg, outputArg] = process.argv.slice(2);
 assert.ok(baseArg && outputArg, 'Pass base URL and SSD output directory');
@@ -117,6 +119,18 @@ try {
     await bob.page.getByRole('heading', { level: 2, name: STORY_A }).waitFor();
     await bob.page.locator('.rb-poker-story').filter({ hasText: STORY_B }).waitFor();
     await seat(alice, 'Bob').waitFor();
+  });
+
+  await step('both see two players, and a reaction from B shows on A and then clears', async () => {
+    await alice.page.locator('.rb-poker-players').getByText(label('en', 'poker.players.head', { count: 2 })).waitFor();
+    await bob.page.locator('.rb-poker-players').getByText(label('th', 'poker.players.head', { count: 2 })).waitFor();
+    await seat(bob, 'Alice').getByRole('button', { name: label('th', 'poker.react.open', { name: 'Alice' }) }).click();
+    await button(bob, 'poker.react.send', { emoji: REACTION_EMOJI }).click();
+    const floating = seat(alice, 'Alice').locator('.rb-poker-reaction', { hasText: REACTION_EMOJI });
+    await floating.waitFor();
+    await floating.waitFor({ state: 'detached', timeout: POKER_REACTION_TTL_MS + TIMEOUT_MS });
+    assert.equal(await seat(alice, 'Bob').getByRole('button', { name: label('en', 'poker.react.open', { name: 'Bob' }) }).count(), 1);
+    assert.equal(await seat(alice, 'Alice').locator('.rb-poker-react__toggle').count(), 0, 'no reaction button on own seat');
   });
 
   await step('votes stay face down for the other participant', async () => {

@@ -14,6 +14,7 @@ import { StoryList } from './StoryList.jsx';
 import { PokerTable } from './PokerTable.jsx';
 import { RoundSummary } from './RoundSummary.jsx';
 import { CardHand } from './CardHand.jsx';
+import { PlayerList } from './PlayerList.jsx';
 import './poker.css';
 
 const COPIED_NOTICE_MS = 2000;
@@ -82,7 +83,7 @@ export default function PokerApp({ code, token, store, syncStatus, initialName }
   const link = useCopyLink(code, token);
   useUndoShortcuts(store);
 
-  const { room, names, userId } = snapshot;
+  const { room, names, userId, reactions } = snapshot;
   const story = room.stories.find((entry) => entry.id === room.activeStoryId) ?? null;
   const votes = (story && room.votesByStory.get(story.id)) || EMPTY_VOTES;
   const revealed = story?.revealedAt != null;
@@ -92,11 +93,15 @@ export default function PokerApp({ code, token, store, syncStatus, initialName }
       <PokerHeader snapshot={snapshot} canChangeDeck={canChangeDeck(room)} copied={link.copied}
         onCopyLink={link.copy} onExport={() => exportCsv(room, code)} onRename={() => name.setOpen(true)} actions={store} />
       <main className="rb-poker__body">
-        <StoryList stories={room.stories} deck={room.deck} activeStoryId={room.activeStoryId}
-          onSelect={store.selectStory} onAdd={store.addStories} onRename={store.renameStory} onRemove={store.removeStory} />
+        <div className="rb-poker__side">
+          <StoryList stories={room.stories} deck={room.deck} activeStoryId={room.activeStoryId}
+            onSelect={store.selectStory} onAdd={store.addStories} onRename={store.renameStory} onRemove={store.removeStory} />
+          <PlayerList seats={seats} hasStory={story !== null} />
+        </div>
         <div className="rb-poker__play">
           <PokerTable seats={seats} deck={room.deck} story={story} onReveal={store.reveal} onReset={store.resetRound}
-            onNext={store.nextStory} canNext={story !== null && nextStoryId(room.stories, story.id) !== null} />
+            onNext={store.nextStory} canNext={story !== null && nextStoryId(room.stories, story.id) !== null}
+            reactions={reactions} onReact={name.name ? store.react : undefined} />
           {revealed && (
             <RoundSummary summary={summarizeRound(votes, room.deck)} deck={room.deck} names={names}
               finalEstimate={story.finalEstimate} onAccept={store.acceptEstimate} />

@@ -89,3 +89,58 @@ test('the story list shows final estimates, the active story and an empty state'
     }
   });
 });
+
+test('the player list counts online players and shows who has voted', async () => {
+  await withChromeModule('/src/client/poker/PlayerList.jsx', async ({ PlayerList }, { setLang, t }) => {
+    const votes = new Map([['amy', '5'], ['gone', '8']]);
+    const seats = pokerTableSeats(names, votes, { revealed: false, viewerId: 'me', fallbackName: 'Guest' });
+    for (const lang of LANGUAGES) {
+      setLang(lang);
+      const markup = renderToStaticMarkup(React.createElement(PlayerList, { seats, hasStory: true }));
+      assert.ok(markup.includes(t('poker.players.head', { count: 2 })), `${lang}: the voter who left is not counted online`);
+      assert.ok(markup.includes(`Mia (${t('poker.table.you')})`));
+      assert.equal((markup.match(/rb-poker-player__status--voted/g) || []).length, 2);
+      assert.ok(markup.includes(t('poker.table.waiting')));
+      assert.ok(markup.includes(t('poker.table.offline')));
+      const idle = renderToStaticMarkup(React.createElement(PlayerList, { seats, hasStory: false }));
+      assert.ok(!idle.includes(t('poker.table.waiting')), `${lang}: no vote status without a story`);
+    }
+  });
+});
+
+test('other online seats offer reactions and show live emoji; the viewer cannot react to self', async () => {
+  await withChromeModule('/src/client/poker/PokerTable.jsx', async ({ PokerTable }, { setLang, t }) => {
+    for (const lang of LANGUAGES) {
+      setLang(lang);
+      const seats = pokerTableSeats(names, new Map(), { revealed: false, viewerId: 'me', fallbackName: 'Guest' });
+      const reactions = new Map([['amy', [{ key: 'me:1', emoji: '🎉', fromUserId: 'me' }]]]);
+      const markup = renderToStaticMarkup(React.createElement(PokerTable, {
+        seats, deck, story: story(), onReveal: noop, onReset: noop, onNext: noop, canNext: false, reactions, onReact: noop,
+      }));
+      assert.ok(markup.includes(`aria-label="${t('poker.react.open', { name: 'Amy' })}"`));
+      assert.ok(!markup.includes(`aria-label="${t('poker.react.open', { name: 'Mia' })}"`), `${lang}: no reaction button on own seat`);
+      assert.match(markup, /class="rb-poker-reaction"[^>]*>🎉</);
+      const readOnly = renderToStaticMarkup(React.createElement(PokerTable, {
+        seats, deck, story: story(), onReveal: noop, onReset: noop, onNext: noop, canNext: false,
+      }));
+      assert.doesNotMatch(readOnly, /rb-poker-react__toggle/, `${lang}: no reactions before the viewer has a name`);
+    }
+  });
+});
+
+test('the feature section starts a poker room with a check mark on the picked hand card', async () => {
+  await withChromeModule('/src/client/poker/PokerFeature.jsx', async ({ default: PokerFeature }, { setLang, t }) => {
+    for (const lang of LANGUAGES) {
+      setLang(lang);
+      const markup = renderToStaticMarkup(React.createElement(PokerFeature, { Heading: 'h1', titleKey: 'pokerPage.heading', ledeKey: 'pokerPage.lede' }));
+      assert.match(markup, new RegExp(`<h1[^>]*>${t('pokerPage.heading')}</h1>`));
+      assert.ok(markup.includes(t('landing.poker.btn')));
+      for (const key of ['pokerFeature.point1', 'pokerFeature.point2', 'pokerFeature.point3']) assert.ok(markup.includes(t(key)));
+    }
+  });
+  await withChromeModule('/src/client/poker/CardHand.jsx', async ({ CardHand }) => {
+    const markup = renderToStaticMarkup(React.createElement(CardHand, { deck, selectedCardId: '5', locked: false, disabled: false, onPick: noop }));
+    assert.equal((markup.match(/rb-poker-card__badge/g) || []).length, 1, 'only the picked card has the badge');
+    assert.match(markup, /aria-pressed="true"[^>]*>(?:(?!<\/button>).)*rb-poker-card__badge/);
+  });
+});

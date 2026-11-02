@@ -17,7 +17,7 @@ import CreateBoardError from './CreateBoardError.jsx';
 import LandingGuide from './LandingGuide.jsx';
 import FormatChips from './FormatChips.jsx';
 import PublicWallPreview from '../public-wall/PublicWallPreview.jsx';
-import PokerPromo from '../poker/PokerPromo.jsx';
+import PokerFeature from '../poker/PokerFeature.jsx';
 import { PLANNING_POKER_PATH } from '../seo/seo-pages.js';
 import { LEGAL_PAGE, LEGAL_PATH } from '../legal/legal-content.js';
 import './landing.css';
@@ -108,8 +108,10 @@ export default function Landing() {
       <main className="rb-landing__content">
         <PublicWallPreview variant="hero" masthead={<LandingMasthead />} belowHero={
           <>
+            <div className="rb-landing__feature">
+              <PokerFeature titleKey="landing.poker.head" ledeKey="landing.poker.desc" showGuideLink buttonVariant={BUTTON_VARIANT.DEFAULT} />
+            </div>
             {recents.length > 0 && <RecentRooms recents={recents} onRemove={removeRecent} />}
-            <PokerPromo />
             <LandingGuide onStartFormat={startFormat} creating={creating} createError={createError} />
             <LandingFooter />
           </>
