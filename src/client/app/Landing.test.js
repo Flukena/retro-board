@@ -82,49 +82,6 @@ test('landing uses primary create, disabled empty join and display-font hero in 
   });
 });
 
-test('recent row labels removal in both languages and forwards its code and token', async () => {
-  await withChromeModule('/src/client/app/Landing.jsx', ({ RecentRow }, { getLang, setLang, t }) => {
-    const originalLang = getLang();
-    const recent = { code: 'abc', token: 'secret_1', name: 'Sprint', visitedAt: 0 };
-    try {
-      for (const language of ['th', 'en']) {
-        setLang(language);
-        const calls = [];
-        const row = RecentRow({ recent, onRemove: (...args) => calls.push(args) });
-        const html = renderToStaticMarkup(row);
-        const label = t('landing.recents.remove');
-        assert.ok(html.includes(`aria-label="${label}"`));
-        assert.ok(html.includes(`title="${label}"`));
-        assert.match(html, /rb-icon-btn/);
-        assert.doesNotMatch(html, /landing\./);
-        row.props.children.at(-1).props.onClick();
-        assert.deepEqual(calls, [[recent.code, recent.token]]);
-      }
-    } finally {
-      setLang(originalLang);
-    }
-  });
-});
-
-test('a poker recent is labelled as Planning Poker and reopens at its /p/ link', async () => {
-  await withChromeModule('/src/client/app/Landing.jsx', ({ RecentRow }, { t }) => {
-    const originalWindow = globalThis.window;
-    const poker = { code: 'abc', token: 'secret_1', name: '', visitedAt: 0, kind: 'poker' };
-    const board = { ...poker, kind: 'board' };
-    try {
-      globalThis.window = { location: { href: '' } };
-      const pokerRow = RecentRow({ recent: poker, onRemove: () => {} });
-      assert.ok(renderToStaticMarkup(pokerRow).includes(t('poker.title')));
-      assert.ok(!renderToStaticMarkup(RecentRow({ recent: board, onRemove: () => {} })).includes(t('poker.title')));
-      pokerRow.props.children[0].props.onClick();
-      assert.match(globalThis.window.location.href, /^\/p\/abc/);
-    } finally {
-      globalThis.window = originalWindow;
-    }
-  });
-});
-
-
 test('landing CSS matches design C surfaces, filled inputs and top column', () => {
   const css = readFileSync(new URL('./landing.css', import.meta.url), 'utf8');
   const contracts = {

@@ -312,6 +312,9 @@
 }
 
 /* Planning Poker showcase (home lead feature and /planning-poker hero) */
+/* The guide page lists your poker rooms right under the start card. */
+.rb-poker-feature + .rb-landing__card--recents { margin-top: var(--space-4); }
+
 .rb-poker-feature {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

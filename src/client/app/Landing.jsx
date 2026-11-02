@@ -1,15 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Sparkles, Plus, ArrowRight, X, Sun, Moon, Monitor, Check, ChevronDown,
+  Sparkles, Plus, ArrowRight, Sun, Moon, Monitor, Check, ChevronDown,
 } from 'lucide-react';
-import { ROOM_KIND, gotoBoard, loadRecents, forgetRecent } from './router.js';
+import { ROOM_KIND, gotoBoard } from './router.js';
+import RecentRooms, { useRecentRooms } from './RecentRooms.jsx';
 import { t, useLang } from '../ui/i18n.js';
 import { LanguagePicker } from '../ui/LanguagePicker.jsx';
 import { useTheme, nextThemePref } from '../ui/theme.js';
-import { Button, IconButton, Surface } from '../ui/UiPrimitives.jsx';
+import { Button, Surface } from '../ui/UiPrimitives.jsx';
 import { BUTTON_VARIANT, SURFACE_KIND } from '../ui/ui-variants.js';
 import { TOPBAR_ICON_SIZE_PX } from '../chrome/chrome-layout.js';
-import { formatRelativeTime } from '../ui/relative-time.js';
 import { parseJoinInput } from './join-input.js';
 import { DISPLAY_NAME_MAX_LENGTH } from '../../domain/security-boundaries.js';
 import { APP_VIEWPORT_CONTENT } from '../ui/mobile-layout.js';
@@ -23,7 +23,7 @@ import { PLANNING_POKER_PATH } from '../seo/seo-pages.js';
 import { LEGAL_PAGE, LEGAL_PATH } from '../legal/legal-content.js';
 import './landing.css';
 
-const LANDING_ICON_SIZE_PX = Object.freeze({ BRAND: 22, ACTION: 16, REMOVE: 15, TRUST: 14 });
+const LANDING_ICON_SIZE_PX = Object.freeze({ BRAND: 22, ACTION: 16, TRUST: 14 });
 const THEME_ICONS = Object.freeze({ auto: Monitor, dark: Moon, light: Sun });
 const TRUST_KEYS = Object.freeze(['landing.trust.free', 'landing.trust.signup', 'landing.trust.realtime']);
 export const RECENTS_SECTION_ID = 'landing-recents';
@@ -87,20 +87,16 @@ function scrollToControlledSection(event) {
 }
 
 export default function Landing() {
-  const [recents, setRecents] = useState([]);
   const [joinCode, setJoinCode] = useState('');
   const [boardName, setBoardName] = useState('');
   const { creating, createError, createBoard: createRoomAndOpen } = useCreateBoard();
-  useEffect(() => { setRecents(loadRecents()); }, []);
+  // Poker rooms are listed on the Planning Poker page instead.
+  const { recents, remove: removeRecent } = useRecentRooms(ROOM_KIND.BOARD);
   useBlockBrowserZoom();
 
   const join = () => {
     const destination = parseJoinInput(joinCode);
     if (destination) gotoBoard(destination.code, destination.token);
-  };
-  const removeRecent = (code, token) => {
-    forgetRecent(code, token);
-    setRecents(loadRecents());
   };
   const startFormat = (starter) => createRoomAndOpen({ name: boardName, starter });
 
@@ -112,7 +108,7 @@ export default function Landing() {
             <div className="rb-landing__feature">
               <PokerFeature titleKey="landing.poker.head" ledeKey="landing.poker.desc" showGuideLink buttonVariant={BUTTON_VARIANT.DEFAULT} />
             </div>
-            {recents.length > 0 && <RecentRooms recents={recents} onRemove={removeRecent} />}
+            {recents.length > 0 && <RecentRooms id={RECENTS_SECTION_ID} recents={recents} onRemove={removeRecent} />}
             <LandingGuide onStartFormat={startFormat} creating={creating} createError={createError} />
             <LandingFooter />
           </>
@@ -158,18 +154,6 @@ function LandingMasthead() {
       </nav>
       <CornerToggles themePref={themePref} onTheme={() => setThemePref(nextThemePref(themePref))} />
     </header>
-  );
-}
-
-function RecentRooms({ recents, onRemove }) {
-  return (
-    <Surface id={RECENTS_SECTION_ID} role="region" aria-labelledby="landing-recents-title" tabIndex={-1}
-      kind={SURFACE_KIND.CARD} className="rb-landing__card rb-landing__card--recents">
-      <h2 id="landing-recents-title" className="rb-landing__section-head">{t('landing.recents.head')}</h2>
-      {recents.map((recent) => (
-        <RecentRow key={`${recent.code}#${recent.token || ''}`} recent={recent} onRemove={onRemove} />
-      ))}
-    </Surface>
   );
 }
 
@@ -257,37 +241,6 @@ export function JoinRow({ joinCode, onCodeChange, onJoin }) {
           {t('landing.join.btn')} <ArrowRight size={LANDING_ICON_SIZE_PX.ACTION} />
         </Button>
       </div>
-    </div>
-  );
-}
-
-// Poker rooms are created without a name, so they are titled by what they are.
-const recentTitle = (recent) => recent.name || (recent.kind === ROOM_KIND.POKER ? t('poker.title') : recent.code);
-
-export function RecentRow({ recent, onRemove }) {
-  const removeLabel = t('landing.recents.remove');
-  return (
-    <div className="rb-landing__recent">
-      <button
-        type="button"
-        className="rb-landing__recent-open"
-        onClick={() => gotoBoard(recent.code, recent.token, recent.kind)}
-      >
-        <span className="rb-landing__recent-name">{recentTitle(recent)}</span>
-        <span className="rb-landing__recent-detail">
-          <span className="rb-landing__recent-code">{recent.code}</span>
-          {t('landing.recents.separator')}
-          <span>{formatRelativeTime(recent.visitedAt)}</span>
-        </span>
-      </button>
-      <IconButton
-        className="rb-landing__remove"
-        onClick={() => onRemove(recent.code, recent.token)}
-        title={removeLabel}
-        aria-label={removeLabel}
-      >
-        <X size={LANDING_ICON_SIZE_PX.REMOVE} />
-      </IconButton>
     </div>
   );
 }

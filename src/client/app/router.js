@@ -182,6 +182,10 @@ export function loadRecents() {
   return readRecentList();
 }
 
+export function recentsOfKind(kind) {
+  return readRecentList().filter((recent) => recent.kind === kind);
+}
+
 // Name the creator typed for this room, kept with its recent entry.
 export function recentBoardName(code, token) {
   const normalizedToken = token == null ? null : normalizeToken(token);

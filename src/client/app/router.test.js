@@ -8,6 +8,7 @@ import {
   loadRecents,
   markBoardCreated,
   recentBoardName,
+  recentsOfKind,
   rememberRecent,
 } from './router.js';
 
@@ -169,4 +170,12 @@ test('share links keep the room kind path and put the token in the fragment', as
   } finally {
     globalThis.window = original;
   }
+});
+
+test('recents of one kind leave out the other kind, so home lists boards and the poker page lists poker rooms', () => {
+  installStorage();
+  rememberRecent('Board123', 'Retro', 'valid_token');
+  rememberRecent('Poker123', '', 'valid_token', ROOM_KIND.POKER);
+  assert.deepEqual(recentsOfKind(ROOM_KIND.BOARD).map((r) => r.code), ['Board123']);
+  assert.deepEqual(recentsOfKind(ROOM_KIND.POKER).map((r) => r.code), ['Poker123']);
 });
