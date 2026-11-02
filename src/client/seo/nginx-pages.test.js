@@ -17,6 +17,7 @@ test('unknown paths get a real 404 page instead of the home page', () => {
 
 test('boards and the Public Wall are served the noindex app shell', () => {
   assert.match(locationBody('~ "\\^/b/\\[A-Za-z0-9_-\\]\\{3,32\\}/\\?\\$"'), /try_files \/app\.html =404;/);
+  assert.match(locationBody('~ "\\^/p/\\[A-Za-z0-9_-\\]\\{3,32\\}/\\?\\$"'), /try_files \/app\.html =404;/);
   assert.match(locationBody('~ \\^/public/\\?\\$'), /try_files \/app\.html =404;/);
 });
 
