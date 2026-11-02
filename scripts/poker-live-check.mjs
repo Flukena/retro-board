@@ -20,7 +20,7 @@ const STORY_B = 'Checkout';
 const STORY_B_RENAMED = 'Checkout with coupons';
 const VOTE_A = '5';
 const VOTE_B = '8';
-// Average of 5 and 8 is 6.5, equally far from 5 and 8: estimates round up.
+// One vote each for 5 and 8: the tie suggests the larger card.
 const EXPECTED_AVERAGE = '6.5';
 const EXPECTED_SUGGESTION = '8';
 const JSON_INDENT_SPACES = 2;
@@ -176,6 +176,13 @@ try {
   await step('copy link copies the poker URL', async () => {
     await button(alice, 'topbar.copyLink').click();
     assert.equal(await alice.page.evaluate(() => navigator.clipboard.readText()), roomUrl);
+  });
+
+  await step('language button switches the whole room, not only the header', async () => {
+    await bob.page.getByTitle(label('th', 'settings.lang'), { exact: true }).click();
+    await button({ page: bob.page, lang: 'en' }, 'poker.stories.add').waitFor();
+    await bob.page.getByTitle(label('en', 'settings.lang'), { exact: true }).click();
+    await button(bob, 'poker.stories.add').waitFor();
   });
 
   await step('dark theme and narrow width render', async () => {

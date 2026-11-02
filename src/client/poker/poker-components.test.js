@@ -67,7 +67,7 @@ test('a wide round names who should explain and offers the suggested estimate', 
       const summary = summarizeRound(new Map([['me', '2'], ['amy', '13']]), deck);
       const markup = renderToStaticMarkup(React.createElement(RoundSummary, { summary, deck, names, finalEstimate: null, onAccept: noop }));
       assert.ok(markup.includes(t('poker.summary.wide', { low: 'Mia', high: 'Amy' })));
-      assert.ok(markup.includes(t('poker.summary.accept', { value: '8' })));
+      assert.ok(markup.includes(t('poker.summary.accept', { value: '13' })), 'a 2-vs-13 tie suggests the larger card');
       const accepted = renderToStaticMarkup(React.createElement(RoundSummary, { summary, deck, names, finalEstimate: '8', onAccept: noop }));
       assert.ok(accepted.includes(t('poker.summary.accepted', { value: '8' })));
       assert.doesNotMatch(accepted, /rb-choice-chip/);

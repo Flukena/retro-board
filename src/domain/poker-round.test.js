@@ -61,10 +61,19 @@ test('distribution lists picked cards in deck order with counts', () => {
   assert.deepEqual(summary.distribution.map(({ cardId, count }) => [cardId, count]), [['3', 1], ['8', 2], [POKER_CARD_UNKNOWN, 1]]);
 });
 
-test('suggestion is the deck card nearest the average, rounding ties up', () => {
-  assert.equal(summarizeRound(votes({ a: '3', b: '8' }), fibonacci).suggestedCardId, '5');
-  // average 4 is equally far from 3 and 5: estimates round up.
-  assert.equal(summarizeRound(votes({ a: '3', b: '5' }), fibonacci).suggestedCardId, '5');
+test('suggestion is the most picked card, not the card nearest the average', () => {
+  // Averages 6.3 and 6.3 would point at 5; the majority picked 8 and 3.
+  assert.equal(summarizeRound(votes({ a: '3', b: '8', c: '8' }), fibonacci).suggestedCardId, '8');
+  assert.equal(summarizeRound(votes({ a: '3', b: '3', c: '13' }), fibonacci).suggestedCardId, '3');
+});
+
+test('a tie for the most picked card suggests the larger card', () => {
+  assert.equal(summarizeRound(votes({ a: '3', b: '8' }), fibonacci).suggestedCardId, '8');
+});
+
+test('? and coffee never become the suggestion, even as the majority', () => {
+  const summary = summarizeRound(votes({ a: POKER_CARD_UNKNOWN, b: POKER_CARD_UNKNOWN, c: '5' }), fibonacci);
+  assert.equal(summary.suggestedCardId, '5');
 });
 
 test('non-numeric decks suggest the most picked size, preferring the larger on ties', () => {

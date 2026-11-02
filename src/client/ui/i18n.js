@@ -1,9 +1,10 @@
 // Tiny i18n: a `t(key, params)` lookup with localStorage persistence and
-// browser-language autodetect. No external dependency.
+// an English default. No external dependency.
 
 import { useEffect, useState } from 'react';
 
 const STORAGE_KEY = 'rb_lang';
+const DEFAULT_LANG = 'en';
 
 const dict = {
   th: {
@@ -1580,16 +1581,16 @@ const dict = {
   },
 };
 
-function detectInitialLang() {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved && dict[saved]) return saved;
-  } catch { /* swallow */ }
-  const nav = typeof navigator !== 'undefined' ? (navigator.language || '') : '';
-  return nav.toLowerCase().startsWith('th') ? 'th' : 'en';
+// English is the product default; only an explicit saved choice changes the first paint.
+export function initialLanguage(saved) {
+  return saved && dict[saved] ? saved : DEFAULT_LANG;
 }
 
-let currentLang = detectInitialLang();
+function savedLanguage() {
+  try { return localStorage.getItem(STORAGE_KEY); } catch { return null; }
+}
+
+let currentLang = initialLanguage(savedLanguage());
 const listeners = new Set();
 
 export function getLang() { return currentLang; }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getLang, setLang, t } from './i18n.js';
+import { getLang, initialLanguage, setLang, t } from './i18n.js';
 
 test('Thai vote stop and result copy uses Thai words and preserves count placeholders', () => {
   const originalLang = getLang();
@@ -15,4 +15,10 @@ test('Thai vote stop and result copy uses Thai words and preserves count placeho
   } finally {
     setLang(originalLang);
   }
+});
+
+test('a first visit starts in English, whatever the browser language; a saved choice wins', () => {
+  assert.equal(initialLanguage(null), 'en');
+  assert.equal(initialLanguage('xx'), 'en', 'an unknown saved value falls back to English');
+  assert.equal(initialLanguage('th'), 'th');
 });

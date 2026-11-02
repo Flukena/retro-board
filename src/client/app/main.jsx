@@ -13,7 +13,7 @@ import { NOT_FOUND_TITLE_KEY, seoPageForPath } from '../seo/seo-pages.js';
 import { usePageHead } from '../seo/use-page-head.js';
 import { BoardErrorBoundary } from './BoardErrorBoundary.jsx';
 import { SyncBanner } from '../session/SyncBanner.jsx';
-import { setLang } from '../ui/i18n.js';
+import { setLang, useLang } from '../ui/i18n.js';
 import RoomBootstrapScreen from './RoomBootstrapScreen.jsx';
 import { ROOM_BOOTSTRAP_STATUS, useRoomBootstrap } from './use-room-bootstrap.js';
 import PokerBootstrap from '../poker/PokerBootstrap.jsx';
@@ -71,7 +71,14 @@ const ROUTE_VIEWS = {
   template: () => <TemplatePage slug={route.slug} />,
   notFound: () => <NotFoundPage />,
 };
-const App = (ROUTE_VIEWS[route.kind] ?? (() => <Landing />))();
+const renderRoute = ROUTE_VIEWS[route.kind] ?? (() => <Landing />);
+
+// Subscribes once for every page, so switching language re-renders the whole view,
+// not only the component that owns the language button.
+function App() {
+  useLang();
+  return renderRoute();
+}
 // Boards name their own tab; content pages use their search title.
 const pageTitleKey = route.kind === 'notFound' ? NOT_FOUND_TITLE_KEY : seoPageForPath(window.location.pathname)?.titleKey ?? null;
 
@@ -81,5 +88,5 @@ function PageHead() {
 }
 
 createRoot(document.getElementById('root')).render(
-  <React.StrictMode><BoardErrorBoundary><PageHead />{App}</BoardErrorBoundary></React.StrictMode>,
+  <React.StrictMode><BoardErrorBoundary><PageHead /><App /></BoardErrorBoundary></React.StrictMode>,
 );

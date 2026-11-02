@@ -54,11 +54,11 @@ const STEP_NAMES = {
   launch: 'launch two contexts', create: 'create board', join: 'join board',
   syncA: `sync ${SYNC_DIRECTION_A_TO_B}`, syncB: `sync ${SYNC_DIRECTION_B_TO_A}`,
   undo: 'undo in both contexts', redo: 'redo in both contexts', shortcuts: 'board tool shortcuts in both languages',
-  narrow: 'board th/light narrow', close: 'close browser',
+  narrow: 'board th/light narrow', close: 'close browser', language: 'landing language button switches the hero',
 };
 const LABELS = {
   en: {
-    landingTitle: 'Free online retrospective board.', createButton: 'Create',
+    landingTitle: 'Free online retrospective board.', createButton: 'Create', languageTitle: 'Language',
     namePlaceholder: 'e.g. "Fluke"', nameConfirm: 'Enter room',
     stickyPlaceholder: 'Double-click to edit',
     revealTitle: 'Off: hide in the normal UI (not encrypted)',
@@ -66,7 +66,7 @@ const LABELS = {
     nothingToUndoTitle: 'Nothing to undo (only reverts your own edits from this tab)',
   },
   th: {
-    landingTitle: 'บอร์ด retrospective ออนไลน์ฟรี', createButton: 'สร้างห้อง',
+    landingTitle: 'บอร์ด retrospective ออนไลน์ฟรี', createButton: 'สร้างห้อง', languageTitle: 'ภาษา',
     namePlaceholder: 'เช่น "ฟลุค"', nameConfirm: 'เข้าห้อง',
     stickyPlaceholder: 'ดับเบิลคลิกเพื่อแก้ไข',
     revealTitle: 'ปิด: ซ่อนในหน้าจอปกติ (ไม่ได้เข้ารหัส)',
@@ -80,6 +80,8 @@ const APPEARANCES = [
 ];
 const INITIAL_APPEARANCE_A = { lang: 'en', theme: 'light' };
 const INITIAL_APPEARANCE_B = { lang: 'th', theme: 'light' };
+// The landing starts in INITIAL_APPEARANCE_A's language; each click moves to the other one.
+const LANGUAGE_BUTTON_SEQUENCE = ['en', 'th'];
 const EXIT_SUCCESS = 0;
 const EXIT_FAILURE = 1;
 const JSON_INDENT_SPACES = 2;
@@ -209,6 +211,17 @@ async function landingScreenshot(page, options, appearance, report) {
   await page.getByRole('button', { name: labels.createButton, exact: true }).waitFor();
   await page.getByRole('heading', { level: 1 }).filter({ hasText: labels.landingTitle }).waitFor();
   return captureScreenshot(page, `landing-${appearance.lang}-${appearance.theme}.png`, report, options.out);
+}
+
+// Clicks the language button and expects the hero copy, not only the button, to follow.
+async function checkLanguageButton(page, options) {
+  await page.goto(options.baseUrl, { waitUntil: 'domcontentloaded' });
+  await applyAppearance(page, INITIAL_APPEARANCE_A);
+  for (const lang of LANGUAGE_BUTTON_SEQUENCE) {
+    await page.getByTitle(LABELS[lang].languageTitle, { exact: true }).click();
+    const next = LANGUAGE_BUTTON_SEQUENCE.find((other) => other !== lang);
+    await page.getByRole('heading', { level: 1 }).filter({ hasText: LABELS[next].landingTitle }).waitFor();
+  }
 }
 
 async function passNamePrompt(page, lang, name) {
@@ -373,6 +386,7 @@ async function checkScreenshots(state, options, report) {
     await runStep(report, `landing ${appearance.lang}/${appearance.theme}`,
       () => landingScreenshot(state.pageA, options, appearance, report));
   }
+  await runStep(report, STEP_NAMES.language, () => checkLanguageButton(state.pageA, options));
 }
 
 async function checkBoardScreenshots(state, options, report) {
@@ -408,7 +422,7 @@ async function checkCollaboration(state, options, report) {
 
 async function reportUnavailableChecks(report) {
   const names = [
-    ...APPEARANCES.map(({ lang, theme }) => `landing ${lang}/${theme}`),
+    ...APPEARANCES.map(({ lang, theme }) => `landing ${lang}/${theme}`), STEP_NAMES.language,
     STEP_NAMES.create, STEP_NAMES.join, STEP_NAMES.syncA, STEP_NAMES.syncB,
     STEP_NAMES.undo, STEP_NAMES.redo, STEP_NAMES.shortcuts,
     ...APPEARANCES.map(({ lang, theme }) => `board ${lang}/${theme}`),

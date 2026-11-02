@@ -50,17 +50,8 @@ function spreadOf(rankedVotes) {
   };
 }
 
-// Nearest numeric card; on an equal distance the larger card wins because
-// under-estimates hurt planning more than over-estimates.
-function nearestCard(ranked, average) {
-  let best = null;
-  for (const card of ranked) {
-    if (card.value === null) continue;
-    if (!best || Math.abs(card.value - average) <= Math.abs(best.value - average)) best = card;
-  }
-  return best?.id ?? null;
-}
-
+// The card most voters picked; on a tie the larger card wins because
+// under-estimates hurt planning more than over-estimates. ? and coffee are not ranked.
 function mostPickedCard(ranked, rankedVotes) {
   const counts = new Map();
   for (const { card } of rankedVotes) counts.set(card.id, (counts.get(card.id) ?? 0) + 1);
@@ -89,7 +80,7 @@ export function summarizeRound(votes, deckEntry) {
     distribution: distributionOf(cards, deckEntry),
     consensus: pickedIds.size === 1 && rankedVotes.length === cards.length,
     ...spreadOf(rankedVotes),
-    suggestedCardId: average === null ? mostPickedCard(ranked, rankedVotes) : nearestCard(ranked, average),
+    suggestedCardId: mostPickedCard(ranked, rankedVotes),
   };
 }
 
