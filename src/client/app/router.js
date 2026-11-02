@@ -105,6 +105,9 @@ const RECENTS_KEY = 'rb_recents';
 const BOARD_CODE_RE = /^[A-Za-z0-9_-]{3,32}$/;
 const RECENT_NAME_MAX_LENGTH = 120;
 
+// Entries saved before poker rooms existed have no kind; they are boards.
+const recentKind = (value) => (value === ROOM_KIND.POKER ? ROOM_KIND.POKER : ROOM_KIND.BOARD);
+
 const normalizeToken = (value) => (
   typeof value === 'string' && TOKEN_RE.test(value) ? value : null
 );
@@ -123,6 +126,7 @@ const normalizeRecent = (value) => {
     visitedAt: Number.isSafeInteger(value.visitedAt) && value.visitedAt >= 0
       ? value.visitedAt
       : 0,
+    kind: recentKind(value.kind),
   };
 };
 
@@ -146,7 +150,7 @@ const readRecentList = () => {
   catch { return []; }
 };
 
-export function rememberRecent(code, name, token) {
+export function rememberRecent(code, name, token, kind = ROOM_KIND.BOARD) {
   if (!BOARD_CODE_RE.test(code || '')) return;
   const normalizedToken = token == null ? null : normalizeToken(token);
   if (token != null && !normalizedToken) return;
@@ -166,6 +170,7 @@ export function rememberRecent(code, name, token) {
       token: normalizedToken,
       name: nextName,
       visitedAt: Date.now(),
+      kind: recentKind(kind),
     });
     localStorage.setItem(RECENTS_KEY, JSON.stringify(filtered.slice(0, 10)));
   } catch {

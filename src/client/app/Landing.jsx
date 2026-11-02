@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Sparkles, Plus, ArrowRight, X, Sun, Moon, Monitor, Check, ChevronDown,
 } from 'lucide-react';
-import { gotoBoard, loadRecents, forgetRecent } from './router.js';
+import { ROOM_KIND, gotoBoard, loadRecents, forgetRecent } from './router.js';
 import { t, useLang } from '../ui/i18n.js';
 import { LanguagePicker } from '../ui/LanguagePicker.jsx';
 import { useTheme, nextThemePref } from '../ui/theme.js';
@@ -261,6 +261,9 @@ export function JoinRow({ joinCode, onCodeChange, onJoin }) {
   );
 }
 
+// Poker rooms are created without a name, so they are titled by what they are.
+const recentTitle = (recent) => recent.name || (recent.kind === ROOM_KIND.POKER ? t('poker.title') : recent.code);
+
 export function RecentRow({ recent, onRemove }) {
   const removeLabel = t('landing.recents.remove');
   return (
@@ -268,9 +271,9 @@ export function RecentRow({ recent, onRemove }) {
       <button
         type="button"
         className="rb-landing__recent-open"
-        onClick={() => gotoBoard(recent.code, recent.token)}
+        onClick={() => gotoBoard(recent.code, recent.token, recent.kind)}
       >
-        <span className="rb-landing__recent-name">{recent.name || recent.code}</span>
+        <span className="rb-landing__recent-name">{recentTitle(recent)}</span>
         <span className="rb-landing__recent-detail">
           <span className="rb-landing__recent-code">{recent.code}</span>
           {t('landing.recents.separator')}

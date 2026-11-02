@@ -4,7 +4,7 @@ import { Button } from '../ui/UiPrimitives.jsx';
 import { BUTTON_VARIANT } from '../ui/ui-variants.js';
 import RoomBootstrapScreen from '../app/RoomBootstrapScreen.jsx';
 import { ROOM_BOOTSTRAP_STATUS, useRoomBootstrap } from '../app/use-room-bootstrap.js';
-import { gotoBoard } from '../app/router.js';
+import { ROOM_KIND, gotoBoard, isBoardCreatedByMe, rememberRecent } from '../app/router.js';
 import { ROOM_SESSION_ERROR, RoomSessionError, establishRoomSession } from '../session/room-session.js';
 import { SYNC_STATE } from '../session/sync-status.js';
 import { createRandomId } from '../session/random-id.js';
@@ -64,6 +64,8 @@ export default function PokerBootstrap({ code, token }) {
   const state = useRoomBootstrap(async () => {
     if (!token) throw new RoomSessionError(ROOM_SESSION_ERROR.INVALID);
     await establishRoomSession(code, token);
+    // Like boards, only the creator's rooms are listed, so forwarded links are never stored.
+    if (isBoardCreatedByMe(code, token)) rememberRecent(code, undefined, token, ROOM_KIND.POKER);
   }, `${code}:${token}`);
   if (state.status === ROOM_BOOTSTRAP_STATUS.READY) return <PokerRoom code={code} token={token} />;
   return <RoomBootstrapScreen status={state.status} retryAfterSeconds={state.retryAfterSeconds} onRetry={state.retry} />;

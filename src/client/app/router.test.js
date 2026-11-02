@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   forgetRecent,
   isBoardCreatedByMe,
+  ROOM_KIND,
   loadRecents,
   markBoardCreated,
   recentBoardName,
@@ -34,8 +35,24 @@ test('malformed recent storage is normalized to an empty list', () => {
     ]),
   });
   assert.deepEqual(loadRecents(), [{
-    code: 'Room1234', token: 'valid_token', name: '', visitedAt: 0,
+    code: 'Room1234', token: 'valid_token', name: '', visitedAt: 0, kind: ROOM_KIND.BOARD,
   }]);
+});
+
+test('a recent remembers whether it is a poker room; older or unknown entries reopen as boards', () => {
+  installStorage({
+    rb_recents: JSON.stringify([
+      { code: 'Legacy12', token: 'valid_token', name: 'old' },
+      { code: 'Weird123', token: 'valid_token', kind: 'spreadsheet' },
+    ]),
+  });
+  rememberRecent('Poker123', '', 'valid_token', ROOM_KIND.POKER);
+  rememberRecent('Poker123', undefined, 'valid_token', ROOM_KIND.POKER);
+  assert.deepEqual(loadRecents().map((r) => [r.code, r.kind]), [
+    ['Poker123', ROOM_KIND.POKER],
+    ['Legacy12', ROOM_KIND.BOARD],
+    ['Weird123', ROOM_KIND.BOARD],
+  ]);
 });
 
 test('refreshing a recent preserves its existing board name', () => {

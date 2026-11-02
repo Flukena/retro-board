@@ -18,7 +18,6 @@ export function useCreateBoard() {
     const timer = setTimeout(() => setCreateError(null), createError.retryAfterSeconds * MILLISECONDS_PER_SECOND);
     return () => clearTimeout(timer);
   }, [createError]);
-  // Recents always reopen as boards, so only board rooms are listed there.
   const createBoard = async ({ name = '', starter = null, kind = ROOM_KIND.BOARD } = {}) => {
     if (creatingRef.current) return;
     creatingRef.current = true;
@@ -27,7 +26,7 @@ export function useCreateBoard() {
     try {
       const { code, token } = await createRoom();
       markBoardCreated(code, token);
-      if (kind === ROOM_KIND.BOARD) rememberRecent(code, name, token);
+      rememberRecent(code, name, token, kind);
       if (starter) savePendingStarter(code, starter);
       gotoBoard(code, token, kind);
     } catch (error) {
