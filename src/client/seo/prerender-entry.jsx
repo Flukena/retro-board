@@ -6,6 +6,7 @@ import Landing from '../app/Landing.jsx';
 import LegalPage from '../legal/LegalPage.jsx';
 import TemplatePage from '../templates/TemplatePage.jsx';
 import NotFoundPage from '../app/NotFoundPage.jsx';
+import PokerGuidePage from '../poker/PokerGuidePage.jsx';
 import {
   DEFAULT_SEO_LANG, NOT_FOUND_TITLE_KEY, SEO_LANGS, SEO_PAGES, SEO_PAGE_KIND, SOCIAL_IMAGE,
   canonicalUrl, localizedPath, pageAlternates,
@@ -20,6 +21,7 @@ const VIEWS = Object.freeze({
   [SEO_PAGE_KIND.LANDING]: () => <Landing />,
   [SEO_PAGE_KIND.TEMPLATE]: (page) => <TemplatePage slug={page.slug} />,
   [SEO_PAGE_KIND.LEGAL]: (page) => <LegalPage page={page.legalPage} />,
+  [SEO_PAGE_KIND.TOOL]: () => <PokerGuidePage />,
 });
 
 const outputFile = (path) => (path === '/' ? 'index.html' : `${path.slice(1)}/index.html`);

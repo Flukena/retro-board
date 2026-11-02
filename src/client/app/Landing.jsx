@@ -17,6 +17,8 @@ import CreateBoardError from './CreateBoardError.jsx';
 import LandingGuide from './LandingGuide.jsx';
 import FormatChips from './FormatChips.jsx';
 import PublicWallPreview from '../public-wall/PublicWallPreview.jsx';
+import PokerPromo from '../poker/PokerPromo.jsx';
+import { PLANNING_POKER_PATH } from '../seo/seo-pages.js';
 import { LEGAL_PAGE, LEGAL_PATH } from '../legal/legal-content.js';
 import './landing.css';
 
@@ -107,6 +109,7 @@ export default function Landing() {
         <PublicWallPreview variant="hero" masthead={<LandingMasthead />} belowHero={
           <>
             {recents.length > 0 && <RecentRooms recents={recents} onRemove={removeRecent} />}
+            <PokerPromo />
             <LandingGuide onStartFormat={startFormat} creating={creating} createError={createError} />
             <LandingFooter />
           </>
@@ -148,6 +151,7 @@ function LandingMasthead() {
       <nav className="rb-landing__nav" aria-label={t('tpl.linksNav')}>
         <a href="#landing-guide-templates">{t('landing.nav.templates')}</a>
         <a href="#landing-guide-faq">{t('landing.nav.faq')}</a>
+        <a href={PLANNING_POKER_PATH}>{t('poker.title')}</a>
       </nav>
       <CornerToggles
         lang={lang}

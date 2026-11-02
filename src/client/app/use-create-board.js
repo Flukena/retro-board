@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { gotoBoard, markBoardCreated, rememberRecent } from './router.js';
+import { ROOM_KIND, gotoBoard, markBoardCreated, rememberRecent } from './router.js';
 import { ROOM_SESSION_ERROR, RoomSessionError, createRoom } from '../session/room-session.js';
 import { savePendingStarter } from '../templates/pending-starter.js';
 
@@ -18,7 +18,8 @@ export function useCreateBoard() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState(null);
   const creatingRef = useRef(false);
-  const createBoard = async ({ name = '', starter = null } = {}) => {
+  // Recents always reopen as boards, so only board rooms are listed there.
+  const createBoard = async ({ name = '', starter = null, kind = ROOM_KIND.BOARD } = {}) => {
     if (creatingRef.current) return;
     creatingRef.current = true;
     setCreating(true);
@@ -26,9 +27,9 @@ export function useCreateBoard() {
     try {
       const { code, token } = await createRoom();
       markBoardCreated(code, token);
-      rememberRecent(code, name, token);
+      if (kind === ROOM_KIND.BOARD) rememberRecent(code, name, token);
       if (starter) savePendingStarter(code, starter);
-      gotoBoard(code, token);
+      gotoBoard(code, token, kind);
     } catch (error) {
       setCreateError(createErrorOf(error));
     } finally {

@@ -27,6 +27,21 @@ A signed, expiring HttpOnly cookie scoped to one registered room handle and
 document. It does not expose the private room capability. Public and private
 entry exchange credentials differently but share the same cookie validation.
 
+## Poker room
+
+A registered relay room opened at `/p/<code>#<token>` instead of `/b/`. The
+relay does not know room kinds: the doc's `poker` map marks it with
+`kind: 'poker'`, set by the first client after the initial sync, and a room
+whose `items` map holds board items is never claimed. `stories` holds one map
+per story (title, order, `revealedAt`, `finalEstimate`); `votes` maps
+`<storyId>:<userId>` to a card id of the room deck. Decoding is
+`decodePokerRoom` in `src/domain/poker-schema.js`.
+
+A round is the votes of one story. Reveal sets `revealedAt` and freezes votes
+until the round is reset. Hiding cards before reveal is a workflow rule, not a
+secret: any link holder can read the raw doc (see SECURITY.md). Story edits
+are undoable; votes, reveal and final estimates are not.
+
 ## Protocol envelope
 
 A complete binary WebSocket sync or awareness frame. Framing, byte/count

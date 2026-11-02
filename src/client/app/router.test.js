@@ -112,3 +112,44 @@ test('content pages under /th route in Thai; boards and the Public Wall have no 
     globalThis.window = original;
   }
 });
+
+test('poker rooms route by /p/ with the capability read from the fragment', async () => {
+  const { parseRoute, ROOM_KIND } = await import('./router.js');
+  const original = globalThis.window;
+  try {
+    const route = (pathname, hash = '') => { globalThis.window = { location: { pathname, hash } }; return parseRoute(); };
+    assert.deepEqual(route('/p/Room1234', '#abcdefghijklmnop'), { kind: ROOM_KIND.POKER, code: 'Room1234', token: 'abcdefghijklmnop' });
+    assert.deepEqual(route('/p/Room1234/'), { kind: ROOM_KIND.POKER, code: 'Room1234', token: null });
+    for (const pathname of ['/p/x', '/p/Room1234/extra', '/th/p/Room1234']) {
+      assert.deepEqual(route(pathname), { kind: 'notFound' }, pathname);
+    }
+  } finally {
+    globalThis.window = original;
+  }
+});
+
+test('the Planning Poker guide routes in English and Thai', async () => {
+  const { parseRoute } = await import('./router.js');
+  const original = globalThis.window;
+  try {
+    const route = (pathname) => { globalThis.window = { location: { pathname, hash: '' } }; return parseRoute(); };
+    assert.deepEqual(route('/planning-poker'), { kind: 'pokerGuide' });
+    assert.deepEqual(route('/planning-poker/'), { kind: 'pokerGuide' });
+    assert.deepEqual(route('/th/planning-poker'), { kind: 'pokerGuide', lang: 'th' });
+    assert.deepEqual(route('/planning-pokers'), { kind: 'notFound' });
+  } finally {
+    globalThis.window = original;
+  }
+});
+
+test('share links keep the room kind path and put the token in the fragment', async () => {
+  const { buildBoardUrl, ROOM_KIND } = await import('./router.js');
+  const original = globalThis.window;
+  try {
+    globalThis.window = { location: { origin: 'https://retroroom.party' } };
+    assert.equal(buildBoardUrl('Room1234', 'abcdefghijklmnop'), 'https://retroroom.party/b/Room1234#abcdefghijklmnop');
+    assert.equal(buildBoardUrl('Room1234', 'abcdefghijklmnop', ROOM_KIND.POKER), 'https://retroroom.party/p/Room1234#abcdefghijklmnop');
+  } finally {
+    globalThis.window = original;
+  }
+});

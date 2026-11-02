@@ -5,7 +5,10 @@ import { STARTER_FORMAT, templatePath } from '../templates/starter-formats.js';
 // and the build pre-renders each into its own HTML file with its own head.
 export const SITE_ORIGIN = 'https://retroroom.party';
 
-export const SEO_PAGE_KIND = Object.freeze({ LANDING: 'landing', TEMPLATE: 'template', LEGAL: 'legal' });
+export const SEO_PAGE_KIND = Object.freeze({ LANDING: 'landing', TEMPLATE: 'template', LEGAL: 'legal', TOOL: 'tool' });
+
+// Guide page for the Planning Poker tool; rooms themselves live under /p/.
+export const PLANNING_POKER_PATH = '/planning-poker';
 
 const page = (path, key, kind, extra = {}) => Object.freeze({
   path, kind, titleKey: `seo.${key}.title`, descriptionKey: `seo.${key}.description`, ...extra,
@@ -13,6 +16,7 @@ const page = (path, key, kind, extra = {}) => Object.freeze({
 
 export const SEO_PAGES = Object.freeze([
   page('/', 'home', SEO_PAGE_KIND.LANDING),
+  page(PLANNING_POKER_PATH, 'poker', SEO_PAGE_KIND.TOOL),
   page(templatePath(STARTER_FORMAT.RETRO_LOOP), 'loop', SEO_PAGE_KIND.TEMPLATE, { slug: STARTER_FORMAT.RETRO_LOOP }),
   page(templatePath(STARTER_FORMAT.START_STOP_CONTINUE), 'ssc', SEO_PAGE_KIND.TEMPLATE, { slug: STARTER_FORMAT.START_STOP_CONTINUE }),
   page(templatePath(STARTER_FORMAT.MAD_SAD_GLAD), 'msg', SEO_PAGE_KIND.TEMPLATE, { slug: STARTER_FORMAT.MAD_SAD_GLAD }),

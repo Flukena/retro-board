@@ -8,6 +8,7 @@ import {
 import { resolveExportBoardCode } from './export-filename.js';
 import { IMPORT_MAX_FILE_BYTES, normalizeImportManifest } from '../../domain/import-schema.js';
 import { embedBackupImages } from './backup-images.js';
+import { csvDocument, csvRow } from '../../domain/csv-writer.js';
 
 const jsonTimestamp = (timestamp) => (
   new Date(timestamp).toISOString().slice(0, 19).replace(/[:T]/g, '-')
@@ -112,24 +113,11 @@ export const createCsvExportArtifact = ({
 };
 
 const csvColorName = (i) => CSV_COLOR_NAMES[i] || String(i);
-const csvEsc = (v) => {
-  let s = v == null ? '' : String(v);
-  if (CSV_FORMULA_PREFIX_PATTERN.test(s)) s = `'${s}`;
-  return /[",\n\r]/.test(s)
-    ? `"${s.replace(/"/g, '""')}"`
-    : s;
-};
-
-
-const CSV_FORMULA_PREFIX_PATTERN = /^\s*[=+\-@\t\r]/;
-const CSV_BOM = '\uFEFF';
-const CSV_ROW_SEPARATOR = '\r\n';
-const CSV_COLUMN_SEPARATOR = ',';
 const CSV_COLOR_NAMES = ['yellow', 'red', 'green', 'blue', 'purple', 'orange'];
 const CSV_STICKY_COLUMNS = ['text', 'author', 'votes', 'color', 'createdAt'];
 
 const csvHeader = (labels, columns = CSV_STICKY_COLUMNS) => (
-  columns.map((key) => csvEsc(labels[key])).join(CSV_COLUMN_SEPARATOR)
+  csvRow(columns.map((key) => labels[key]))
 );
 const csvStickyRow = (sticky, board, votes, userId, labels) => [
   isStickyHiddenForUser(sticky, board.items, board.allRevealed, userId)
@@ -142,7 +130,6 @@ const csvStickyRow = (sticky, board, votes, userId, labels) => [
 const sortByVotes = (items, votes) => items.sort((a, b) => (
   (votes.get(b.id)?.size ?? 0) - (votes.get(a.id)?.size ?? 0)
 ));
-const joinCsv = (lines) => CSV_BOM + lines.join(CSV_ROW_SEPARATOR);
 
 export const buildZoneCsv = (zone, board, votes, userId, labels) => {
   const children = board.items.filter((item) => (
@@ -150,9 +137,9 @@ export const buildZoneCsv = (zone, board, votes, userId, labels) => {
   ));
   const lines = [csvHeader(labels)];
   sortByVotes(children, votes).forEach((sticky) => {
-    lines.push(csvStickyRow(sticky, board, votes, userId, labels).map(csvEsc).join(CSV_COLUMN_SEPARATOR));
+    lines.push(csvRow(csvStickyRow(sticky, board, votes, userId, labels)));
   });
-  return joinCsv(lines);
+  return csvDocument(lines);
 };
 
 export const buildBoardCsv = (board, votes, userId, labels) => {
@@ -165,8 +152,7 @@ export const buildBoardCsv = (board, votes, userId, labels) => {
   });
   const lines = [csvHeader(labels, ['zone', ...CSV_STICKY_COLUMNS])];
   const pushRow = (zoneLabel, sticky) => {
-    lines.push([zoneLabel, ...csvStickyRow(sticky, board, votes, userId, labels)]
-      .map(csvEsc).join(CSV_COLUMN_SEPARATOR));
+    lines.push(csvRow([zoneLabel, ...csvStickyRow(sticky, board, votes, userId, labels)]));
   };
   zones.forEach((zone) => {
     sortByVotes(stickies.filter((sticky) => ownerByStickyId.get(sticky.id) === zone.id), votes)
@@ -174,5 +160,5 @@ export const buildBoardCsv = (board, votes, userId, labels) => {
   });
   sortByVotes(stickies.filter((sticky) => !ownerByStickyId.has(sticky.id)), votes)
     .forEach((sticky) => pushRow(labels.unassigned, sticky));
-  return joinCsv(lines);
+  return csvDocument(lines);
 };

@@ -14,8 +14,8 @@ test('the sitemap lists exactly the indexable pages and nothing private or user-
   const locs = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]);
   assert.deepEqual(locs, SEO_PAGES.flatMap((page) => [canonicalUrl(page.path), canonicalUrl(localizedPath(page.path, 'th'))]));
   assert.ok(locs.every((loc) => loc.startsWith(`${SITE_ORIGIN}/`)));
-  assert.ok(!locs.some((loc) => /\/(b|public)(\/|$)/.test(new URL(loc).pathname)), 'boards and the Public Wall stay out');
-  for (const path of ['/', '/templates/start-stop-continue', '/templates/mad-sad-glad', '/templates/4ls-retrospective',
+  assert.ok(!locs.some((loc) => /\/(b|p|public)(\/|$)/.test(new URL(loc).pathname)), 'boards, poker rooms and the Public Wall stay out');
+  for (const path of ['/', '/planning-poker', '/th/planning-poker', '/templates/start-stop-continue', '/templates/mad-sad-glad', '/templates/4ls-retrospective',
     '/th', '/th/templates/retro-loop', '/th/privacy']) {
     assert.ok(locs.includes(canonicalUrl(path)), path);
   }

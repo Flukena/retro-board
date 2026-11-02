@@ -62,6 +62,16 @@ test('undo and silent shared edits count; socket sync clears guard and destroy d
   assert.equal(after.defaultPrevented, false);
 });
 
+test('a room kind with its own shared maps marks offline edits to those maps pending', (context) => {
+  const doc = new Y.Doc();
+  context.after(() => doc.destroy());
+  const state = attachClientSync(new Transport(), doc, new EventTarget(), { sharedMapNames: ['votes'] });
+  doc.transact(() => doc.getMap('items').set('ignored', 1), 'local');
+  assert.equal(state.getSnapshot().hasUnsyncedLocalChanges, false);
+  doc.transact(() => doc.getMap('votes').set('story:user', '5'), 'local');
+  assert.equal(state.getSnapshot().hasUnsyncedLocalChanges, true);
+});
+
 const TEST_NOW_MS = 1_700_000_000_000;
 const SESSION_TTL_MS = 60_000;
 const REFRESH_DELAY_MS = 48_000;

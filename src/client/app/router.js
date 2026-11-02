@@ -4,9 +4,15 @@
 import { PUBLIC_PATH } from '../../domain/public-wall-contract.js';
 import { legalPageForPath } from '../legal/legal-content.js';
 import { TEMPLATE_PATH_PREFIX, starterFormat } from '../templates/starter-formats.js';
-import { splitLangPath } from '../seo/seo-pages.js';
+import { PLANNING_POKER_PATH, splitLangPath } from '../seo/seo-pages.js';
 
 const BOARD_PATH = /^\/b\/([A-Za-z0-9_-]{3,32})\/?$/;
+const POKER_PATH = /^\/p\/([A-Za-z0-9_-]{3,32})\/?$/;
+
+// Every room is the same relay room; the path picks which app opens it.
+export const ROOM_KIND = Object.freeze({ BOARD: 'board', POKER: 'poker' });
+const ROOM_PATH_PREFIX = Object.freeze({ [ROOM_KIND.BOARD]: '/b/', [ROOM_KIND.POKER]: '/p/' });
+const roomPath = (code, token, kind) => `${ROOM_PATH_PREFIX[kind]}${code}${token ? `#${token}` : ''}`;
 // Tokens are 16 alphanumeric chars (Web Crypto generated). The pattern is
 // permissive so older links and hand-edits still parse cleanly; junk in the
 // fragment just resolves to an unreachable yjs doc name.
@@ -29,7 +35,9 @@ export function parseRoute() {
   if (lang) return { kind: 'notFound' };
   if (path === PUBLIC_PATH || path === `${PUBLIC_PATH}/`) return { kind: 'public' };
   const m = path.match(BOARD_PATH);
-  if (m) return { kind: 'board', code: m[1], token: readTokenFromHash() };
+  if (m) return { kind: ROOM_KIND.BOARD, code: m[1], token: readTokenFromHash() };
+  const poker = path.match(POKER_PATH);
+  if (poker) return { kind: ROOM_KIND.POKER, code: poker[1], token: readTokenFromHash() };
   return { kind: 'notFound' };
 }
 
@@ -37,6 +45,7 @@ function contentRoute(path) {
   const legalPage = legalPageForPath(path);
   if (legalPage) return { kind: 'legal', page: legalPage };
   if (LANDING_PATHS.has(path)) return { kind: 'landing' };
+  if (path.replace(/\/$/, '') === PLANNING_POKER_PATH) return { kind: 'pokerGuide' };
   const slug = templateSlugForPath(path);
   if (slug) return { kind: 'template', slug };
   return null;
@@ -80,13 +89,12 @@ export function generateBoardToken() {
 
 // Build a full share URL. `token` is optional; without it the link is the
 // legacy /b/CODE form and resolves to the pre-token doc name.
-export function buildBoardUrl(code, token) {
-  const base = `${window.location.origin}/b/${code}`;
-  return token ? `${base}#${token}` : base;
+export function buildBoardUrl(code, token, kind = ROOM_KIND.BOARD) {
+  return `${window.location.origin}${roomPath(code, token, kind)}`;
 }
 
-export function gotoBoard(code, token) {
-  window.location.href = token ? `/b/${code}#${token}` : `/b/${code}`;
+export function gotoBoard(code, token, kind = ROOM_KIND.BOARD) {
+  window.location.href = roomPath(code, token, kind);
 }
 
 export function gotoLanding() {

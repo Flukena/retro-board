@@ -4,14 +4,18 @@ import { ROOM_SESSION_HEALTH, getRoomSessionHealth, onRoomSessionHealth, isPubli
 const SESSION_POLICY_CLOSE_CODE = 1008;
 const SESSION_EXPIRED_REASON = 'session expired';
 
-function hasSharedLocalChange(doc, transaction) {
+// Top-level maps whose local edits must reach the relay before unload.
+// Board rooms use these; other room kinds pass their own list.
+export const BOARD_SHARED_MAP_NAMES = Object.freeze(['items', 'meta']);
+
+function hasSharedLocalChange(doc, transaction, sharedMapNames) {
   if (!transaction.local) return false;
-  if (['items', 'meta'].some((name) => transaction.changedParentTypes.has(doc.getMap(name)))) return true;
+  if (sharedMapNames.some((name) => transaction.changedParentTypes.has(doc.getMap(name)))) return true;
   const changedKeys = transaction.changed.get(doc.getMap('kv'));
   return changedKeys && [...changedKeys].some((key) => key?.startsWith('s|'));
 }
 
-export function attachClientSync(provider, doc, browser) {
+export function attachClientSync(provider, doc, browser, { sharedMapNames = BOARD_SHARED_MAP_NAMES } = {}) {
   const state = new SyncStatus();
   const onStatus = ({ status }) => state.transport(status);
   const onSync = (synced) => { if (synced) state.synced(provider.wsconnected); };
@@ -20,7 +24,7 @@ export function attachClientSync(provider, doc, browser) {
     if (event?.code === SESSION_POLICY_CLOSE_CODE && event.reason === SESSION_EXPIRED_REASON) state.socketExpired();
   };
   const onTransaction = (transaction) => {
-    if (hasSharedLocalChange(doc, transaction)) state.localChange(provider.wsconnected && provider.synced);
+    if (hasSharedLocalChange(doc, transaction, sharedMapNames)) state.localChange(provider.wsconnected && provider.synced);
   };
   const onHealth = () => {
     if (getRoomSessionHealth() === ROOM_SESSION_HEALTH.REPLACED) {
