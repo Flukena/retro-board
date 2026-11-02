@@ -69,3 +69,15 @@ test('every language version of a page points at all versions, with English as x
     { hreflang: 'x-default', href: 'https://retroroom.party/privacy' },
   ]);
 });
+
+// RFC 9116: Contact and Expires are required, and an expired file must be renewed, not ignored.
+test('security.txt names a contact, a future expiry and its canonical URL', () => {
+  const fields = Object.fromEntries(read('public/.well-known/security.txt').trim().split('\n').map((line) => {
+    const separator = line.indexOf(': ');
+    return [line.slice(0, separator), line.slice(separator + 2)];
+  }));
+  assert.match(fields.Contact, /^mailto:[^@\s]+@[^@\s]+$/);
+  const expires = Date.parse(fields.Expires);
+  assert.ok(Number.isFinite(expires) && expires > Date.now(), 'security.txt has expired: set a new Expires date');
+  assert.equal(fields.Canonical, `${SITE_ORIGIN}/.well-known/security.txt`);
+});

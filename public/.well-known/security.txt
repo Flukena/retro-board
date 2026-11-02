@@ -1,0 +1,4 @@
+Contact: mailto:flukgoza@gmail.com
+Expires: 2027-11-01T00:00:00.000Z
+Preferred-Languages: th, en
+Canonical: https://retroroom.party/.well-known/security.txt
