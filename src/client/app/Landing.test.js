@@ -114,3 +114,13 @@ test('Join is secondary, enabled for text, and forwards click and Enter', async 
     assert.equal(joins, 2);
   });
 });
+
+test('the Planning Poker lead card sits in a plain column, not inside a framed feature tile', async () => {
+  await withChromeModule('/src/client/app/Landing.jsx', ({ default: Landing }, { setLang }) => {
+    setLang('en');
+    const html = renderLanding(Landing);
+    assert.match(html, /<div class="rb-landing__poker"><section class="rb-poker-feature"/);
+    const tileWrapsPoker = /<div class="rb-landing__feature">\s*<section class="rb-poker-feature"/;
+    assert.doesNotMatch(html, tileWrapsPoker);
+  });
+});

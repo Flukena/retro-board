@@ -107,7 +107,7 @@ export default function Landing() {
       <main className="rb-landing__content">
         <PublicWallPreview variant="hero" masthead={<SiteMasthead homeHref="/" BrandIcon={Sparkles} titleKey="app.title" links={LANDING_LINKS} />} belowHero={
           <>
-            <div className="rb-landing__feature">
+            <div className="rb-landing__poker">
               <PokerFeature titleKey="landing.poker.head" ledeKey="landing.poker.desc" showGuideLink buttonVariant={BUTTON_VARIANT.DEFAULT} />
             </div>
             {recents.length > 0 && <RecentRooms id={RECENTS_SECTION_ID} recents={recents} onRemove={removeRecent} />}

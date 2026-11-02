@@ -340,6 +340,13 @@
 .rb-landing__public-bar .rb-public-wall__join svg { width: var(--space-4); height: var(--space-4); }
 
 /* ---- Recent rooms ---- */
+/* Planning Poker lead card under the hero: same column as the recent rooms, no frame of its own. */
+.rb-landing__poker {
+  box-sizing: border-box;
+  width: calc(100% - 2 * var(--landing-hero-padding));
+  max-width: calc(var(--landing-content-max-width) - 2 * var(--landing-hero-padding));
+  margin: var(--space-8) auto 0;
+}
 .rb-landing__page .rb-landing__card--recents {
   max-width: calc(var(--landing-content-max-width) - 2 * var(--landing-hero-padding));
   margin: var(--space-8) auto 0;
