@@ -1,7 +1,7 @@
 import { BOARD_MODE } from '../../domain/public-wall-contract.js';
 import React, { useState } from 'react';
 import {
-  Copy, Crown, Languages, Lock, Monitor, Moon, MoreHorizontal,
+  Copy, Crown, Lock, Monitor, Moon, MoreHorizontal,
   Redo2, Sparkles, Sun, Undo2, Unlock,
 } from 'lucide-react';
 import { Avatar } from '../ui/Avatar.jsx';
@@ -10,6 +10,7 @@ import { Button, Divider } from '../ui/UiPrimitives.jsx';
 import { BUTTON_VARIANT, DIVIDER_ORIENTATION, topBarButtonVariant } from '../ui/ui-variants.js';
 import { TOPBAR_H_PX, TOPBAR_INSET_PX, TOPBAR_ICON_SIZE_PX, Z } from './chrome-layout.js';
 import { t } from '../ui/i18n.js';
+import { LanguagePicker } from '../ui/LanguagePicker.jsx';
 import { boardManagementPermissions } from '../../domain/public-board-permissions.js';
 import './topbar.css';
 import '../ui/mobile-layout.css';
@@ -76,9 +77,9 @@ function PresenceButton({ players, onClick }) {
 
 export function TopBar({
   mode = BOARD_MODE.PRIVATE, code, title = null, canUndo, canRedo, editingLocked, isAdmin, admin, canClaim, players,
-  userId, userName, lang, themePref, exportBusy, scrollWheelZoomEnabled,
+  userId, userName, themePref, exportBusy, scrollWheelZoomEnabled,
   onHome, onCopyLink, onUndo, onRedo, onToggleEditingLock, onClaimAdmin,
-  onEditName, onToggleLanguage, onToggleTheme, onToggleScrollWheelZoom,
+  onEditName, onToggleTheme, onToggleScrollWheelZoom,
   onExport, onExportCsv, onImport, onHelp, onUnlockAll, onResetVotes, onClear,
   onTransferAdmin, onFollow, onStopFollowing,
 }) {
@@ -183,10 +184,7 @@ export function TopBar({
           />
           <span>{userName || t('topbar.setName')}</span>
         </Button>
-        <Button className="rb-btn--pill" onClick={onToggleLanguage} title={t('settings.lang')}>
-          <Languages size={TOPBAR_ICON_SIZE_PX.TOGGLE} />
-          {lang === 'th' ? 'TH' : 'EN'}
-        </Button>
+        <LanguagePicker />
         <Button
           className="rb-btn--pill"
           onClick={onToggleTheme}

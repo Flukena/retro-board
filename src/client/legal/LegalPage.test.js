@@ -20,7 +20,7 @@ test('legal pages render every translated section, the effective date and a link
         const other = page === LEGAL_PAGE.PRIVACY ? LEGAL_PAGE.TERMS : LEGAL_PAGE.PRIVACY;
         assert.ok(html.includes(`href="${LEGAL_PATH[other]}"`));
         assert.match(html, /href="\/"/);
-        assert.ok(html.includes(`>${t(`settings.lang.${lang}`)}</button>`), 'language pill shows the current language');
+        assert.match(html, new RegExp(`<option value="${lang}"[^>]*selected=""`), 'language picker shows the current language');
       }
     }
   });

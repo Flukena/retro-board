@@ -21,4 +21,33 @@ test('a first visit starts in English, whatever the browser language; a saved ch
   assert.equal(initialLanguage(null), 'en');
   assert.equal(initialLanguage('xx'), 'en', 'an unknown saved value falls back to English');
   assert.equal(initialLanguage('th'), 'th');
+  assert.equal(initialLanguage('ko'), 'ko', 'a saved language that is not loaded yet is still honoured');
+});
+
+test('picking an on-demand language loads it before switching; unknown codes change nothing', async () => {
+  const originalLang = getLang();
+  try {
+    setLang('en');
+    const english = t('settings.lang');
+    await setLang('ja');
+    assert.equal(getLang(), 'ja');
+    assert.notEqual(t('settings.lang'), english, 'Japanese text, not the English fallback');
+    await setLang('xx');
+    assert.equal(getLang(), 'ja');
+  } finally {
+    await setLang(originalLang);
+  }
+});
+
+test('the last language picked wins when loads overlap', async () => {
+  const originalLang = getLang();
+  try {
+    setLang('en');
+    const slow = setLang('zh');
+    setLang('th');
+    await slow;
+    assert.equal(getLang(), 'th');
+  } finally {
+    await setLang(originalLang);
+  }
 });

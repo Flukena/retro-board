@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
+import { LANGUAGE_OPTIONS } from './i18n.js';
 
 const SOURCE_ROOT = new URL('../../../', import.meta.url);
 const STATIC_TRANSLATION_CALL = /\bt\(\s*(['"])([^'"\n]+)\1/g;
@@ -35,3 +36,26 @@ test('every static translation call has a Thai and English dictionary entry', ()
   }
   assert.deepEqual(missing, []);
 });
+
+const PLACEHOLDER = /\{[a-zA-Z]+\}/g;
+const placeholdersOf = (value) => [...new Set(String(value).match(PLACEHOLDER) ?? [])].sort();
+
+test('every on-demand language has exactly the English keys and keeps their placeholders', async () => {
+  const lazyCodes = LANGUAGE_OPTIONS.map(({ code }) => code).filter((code) => !Object.hasOwn(dictionaries, code));
+  assert.ok(lazyCodes.length > 0);
+  const englishKeys = Object.keys(dictionaries.en).sort();
+  for (const code of lazyCodes) {
+    const { default: locale } = await import(`./locales/${code}.js`);
+    assert.deepEqual(Object.keys(locale).sort(), englishKeys, `${code}: key set`);
+    // Keep every English placeholder; use no token the code never passes (English or Thai may omit one, e.g. "1 card").
+    const mismatched = englishKeys.filter((key) => {
+      const allowed = new Set([...placeholdersOf(dictionaries.en[key]), ...placeholdersOf(dictionaries.th[key])]);
+      const used = placeholdersOf(locale[key]);
+      return placeholdersOf(dictionaries.en[key]).some((token) => !used.includes(token)) || used.some((token) => !allowed.has(token));
+    });
+    assert.deepEqual(mismatched, [], `${code}: placeholders`);
+    const untranslated = englishKeys.filter((key) => typeof locale[key] !== 'string' || !locale[key].trim());
+    assert.deepEqual(untranslated, [], `${code}: empty values`);
+  }
+});
+

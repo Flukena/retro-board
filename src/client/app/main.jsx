@@ -13,7 +13,7 @@ import { NOT_FOUND_TITLE_KEY, seoPageForPath } from '../seo/seo-pages.js';
 import { usePageHead } from '../seo/use-page-head.js';
 import { BoardErrorBoundary } from './BoardErrorBoundary.jsx';
 import { SyncBanner } from '../session/SyncBanner.jsx';
-import { setLang, useLang } from '../ui/i18n.js';
+import { languageReady, setLang, useLang } from '../ui/i18n.js';
 import RoomBootstrapScreen from './RoomBootstrapScreen.jsx';
 import { ROOM_BOOTSTRAP_STATUS, useRoomBootstrap } from './use-room-bootstrap.js';
 import PokerBootstrap from '../poker/PokerBootstrap.jsx';
@@ -87,6 +87,7 @@ function PageHead() {
   return null;
 }
 
-createRoot(document.getElementById('root')).render(
+// A saved on-demand language loads first, so the page never flashes English.
+languageReady.then(() => createRoot(document.getElementById('root')).render(
   <React.StrictMode><BoardErrorBoundary><PageHead /><App /></BoardErrorBoundary></React.StrictMode>,
-);
+));

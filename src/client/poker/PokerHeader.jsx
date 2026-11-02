@@ -1,12 +1,12 @@
 import React from 'react';
-import { Download, Languages, Link2, Redo2, Undo2, UserRound } from 'lucide-react';
+import { Download, Link2, Redo2, Undo2, UserRound } from 'lucide-react';
+import { LanguagePicker } from '../ui/LanguagePicker.jsx';
 import { Button, IconButton } from '../ui/UiPrimitives.jsx';
 import { t, useLang } from '../ui/i18n.js';
 import { POKER_DECKS } from '../../domain/poker-deck.js';
 import { deckNameKey } from './poker-format.js';
 
 const ICON_SIZE_PX = 16;
-const OTHER_LANG = Object.freeze({ th: 'en', en: 'th' });
 
 function DeckSelect({ deckId, canChange, onChange }) {
   return (
@@ -20,7 +20,7 @@ function DeckSelect({ deckId, canChange, onChange }) {
 }
 
 export function PokerHeader({ snapshot, canChangeDeck, copied, onCopyLink, onExport, onRename, actions }) {
-  const [lang, setLang] = useLang();
+  useLang();
   return (
     <header className="rb-poker-header">
       <a className="rb-poker-header__brand" href="/">{t('poker.title')}</a>
@@ -38,9 +38,7 @@ export function PokerHeader({ snapshot, canChangeDeck, copied, onCopyLink, onExp
         <Button onClick={onRename} title={t('poker.changeName')}>
           <UserRound size={ICON_SIZE_PX} aria-hidden="true" />{t('poker.changeName')}
         </Button>
-        <Button className="rb-btn--pill" onClick={() => setLang(OTHER_LANG[lang])} title={t('settings.lang')}>
-          <Languages size={ICON_SIZE_PX} aria-hidden="true" />{t(`settings.lang.${lang}`)}
-        </Button>
+        <LanguagePicker />
         <Button onClick={onCopyLink} title={t('topbar.copyLink')}>
           <Link2 size={ICON_SIZE_PX} aria-hidden="true" />{copied ? t('topbar.copied') : t('topbar.copyLink')}
         </Button>

@@ -17,6 +17,7 @@ import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { pathToFileURL } from 'node:url';
 import { Z } from '../src/client/chrome/chrome-layout.js';
+import japanese from '../src/client/ui/locales/ja.js';
 
 const DEFAULT_BASE_URL = 'http://127.0.0.1:5180';
 const BASE_DATA_DIR = '/Volumes/BaseDisk/Base';
@@ -54,7 +55,7 @@ const STEP_NAMES = {
   launch: 'launch two contexts', create: 'create board', join: 'join board',
   syncA: `sync ${SYNC_DIRECTION_A_TO_B}`, syncB: `sync ${SYNC_DIRECTION_B_TO_A}`,
   undo: 'undo in both contexts', redo: 'redo in both contexts', shortcuts: 'board tool shortcuts in both languages',
-  narrow: 'board th/light narrow', close: 'close browser', language: 'landing language button switches the hero',
+  narrow: 'board th/light narrow', close: 'close browser', language: 'landing language picker switches the hero',
 };
 const LABELS = {
   en: {
@@ -74,14 +75,16 @@ const LABELS = {
     nothingToUndoTitle: 'ไม่มีอะไรให้ย้อนกลับ (ย้อนได้แค่สิ่งที่คุณเพิ่งแก้เองในแท็บนี้)',
   },
 };
+// Japanese is loaded on demand; the check reads its strings from the shipped locale.
+LABELS.ja = Object.freeze({ landingTitle: japanese['landing.hero.title'], languageTitle: japanese['settings.lang'] });
 const APPEARANCES = [
   { lang: 'th', theme: 'light' }, { lang: 'th', theme: 'dark' },
   { lang: 'en', theme: 'light' }, { lang: 'en', theme: 'dark' },
 ];
 const INITIAL_APPEARANCE_A = { lang: 'en', theme: 'light' };
 const INITIAL_APPEARANCE_B = { lang: 'th', theme: 'light' };
-// The landing starts in INITIAL_APPEARANCE_A's language; each click moves to the other one.
-const LANGUAGE_BUTTON_SEQUENCE = ['en', 'th'];
+// The landing starts in INITIAL_APPEARANCE_A's language; ja loads on demand, then back to th and en.
+const LANGUAGE_BUTTON_SEQUENCE = ['th', 'ja', 'en'];
 const EXIT_SUCCESS = 0;
 const EXIT_FAILURE = 1;
 const JSON_INDENT_SPACES = 2;
@@ -213,14 +216,15 @@ async function landingScreenshot(page, options, appearance, report) {
   return captureScreenshot(page, `landing-${appearance.lang}-${appearance.theme}.png`, report, options.out);
 }
 
-// Clicks the language button and expects the hero copy, not only the button, to follow.
+// Picks each language in turn and expects the hero copy, not only the picker, to follow.
 async function checkLanguageButton(page, options) {
   await page.goto(options.baseUrl, { waitUntil: 'domcontentloaded' });
   await applyAppearance(page, INITIAL_APPEARANCE_A);
-  for (const lang of LANGUAGE_BUTTON_SEQUENCE) {
-    await page.getByTitle(LABELS[lang].languageTitle, { exact: true }).click();
-    const next = LANGUAGE_BUTTON_SEQUENCE.find((other) => other !== lang);
+  let current = INITIAL_APPEARANCE_A.lang;
+  for (const next of LANGUAGE_BUTTON_SEQUENCE) {
+    await page.getByRole('combobox', { name: LABELS[current].languageTitle, exact: true }).selectOption(next);
     await page.getByRole('heading', { level: 1 }).filter({ hasText: LABELS[next].landingTitle }).waitFor();
+    current = next;
   }
 }
 

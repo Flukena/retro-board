@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Sparkles, Plus, ArrowRight, X, Languages, Sun, Moon, Monitor, Check, ChevronDown,
+  Sparkles, Plus, ArrowRight, X, Sun, Moon, Monitor, Check, ChevronDown,
 } from 'lucide-react';
 import { gotoBoard, loadRecents, forgetRecent } from './router.js';
 import { t, useLang } from '../ui/i18n.js';
+import { LanguagePicker } from '../ui/LanguagePicker.jsx';
 import { useTheme, nextThemePref } from '../ui/theme.js';
 import { Button, IconButton, Surface } from '../ui/UiPrimitives.jsx';
 import { BUTTON_VARIANT, SURFACE_KIND } from '../ui/ui-variants.js';
@@ -142,7 +143,7 @@ export default function Landing() {
 }
 
 function LandingMasthead() {
-  const [lang, setLang] = useLang();
+  useLang();
   const { pref: themePref, setThemePref } = useTheme();
   return (
     <header className="rb-landing__masthead">
@@ -155,12 +156,7 @@ function LandingMasthead() {
         <a href="#landing-guide-faq">{t('landing.nav.faq')}</a>
         <a href={PLANNING_POKER_PATH}>{t('poker.title')}</a>
       </nav>
-      <CornerToggles
-        lang={lang}
-        themePref={themePref}
-        onLanguage={() => setLang(lang === 'th' ? 'en' : 'th')}
-        onTheme={() => setThemePref(nextThemePref(themePref))}
-      />
+      <CornerToggles themePref={themePref} onTheme={() => setThemePref(nextThemePref(themePref))} />
     </header>
   );
 }
@@ -193,15 +189,12 @@ function LandingFooter() {
   );
 }
 
-function CornerToggles({ lang, themePref, onLanguage, onTheme }) {
+function CornerToggles({ themePref, onTheme }) {
   const ThemeIcon = THEME_ICONS[themePref];
   const themeTitle = `${t('settings.theme')}: ${t(`settings.theme.${themePref}`)}`;
   return (
     <div className="rb-landing__corner">
-      <Button className="rb-btn--pill" onClick={onLanguage} title={t('settings.lang')}>
-        <Languages size={TOPBAR_ICON_SIZE_PX.TOGGLE} />
-        {t(`settings.lang.${lang}`)}
-      </Button>
+      <LanguagePicker />
       <Button
         className="rb-btn--pill"
         onClick={onTheme}

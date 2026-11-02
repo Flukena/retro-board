@@ -206,7 +206,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
   const publicMode = mode === BOARD_MODE.PUBLIC;
   useEffect(() => { void warmBoardFonts(document); }, []);
   /* ---------- i18n + theme ---------- */
-  const [lang, setLang] = useLang();
+  const [lang] = useLang();
   const { pref: themePref, setThemePref } = useTheme();
   // `lang` is referenced so React re-renders strings on toggle.
   void lang;
@@ -3565,7 +3565,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
       })}
       userId={userId}
       userName={userName}
-      lang={lang}
       themePref={themePref}
       exportBusy={exportBusy}
       scrollWheelZoomEnabled={scrollWheelZoomEnabled}
@@ -3576,7 +3575,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
       onToggleEditingLock={() => adminToggle('editingLocked')}
       onClaimAdmin={adminClaim}
       onEditName={() => { setNameDraft(userName); setNameModalOpen(true); }}
-      onToggleLanguage={() => setLang(lang === 'th' ? 'en' : 'th')}
       onToggleTheme={() => setThemePref(nextThemePref(themePref))}
       onToggleScrollWheelZoom={toggleScrollWheelZoom}
       onExport={exportBoard}

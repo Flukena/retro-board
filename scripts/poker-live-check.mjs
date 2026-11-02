@@ -192,10 +192,11 @@ try {
     assert.equal(await alice.page.evaluate(() => navigator.clipboard.readText()), roomUrl);
   });
 
-  await step('language button switches the whole room, not only the header', async () => {
-    await bob.page.getByTitle(label('th', 'settings.lang'), { exact: true }).click();
+  await step('language picker switches the whole room, not only the header', async () => {
+    const picker = (lang) => bob.page.getByRole('combobox', { name: label(lang, 'settings.lang'), exact: true });
+    await picker('th').selectOption('en');
     await button({ page: bob.page, lang: 'en' }, 'poker.stories.add').waitFor();
-    await bob.page.getByTitle(label('en', 'settings.lang'), { exact: true }).click();
+    await picker('en').selectOption('th');
     await button(bob, 'poker.stories.add').waitFor();
   });
 
