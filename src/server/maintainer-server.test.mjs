@@ -2,13 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { request } from 'node:http';
-import { createMaintainerServer, maintainerConfig, startMaintainer } from './maintainer-server.js';
+import { RETIRE_IDLE_PATH, createMaintainerServer, maintainerConfig, startMaintainer } from './maintainer-server.js';
 
 const key = randomBytes(32).toString('base64url');
 
-async function fixture(t, snapshot = () => ({ rooms: [] }), roomLink) {
+async function fixture(t, snapshot = () => ({ rooms: [] }), roomLink, retireIdle) {
   const origins = new Set(['https://owner.example.ts.net']);
-  const server = createMaintainerServer({ key, origins, snapshot, roomLink, assets: new Map([['/', { body: 'login', type: 'text/html' }]]) });
+  const server = createMaintainerServer({ key, origins, snapshot, roomLink, retireIdle, assets: new Map([['/', { body: 'login', type: 'text/html' }]]) });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
   const url = `http://127.0.0.1:${server.address().port}`;
@@ -144,4 +144,31 @@ test('private and Public console sessions coexist on the same host even with a s
   const Cookie=`${privateCookie}; ${publicCookie}`;
   assert.equal((await privateRelay.get('/api/status',{Cookie})).status,200);
   assert.equal((await publicRelay.get('/api/status',{Cookie})).status,200);
+});
+
+test('idle room retirement requires owner authentication, a same-origin POST, and refreshes status', async t => {
+  let sweeps = 0;
+  let snapshots = 0;
+  const result = { retired: 2, unknownAge: 1, files: 3 };
+  const { get, server } = await fixture(t, () => { snapshots += 1; return { rooms: [] }; }, undefined, async () => { sweeps += 1; return result; });
+  const Origin = `http://127.0.0.1:${server.address().port}`;
+  const Authorization = `Bearer ${key}`;
+  assert.equal((await get(RETIRE_IDLE_PATH, { Origin }, 'POST')).status, 401);
+  assert.equal((await get(RETIRE_IDLE_PATH, { Authorization }, 'POST')).status, 403);
+  assert.equal((await get(RETIRE_IDLE_PATH, { Origin: 'https://evil.example', Authorization }, 'POST')).status, 403);
+  assert.equal((await get(RETIRE_IDLE_PATH, { Origin, Authorization })).status, 405);
+  assert.equal(sweeps, 0);
+  await get('/api/status', { Authorization });
+  const response = await get(RETIRE_IDLE_PATH, { Origin, Authorization }, 'POST');
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.json(), result);
+  assert.equal(sweeps, 1);
+  await get('/api/status', { Authorization });
+  assert.equal(snapshots, 2, 'status after a sweep is not served from the old cache');
+});
+
+test('idle room retirement is unavailable when the relay offers none', async t => {
+  const { get, server } = await fixture(t);
+  const Origin = `http://127.0.0.1:${server.address().port}`;
+  assert.equal((await get(RETIRE_IDLE_PATH, { Origin, Authorization: `Bearer ${key}` }, 'POST')).status, 404);
 });

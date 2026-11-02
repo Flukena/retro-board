@@ -12,10 +12,21 @@ test('lists cold and resident rooms without hydration or disclosure of capabilit
     blockedRooms: new Map([[warm, Date.now() + 10000]]), roomUsage: new WeakMap([[doc, { upperBytes: 120 }]]), ready: true,
   });
   assert.equal(snapshot.rooms.length, 2);
-  assert.deepEqual(snapshot.rooms[0], { createdAt: null, lastSessionAt: null, lastActiveAt: null, handle: 'cold-handle', connections: 0, resident: false, blockedUntil: null, documentBytesUpperBound: null, uploadBytes: 25, uploadFiles: 2, collections: null });
+  assert.deepEqual(snapshot.rooms[0], { createdAt: null, lastSessionAt: null, trackedSinceAt: null, lastActiveAt: null, handle: 'cold-handle', connections: 0, resident: false, blockedUntil: null, documentBytesUpperBound: null, uploadBytes: 25, uploadFiles: 2, collections: null });
   assert.equal(snapshot.rooms[1].connections, 3);
   assert.deepEqual(snapshot.rooms[1].collections, { items: 1 });
   assert.equal(snapshot.rooms[1].documentBytesUpperBound, 120);
   assert.ok(snapshot.rooms[1].blockedUntil > Date.now());
   assert.doesNotMatch(JSON.stringify(snapshot), /SECRET|private content|yjs\/board/);
+});
+
+test('rows carry when tracking began for rooms older than activity tracking', () => {
+  const legacy = 'yjs/board-legacy-SECRET_TOKEN';
+  const activity = { get: () => ({ createdAt: null, lastSessionAt: null, lastActiveAt: null, trackedSinceAt: 1234 }) };
+  const snapshot = maintainerSnapshot({
+    registry: { registeredRoomsByHandle: new Map([['legacy-handle', legacy]]), roomUploadUsage: new Map(), activity },
+    docs: new Map(), connections: new Map(), blockedRooms: new Map(), roomUsage: new WeakMap(), ready: true,
+  });
+  assert.equal(snapshot.rooms[0].trackedSinceAt, 1234);
+  assert.equal(snapshot.rooms[0].createdAt, null);
 });

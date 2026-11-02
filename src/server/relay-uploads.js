@@ -39,6 +39,10 @@ const RIFF_SIGNATURE_BYTES = 4;
 const WEBP_FORMAT_OFFSET_BYTES = 8;
 export const IMAGE_SNIFF_BYTES = WEBP_SIGNATURE_BYTES;
 const ROOM_HANDLE_CHARACTERS = 32;
+// The owning room's handle of a room image file, or null for any other file.
+export const roomHandleOfImageFile = (name) => (
+  ROOM_IMAGE_FILENAME_RE.test(name) ? name.slice(0, ROOM_HANDLE_CHARACTERS) : null
+);
 const PRIVATE_UPLOAD_FILE_MODE = 0o600;
 export const UPLOAD_STORAGE_FAILURE_EVENT = 'storageFailure';
 
@@ -67,8 +71,8 @@ const accountScannedFile = (entry, uploadsDir, usage, physicalFiles) => {
     }
     if (!isStoredImageFilename(entry.name)) return;
     usage.files += 1;
-    if (!ROOM_IMAGE_FILENAME_RE.test(entry.name)) return;
-    const handle = entry.name.slice(0, ROOM_HANDLE_CHARACTERS);
+    const handle = roomHandleOfImageFile(entry.name);
+    if (!handle) return;
     const room = usage.roomsByHandle.get(handle) || { bytes: 0, files: 0 };
     room.bytes += size;
     room.files += 1;

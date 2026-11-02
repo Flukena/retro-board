@@ -1,0 +1,81 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { retireIdleRooms } from './room-retirement.js';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const NOW = Date.UTC(2026, 10, 2);
+const OLD_DAYS = 61;
+const RECENT_DAYS = 59;
+const handleOf = (label) => label.padEnd(32, 'x');
+const docOf = (label) => `yjs/board-${label}-abcdefgh12345678`;
+const imageOf = (label) => `${handleOf(label)}.0a1b.png`;
+const QUIET = { log() {} };
+
+function fixture(rooms, { files = [], publicWall = false } = {}) {
+  const activity = new Map(rooms.map(({ label, createdAt }) => [docOf(label), { createdAt, lastSessionAt: null, lastActiveAt: null }]));
+  const retiredDocs = [];
+  const registry = {
+    registeredRoomsByHandle: new Map(rooms.map(({ label }) => [handleOf(label), docOf(label)])),
+    activity: { get: (docName) => activity.get(docName) },
+    async retireRoom(docName) {
+      retiredDocs.push(docName);
+      const handle = [...this.registeredRoomsByHandle].find(([, name]) => name === docName)[0];
+      this.registeredRoomsByHandle.delete(handle);
+      return handle;
+    },
+  };
+  const remaining = new Set(files);
+  const io = {
+    async readdir() { return [...remaining].map((name) => ({ name, isFile: () => true })); },
+    async unlink(path) { remaining.delete(path.split('/').at(-1)); },
+  };
+  let reconciled = 0;
+  const context = {
+    registry, io, publicWall, log: QUIET, now: NOW, uploadsDir: '/uploads',
+    docs: new Map(rooms.filter((r) => r.resident).map(({ label }) => [docOf(label), {}])),
+    connections: new Map(rooms.filter((r) => r.connections).map(({ label, connections }) => [docOf(label), connections])),
+    blockedRooms: new Map(rooms.map(({ label }) => [docOf(label), NOW])),
+    roomPersistenceChurn: new Map(rooms.map(({ label }) => [docOf(label), {}])),
+    reconcileUploadUsage: async () => { reconciled += 1; },
+  };
+  return { context, retiredDocs, remaining, get reconciled() { return reconciled; } };
+}
+
+const daysAgo = (days) => NOW - days * DAY_MS;
+
+test('retires only rooms idle past sixty days, with their images and per-room state', async () => {
+  const f = fixture([
+    { label: 'old', createdAt: daysAgo(OLD_DAYS) },
+    { label: 'recent', createdAt: daysAgo(RECENT_DAYS) },
+    { label: 'live', createdAt: daysAgo(OLD_DAYS), connections: 2 },
+    { label: 'loaded', createdAt: daysAgo(OLD_DAYS), resident: true },
+    { label: 'legacy', createdAt: null },
+  ], { files: [imageOf('old'), imageOf('recent'), 'legacy-upload.png'] });
+  const result = await retireIdleRooms(f.context);
+  assert.deepEqual(result, { retired: 1, unknownAge: 1, files: 1 });
+  assert.deepEqual(f.retiredDocs, [docOf('old')]);
+  assert.deepEqual([...f.remaining].sort(), [imageOf('recent'), 'legacy-upload.png'].sort());
+  assert.equal(f.context.blockedRooms.has(docOf('old')), false);
+  assert.equal(f.context.roomPersistenceChurn.has(docOf('old')), false);
+  assert.equal(f.context.blockedRooms.has(docOf('recent')), true);
+  assert.equal(f.reconciled, 1);
+});
+
+test('a room opened after the candidates were chosen is kept', async () => {
+  const f = fixture([{ label: 'first', createdAt: daysAgo(OLD_DAYS) }, { label: 'second', createdAt: daysAgo(OLD_DAYS) }]);
+  const retire = f.context.registry.retireRoom.bind(f.context.registry);
+  f.context.registry.retireRoom = async (docName) => {
+    const handle = await retire(docName);
+    f.context.docs.set(docOf('second'), {});
+    return handle;
+  };
+  const result = await retireIdleRooms(f.context);
+  assert.equal(result.retired, 1);
+  assert.deepEqual(f.retiredDocs, [docOf('first')]);
+});
+
+test('the Public Wall relay never retires anything', async () => {
+  const f = fixture([{ label: 'wall', createdAt: daysAgo(OLD_DAYS * 10) }], { publicWall: true });
+  assert.deepEqual(await retireIdleRooms(f.context), { retired: 0, unknownAge: 0, files: 0 });
+  assert.deepEqual(f.retiredDocs, []);
+});

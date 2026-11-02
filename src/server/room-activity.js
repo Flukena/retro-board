@@ -5,7 +5,9 @@ const decodeActivity = value => ({
   createdAt: timestamp(value?.createdAt),
   lastSessionAt: timestamp(value?.lastSessionAt),
   lastActiveAt: timestamp(value?.lastActiveAt),
+  trackedSinceAt: timestamp(value?.trackedSinceAt),
 });
+const hasAnyTime = (record) => Object.values(record).some((time) => time !== null);
 
 // One pending record per registered room; writes coalesce across tabs and events.
 export class RoomActivity {
@@ -17,8 +19,15 @@ export class RoomActivity {
 
   constructor(storage) { this.#storage = storage; }
   get(docName) { return this.#records.get(docName) ?? decodeActivity(null); }
-  async hydrate(docName) {
-    this.#records.set(docName, decodeActivity(await this.#storage.getMeta(docName, ROOM_ACTIVITY_META)));
+  // A room from before activity tracking gets the time tracking began, so its
+  // idle time is measured from a known point instead of guessed or ignored.
+  async hydrate(docName, now = Date.now()) {
+    let record = decodeActivity(await this.#storage.getMeta(docName, ROOM_ACTIVITY_META));
+    if (!hasAnyTime(record)) {
+      record = { ...record, trackedSinceAt: now };
+      await this.#storage.setMeta(docName, ROOM_ACTIVITY_META, record);
+    }
+    this.#records.set(docName, record);
   }
   async create(docName, now = Date.now()) {
     const record = { ...decodeActivity(null), createdAt: now };

@@ -28,7 +28,7 @@ function send(port, path = '/', headers = {}, method = 'GET') {
 async function fixture(t) {
   const key = randomBytes(KEY_BYTES).toString('base64url');
   const consoleServer = createMaintainerServer({key, snapshot: () => ({rooms: []}),
-    assets: new Map([['/', {body: '<main>login</main>', type: 'text/html'}]]), roomLink: () => 'https://board.example/public'});
+    assets: new Map([['/', {body: '<main>login</main>', type: 'text/html'}]]), roomLink: () => 'https://board.example/public', retireIdle: async () => ({retired: 0, unknownAge: 0, files: 0})});
   const upstreamPort = await listen(t, consoleServer);
   const gateway = createMaintainerIpGateway({externalOrigin: ORIGIN, upstreamPort});
   const port = await listen(t, gateway);
@@ -52,6 +52,7 @@ test('serves login directly without redirect or DNS and requires the real consol
   const session = {Cookie: cookie.split(';')[0]};
   assert.equal((await send(port, '/api/status', session)).status, 200);
   assert.equal((await send(port, `/api/rooms/${ROOM_HANDLE}/join`, {...session, Origin: ORIGIN}, 'POST')).status, 200);
+  assert.equal((await send(port, '/api/rooms/retire-idle', {...session, Origin: ORIGIN}, 'POST')).status, 200);
   assert.equal((await send(port, '/api/session', {...session, Origin: ORIGIN}, 'DELETE')).status, 204);
   assert.equal((await send(port, '/api/status', session)).status, 401);
 });
@@ -68,7 +69,7 @@ test('rejects foreign origins, host spoofing, missing write origins and duplicat
   const bodyRejected = await send(port, '/api/session', {...auth, Origin: ORIGIN, 'Content-Length': '1'}, 'POST');
   assert.equal(bodyRejected.status, 413);
   assert.equal(bodyRejected.headers.connection, 'close');
-  for (const path of ['/public', '/api/status?other=1', '/.env']) {
+  for (const path of ['/public', '/api/status?other=1', '/.env', '/api/rooms/retire-idle/x', '/api/rooms/other']) {
     assert.equal((await send(port, path, auth)).status, 404);
   }
   {

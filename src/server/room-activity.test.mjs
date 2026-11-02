@@ -13,17 +13,20 @@ function fixture() {
   return { activity: new RoomActivity(storage), storage, persisted, writes };
 }
 
-test('creation and latest session survive restart, legacy creation remains unknown', async () => {
+test('creation and latest session survive restart; a legacy room records when tracking began, not a creation time', async () => {
   const { activity, storage } = fixture();
   await activity.create('room', 1000);
   activity.touch('room', { session: true, now: 2000 });
   activity.touch('room', { now: 3000 });
   await activity.stop();
   const restored = new RoomActivity(storage);
-  await restored.hydrate('room');
-  await restored.hydrate('legacy');
-  assert.deepEqual(restored.get('room'), { createdAt: 1000, lastSessionAt: 2000, lastActiveAt: 3000 });
-  assert.deepEqual(restored.get('legacy'), { createdAt: null, lastSessionAt: null, lastActiveAt: null });
+  await restored.hydrate('room', 4000);
+  await restored.hydrate('legacy', 4000);
+  assert.deepEqual(restored.get('room'), { createdAt: 1000, lastSessionAt: 2000, lastActiveAt: 3000, trackedSinceAt: null });
+  assert.deepEqual(restored.get('legacy'), { createdAt: null, lastSessionAt: null, lastActiveAt: null, trackedSinceAt: 4000 });
+  const again = new RoomActivity(storage);
+  await again.hydrate('legacy', 9000);
+  assert.equal(again.get('legacy').trackedSinceAt, 4000, 'tracking start is recorded once and kept');
 });
 
 test('coalesces activity writes, ignores unknown rooms and never moves times backwards', async () => {
@@ -81,16 +84,17 @@ test('a touch during an in-flight write remains pending and shutdown flushes it'
   release();
   await Promise.all([flushing, stopping]);
   assert.equal(writes.length, 3);
-  assert.deepEqual(writes.at(-1), { createdAt: 1000, lastSessionAt: 3000, lastActiveAt: 3000 });
+  assert.deepEqual(writes.at(-1), { createdAt: 1000, lastSessionAt: 3000, lastActiveAt: 3000, trackedSinceAt: null });
 });
 
-test('invalid legacy metadata remains unknown and rollback drops pending activity', async () => {
+test('invalid legacy metadata is not trusted as a time and rollback drops pending activity', async () => {
   const { activity, persisted, writes } = fixture();
   persisted.set('legacy', { createdAt: -1, lastSessionAt: '1234', lastActiveAt: Infinity });
-  await activity.hydrate('legacy');
-  assert.deepEqual(activity.get('legacy'), { createdAt: null, lastSessionAt: null, lastActiveAt: null });
+  await activity.hydrate('legacy', 1500);
+  const stamped = { createdAt: null, lastSessionAt: null, lastActiveAt: null, trackedSinceAt: 1500 };
+  assert.deepEqual(activity.get('legacy'), stamped);
   activity.touch('legacy', { now: 2000 });
   activity.forget('legacy');
   await activity.stop();
-  assert.equal(writes.length, 0);
+  assert.deepEqual(writes, [stamped]);
 });

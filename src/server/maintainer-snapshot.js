@@ -18,6 +18,7 @@ export function maintainerRooms({ registry, docs, connections, blockedRooms, roo
       handle,
       createdAt: registry.activity?.get(docName).createdAt ?? null,
       lastSessionAt: registry.activity?.get(docName).lastSessionAt ?? null,
+      trackedSinceAt: registry.activity?.get(docName).trackedSinceAt ?? null,
       lastActiveAt: (connections.get(docName) ?? 0) > 0 ? now : registry.activity?.get(docName).lastActiveAt ?? null,
       connections: connections.get(docName) ?? 0,
       resident: Boolean(doc),

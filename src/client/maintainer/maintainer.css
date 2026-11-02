@@ -18,6 +18,8 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--
 
 .maintainer-filters { display: flex; flex-wrap: wrap; gap: 16px; }
 .maintainer-filters label { flex: 1; min-width: min(220px, 100%); }
+.maintainer-idle [role="group"] { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.maintainer-idle [role="group"] p { flex-basis: 100%; margin: 0; }
 .maintainer-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .maintainer-chart { margin: 0; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-panel); min-width: 0; }
 .maintainer-chart figcaption, .maintainer-chart-times { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; }

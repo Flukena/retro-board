@@ -31,6 +31,8 @@ import { provisionPublicWall, RelayPublicWall, retainPublicDocument } from './sr
 import { createRejectionCounters } from './src/server/relay-rejection-counters.js';
 import { startMaintainer } from './src/server/maintainer-server.js';
 import { maintainerSnapshot } from './src/server/maintainer-snapshot.js';
+import { checkedStorage } from './src/server/relay-storage.js';
+import { retireIdleRooms } from './src/server/room-retirement.js';
 import { admitPublicAction, registerPublicQuotaClient, notifyPublicQuota } from './src/server/public-action-limit.js';
 
 // yjs, y-leveldb, and y-websocket must all resolve to the SAME yjs module
@@ -266,60 +268,10 @@ let pendingStoreBytes = 0;
 // below can skip writing it straight back.
 const HYDRATION_ORIGIN = Symbol('hydration');
 
-const storageOperationError = (message) => Object.assign(new Error(message), {
-  code: 'STORAGE_FAILURE',
-});
-
-// y-leveldb's _transact swallows every error: it catches, console.warn's the
-// error, and resolves `null`. Its promises therefore NEVER reject, so a
-// `.catch()` on any of these calls is dead code and a `.then()` runs even when
-// the write failed. Each call has to be checked against its own success
-// contract instead (verified in node_modules/y-leveldb/src/y-leveldb.js):
-//   getYDoc       -> Y.Doc         | null on failure
-//   storeUpdate   -> integer clock | null on failure
-//   flushDocument -> undefined     | null on failure
-const checkedGetYDoc = async (docName) => {
-  const doc = await ldb.getYDoc(docName);
-  if (!(doc instanceof Y.Doc)) throw storageOperationError(`getYDoc failed: ${roomLogId(docName)}`);
-  return doc;
-};
-
-const checkedStoreUpdate = async (docName, update) => {
-  const clock = await ldb.storeUpdate(docName, update);
-  if (!Number.isInteger(clock)) throw storageOperationError(`storeUpdate failed: ${roomLogId(docName)}`);
-  return clock;
-};
-
-const checkedClearDocument = async (docName) => {
-  // Same contract as flushDocument: `undefined` on success, `null` on failure.
-  const result = await ldb.clearDocument(docName);
-  if (result === null) throw storageOperationError(`clearDocument failed: ${roomLogId(docName)}`);
-};
-
-const checkedFlushDocument = async (docName) => {
-  // A successful flush resolves `undefined` — the callback y-leveldb passes to
-  // _transact has no return statement — so only a strict `null` means failure.
-  // `if (!result)` would treat every success as an error here.
-  const result = await ldb.flushDocument(docName);
-  if (result === null) throw storageOperationError(`flushDocument failed: ${roomLogId(docName)}`);
-};
-
-const checkedGetAllDocNames = async () => {
-  const names = await ldb.getAllDocNames();
-  if (!Array.isArray(names)) throw storageOperationError('getAllDocNames failed');
-  return names;
-};
-
-const checkedGetMeta = async (docName, key) => {
-  const value = await ldb.getMeta(docName, key);
-  if (value === null) throw storageOperationError(`getMeta failed: ${roomLogId(docName)}`);
-  return value;
-};
-
-const checkedSetMeta = async (docName, key, value) => {
-  const result = await ldb.setMeta(docName, key, value);
-  if (result === null) throw storageOperationError(`setMeta failed: ${roomLogId(docName)}`);
-};
+const {
+  getYDoc: checkedGetYDoc, storeUpdate: checkedStoreUpdate, clearDocument: checkedClearDocument,
+  flushDocument: checkedFlushDocument, getAllDocNames: checkedGetAllDocNames, getMeta: checkedGetMeta, setMeta: checkedSetMeta,
+} = checkedStorage(ldb, Y);
 
 // One-shot wipe/retirement runs before room registration. If registration ran
 // first, the old capability would remain in the in-memory maps and could mint
@@ -1371,7 +1323,10 @@ const maintainer = await startMaintainer(process.env, () => maintainerSnapshot({
   databaseBytes: dbUsageBytes, uploadBytes: uploadState.bytes,
   pendingStoreOps, pendingStoreBytes, activeDocumentBytes,
   limits: { databaseBytes: MAX_DB_BYTES, uploadBytes: MAX_UPLOAD_STORAGE_BYTES, activeDocumentBytes: MAX_ACTIVE_DOCUMENT_BYTES, pendingStoreBytes: MAX_PENDING_STORE_BYTES, pendingStoreOps: MAX_PENDING_STORE_OPS },
-}), { registry: roomRegistry, boardOrigin: ALLOWED_ORIGINS[0], publicWall: PUBLIC_WALL });
+}), { registry: roomRegistry, boardOrigin: ALLOWED_ORIGINS[0], publicWall: PUBLIC_WALL }, () => retireIdleRooms({
+  registry: roomRegistry, docs, connections: wsConnectionsByRoom, blockedRooms, roomPersistenceChurn,
+  publicWall: PUBLIC_WALL, uploadsDir: UPLOADS_DIR, io: fs.promises, reconcileUploadUsage, log: console,
+}));
 maintenance.on(MAINTENANCE_STORAGE_FAILURE_EVENT, markStorageFailure);
 const runMaintenance = () => maintenance.run({
   publicWall: publicWall && { docName: publicWall.docName, history: publicHistory },

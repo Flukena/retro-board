@@ -21,6 +21,7 @@ const HEADERS = {
   'referrer-policy': 'no-referrer',
   'content-security-policy': "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
 };
+export const RETIRE_IDLE_PATH = '/api/rooms/retire-idle';
 const digest = (value) => createHash('sha256').update(value).digest();
 
 export function maintainerConfig(env) {
@@ -54,7 +55,7 @@ const respond = (res, status, body = '', type = 'text/plain', headers = {}) => {
   res.end(body);
 };
 
-export function createMaintainerServer({ key, origins = new Set(), container = false, snapshot, roomLink = () => null, assets = new Map() }) {
+export function createMaintainerServer({ key, origins = new Set(), container = false, snapshot, roomLink = () => null, retireIdle = null, assets = new Map() }) {
   const expected = digest(`Bearer ${key}`);
   let sessions;
   const authenticatedKey = req => req.headersDistinct.authorization?.length === 1
@@ -81,9 +82,23 @@ export function createMaintainerServer({ key, origins = new Set(), container = f
   };
   let cached;
   let expiresAt = 0;
+  let retiring = null;
+  const retireIdleRooms = (req, res) => {
+    if (!origins.has(req.headers.origin)) { respond(res, 403); return; }
+    if (req.method !== 'POST') { respond(res, 405); return; }
+    if (!authenticatedKey(req) && !sessions.valid(req.headers.cookie)) { respond(res, 401); return; }
+    if (!retireIdle) { respond(res, 404); return; }
+    // One sweep at a time; a second click joins the running one.
+    retiring ??= Promise.resolve().then(retireIdle).finally(() => { retiring = null; expiresAt = 0; });
+    retiring.then(
+      result => respond(res, 200, JSON.stringify(result), 'application/json'),
+      () => respond(res, 503),
+    );
+  };
   const server = createServer({ maxHeaderSize: MAX_HEADER_BYTES }, (req, res) => {
     if (!allowedRequest(req, origins, container)) { respond(res, 403); return; }
     if (req.url === '/api/session') { sessionRequest(req, res); return; }
+    if (req.url === RETIRE_IDLE_PATH) { retireIdleRooms(req, res); return; }
     const join = /^\/api\/rooms\/([A-Za-z0-9_-]{32})\/join$/.exec(req.url);
     if (join) { joinRoom(req, res, join[1]); return; }
     if (req.method !== 'GET') { respond(res, 405); return; }
@@ -118,12 +133,12 @@ export function createMaintainerServer({ key, origins = new Set(), container = f
   return server;
 }
 
-export async function startMaintainer(env, snapshot, roomAccess) {
+export async function startMaintainer(env, snapshot, roomAccess, retireIdle = null) {
   const config = maintainerConfig(env);
   if (!config) return null;
   const root = new URL('../../dist-maintainer/', import.meta.url);
   const assets = new Map(ASSETS.map(([path, file, type]) => [path, { body: readFileSync(new URL(file, root)), type }]));
-  const server = createMaintainerServer({ ...config, snapshot, assets, roomLink: createMaintainerRoomLinks(roomAccess) });
+  const server = createMaintainerServer({ ...config, snapshot, assets, roomLink: createMaintainerRoomLinks(roomAccess), retireIdle });
   await new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(config.port, config.container ? '0.0.0.0' : '127.0.0.1', resolve);

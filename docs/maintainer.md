@@ -57,6 +57,23 @@ Activity updates coalesce to at most one metadata write per dirty room per
 An abrupt crash can lose the final interval of activity, but not room creation.
 Opening the console alone never marks a room active or hydrates its document.
 
+## Retiring idle rooms
+
+The private console offers to delete rooms unused for over 60 days
+(`src/domain/room-retention.js`). A room's last use is the latest of its
+creation, latest session and last activity times. A room created before
+activity tracking has none of these; on the first relay start that sees it, the
+relay records `trackedSinceAt` (when tracking began) instead of guessing a
+creation time, so such a room is deleted only after 60 further days without use.
+Rooms with a connection or a loaded document are never deleted; a room whose
+record could not be read is only counted. The first click shows a warning;
+only the second click deletes. The relay recomputes the list itself, unpublishes
+each room in the same tick it checks the room is closed (so no session can open
+it meanwhile), then clears its LevelDB document and metadata and removes its
+uploaded images. One `[yjs] idle room sweep` line records the counts. Deletion
+is permanent: run and verify a production backup before using it. The Public
+Wall console has no such action.
+
 Resource alerts begin at 80% of each configured budget and become critical at
 95%. Database, uploads, resident documents, V8 heap ceiling and pending writes
 are checked; readiness and failed polling remain visible independently. RSS is

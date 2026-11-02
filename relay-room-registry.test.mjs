@@ -282,3 +282,39 @@ test('registry unavailable service precedes capacity and performs no persistence
   await assert.rejects(registry.createRoom({ unavailable: true }), { code: SERVER_UNAVAILABLE_CODE });
   assert.deepEqual(trace, []);
 });
+
+test('registry retire unpublishes the room before clearing its storage', async () => {
+  const { registry, instance, metadata, trace } = await registryFixture();
+  const room = await registry.createRoom();
+  const kept = await registry.createRoom();
+  const docName = registry.registeredDocForCapability(room.code, room.token);
+  const handle = registry.roomHandleForDoc(docName);
+  trace.length = 0;
+  const retiring = instance.retireRoom(docName);
+  // Unpublished in the same tick, before any storage work completes.
+  assert.equal(registry.registeredDocForCapability(room.code, room.token), null);
+  assert.equal(registry.registeredRoomsByHandle.has(handle), false);
+  assert.equal(registry.roomUploadUsage.has(docName), false);
+  assert.equal(instance.existingDocNames.has(docName), false);
+  assert.equal(instance.registeredDocDigests.has(docName), false);
+  assert.equal(await retiring, handle);
+  assert.ok(trace.includes(ROLLBACK_STEP_LABEL));
+  assert.equal([...metadata.keys()].some((key) => key.startsWith(`${docName}:`)), false);
+  assert.ok(registry.registeredDocForCapability(kept.code, kept.token));
+  assert.equal(registry.registeredDocs.size, 1);
+});
+
+test('registry retire of an unknown room does nothing', async () => {
+  const { instance, trace } = await registryFixture();
+  assert.equal(await instance.retireRoom(DOC_NAME), null);
+  assert.deepEqual(trace, []);
+});
+
+test('registry retire storage failure latches and rejects', async () => {
+  const error = Object.assign(new Error('clear failed'), { code: STORAGE_FAILURE_CODE });
+  const { registry, instance, failures } = await registryFixture({ cleanupError: error });
+  const room = await registry.createRoom();
+  const docName = registry.registeredDocForCapability(room.code, room.token);
+  await assert.rejects(instance.retireRoom(docName), error);
+  assert.deepEqual(failures, [error]);
+});

@@ -231,6 +231,30 @@ export class RoomRegistry extends EventEmitter {
     }
   }
 
+  // Unpublish synchronously, before the first await, so no session, upgrade or
+  // upload can reach the room while its storage is cleared. Callers check that
+  // the room is not loaded or connected in the same tick. Returns the handle.
+  async retireRoom(docName) {
+    const handle = this.registeredRoomHandlesByDoc.get(docName);
+    if (!handle) return null;
+    this.registeredDocs.delete(docName);
+    this.registeredDocDigests.delete(docName);
+    this.registeredRoomsByHandle.delete(handle);
+    this.registeredRoomHandlesByDoc.delete(docName);
+    this.roomUploadUsage.delete(docName);
+    this.existingDocNames.delete(docName);
+    this.activity.forget(docName);
+    try {
+      // A flush already in flight must land before the clear, not after it.
+      await this.activity.flush();
+      await this.#persistence.clearDocument(docName);
+    } catch (error) {
+      this.reportStorageFailure(error);
+      throw error;
+    }
+    return handle;
+  }
+
   async createRoom({ unavailable = false, initialUpdate = null } = {}) {
     if (unavailable) throw Object.assign(new Error(SERVICE_UNAVAILABLE_MESSAGE), { code: SERVER_UNAVAILABLE_CODE });
     if (this.registeredDocs.size + this.pendingRoomCreations >= this.#maxRooms) {

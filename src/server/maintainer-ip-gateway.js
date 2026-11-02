@@ -10,7 +10,7 @@ const TAILNET_SECOND_OCTET_MIN = 64;
 const TAILNET_SECOND_OCTET_MAX = 127;
 const PORT_MAX = 65535;
 const READ_METHODS = new Set(['GET', 'HEAD']);
-const PATH_RE = /^(?:\/|\/maintainer\.(?:js|css)|\/api\/(?:status|session|rooms\/[A-Za-z0-9_-]{32}\/join))$/;
+const PATH_RE = /^(?:\/|\/maintainer\.(?:js|css)|\/api\/(?:status|session|rooms\/(?:retire-idle|[A-Za-z0-9_-]{32}\/join)))$/;
 const FORWARDED_HEADERS = ['authorization', 'cookie', 'sec-fetch-site', 'accept', 'accept-encoding'];
 const UNIQUE_HEADERS = ['host', 'origin', 'authorization', 'cookie'];
 
