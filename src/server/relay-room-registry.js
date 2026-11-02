@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { ROOM_HANDLE_RE, ROOM_ID_ALLOCATION_ATTEMPTS, STORE_OPERATION_OVERHEAD_BYTES } from './relay-config.js';
 import { roomLogId } from './relay-log-id.js';
+import { RoomActivity } from './room-activity.js';
 
 export const ROOM_REGISTRATION_META = 'retro-room-registration-v1';
 export const ROOM_HANDLE_META = 'retro-room-handle-v1';
@@ -82,6 +83,7 @@ export class RoomRegistry extends EventEmitter {
   pendingRoomHandles = new Set();
   existingDocNames = new Set();
   pendingRoomCreations = 0;
+  activity;
   #failure = null;
   #persistence;
   #Y;
@@ -94,6 +96,7 @@ export class RoomRegistry extends EventEmitter {
   constructor({ persistence, Y, maxRooms, maxDatabaseBytes, signingKey, log = console }) {
     super();
     this.#persistence = persistence;
+    this.activity = new RoomActivity(persistence);
     this.#Y = Y;
     this.#maxRooms = maxRooms;
     this.#maxDatabaseBytes = maxDatabaseBytes;
@@ -150,6 +153,7 @@ export class RoomRegistry extends EventEmitter {
       handle = this.newUniqueRoomHandle();
       await this.#persistence.setMeta(docName, ROOM_HANDLE_META, handle);
     }
+    await this.activity.hydrate(docName);
     this.registerDocInMemory(docName, handle);
     const stored = persistedUsage(await this.#persistence.getMeta(docName, ROOM_UPLOAD_USAGE_META));
     const actual = initialUploadUsage.roomsByHandle.get(handle) || emptyUsage();
@@ -197,6 +201,7 @@ export class RoomRegistry extends EventEmitter {
     await this.#persistence.storeUpdate(docName, update);
     await this.#persistence.setMeta(docName, ROOM_HANDLE_META, handle);
     await this.#persistence.setMeta(docName, ROOM_UPLOAD_USAGE_META, emptyUsage());
+    await this.activity.create(docName);
     await this.#persistence.flushDocument(docName);
     if (this.#persistence.measureDatabase() > this.#maxDatabaseBytes) {
       const error = databaseCapacityError();
@@ -218,6 +223,7 @@ export class RoomRegistry extends EventEmitter {
     try {
       await this.#persistence.clearDocument(docName);
       this.existingDocNames.delete(docName);
+      this.activity.forget(docName);
       this.#persistence.measureDatabase();
     } catch (error) {
       this.reportStorageFailure(error);

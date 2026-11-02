@@ -14,6 +14,10 @@ test('banner renders outage and unsynced copy in both languages', async () => {
       assert.ok(markup.includes(t('resilience.disconnected')));
       assert.ok(markup.includes(t('resilience.pending')));
       assert.ok(markup.includes('role="status"'));
+      const limited = renderToStaticMarkup(React.createElement(SyncStatusBanner, {
+        state: { status: 'action-limit', hasUnsyncedLocalChanges: true },
+      }));
+      assert.ok(limited.includes(t('resilience.action-limit')));
       const healthy = renderToStaticMarkup(React.createElement(SyncStatusBanner, {
         state: { status: 'connected', hasUnsyncedLocalChanges: false },
       }));

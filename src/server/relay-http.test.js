@@ -31,7 +31,8 @@ test('origin rejection precedes CORS and localhost fallback remains exact', () =
   const accepted = response();
   assert.equal(acceptCredentialOrigin({ headers: { origin: ORIGIN } }, accepted, [ORIGIN], false), true);
   assert.deepEqual(accepted.headers, {
-    'access-control-allow-origin': ORIGIN, 'access-control-allow-credentials': 'true', vary: 'Origin',
+    'access-control-allow-origin': ORIGIN, 'access-control-allow-credentials': 'true',
+    'access-control-expose-headers': 'Retry-After', vary: 'Origin',
   });
   assert.equal(isExactAllowedOrigin('http://localhost:5173', [], true), true);
   assert.equal(isExactAllowedOrigin('http://localhost:5173/', [], true), false);
@@ -113,7 +114,7 @@ const entrypointHttp = (overrides = {}) => {
     reserveHttpRequest: () => ({ status: 0, release() {} }),
     rejectionCounters: { observeResponse() {} },
     authenticatedDocFromRequest: () => null,
-    takeCreateToken: () => true, createRegisteredRoom: async () => ({ code: 'abc', token: 'capability' }),
+    takeCreateToken: () => 0, createRegisteredRoom: async () => ({ code: 'abc', token: 'capability' }),
     markStorageFailure() { assert.fail('unexpected storage failure'); },
     failureAttemptAvailable: () => true, recordSessionFailure() {},
     registeredDocForCapability: () => null,
@@ -139,7 +140,8 @@ test('entrypoint preserves preflight headers and origin before unknown-room prec
   dispatch(routeRequest('OPTIONS', '/yjs/api/rooms'), accepted);
   assert.equal(accepted.status, 204);
   assert.deepEqual(accepted.headers, {
-    'access-control-allow-origin': ORIGIN, 'access-control-allow-credentials': 'true', vary: 'Origin',
+    'access-control-allow-origin': ORIGIN, 'access-control-allow-credentials': 'true',
+    'access-control-expose-headers': 'Retry-After', vary: 'Origin',
     'access-control-allow-methods': 'POST, OPTIONS', 'access-control-allow-headers': 'Content-Type',
     'access-control-max-age': '600', 'cache-control': 'no-store',
   });
@@ -179,7 +181,7 @@ test('entrypoint image access retains unknown room before session and skips orig
 });
 
 test('entrypoint retains creation and session JSON error and failure-budget precedence', async () => {
-  const limited = entrypointHttp({ takeCreateToken: () => false });
+  const limited = entrypointHttp({ takeCreateToken: () => 60 });
   const create = response();
   await limited.handleCreateRoom(request(['bad'], { origin: ORIGIN, 'content-type': 'text/plain' }), create, 'ip');
   assert.equal(create.status, 429);
@@ -250,6 +252,8 @@ test('room target parser accepts public opaque handles and rejects capability-be
   const parsePublic = runInNewContext(`${source}\nroomTargetFromRequest;`, { PUBLIC_WALL: true, Number });
   const parsePrivate = runInNewContext(`${source}\nroomTargetFromRequest;`, { PUBLIC_WALL: false, Number });
   assert.equal(parsePublic({ url: `/yjs-public/rooms/${ROOM_HANDLE}?awarenessId=42` }).handle, ROOM_HANDLE);
+  assert.equal(parsePublic({ url: `/yjs-public/rooms/${ROOM_HANDLE}?awarenessId=42&quota=1` }).supportsQuota, true);
+  assert.equal(parsePrivate({ url: `/yjs/rooms/${ROOM_HANDLE}?awarenessId=42&quota=1` }), null);
   assert.equal(parsePrivate({ url: `/yjs-public/rooms/${ROOM_HANDLE}` }), null);
   for (const suffix of ['#secret', '?token=secret', '?awarenessId=-1', '?awarenessId=42&token=secret']) {
     assert.equal(parsePublic({ url: `/yjs-public/rooms/${ROOM_HANDLE}${suffix}` }), null);

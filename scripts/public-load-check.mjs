@@ -9,6 +9,7 @@ import * as Y from 'yjs';
 import WebSocket from 'ws';
 import { WebsocketProvider } from 'y-websocket';
 import { createMotionPublisher, sendOnlyLocalAwareness } from '../src/client/session/awareness-transport.js';
+import { attachPublicCreationBudget } from '../src/client/session/public-creation-budget.js';
 import { PUBLIC_RELAY_PREFIX, PUBLIC_SESSION_ROUTE } from '../src/domain/public-wall-contract.js';
 
 const SSD_ROOT = '/Volumes/ssd-fluke/BaseData';
@@ -25,6 +26,8 @@ const IDLE_DURATION_MS = 35000;
 const ACTIVE_DURATION_MS = 15000;
 const ACTIVE_INTERVAL_MS = 100;
 const SEED_CARD_COUNT = 100;
+const SEED_CARDS_PER_CLIENT = 10;
+const IPV4_HOSTS_PER_SUBNET = 254;
 const SEED_COLOR_COUNT = 5;
 const MILLISECONDS_PER_SECOND = 1000;
 const MAX_AWARENESS_P95_MS = 2000;
@@ -75,7 +78,8 @@ function createClient(index, credentials) {
   let rejected = false;
   class Socket extends WebSocket {
     constructor(address, protocols) {
-      super(address, protocols, { headers: { origin: ORIGIN, cookie: credentials.cookie } });
+      super(address, protocols, { headers: { origin: ORIGIN, cookie: credentials.cookie,
+        'cf-connecting-ip': `10.0.${Math.floor(index / IPV4_HOSTS_PER_SUBNET)}.${index % IPV4_HOSTS_PER_SUBNET + 1}` } });
       this.on('unexpected-response', (_request, response) => {
         report.upgradeStatuses[response.statusCode] = (report.upgradeStatuses[response.statusCode] || 0) + 1;
         rejected = true; response.resume(); this.terminate();
@@ -89,7 +93,8 @@ function createClient(index, credentials) {
   const doc = new Y.Doc();
   const provider = new WebsocketProvider(`${base.href.replace('http:', 'ws:')}${PUBLIC_RELAY_PREFIX.slice(1)}`,
     `rooms/${credentials.roomHandle}`, doc, { connect: false, disableBc: true,
-      WebSocketPolyfill: Socket, params: { awarenessId: String(doc.clientID) } });
+      WebSocketPolyfill: Socket, params: { awarenessId: String(doc.clientID), quota: '1' } });
+  attachPublicCreationBudget(provider, { applyBudget() {} });
   sendOnlyLocalAwareness(provider);
   provider.awareness.setLocalStateField('user', { userId: `load-${index}`, name: `Load ${index}`, lastSeen: Date.now() });
   provider.on('connection-close', () => { provider.shouldConnect = false; });
@@ -99,10 +104,11 @@ function createClient(index, credentials) {
   return client;
 }
 
-function seedBoard(doc) {
-  assert.equal(doc.getMap('items').size, 0, 'Load check requires a fresh isolated Public board');
+function seedBoard(doc, batch) {
+  const start = batch * SEED_CARDS_PER_CLIENT;
+  assert.equal(doc.getMap('items').size, start, 'Seed batches require a fresh, synchronized Public board');
   doc.transact(() => {
-    for (let index = 0; index < SEED_CARD_COUNT; index++) {
+    for (let index = start; index < Math.min(start + SEED_CARDS_PER_CLIENT, SEED_CARD_COUNT); index++) {
       const card = new Y.Map();
       const fields = { id: `seed-${index}`, type: 'sticky', x: index * TEXT_WIDTH_PX, y: 0,
         w: TEXT_WIDTH_PX, h: TEXT_HEIGHT_PX, color: index % SEED_COLOR_COUNT, private: false, createdAt: Date.now() };
@@ -118,7 +124,10 @@ async function joinClients(credentials) {
   for (let index = 0; index < TARGET_CLIENT_COUNT; index++) {
     const client = createClient(index, credentials);
     await waitUntil(() => client.provider.synced || client.rejected(), JOIN_TIMEOUT_MS);
-    if (index === 0 && client.provider.synced) { seedBoard(client.doc); await delay(JOIN_POLL_INTERVAL_MS); }
+    if (index * SEED_CARDS_PER_CLIENT < SEED_CARD_COUNT && client.provider.synced) {
+      seedBoard(client.doc, index);
+      await delay(JOIN_POLL_INTERVAL_MS);
+    }
     await delay(JOIN_PACE_MS);
   }
   const rosterConverged = await waitUntil(() => clients.every(client =>

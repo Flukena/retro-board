@@ -69,6 +69,24 @@ test('extracted dialogs preserve attributes, focus and disabled states in both l
   });
 });
 
+test('help lists every central shortcut with translated descriptions', async () => {
+  const { BOARD_SHORTCUTS } = await import('../board/board-shortcuts.js');
+  await withChromeModule('/src/client/ui/Modals.jsx', ({ HelpDialog }, { setLang, getLang, t }) => {
+    const original = getLang();
+    try {
+      for (const language of ['th', 'en']) {
+        setLang(language);
+        const html = renderToStaticMarkup(React.createElement(HelpDialog, { sections: [] }));
+        for (const shortcut of BOARD_SHORTCUTS) {
+          assert.notEqual(t(shortcut.labelKey), shortcut.labelKey);
+          assert.ok(html.includes(t(shortcut.labelKey)));
+          assert.ok(html.includes(shortcut.display));
+        }
+      }
+    } finally { setLang(original); }
+  });
+});
+
 test('confirmation and name cancel through the shared shell without submitting', async () => {
   await withChromeModule('/src/client/ui/Modals.jsx', ({ ConfirmDialog, NameDialog }) => {
     const events = [];

@@ -53,7 +53,7 @@ const SYNC_DIRECTION_B_TO_A = 'B→A';
 const STEP_NAMES = {
   launch: 'launch two contexts', create: 'create board', join: 'join board',
   syncA: `sync ${SYNC_DIRECTION_A_TO_B}`, syncB: `sync ${SYNC_DIRECTION_B_TO_A}`,
-  undo: 'undo in both contexts', redo: 'redo in both contexts',
+  undo: 'undo in both contexts', redo: 'redo in both contexts', shortcuts: 'board tool shortcuts in both languages',
   narrow: 'board th/light narrow', close: 'close browser',
 };
 const LABELS = {
@@ -384,6 +384,18 @@ async function checkBoardScreenshots(state, options, report) {
     () => boardScreenshot(state, options, APPEARANCES[0], VIEWPORT_NARROW, report, '-narrow'));
 }
 
+async function checkToolShortcuts(state) {
+  if (!state.redone) throw new Error('Collaboration checks must pass before shortcut checks.');
+  for (const page of [state.pageA, state.pageB]) {
+    await page.locator(CANVAS_SELECTOR).click({ position: STICKY_POSITION_A_PX });
+    for (const [key, tool] of [['t', 'text'], ['z', 'zone'], ['v', 'select']]) {
+      await page.keyboard.press(key);
+      await page.locator(`[data-tool="${tool}"][aria-pressed="true"]`).waitFor();
+    }
+    await page.keyboard.press('Escape');
+  }
+}
+
 async function checkCollaboration(state, options, report) {
   state.created = await runStep(report, STEP_NAMES.create, () => createBoard(state.pageA, options, report));
   state.joined = await runStep(report, STEP_NAMES.join, () => joinBoard(state.pageB, report));
@@ -391,13 +403,14 @@ async function checkCollaboration(state, options, report) {
   state.syncedB = await runStep(report, STEP_NAMES.syncB, () => checkSync(state, SYNC_DIRECTION_B_TO_A));
   state.undone = await runStep(report, STEP_NAMES.undo, () => checkUndo(state));
   state.redone = await runStep(report, STEP_NAMES.redo, () => checkRedo(state));
+  await runStep(report, STEP_NAMES.shortcuts, () => checkToolShortcuts(state));
 }
 
 async function reportUnavailableChecks(report) {
   const names = [
     ...APPEARANCES.map(({ lang, theme }) => `landing ${lang}/${theme}`),
     STEP_NAMES.create, STEP_NAMES.join, STEP_NAMES.syncA, STEP_NAMES.syncB,
-    STEP_NAMES.undo, STEP_NAMES.redo,
+    STEP_NAMES.undo, STEP_NAMES.redo, STEP_NAMES.shortcuts,
     ...APPEARANCES.map(({ lang, theme }) => `board ${lang}/${theme}`),
     STEP_NAMES.narrow,
   ];

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { t, useLang } from '../ui/i18n.js';
 import { appendHistory, selectRooms } from './monitoring-model.js';
 import { Monitoring } from './Monitoring.jsx';
+import { RoomActivity } from './RoomActivity.jsx';
 import { RoomAccess } from './RoomAccess.jsx';
 import { formatMib } from './monitoring-format.js';
 
@@ -12,7 +13,7 @@ function Metric({ label, children }) {
   return <div className="maintainer-metric"><span>{t(label)}</span><strong>{children}</strong></div>;
 }
 
-function Rooms({ rooms }) {
+function Rooms({ rooms, now }) {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('all');
   const [sort, setSort] = useState('connections');
@@ -26,10 +27,11 @@ function Rooms({ rooms }) {
     </div>
     <p>{t('maintainer.visibleRooms', {n:visible.length, total:rooms.length})}</p>
     <div className="maintainer-table"><table>
-      <thead><tr>{['handle', 'connections', 'state', 'uploads', 'document', 'collections', 'openRoom'].map(key => <th key={key}>{t(`maintainer.${key}`)}</th>)}</tr></thead>
+      <thead><tr>{['handle', 'connections', 'state', 'activity', 'uploads', 'document', 'collections', 'openRoom'].map(key => <th key={key}>{t(`maintainer.${key}`)}</th>)}</tr></thead>
       <tbody>{visible.map(room => <tr key={room.handle}>
         <td><code>{room.handle}</code></td><td>{room.connections}</td>
         <td>{t(room.blockedUntil ? 'maintainer.blocked' : room.resident ? 'maintainer.resident' : 'maintainer.cold')}</td>
+        <RoomActivity room={room} now={now}/>
         <td>{formatMib(room.uploadBytes)} · {t('maintainer.files', { n: room.uploadFiles })}</td>
         <td>{room.documentBytesUpperBound === null ? t('maintainer.unknown') : formatMib(room.documentBytesUpperBound)}</td>
         <td>{room.collections ? Object.entries(room.collections).map(([name, count]) => <div key={name}><code>{name}</code>: {count ?? t('maintainer.unknown')}</div>) : t('maintainer.unknown')}</td>
@@ -55,7 +57,7 @@ function Dashboard({ data, history }) {
       <Metric label="maintainer.activeDocuments">{formatMib(data.activeDocumentBytes)} / {formatMib(data.limits.activeDocumentBytes)}</Metric>
     </div>
     <Monitoring data={data} history={history} />
-    <Rooms rooms={data.rooms} />
+    <Rooms rooms={data.rooms} now={Date.parse(data.at)} />
   </>;
 }
 

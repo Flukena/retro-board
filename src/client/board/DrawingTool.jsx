@@ -64,6 +64,7 @@ export const DrawingTool = memo(function DrawingTool(props) {
   const settingsRef = useRef({ color: null, width: selectedWidth, tool });
   useBrowserLayoutEffect(() => {
     contextRef.current = props; settingsRef.current = { color, width: selectedWidth, tool };
+    controllerRef.current?.cursor();
     controllerRef.current?.requestPaint();
   });
   const refresh = () => { setSummary(summaryOf(draftRef.current)); controllerRef.current?.requestPaint(); };

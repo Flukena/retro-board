@@ -1,5 +1,5 @@
 export const SYNC_STATE = Object.freeze({
-  CONNECTED: 'connected', CONNECTING: 'connecting', DISCONNECTED: 'disconnected', SESSION_LOST: 'session-lost',
+  CONNECTED: 'connected', CONNECTING: 'connecting', DISCONNECTED: 'disconnected', SESSION_LOST: 'session-lost', ACTION_LIMIT: 'action-limit',
 });
 
 export class SyncStatus {
@@ -7,6 +7,7 @@ export class SyncStatus {
   #transport = SYNC_STATE.CONNECTING;
   #sessionLost = false;
   #socketExpired = false;
+  #actionLimited = false;
   #pending = false;
   #snapshot = Object.freeze({ status: SYNC_STATE.CONNECTING, hasUnsyncedLocalChanges: false });
 
@@ -17,7 +18,8 @@ export class SyncStatus {
   };
 
   #publish() {
-    const status = (this.#sessionLost || this.#socketExpired) ? SYNC_STATE.SESSION_LOST : this.#transport;
+    const status = this.#actionLimited ? SYNC_STATE.ACTION_LIMIT
+      : (this.#sessionLost || this.#socketExpired) ? SYNC_STATE.SESSION_LOST : this.#transport;
     if (this.#snapshot.status === status && this.#snapshot.hasUnsyncedLocalChanges === this.#pending) return;
     this.#snapshot = Object.freeze({ status, hasUnsyncedLocalChanges: this.#pending });
     this.#listeners.forEach((listener) => listener());
@@ -41,6 +43,12 @@ export class SyncStatus {
     this.#publish();
   }
 
+  actionLimitReached() {
+    this.#actionLimited = true;
+    this.#pending = true;
+    this.#publish();
+  }
+
   localChange(socketSynced) {
     if (socketSynced && !this.#sessionLost && !this.#socketExpired) return;
     this.#pending = true;
@@ -48,7 +56,7 @@ export class SyncStatus {
   }
 
   synced(socketConnected) {
-    if (!socketConnected) return; // BroadcastChannel is not a relay acknowledgement.
+    if (!socketConnected || this.#actionLimited) return; // BroadcastChannel is not a relay acknowledgement.
     // A replacement socket authenticated successfully. HTTP refresh failure,
     // if any, remains separate until the session service reports recovery.
     this.#socketExpired = false;

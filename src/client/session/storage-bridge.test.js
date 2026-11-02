@@ -392,3 +392,60 @@ test('image upload forwards cancellation to its authenticated request without ad
     assert.equal(receivedSignal, controller.signal);
   });
 });
+
+test('Public creation quota rejects a repeated paste before mutating Yjs, while deletion and edits remain available', async () => {
+  await withStorage(async (browser) => {
+    const notices = [];
+    browser.addEventListener('retro-public-creation-limit', event => notices.push(event.detail));
+    const initial = Array.from({ length: 10 }, (_, index) => ({ ...VALID_ITEM, id: `quota-${index}` }));
+    assert.equal(browser.storage.addItems(initial), true);
+    const before = Y.encodeStateAsUpdate(browser.__rbYDoc);
+    assert.equal(browser.storage.addItem({ ...VALID_ITEM, id: 'quota-over' }), false);
+    assert.deepEqual(Y.encodeStateAsUpdate(browser.__rbYDoc), before);
+    assert.equal(notices.length, 1);
+    assert.ok(notices[0].retryAfterSeconds > 0);
+    browser.storage.removeItem('quota-0');
+    assert.equal(browser.storage.updateItem('quota-1', { x: 40 }), true);
+    assert.equal(browser.__rbYItems.has('quota-0'), false);
+    assert.equal(browser.__rbYItems.get('quota-1').get('x'), 40);
+  }, { publicWall: true });
+});
+
+test('Public image quota rejects a second image without spending additional item capacity', async () => {
+  await withStorage(async browser => {
+    const image = { id: 'first-image', type: 'image', x: 0, y: 0, w: 100, h: 100 };
+    assert.equal(browser.storage.canCreateItems([{ type: 'image' }]), true);
+    assert.equal(browser.storage.addItem(image), true);
+    assert.equal(browser.storage.canCreateItems([{ type: 'image' }]), false);
+    assert.equal(browser.storage.consumePublicCreationFailure(), true);
+    assert.equal(browser.storage.addItem({ ...image, id: 'second-image' }), false);
+    assert.equal(browser.storage.addItem({ ...VALID_ITEM, id: 'ordinary-item' }), true);
+    assert.equal(browser.__rbYItems.has('second-image'), false);
+  }, { publicWall: true });
+});
+
+test('Public board replacement and import refuse oversized additions atomically, but clearing remains allowed', async () => {
+  await withStorage(async browser => {
+    const items = Array.from({ length: 11 }, (_, index) => ({ ...VALID_ITEM, id: `batch-${index}` }));
+    const before = Y.encodeStateAsUpdate(browser.__rbYDoc);
+    assert.equal(browser.storage.replaceBoard({ items }), false);
+    assert.deepEqual(Y.encodeStateAsUpdate(browser.__rbYDoc), before);
+    assert.equal(browser.storage.importBundle({ items }, [], [], null), false);
+    assert.deepEqual(Y.encodeStateAsUpdate(browser.__rbYDoc), before);
+    assert.equal(browser.storage.addItem({ ...VALID_ITEM, id: 'remove-me' }), true);
+    assert.equal(browser.storage.replaceBoard({ items: [] }), true);
+    assert.equal(browser.__rbYItems.size, 0);
+  }, { publicWall: true });
+});
+
+test('creation is blocked after server quota rejection, but private rooms are unaffected', async () => {
+  await withStorage(async browser => {
+    browser.__rbProvider.emit('connection-close', [{ code: 1008, reason: 'public action limit' }]);
+    assert.equal(browser.storage.addItem({ ...VALID_ITEM, id: 'not-shared' }), false);
+    assert.equal(browser.__rbYItems.has('not-shared'), false);
+  }, { publicWall: true });
+  await withStorage(async browser => {
+    const items = Array.from({ length: 11 }, (_, index) => ({ ...VALID_ITEM, id: `private-${index}` }));
+    assert.equal(browser.storage.addItems(items), true);
+  });
+});

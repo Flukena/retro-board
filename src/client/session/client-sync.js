@@ -1,4 +1,5 @@
 import { SYNC_STATE, SyncStatus, shouldGuardUnload } from './sync-status.js';
+import { PUBLIC_ACTION_LIMIT_REASON } from '../../domain/public-wall-contract.js';
 import { ROOM_SESSION_HEALTH, getRoomSessionHealth, onRoomSessionHealth, isPublicRoomSession, refreshActiveRoomSession } from './room-session.js';
 
 const SESSION_POLICY_CLOSE_CODE = 1008;
@@ -22,11 +23,16 @@ export function attachClientSync(provider, doc, browser, { sharedMapNames = BOAR
   const onClose = (event) => {
     state.transport(SYNC_STATE.DISCONNECTED);
     if (event?.code === SESSION_POLICY_CLOSE_CODE && event.reason === SESSION_EXPIRED_REASON) state.socketExpired();
+    if (event?.code === SESSION_POLICY_CLOSE_CODE && event.reason === PUBLIC_ACTION_LIMIT_REASON) {
+      state.actionLimitReached();
+      provider.disconnect();
+    }
   };
   const onTransaction = (transaction) => {
     if (hasSharedLocalChange(doc, transaction, sharedMapNames)) state.localChange(provider.wsconnected && provider.synced);
   };
   const onHealth = () => {
+    if (state.getSnapshot().status === SYNC_STATE.ACTION_LIMIT) return;
     if (getRoomSessionHealth() === ROOM_SESSION_HEALTH.REPLACED) {
       provider.disconnect();
       browser.removeEventListener('beforeunload', onUnload);

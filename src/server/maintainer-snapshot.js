@@ -16,6 +16,9 @@ export function maintainerRooms({ registry, docs, connections, blockedRooms, roo
     const usage = registry.roomUploadUsage.get(docName);
     return {
       handle,
+      createdAt: registry.activity?.get(docName).createdAt ?? null,
+      lastSessionAt: registry.activity?.get(docName).lastSessionAt ?? null,
+      lastActiveAt: (connections.get(docName) ?? 0) > 0 ? now : registry.activity?.get(docName).lastActiveAt ?? null,
       connections: connections.get(docName) ?? 0,
       resident: Boolean(doc),
       blockedUntil: (blockedRooms.get(docName) ?? 0) > now ? blockedRooms.get(docName) : null,

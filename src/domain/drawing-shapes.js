@@ -1,4 +1,4 @@
-export const DRAWING_TOOL = Object.freeze({ PEN: 'pen', ERASER: 'eraser', RECTANGLE: 'rectangle', CIRCLE: 'circle', ARROW: 'arrow' });
+export const DRAWING_TOOL = Object.freeze({ PEN: 'pen', RECTANGLE: 'rectangle', CIRCLE: 'circle', ARROW: 'arrow', ERASER: 'eraser' });
 export const DRAWING_TOOLS = Object.freeze(Object.values(DRAWING_TOOL));
 const SHAPE_TOOLS = new Set([DRAWING_TOOL.RECTANGLE, DRAWING_TOOL.CIRCLE, DRAWING_TOOL.ARROW]);
 const ARROW_HEAD_WIDTH_FACTOR = 4;

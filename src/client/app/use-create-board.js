@@ -1,15 +1,10 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ROOM_KIND, gotoBoard, markBoardCreated, rememberRecent } from './router.js';
-import { ROOM_SESSION_ERROR, RoomSessionError, createRoom } from '../session/room-session.js';
+import { ROOM_SESSION_ERROR, createRoom } from '../session/room-session.js';
+import { createBoardError } from './create-board-error.js';
 import { savePendingStarter } from '../templates/pending-starter.js';
 
-const createErrorOf = (error) => {
-  const rateLimited = error instanceof RoomSessionError && error.code === ROOM_SESSION_ERROR.RATE_LIMITED;
-  return {
-    code: rateLimited ? ROOM_SESSION_ERROR.RATE_LIMITED : ROOM_SESSION_ERROR.UNAVAILABLE,
-    retryAfterSeconds: rateLimited ? error.retryAfterSeconds : null,
-  };
-};
+const MILLISECONDS_PER_SECOND = 1_000;
 
 // Creates a room and opens it. Shared by the home page and the template pages.
 // The relay, not the browser, allocates and registers the room; creator status
@@ -18,6 +13,11 @@ export function useCreateBoard() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState(null);
   const creatingRef = useRef(false);
+  useEffect(() => {
+    if (createError?.code !== ROOM_SESSION_ERROR.RATE_LIMITED || !createError.retryAfterSeconds) return undefined;
+    const timer = setTimeout(() => setCreateError(null), createError.retryAfterSeconds * MILLISECONDS_PER_SECOND);
+    return () => clearTimeout(timer);
+  }, [createError]);
   // Recents always reopen as boards, so only board rooms are listed there.
   const createBoard = async ({ name = '', starter = null, kind = ROOM_KIND.BOARD } = {}) => {
     if (creatingRef.current) return;
@@ -31,7 +31,7 @@ export function useCreateBoard() {
       if (starter) savePendingStarter(code, starter);
       gotoBoard(code, token, kind);
     } catch (error) {
-      setCreateError(createErrorOf(error));
+      setCreateError(createBoardError(error));
     } finally {
       creatingRef.current = false;
       setCreating(false);

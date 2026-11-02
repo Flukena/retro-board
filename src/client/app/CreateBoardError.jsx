@@ -1,8 +1,8 @@
 import React from 'react';
 import { t } from '../ui/i18n.js';
 import { ROOM_SESSION_ERROR } from '../session/room-session.js';
+import { CREATE_RETRY_FALLBACK_SECONDS } from './create-board-error.js';
 
-const CREATE_RETRY_FALLBACK_SECONDS = 2;
 
 export default function CreateBoardError({ error, className = 'rb-landing__error' }) {
   if (!error) return null;

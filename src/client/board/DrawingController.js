@@ -2,12 +2,14 @@ import { attachMobileGestures } from './mobile-gestures.js';
 import { paintDrawing, resizeDrawingPreview } from './drawing-paint.js';
 import { DRAWING_TOOL } from '../../domain/drawing-shapes.js';
 import { STICKY_AUTO_TEXT } from '../ui/palette.js';
+import { resolveBoardShortcut } from './board-shortcuts.js';
 
 const PRIMARY_BUTTON = 0;
 const MIDDLE_BUTTON = 1;
 const SAMPLE_SPACING_SCREEN_PX = 1;
 const COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
 const NATIVE_EDITOR_SELECTOR = 'input, textarea, select, [contenteditable="true"]';
+const ERASER_CURSOR = 'url("/eraser-cursor.svg") 4 24, crosshair';
 
 export class DrawingController {
   constructor(canvas, draft, operations) {
@@ -83,10 +85,11 @@ export class DrawingController {
     if (event.target.closest?.(NATIVE_EDITOR_SELECTOR)) return;
     if (event.code === 'Space') { this.space = true; event.preventDefault(); this.cursor(); return; }
     if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); this.operations.cancel(); return; }
-    if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'z') return;
+    const action = resolveBoardShortcut(event);
+    if (action !== 'undo' && action !== 'redo') return;
     event.preventDefault(); event.stopImmediatePropagation();
     if (this.operations.busy()) return;
-    if (event.shiftKey) this.draft.redo(); else this.draft.undo();
+    if (action === 'redo') this.draft.redo(); else this.draft.undo();
     this.stroke = false; this.changed();
   }
   wheel(event) {
@@ -99,7 +102,10 @@ export class DrawingController {
     this.requestPaint();
   }
   changed() { if (!this.disposed) this.operations.changed(); this.operations.previewChanged?.(); this.requestPaint(); }
-  cursor() { this.canvas.style.cursor = this.pan ? 'grabbing' : this.space ? 'grab' : 'crosshair'; }
+  cursor() {
+    this.canvas.style.cursor = this.pan ? 'grabbing' : this.space ? 'grab'
+      : this.operations.settings().tool === DRAWING_TOOL.ERASER ? ERASER_CURSOR : 'crosshair';
+  }
   resize() {
     this.ratio = resizeDrawingPreview(this.canvas, this.view.innerWidth, this.view.innerHeight, this.view.devicePixelRatio || 1);
     this.requestPaint();

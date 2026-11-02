@@ -55,6 +55,11 @@ test('capacity profile plus Compose overrides retain exact effective production 
   for (const [name, value] of Object.entries(expected)) assert.equal(config[name], value, name);
 });
 
+test('room creation replenishes one per minute by default and accepts an explicit hourly limit', () => {
+  assert.equal(readRelayConfig({}).ROOM_CREATES_PER_HOUR, 60);
+  assert.equal(readRelayConfig({ YJS_ROOM_CREATES_PER_HOUR: '6' }).ROOM_CREATES_PER_HOUR, 6);
+});
+
 test('configuration retains upload default and dependent bounds', () => {
   assert.equal(readRelayConfig({}).MAX_UPLOAD_BYTES, 5 * MIB_BYTES);
   assert.equal(readRelayConfig({ YJS_MAX_UPLOAD_BYTES: '1024' }).MAX_UPLOAD_BYTES, 1024);

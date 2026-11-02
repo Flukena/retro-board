@@ -673,7 +673,18 @@ test('room creation has a separate per-IP rate limit', async (t) => {
   assert.equal((await apiPost(server, '/api/rooms')).status, 201);
   const limited = await apiPost(server, '/api/rooms');
   assert.equal(limited.status, 429);
-  assert.equal(limited.headers.get('retry-after'), '60');
+  assert.ok(Number(limited.headers.get('retry-after')) > 3500, 'retry time must reflect the configured hourly refill');
+});
+
+test('room creation becomes available again after its advertised cooldown', async (t) => {
+  const server = await startServer({ YJS_ROOM_CREATE_BURST: '1', YJS_ROOM_CREATES_PER_HOUR: '3600' });
+  t.after(server.stop);
+  assert.equal((await apiPost(server, '/api/rooms')).status, 201);
+  const limited = await apiPost(server, '/api/rooms');
+  assert.equal(limited.status, 429);
+  assert.equal(limited.headers.get('retry-after'), '1');
+  await delay(1100);
+  assert.equal((await apiPost(server, '/api/rooms')).status, 201);
 });
 
 test('room creation also has an independent global rate limit', async (t) => {

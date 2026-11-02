@@ -8,6 +8,7 @@ export const isExactAllowedOrigin = (origin, allowedOrigins, allowInsecureHttp) 
 export const setCredentialCors = (origin, res) => {
   res.setHeader('access-control-allow-origin', origin);
   res.setHeader('access-control-allow-credentials', 'true');
+  res.setHeader('access-control-expose-headers', 'Retry-After');
   res.setHeader('vary', 'Origin');
 };
 

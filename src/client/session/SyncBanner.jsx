@@ -3,6 +3,7 @@ import { Button, Surface } from '../ui/UiPrimitives.jsx';
 import { t, useLang } from '../ui/i18n.js';
 import { refreshActiveRoomSession, canRefreshRoomSession } from './room-session.js';
 import { SYNC_STATE } from './sync-status.js';
+import { PublicCreationNotice } from './PublicCreationNotice.jsx';
 import { TOAST_BOTTOM_PX, Z } from '../chrome/chrome-layout.js';
 import './client-resilience.css';
 
@@ -12,7 +13,7 @@ export function useSyncStatus() {
 
 export function SyncBanner() {
   const state = useSyncStatus();
-  return <SyncStatusBanner state={state} />;
+  return <><SyncStatusBanner state={state} /><PublicCreationNotice syncStatus={state.status} /></>;
 }
 
 export function SyncStatusBanner({ state }) {

@@ -35,6 +35,8 @@ import { useDrawingMode } from './src/client/board/useDrawingMode.js';
 import { useDrawingSession } from './src/client/board/useDrawingSession.js';
 import { LiveDrawingPreviews } from './src/client/board/LiveDrawingPreviews.jsx';
 import { DrawingTool } from './src/client/board/DrawingTool.jsx';
+import { resolveBoardShortcut } from './src/client/board/board-shortcuts.js';
+import { useSpacePan } from './src/client/board/use-space-pan.js';
 import { ToolDock, TOOL_ID } from './src/client/chrome/ToolDock.jsx';
 import { ZoomControls } from './src/client/chrome/ZoomControls.jsx';
 import { TopCenterStack } from './src/client/chrome/TopCenterStack.jsx';
@@ -113,7 +115,7 @@ import { storage, adminRoleStorage } from './src/client/session/room-storage.js'
 import { DEFAULT_BOARD } from './src/domain/board-state.js';
 import { reconcileBoardSnapshot } from './src/domain/board-reconciliation.js';
 import { effectiveZIndex, compareZOrder, swapZOrderEntries } from './src/domain/z-order.js';
-import { IMAGE_MAX_MIB_LABEL, prepareImageBlob } from './src/client/transfer/image-upload.js';
+import { IMAGE_MAX_MIB_LABEL, prepareImageBlob, canStartImageImport } from './src/client/transfer/image-upload.js';
 import { CollaborativeTextEditor } from './src/client/board/CollaborativeTextEditor.jsx';
 import { TextCard } from './src/client/board/TextCard.jsx';
 import { ImageCard } from './src/client/board/ImageCard.jsx';
@@ -314,50 +316,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     storage.setLocalBusyItems('text', itemId ? [itemId] : []);
   }, []);
 
-  // Hold Space + drag = pan the canvas regardless of what's under the cursor
-  // (Figma/Miro-style), overriding the normal "drag a card moves it" or
-  // "drag empty canvas pans" behavior. Ignored while typing in a text field
-  // so a literal space keystroke isn't swallowed. Consumed in
-  // onCanvasMouseDown/startItemDrag/startZoneDrag below.
+  const shortcutToolHandlersRef = useRef({});
   const spaceHeldRef = useRef(false);
-  useEffect(() => {
-    const isTypingTarget = () => {
-      const tag = document.activeElement?.tagName;
-      return tag === 'TEXTAREA' || tag === 'INPUT';
-    };
-    const onSpaceKeyDown = (e) => {
-      if (e.code !== 'Space' || isTypingTarget()) return;
-      e.preventDefault();
-      if (spaceHeldRef.current) return;
-      spaceHeldRef.current = true;
-      if (canvasRef.current) {
-        canvasRef.current.style.cursor = interactionRef.current?.kind === 'pan' ? 'grabbing' : 'grab';
-      }
-    };
-    const onSpaceKeyUp = (e) => {
-      if (e.code !== 'Space') return;
-      spaceHeldRef.current = false;
-      if (canvasRef.current) {
-        canvasRef.current.style.cursor = interactionRef.current?.kind === 'pan' ? 'grabbing' : '';
-      }
-    };
-    // If the window loses focus while Space is held (e.g. alt-tab), the
-    // keyup never arrives — reset here so pan mode doesn't get stuck on.
-    const onBlur = () => {
-      spaceHeldRef.current = false;
-      if (canvasRef.current) {
-        canvasRef.current.style.cursor = interactionRef.current?.kind === 'pan' ? 'grabbing' : '';
-      }
-    };
-    window.addEventListener('keydown', onSpaceKeyDown);
-    window.addEventListener('keyup', onSpaceKeyUp);
-    window.addEventListener('blur', onBlur);
-    return () => {
-      window.removeEventListener('keydown', onSpaceKeyDown);
-      window.removeEventListener('keyup', onSpaceKeyUp);
-      window.removeEventListener('blur', onBlur);
-    };
-  }, []);
 
   // single-select helpers
   const selectedId = selectedIds.size === 1 ? [...selectedIds][0] : null;
@@ -396,6 +356,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
   const minimapActivityAtRef = useRef(0);
   const saveTimerRef = useRef(null);
   const interactionRef = useRef(null);
+  useSpacePan(spaceHeldRef, canvasRef, interactionRef);
   const editAreaRef = useRef(null);
   // Ids of items currently being dragged/resized locally — protected from remote overwrite of geometry.
   const dragItemsRef = useRef(null);
@@ -793,7 +754,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
   const lastWriteFailureRef = useRef(0);
   const reportWriteFailure = useCallback(() => {
     const nowMs = Date.now();
-    if (nowMs - lastWriteFailureRef.current < 3000) return;
+    if (window.storage?.consumePublicCreationFailure?.() || nowMs - lastWriteFailureRef.current < 3000) return;
     lastWriteFailureRef.current = nowMs;
     setToast({ msg: t('common.saveFailed'), type: 'warn' });
   }, []);
@@ -1298,7 +1259,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
       private: !publicMode,
       ...(fontSize ? { fontSize } : {}),
     };
-    addItemLocal(it);
+    if (!addItemLocal(it)) return;
     setSelectedId(it.id);
     updateFocusedText(`${it.id}:text`);
     setTimeout(() => editAreaRef.current?.focus(), 20);
@@ -1318,7 +1279,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
       text: t('tool.text'),
     };
     it.parentZoneId = resolveOwnerZone(it, boardRef.current.items)?.id ?? null;
-    addItemLocal(it);
+    if (!addItemLocal(it)) return;
     setSelectedId(it.id);
     updateFocusedText(`${it.id}:text`);
     setTimeout(() => {
@@ -1339,7 +1300,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
       createdAt: Date.now(),
     };
     it.parentZoneId = resolveOwnerZone(it, boardRef.current.items)?.id ?? null;
-    addItemLocal(it);
+    if (!addItemLocal(it)) return;
     setSelectedId(it.id);
     return it.id;
   }, [userId, userName, addItemLocal, setSelectedId]);
@@ -1368,13 +1329,13 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
       createdAt: Date.now(),
     };
     it.parentZoneId = resolveOwnerZone(it, boardRef.current.items)?.id ?? null;
-    addItemLocal(it);
+    if (!addItemLocal(it)) return;
     setSelectedId(it.id);
     return it.id;
   }, [userId, userName, addItemLocal, setSelectedId]);
 
   const importImageFromBlob = useCallback(async (blob, worldX, worldY) => {
-    if (!blob || !blob.type || !blob.type.startsWith('image/')) return;
+    if (!canStartImageImport(blob, window.storage)) return;
     if (!isSafeImageMime(blob.type)) {
       setToast({ msg: t('image.unsupportedFormat'), type: 'warn' });
       return;
@@ -2822,7 +2783,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
         : (resolveOwnerZone(clone, b.items)?.id ?? null);
       return clone;
     });
-    addItemsLocal(clones);
+    if (!addItemsLocal(clones)) return;
     setSelectedIds(new Set(clones.map((c) => c.id)));
     if (stripped > 0) {
       setToast({ msg: t('copy.hiddenStripped', { n: stripped }), type: 'warn' });
@@ -2853,25 +2814,30 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
         stopFollowing();
         return;
       }
-      const meta = e.ctrlKey || e.metaKey;
-      if (!meta && e.shiftKey && !e.altKey && e.code === 'Digit1') {
+      if (document.querySelector('[role="dialog"]')) return;
+      const action = resolveBoardShortcut(e);
+      if (shortcutToolHandlersRef.current[action]) {
+        if (!e.repeat) { e.preventDefault(); shortcutToolHandlersRef.current[action](); }
+        return;
+      }
+      if (action === 'fitContent') {
         if (interactionRef.current === null) {
           e.preventDefault();
           fitToContent();
         }
         return;
       }
-      if (!meta && e.shiftKey && !e.altKey && e.code === 'Digit2') {
+      if (action === 'fitSelection') {
         if (interactionRef.current === null) {
           e.preventDefault();
           fitToSelection();
         }
         return;
       }
-      const zoomInKey = e.key === '=' || e.key === '+' || e.code === 'NumpadAdd';
-      const zoomOutKey = e.key === '-' || e.code === 'NumpadSubtract';
-      const resetZoomKey = e.key === '0' || e.code === 'Numpad0';
-      if (meta && (zoomInKey || zoomOutKey || resetZoomKey)) {
+      const zoomInKey = action === 'zoomIn';
+      const zoomOutKey = action === 'zoomOut';
+      const resetZoomKey = action === 'zoomReset';
+      if (zoomInKey || zoomOutKey || resetZoomKey) {
         e.preventDefault();
         if (interactionRef.current !== null) return;
         if (zoomInKey) zoomBy(ZOOM_STEP_FACTOR);
@@ -2879,49 +2845,45 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
         else resetZoom();
         return;
       }
-      if (!meta && !e.shiftKey && !e.altKey && (e.key === ']' || e.key === '[')) {
+      if (action === 'front' || action === 'back') {
         e.preventDefault();
-        if (e.key === ']') bringToFront(selectedIds);
+        if (action === 'front') bringToFront(selectedIds);
         else sendToBack(selectedIds);
         return;
       }
-      if (meta && !e.altKey && (e.key === ']' || e.key === '[')) {
+      if (action === 'forward' || action === 'backward') {
         e.preventDefault();
         const id = selectedIds.size === 1 ? [...selectedIds][0] : null;
-        if (e.key === ']') bringForward(id);
+        if (action === 'forward') bringForward(id);
         else sendBackward(id);
         return;
       }
-      if (e.key === 'Escape') {
+      if (action === 'cancel') {
         if (creationModeRef.current) { setCreationMode(null); setZonePreview(null); return; }
         setSelectedIds(new Set());
       }
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedIds.size > 0) {
+      if (action === 'delete' && selectedIds.size > 0) {
         deleteItemsIfAllowed(selectedIds);
       }
-      // Copy / cut / paste / duplicate / undo / redo selected items.
-      if (!meta) return;
-      const k = e.key.toLowerCase();
-      // Undo: Cmd/Ctrl+Z. Redo: Cmd/Ctrl+Shift+Z or Ctrl+Y.
-      if (k === 'z' && !e.shiftKey) { e.preventDefault(); doUndo(); return; }
-      if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); doRedo(); return; }
-      if ((k === 'c' || k === 'x') && selectedIds.size > 0) {
+      if (action === 'undo') { e.preventDefault(); doUndo(); return; }
+      if (action === 'redo') { e.preventDefault(); doRedo(); return; }
+      if ((action === 'copy' || action === 'cut') && selectedIds.size > 0) {
         e.preventDefault();
         const picked = boardRef.current.items.filter((it) => selectedIds.has(it.id));
-        if (k === 'x' && !deleteItemsIfAllowed(picked.map((it) => it.id))) return;
+        if (action === 'cut' && !deleteItemsIfAllowed(picked.map((it) => it.id))) return;
         clipboardRef.current = picked.map((it) => ({ ...it }));
         setToast({ msg: t('copy.done', { n: picked.length }), type: 'info' });
       }
-      if (k === 'v' && clipboardRef.current?.length) {
+      if (action === 'paste' && clipboardRef.current?.length) {
         e.preventDefault();
         duplicateItems(clipboardRef.current);
       }
-      if (k === 'd' && selectedIds.size > 0) {
+      if (action === 'duplicate' && selectedIds.size > 0) {
         e.preventDefault();
         const picked = boardRef.current.items.filter((it) => selectedIds.has(it.id));
         duplicateItems(picked);
       }
-      if (k === 'a') {
+      if (action === 'selectAll') {
         e.preventDefault();
         setSelectedIds(new Set(boardRef.current.items.map((it) => it.id)));
       }
@@ -3662,6 +3624,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     [TOOL_ID.ZONE]: () => armPlacementTool(TOOL_ID.ZONE),
     [TOOL_ID.IMAGE]: pickImageFile,
     [TOOL_ID.DRAW]: drawingSession.toggle,
+  };
+  shortcutToolHandlersRef.current = {
+    selectTool: toolHandlers[TOOL_ID.SELECT], textTool: toolHandlers[TOOL_ID.TEXT],
+    zoneTool: toolHandlers[TOOL_ID.ZONE], drawTool: toolHandlers[TOOL_ID.DRAW],
+    imageTool: toolHandlers[TOOL_ID.IMAGE], stickyTool: () => createAtViewportCenter(addSticky),
   };
 
   useEffect(() => {

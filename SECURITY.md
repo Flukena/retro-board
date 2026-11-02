@@ -215,6 +215,24 @@ session endpoint returns 429 when full. Signed existing writers renew through
 path, so a full wall does not prevent session renewal. Admission is checked again at the
 WebSocket upgrade to close session/admission races.
 
+The Public relay admits at most ten item creations per IP in any rolling
+60-second window, including at most one new image. Image creation also counts
+toward the ten-item limit; edits, existing-image updates, and deletions do not.
+Bulk transactions count each created item. The relay validates updates before
+applying them, including updates from custom clients. These in-memory budgets
+are shared by everyone behind the same trusted IP and reset on relay restart;
+they are not an identity system or protection against distributed abuse.
+Supported clients negotiate a quota message on their Public WebSocket; the relay
+sends the current per-IP budget and acknowledges accepted local creations so
+the client can reject excess creations before changing its Y.Doc. Legacy
+clients remain compatible and do not receive these messages. Concurrent
+creation on the same IP can still race the budget update; if an update is
+rejected, the client stops reconnecting and warns that its local changes have
+not been shared. Users can copy needed content before reloading to rejoin with
+the canonical board. The policy maintains an in-memory
+shadow Y.Doc for preflight, increasing relay memory and update-processing cost.
+
+
 Maintenance prunes excess items to 1,500 in one `public-prune` transaction.
 Oldest means ascending client-supplied `createdAt` milliseconds, then item ID;
 Missing, invalid, and more than 60 seconds in the future timestamps sort first.

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { arrowHead, drawingEndPoint, drawingExtentPoints } from './drawing-shapes.js';
+import { arrowHead, drawingEndPoint, drawingExtentPoints, DRAWING_TOOLS, DRAWING_TOOL } from './drawing-shapes.js';
 test('circle constraints keep mirrored drags square without losing fractional anchors', () => {
   const first = { x: 10.25, y: 20.5 };
   for (const end of [{ x: 50, y: 30 }, { x: -10, y: -70 }, { x: 10.25, y: 100 }]) {
@@ -19,4 +19,8 @@ test('arrow heads stay attached for every direction and short arrows never rever
     assert.equal(drawingExtentPoints({ tool: 'arrow', width: 8, points: [start, end] }).length, 4);
   }
   assert.equal(arrowHead({ x: 1, y: 2 }, { x: 1, y: 2 }, 4), null);
+});
+
+test('eraser is the last drawing tool', () => {
+  assert.equal(DRAWING_TOOLS.at(-1), DRAWING_TOOL.ERASER);
 });
