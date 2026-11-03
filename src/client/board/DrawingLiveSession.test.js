@@ -9,7 +9,7 @@ function fixture() {
   const canvas = { getContext: () => ctx, toBlob: (done, type) => done(new Blob(['png'], { type })) };
   const operations = { createId: () => 'drawing', previews: () => null, items: () => items,
     canEdit: () => true, zoom: () => 1, document: () => ({ createElement: () => canvas }), baseImage: () => null,
-    author: () => ({ authorId: 'owner', authorName: 'Owner' }), uploadImage: async () => `saved-${++uploads}.png`,
+    author: () => ({ authorId: 'owner', authorName: 'Owner' }), canCreateImage: () => true, uploadImage: async () => `saved-${++uploads}.png`,
     stopUndoCapture() {}, addItem: item => { items.push(item); return true; },
     updateItem: (id, patch) => { items = items.map(item => item.id === id ? { ...item, ...patch } : item); return true; },
     removeItem: id => { items = items.filter(item => item.id !== id); }, selectItem() {},
@@ -77,4 +77,13 @@ test('a checkpoint finishing during the next pointer gesture retains that unfini
     resolve('first.png');assert.equal(await pending,true);assert.equal(active.strokes.length,2);
     f.draft.cancelStroke();f.session.changed();assert.equal(active,null,'Cancelling the next gesture reveals the already-saved PNG');
   }finally{f.session.dispose();}
+});
+test('a quota-blocked first save keeps the draft, uploads nothing, lets close discard it, and saves once the quota frees', async () => {
+  const f = fixture(); let quotaFree = false; f.operations.canCreateImage = () => quotaFree;
+  try {
+    f.stroke(); assert.equal(await f.session.autosave.flush(), false);
+    assert.equal(f.uploads(), 0); assert.equal(f.items().length, 0); assert.equal(f.errors().at(-1), 'draw.saveFailed');
+    quotaFree = true; assert.equal(await f.session.autosave.flush(), true);
+    assert.equal(f.uploads(), 1); assert.equal(f.items().length, 1);
+  } finally { f.session.dispose(); }
 });

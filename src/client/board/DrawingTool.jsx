@@ -7,7 +7,7 @@ import { hideDrawingImage } from './drawing-visibility.js';
 import { useDrawingImage } from './useDrawingImage.js';
 import { DrawingController } from './DrawingController.js';
 import { loadDrawingPreferences, saveDrawingPreferences } from './drawing-preferences.js';
-import { uploadWithRetry } from '../transfer/image-upload.js';
+import { canCreateImageItem, uploadWithRetry } from '../transfer/image-upload.js';
 import { FONT_COLORS } from '../ui/palette.js';
 import { Button, IconButton, Surface } from '../ui/UiPrimitives.jsx';
 import { SURFACE_KIND } from '../ui/ui-variants.js';
@@ -89,6 +89,7 @@ export const DrawingTool = memo(function DrawingTool(props) {
       items: () => get().boardRef.current.items, canEdit: () => get().editingAllowed && get().requireEdit(),
       zoom: () => get().viewportRef.current.zoom, document: () => canvasRef.current.ownerDocument,
       baseImage: () => baseRef.current, author: () => ({ authorId: get().userId, authorName: get().userName }),
+      canCreateImage: () => canCreateImageItem(window.storage),
       uploadImage: (blob, signal) => uploadWithRetry(blob, undefined, { signal }),
       stopUndoCapture: () => get().storage.stopUndoCapture?.(),
       addItem: item => get().onAddItem(item), updateItem: (id, patch) => get().onUpdateItem(id, patch),

@@ -6,6 +6,8 @@ const canCommitDrawing = (operations, target) => operations.isCurrent() && opera
 
 export async function saveDrawingArtifact(artifact, operations, target = null) {
   if (!artifact?.blob || !canCommitDrawing(operations, target)) return false;
+  // Only a new drawing creates an item; check the quota first so a blocked save uploads nothing.
+  if (!target && !operations.canCreateImage()) { operations.uploadFailed(); return false; }
   let src;
   try { src = await operations.uploadImage(artifact.blob); }
   catch (error) { operations.uploadFailed(error); return false; }

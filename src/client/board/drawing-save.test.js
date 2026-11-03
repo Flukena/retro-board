@@ -4,7 +4,7 @@ import { saveDrawingArtifact } from './drawing-save.js';
 const artifact = { blob: new Blob(['png'], { type: 'image/png' }), bounds: { x: 10.25, y: 20.5, w: 1600, h: 500 }, natW: 1200, natH: 375 };
 function fixture() {
   const added = [], selected = []; let boundaries = 0, failures = 0;
-  const operations = { isCurrent: () => true, canEdit: () => true, uploadImage: async () => '/rooms/fixture/images/drawing.png', uploadFailed: () => { failures++; },
+  const operations = { isCurrent: () => true, canEdit: () => true, canCreateImage: () => true, uploadImage: async () => '/rooms/fixture/images/drawing.png', uploadFailed: () => { failures++; },
     author: () => ({ authorId: 'a', authorName: 'Ada' }), createId: () => 'drawing', now: () => 1000, items: () => [],
     stopUndoCapture: () => { boundaries++; }, addItem: item => { added.push(item); return true; }, selectItem: id => selected.push(id) };
   return { operations, added, selected, boundaries: () => boundaries, failures: () => failures };
@@ -43,4 +43,15 @@ test('a collaborator replacing or deleting a target during upload prevents stale
     const saving=saveDrawingArtifact(artifact,f.operations,target); current=after; resolve('new.png');
     assert.equal(await saving,false); assert.deepEqual(f.selected,[]);
   }
+});
+test('a new drawing blocked by the Public quota uploads nothing and reports a failed save', async () => {
+  const f = fixture(); let uploads = 0; f.operations.canCreateImage = () => false;
+  f.operations.uploadImage = async () => { uploads++; return 'orphan.png'; };
+  assert.equal(await saveDrawingArtifact(artifact, f.operations), false);
+  assert.equal(uploads, 0); assert.equal(f.failures(), 1); assert.equal(f.added.length, 0); assert.deepEqual(f.selected, []);
+});
+test('editing an existing drawing is not a creation, so a full quota still saves it', async () => {
+  const f = fixture(), target = { id: 'existing', type: 'image', src: 'before.png', x: 1, y: 2, w: 100, h: 80 };
+  f.operations.items = () => [target]; f.operations.canCreateImage = () => false; f.operations.updateItem = () => true;
+  assert.equal(await saveDrawingArtifact(artifact, f.operations, target), true); assert.equal(f.failures(), 0);
 });

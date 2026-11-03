@@ -58,6 +58,7 @@ export class DrawingLiveSession {
       if (!artifact) { this.operations.error('draw.encodeFailed'); return false; }
       const saved = await saveDrawingArtifact(artifact, {
         isCurrent: () => !this.disposed && !this.abort.signal.aborted, canEdit: () => this.operations.canEdit(),
+        canCreateImage: () => this.operations.canCreateImage(),
         uploadImage: blob => this.operations.uploadImage(blob, this.abort.signal),
         uploadFailed: () => this.operations.error('draw.saveFailed'),
         author: () => this.operations.author(), createId: () => this.imageId ?? this.operations.createId(), now: Date.now,

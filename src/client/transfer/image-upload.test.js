@@ -107,3 +107,12 @@ test('image creation preflight stops over-quota uploads without hiding file vali
   assert.equal(checks, 1);
   assert.equal(canStartImageImport({ type: 'image/png', size: 100 }, null), true);
 });
+
+test('canCreateImageItem asks the room quota for exactly one image and allows rooms without a quota', async () => {
+  const { canCreateImageItem } = await import('./image-upload.js');
+  const asked = [];
+  assert.equal(canCreateImageItem({ canCreateItems: items => { asked.push(items); return false; } }), false);
+  assert.deepEqual(asked, [[{ type: 'image' }]]);
+  assert.equal(canCreateImageItem({}), true);
+  assert.equal(canCreateImageItem(null), true);
+});
