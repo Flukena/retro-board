@@ -25,6 +25,10 @@ function snapshotEntries(snapshot) {
   return entries;
 }
 
+// The board keeps one mood round; export only its answers as userId -> score.
+const roundMoods = (moodCheck) => Object.fromEntries((window.storage?.snapshotMoods?.() || [])
+  .filter((answer) => answer.roundId === moodCheck?.id).map((answer) => [answer.userId, answer.score]));
+
 export async function createBoardExport(board, { boardCode, userId }) {
   const votes = snapshotEntries(window.storage?.snapshotVotes?.() || new Map());
   const comments = snapshotEntries(window.storage?.snapshotComments?.() || new Map());
@@ -33,8 +37,10 @@ export async function createBoardExport(board, { boardCode, userId }) {
   return (await loadArchive()).createBoardArchiveArtifact({
     fallbackBoardCode: boardCode,
     board: { items: redacted.items, timer: board.timer, editingLocked: board.editingLocked,
-      votingLocked: board.votingLocked, allRevealed: board.allRevealed, lastResultsAt: board.lastResultsAt },
-    votes, comments: redacted.comments, customTemplates: window.storage?.snapshotTemplates?.() || [],
+      votingLocked: board.votingLocked, allRevealed: board.allRevealed, lastResultsAt: board.lastResultsAt,
+      moodCheck: board.moodCheck ?? null },
+    votes, comments: redacted.comments, moods: roundMoods(board.moodCheck),
+    customTemplates: window.storage?.snapshotTemplates?.() || [],
   }, readBackupImage);
 }
 
@@ -68,11 +74,11 @@ export async function prepareBoardImport(manifest, currentBoard) {
   const meta = manifest.boardMeta;
   const nextBoard = { ...DEFAULT_BOARD, items: importedItems, timer: meta.timer,
     editingLocked: meta.editingLocked, votingLocked: meta.votingLocked,
-    allRevealed: meta.allRevealed, lastResultsAt: meta.lastResultsAt,
+    allRevealed: meta.allRevealed, lastResultsAt: meta.lastResultsAt, moodCheck: meta.moodCheck,
     title: meta.title ?? currentBoard.title ?? null,
     adminUserId: currentBoard.adminUserId, adminName: currentBoard.adminName, adminPinHash: currentBoard.adminPinHash };
   const snapshotBytes = importBundleByteLength({ board: nextBoard, votes: manifest.voteEntries,
-    comments: manifest.commentEntries, customTemplates: manifest.customTemplates });
+    comments: manifest.commentEntries, moods: manifest.moodEntries, customTemplates: manifest.customTemplates });
   if (snapshotBytes > IMPORT_MAX_BUNDLE_BYTES) throw new ImportBundleLimitError();
   return nextBoard;
 }

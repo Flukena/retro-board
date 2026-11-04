@@ -24,6 +24,7 @@ import {
 import { isValidFontColor, isValidFontSize, isValidZIndex } from './item-appearance.js';
 import { isBoardTitle } from './board-title.js';
 import { normalizeActionFields } from './action-item.js';
+import { MOOD_MAX_ANSWERS, isMoodCheckState, isMoodScore } from './mood-check.js';
 
 // Portable JSON backups include raster bytes expanded by base64. This file
 // budget is separate from the small Yjs transaction after image uploads.
@@ -279,6 +280,27 @@ const normalizeBoardMeta = (board) => ({
   title: importedBoardTitle(board.title),
 });
 
+// A restored round is closed: its answers are history, not a live check.
+const normalizeImportedMoodCheck = (value) => {
+  if (value == null) return null;
+  if (!isMoodCheckState(value)) fail('invalid moodCheck');
+  return { id: value.id, startedAt: value.startedAt, open: false };
+};
+
+// `moods` maps userId -> score for the board's single mood round.
+const normalizeMoodEntries = (moods, moodCheck) => {
+  if (moods == null) return [];
+  if (!isPlainRecord(moods)) fail('moods must be an object');
+  const entries = Object.entries(moods);
+  if (entries.length && !moodCheck) fail('moods need a board.moodCheck round');
+  if (entries.length > MOOD_MAX_ANSWERS) fail(`too many moods (max ${MOOD_MAX_ANSWERS})`);
+  return entries.map(([userId, score]) => {
+    if (!isSafeId(userId)) fail('mood has an invalid user id');
+    if (!isMoodScore(score)) fail(`invalid mood score for ${userId}`);
+    return { roundId: moodCheck.id, userId, score };
+  });
+};
+
 // Validate and normalize every cross-reference before an import is allowed to
 // replace live state. This module deliberately has no browser/Yjs dependency,
 // making malformed backups testable without connecting to a room.
@@ -362,9 +384,12 @@ export const normalizeImportManifest = (parsed, importedAt = Date.now()) => {
     });
   }
 
+  const moodCheck = normalizeImportedMoodCheck(manifest.board.moodCheck);
+  const moodEntries = normalizeMoodEntries(manifest.moods, moodCheck);
+
   const customTemplates = normalizeCustomTemplates(manifest.customTemplates, importedAt);
   const customTemplateZoneCount = customTemplates?.reduce((sum, template) => sum + template.zones.length, 0) ?? 0;
-  const recordCount = items.length + voteEntries.length + commentEntries.length
+  const recordCount = items.length + voteEntries.length + commentEntries.length + moodEntries.length
     + (customTemplates?.length ?? 0) + customTemplateZoneCount;
   if (recordCount > IMPORT_MAX_RECORDS) fail(`too many records (max ${IMPORT_MAX_RECORDS})`);
 
@@ -372,8 +397,9 @@ export const normalizeImportManifest = (parsed, importedAt = Date.now()) => {
     items,
     voteEntries,
     commentEntries,
+    moodEntries,
     customTemplates,
-    boardMeta: normalizeBoardMeta(manifest.board),
+    boardMeta: { ...normalizeBoardMeta(manifest.board), moodCheck },
     geometryRepairs: repaired.repairs,
   };
 };

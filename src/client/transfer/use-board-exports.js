@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
 import { buildRetroSummary } from '../../domain/retro-summary.js';
+import { moodSummary } from '../../domain/mood-check.js';
 import { createBoardExport, createCsvBoardExport } from './board-transfer.js';
 import { exportFileName } from './board-backup.js';
 import { downloadArtifact } from './browser-download.js';
@@ -14,6 +15,9 @@ const SUMMARY_DATE_FORMAT = Object.freeze({ dateStyle: 'medium' });
 const IMAGE_EXTENSION = Object.freeze({ [PNG_MIME_TYPE]: 'png', [PDF_MIME_TYPE]: 'pdf' });
 
 const liveVotes = () => window.storage?.snapshotVotes?.() || new Map();
+// Only a closed round is reported; an open one is still collecting answers.
+const closedMood = (moodCheck) => (moodCheck && !moodCheck.open
+  ? moodSummary(window.storage?.snapshotMoods?.() || [], moodCheck.id) : null);
 
 export function summaryLabels() {
   return {
@@ -22,6 +26,8 @@ export function summaryLabels() {
     unassigned: t('export.csv.unassigned'), actionItems: t('action.title'), noActionItems: t('action.empty'),
     hiddenCard: t('action.hiddenCard'), emptyCard: t('action.emptyCard'),
     votes: n => t('summary.votes', { n }), hiddenCount: n => t('summary.hiddenCount', { n }),
+    mood: t('mood.result'), moodScore: score => t(`mood.score.${score}`),
+    moodAverage: (average, count) => t('mood.summaryAverage', { n: average, count }),
   };
 }
 
@@ -37,7 +43,7 @@ export function boardImageLabels() {
 function summaryText(board, userId, exportedAt) {
   return buildRetroSummary({
     title: board.title, items: board.items, votesByItem: liveVotes(), userId, allRevealed: board.allRevealed,
-    participants: window.storage?.getVoteResultParticipants?.() || [], labels: summaryLabels(),
+    participants: window.storage?.getVoteResultParticipants?.() || [], mood: closedMood(board.moodCheck), labels: summaryLabels(),
     dateText: new Intl.DateTimeFormat(getLang(), SUMMARY_DATE_FORMAT).format(exportedAt),
   });
 }

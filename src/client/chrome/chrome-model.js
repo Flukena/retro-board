@@ -7,10 +7,11 @@ export function templateRows(builtins, customTemplates) {
   };
 }
 
-export function followBannerModel(hue, player, cachedPresence, waiting) {
+export function followBannerModel(hue, player, cachedPresence, waiting, presenter = false) {
   return {
     name: player?.name || cachedPresence?.name || DEFAULT_PLAYER_NAME,
     hue,
     waiting,
+    presenter,
   };
 }

@@ -12,6 +12,7 @@ import {
   ZONE_TITLE_MAX_LENGTH,
 } from './security-boundaries.js';
 import { normalizeCustomTemplates, normalizeImportManifest } from './import-schema.js';
+import { MOOD_MAX_ANSWERS } from './mood-check.js';
 
 const importedAt = 1_700_000_000_000;
 const imageId = 'f98dcb70-f794-4b1a-9d4d-09fd5b4cd9a4';
@@ -71,6 +72,7 @@ test('normalizes a manifest into bounded whitelisted records', () => {
     allRevealed: false,
     lastResultsAt: importedAt - 1,
     title: null,
+    moodCheck: null,
   });
   assert.equal(normalized.customTemplates[0].name, 'Team retro');
   assert.deepEqual(normalized.customTemplates[0].zones[0], {
@@ -186,4 +188,32 @@ test('sticky action fields import when valid and reject explicit invalid values'
   for (const bad of [{ actionItem: 'true' }, { actionDue: '2026-02-30' }, { actionDone: 0 }, { actionOwner: 7 }]) {
     assert.throws(() => normalizeImportManifest(withAction(bad), importedAt), /action/, JSON.stringify(bad));
   }
+});
+
+test('mood answers import for the board round, which comes back closed', () => {
+  const round = { id: 'round1', startedAt: 10, open: true };
+  const withMoods = (moodCheck, moods) => ({ ...validManifest(), board: { ...validManifest().board, moodCheck }, moods });
+  const manifest = normalizeImportManifest(withMoods(round, { 'user-a': 5, 'user-b': 2 }), importedAt);
+  assert.deepEqual(manifest.boardMeta.moodCheck, { ...round, open: false });
+  assert.deepEqual(manifest.moodEntries, [
+    { roundId: 'round1', userId: 'user-a', score: 5 }, { roundId: 'round1', userId: 'user-b', score: 2 },
+  ]);
+  assert.deepEqual(normalizeImportManifest(validManifest(), importedAt).moodEntries, []);
+  assert.equal(normalizeImportManifest(validManifest(), importedAt).boardMeta.moodCheck, null);
+  const rejects = [
+    [withMoods({ ...round, id: 'bad id' }, {}), /moodCheck/],
+    [withMoods(null, { 'user-a': 3 }), /moodCheck round/],
+    [withMoods(round, []), /moods must be an object/],
+    [withMoods(round, { 'bad id': 3 }), /invalid user id/],
+    [withMoods(round, { 'user-a': 0 }), /invalid mood score/],
+    [withMoods(round, { 'user-a': 6 }), /invalid mood score/],
+    [withMoods(round, { 'user-a': '4' }), /invalid mood score/],
+  ];
+  for (const [bad, message] of rejects) assert.throws(() => normalizeImportManifest(bad, importedAt), message);
+});
+
+test('mood answers are capped per round', () => {
+  const moods = Object.fromEntries(Array.from({ length: MOOD_MAX_ANSWERS + 1 }, (_, index) => [`user-${index}`, 3]));
+  const manifest = { ...validManifest(), board: { ...validManifest().board, moodCheck: { id: 'r', startedAt: 0, open: false } }, moods };
+  assert.throws(() => normalizeImportManifest(manifest, importedAt), /too many moods/);
 });

@@ -42,6 +42,7 @@ export const createJsonBackupArtifact = ({
   board,
   votes,
   comments,
+  moods,
   customTemplates,
 }) => {
   if (!board || typeof board !== 'object' || !Array.isArray(board.items)) {
@@ -56,6 +57,7 @@ export const createJsonBackupArtifact = ({
     board: { ...board, items: geometry.items },
     votes: votes || {},
     comments: comments || {},
+    moods: moods || {},
     customTemplates: customTemplates || [],
   };
   const normalized = normalizeImportManifest(rawPayload, exportedAt);

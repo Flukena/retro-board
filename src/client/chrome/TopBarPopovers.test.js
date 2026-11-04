@@ -41,3 +41,53 @@ test('the More menu routes action items, summary and image exports, then closes'
     assert.equal(busy[0].props.disabled, true);
   } finally { await server.close(); }
 });
+
+test('presenter menu: admins start, the presenter stops, public rooms hide it', async () => {
+  const server = await createServer({ configFile: false, server: { middlewareMode: true, watch: null, ws: false }, optimizeDeps: { noDiscovery: true, include: [] }, appType: 'custom' });
+  try {
+    const { MorePopover } = await server.ssrLoadModule('/src/client/chrome/TopBarPopovers.jsx');
+    const { t } = await server.ssrLoadModule('/src/client/ui/i18n.js');
+    const events = [];
+    const presenter = { available: true, presenting: false, startPresenting: () => events.push('start'), stopPresenting: () => events.push('stop') };
+    const find = (props, label) => MorePopover({ onClose: () => {}, ...props }).props.children.find(child => child?.props?.label === label);
+    find({ isAdmin: true, presenter }, t('presenter.start')).props.onClick();
+    assert.equal(find({ isAdmin: false, presenter }, t('presenter.start')).props.disabled, true);
+    const stop = find({ isAdmin: false, presenter: { ...presenter, presenting: true } }, t('presenter.stop'));
+    assert.equal(stop.props.disabled, false);
+    stop.props.onClick();
+    assert.deepEqual(events, ['start', 'stop']);
+    assert.equal(find({ isAdmin: true, presenter: { ...presenter, available: false } }, t('presenter.start')), undefined);
+  } finally { await server.close(); }
+});
+
+test('meeting phase menu: only admins start or end phases, public rooms hide it', async () => {
+  const server = await createServer({ configFile: false, server: { middlewareMode: true, watch: null, ws: false }, optimizeDeps: { noDiscovery: true, include: [] }, appType: 'custom' });
+  try {
+    const { MorePopover } = await server.ssrLoadModule('/src/client/chrome/TopBarPopovers.jsx');
+    const { t } = await server.ssrLoadModule('/src/client/ui/i18n.js');
+    const events = [];
+    const phase = { available: true, running: false, start: () => events.push('start'), end: () => events.push('end') };
+    const find = (props, label) => MorePopover({ onClose: () => {}, ...props }).props.children.find(child => child?.props?.label === label);
+    find({ isAdmin: true, phase }, t('phase.start')).props.onClick();
+    find({ isAdmin: true, phase: { ...phase, running: true } }, t('phase.stop')).props.onClick();
+    assert.deepEqual(events, ['start', 'end']);
+    assert.equal(find({ isAdmin: false, phase }, t('phase.start')).props.disabled, true);
+    assert.equal(find({ isAdmin: true, phase: { ...phase, available: false } }, t('phase.start')), undefined);
+  } finally { await server.close(); }
+});
+
+test('mood check menu: only admins open or close a round, public rooms hide it', async () => {
+  const server = await createServer({ configFile: false, server: { middlewareMode: true, watch: null, ws: false }, optimizeDeps: { noDiscovery: true, include: [] }, appType: 'custom' });
+  try {
+    const { MorePopover } = await server.ssrLoadModule('/src/client/chrome/TopBarPopovers.jsx');
+    const { t } = await server.ssrLoadModule('/src/client/ui/i18n.js');
+    const events = [];
+    const mood = { available: true, open: false, start: () => events.push('start'), close: () => events.push('close') };
+    const find = (props, label) => MorePopover({ onClose: () => {}, ...props }).props.children.find(child => child?.props?.label === label);
+    find({ isAdmin: true, mood }, t('mood.start')).props.onClick();
+    find({ isAdmin: true, mood: { ...mood, open: true } }, t('mood.close')).props.onClick();
+    assert.deepEqual(events, ['start', 'close']);
+    assert.equal(find({ isAdmin: false, mood }, t('mood.start')).props.disabled, true);
+    assert.equal(find({ isAdmin: true, mood: { ...mood, available: false } }, t('mood.start')), undefined);
+  } finally { await server.close(); }
+});

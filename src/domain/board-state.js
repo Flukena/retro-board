@@ -19,4 +19,10 @@ export const DEFAULT_BOARD = {
   // admin sets one; if still null, the actions just prompt the admin to set
   // a PIN inline rather than blocking access.
   adminPinHash: null,
+  // Viewer everyone follows while presenting; a live-session value that import resets.
+  presenterUserId: null,
+  // Current meeting phase { id, startedAt } (retro-phase.js); also reset by import.
+  phase: null,
+  // Mood check round { id, startedAt, open } (mood-check.js); kept in backups, closed on import.
+  moodCheck: null,
 };

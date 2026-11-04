@@ -449,3 +449,32 @@ test('creation is blocked after server quota rejection, but private rooms are un
     assert.equal(browser.storage.addItems(items), true);
   });
 });
+
+test('mood answers sync per person, undo only the own answer, and are replaced by import', async () => {
+  await withStorage(async browser => {
+    const storage = browser.storage;
+    let changes = 0;
+    storage.onMoodsChange(() => { changes += 1; });
+    assert.equal(storage.setMood('round1', 'alice', 4), true);
+    storage.stopUndoCapture();
+    assert.equal(storage.setMood('round1', 'bob', 2), true);
+    for (const bad of [['round1', 'alice', 0], ['round1', 'alice', 6], ['bad id', 'alice', 3], ['round1', 'a:b', 3]]) {
+      assert.equal(storage.setMood(...bad), false, JSON.stringify(bad));
+    }
+    assert.deepEqual(storage.snapshotMoods().map(({ userId, score }) => [userId, score]).sort(), [['alice', 4], ['bob', 2]]);
+    assert.ok(changes >= 2);
+    storage.undo();
+    assert.deepEqual(storage.snapshotMoods().map(({ userId }) => userId), ['alice']);
+    storage.stopUndoCapture();
+    storage.clearAllMoods();
+    assert.deepEqual(storage.snapshotMoods(), []);
+    storage.undo();
+    assert.deepEqual(storage.snapshotMoods(), [], 'starting a new round is not undoable');
+    storage.setMood('old', 'carol', 1);
+    const answers = [{ roundId: 'round2', userId: 'dan', score: 5 }];
+    assert.equal(storage.importBundle({ items: [] }, [], [], null, answers), true);
+    assert.deepEqual(storage.snapshotMoods(), answers);
+    assert.equal(storage.importBundle({ items: [] }, [], [], null, [{ ...answers[0], score: 9 }]), false);
+    assert.deepEqual(storage.snapshotMoods(), answers);
+  });
+});

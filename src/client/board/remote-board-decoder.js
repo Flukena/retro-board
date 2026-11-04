@@ -3,6 +3,8 @@ import { validateBoardItem } from '../../domain/import-schema.js';
 import { COMMENT_AUTHOR_NAME_MAX_LEN, isSafeId } from '../../domain/comment-schema.js';
 import { DISPLAY_NAME_MAX_LENGTH } from '../../domain/security-boundaries.js';
 import { isBoardTitle } from '../../domain/board-title.js';
+import { isPhaseState } from '../../domain/retro-phase.js';
+import { isMoodCheckState } from '../../domain/mood-check.js';
 
 // hashAdminPin uses SHA-256, represented as two hexadecimal characters per byte.
 const ADMIN_PIN_HASH_HEX_LENGTH = 64;
@@ -36,6 +38,8 @@ const META_FIELDS = {
   adminUserId: nullable(isSafeId), adminName: nullable(boundedString(DISPLAY_NAME_MAX_LENGTH)), adminPinHash: nullable(isPinHash),
   editingLocked: isBoolean, votingLocked: isBoolean, allRevealed: isBoolean,
   timer: nullable(isTimer), lastResultsAt: nullable(isTimestamp), title: nullable(isBoardTitle),
+  presenterUserId: nullable(isSafeId), phase: nullable((value) => isRecord(value) && isPhaseState(value)),
+  moodCheck: nullable((value) => isRecord(value) && isMoodCheckState(value)),
 };
 
 export function decodeRemoteItem(item) {

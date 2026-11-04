@@ -105,3 +105,28 @@ test('board title from a peer survives only when it is a valid title', () => {
     assert.equal(Object.hasOwn(decodeRemoteBoard([], { title: bad }), 'title'), false, JSON.stringify(bad));
   }
 });
+
+test('presenter id is kept when safe and dropped when it is not an id', () => {
+  assert.equal(decodeRemoteBoard([], { presenterUserId: 'user-1' }).presenterUserId, 'user-1');
+  assert.equal(decodeRemoteBoard([], { presenterUserId: null }).presenterUserId, null);
+  for (const bad of [{}, '__proto__', 'has space', 7]) {
+    assert.equal('presenterUserId' in decodeRemoteBoard([], { presenterUserId: bad }), false, JSON.stringify(bad));
+  }
+});
+
+test('meeting phase is kept when valid and dropped when it is not', () => {
+  const phase = { id: 'vote', startedAt: 1000 };
+  assert.deepEqual(decodeRemoteBoard([], { phase }).phase, phase);
+  assert.equal(decodeRemoteBoard([], { phase: null }).phase, null);
+  for (const bad of ['vote', { id: 'party', startedAt: 1 }, { id: 'vote', startedAt: -5 }, [phase]]) {
+    assert.equal('phase' in decodeRemoteBoard([], { phase: bad }), false, JSON.stringify(bad));
+  }
+});
+
+test('mood round is kept when valid and dropped when it is not', () => {
+  const moodCheck = { id: 'round1', startedAt: 5, open: true };
+  assert.deepEqual(decodeRemoteBoard([], { moodCheck }).moodCheck, moodCheck);
+  for (const bad of [{ ...moodCheck, open: 1 }, { ...moodCheck, id: 'bad id' }, 'round1']) {
+    assert.equal('moodCheck' in decodeRemoteBoard([], { moodCheck: bad }), false, JSON.stringify(bad));
+  }
+});

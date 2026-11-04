@@ -9,9 +9,22 @@ not a rendering fallback.
 
 ## Backup manifest
 
-The versioned JSON representation of a board, votes, comments, and shared
-templates. An exported backup manifest must pass the same decoder used by
-import without repair or information loss.
+The versioned JSON representation of a board, votes, comments, mood answers
+and shared templates. An exported backup manifest must pass the same decoder
+used by import without repair or information loss. The board's mood round
+(`board.moodCheck`) is restored closed; presenter and meeting phase are live
+session state and reset on import.
+
+## Facilitation state
+
+Room meta fields written silently (never undone by Ctrl+Z), private boards only:
+`presenterUserId` (everyone follows this viewer), `phase` (`{ id, startedAt }`,
+one of write/reveal/group/vote/discuss/actions) and `moodCheck`
+(`{ id, startedAt, open }`). A mood answer is the kv key
+`s||mood:<roundId>:<userId>` with an integer 1-5; it is the answerer's own
+undoable write, and one round lives in the room at a time (starting a round
+clears the old answers). Decoding is `src/domain/presenter.js`,
+`retro-phase.js` and `mood-check.js`.
 
 ## Geometry repair
 

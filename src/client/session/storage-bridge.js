@@ -65,6 +65,8 @@ import {
 } from './collaborative-text.js';
 import { normalizeRuntimeImageSource } from '../../domain/security-boundaries.js';
 import { repairStoredBoardGeometry } from '../board/stored-geometry-repair.js';
+import { isMoodKey, moodImportWrites, moodKeys, readMoods } from './mood-store.js';
+import { isMoodScore, moodKey } from '../../domain/mood-check.js';
 import {
   isTemplateKey,
   migrateLegacyTemplates,
@@ -639,6 +641,15 @@ ymap.observe((event) => {
   templateEmitter.dispatchEvent(new Event('change'));
 });
 
+// Mood answers are few (one per person per round), so a full re-read is cheap.
+const moodEmitter = new EventTarget();
+let moodSnapshot = readMoods(ymap);
+ymap.observe((event) => {
+  if (![...event.keysChanged].some(isMoodKey)) return;
+  moodSnapshot = readMoods(ymap);
+  moodEmitter.dispatchEvent(new Event('change'));
+});
+
 // Keys that should never enter the undo stack even when written with shared=true.
 const NEVER_UNDO_KEYS = new Set(['presence']);
 
@@ -1077,9 +1088,11 @@ if (provider) {
     // board, votes, comments, and shared templates together avoids partial
     // imports and prevents one WebSocket update / O(N) snapshot rebuild per
     // comment. Validate again here because window.storage is a public seam.
-    importBundle(board, voteEntries, commentEntries, customTemplates) {
+    importBundle(board, voteEntries, commentEntries, customTemplates, moodEntries = []) {
       if (!board || typeof board !== 'object' || !Array.isArray(board.items)) return false;
       if (!Array.isArray(voteEntries) || !Array.isArray(commentEntries)) return false;
+      const moodWrites = moodImportWrites(moodEntries);
+      if (!moodWrites) return false;
       const normalizedTemplates = normalizeTemplateEntries(customTemplates);
       if (customTemplates != null && !normalizedTemplates) return false;
       if (boardItemsWriteError(board.items)) return false;
@@ -1116,7 +1129,7 @@ if (provider) {
       if (!permitPublicCreations(newSnapshotItems(board.items))) return false;
       const relatedKeys = [];
       ymap.forEach((_value, key) => {
-        if (key.startsWith(VOTE_PREFIX) || key.startsWith(COMMENT_PREFIX)) relatedKeys.push(key);
+        if (key.startsWith(VOTE_PREFIX) || key.startsWith(COMMENT_PREFIX) || isMoodKey(key)) relatedKeys.push(key);
       });
       ydoc.transact(() => {
         // writeBoardSnapshot's nested transaction joins this active outer
@@ -1125,6 +1138,7 @@ if (provider) {
         relatedKeys.forEach((key) => ymap.delete(key));
         normalizedVotes.forEach((key) => ymap.set(key, 1));
         normalizedComments.forEach(({ key, comment }) => ymap.set(key, comment));
+        moodWrites.forEach(({ key, score }) => ymap.set(key, score));
         if (normalizedTemplates) replaceTemplates(ymap, normalizedTemplates);
       }, 'local');
       return true;
@@ -1277,6 +1291,20 @@ if (provider) {
     },
     onVotesChange(handler) { voteEmitter.addEventListener('change', handler); },
     offVotesChange(handler) { voteEmitter.removeEventListener('change', handler); },
+    snapshotMoods() { return moodSnapshot; },
+    // The person's own answer is a local (undoable) write.
+    setMood(roundId, userId, score) {
+      if (!isSafeId(roundId) || !isSafeId(userId) || !isMoodScore(score)) return false;
+      ydoc.transact(() => { ymap.set(moodKey(roundId, userId), score); }, 'local');
+      return true;
+    },
+    // Starting a new round drops the previous one's answers; not undoable.
+    clearAllMoods() {
+      const keys = moodKeys(ymap);
+      if (keys.length) ydoc.transact(() => { keys.forEach((key) => ymap.delete(key)); }, 'system');
+    },
+    onMoodsChange(handler) { moodEmitter.addEventListener('change', handler); },
+    offMoodsChange(handler) { moodEmitter.removeEventListener('change', handler); },
     onCommentsChange(handler) { commentEmitter.addEventListener('change', handler); },
     offCommentsChange(handler) { commentEmitter.removeEventListener('change', handler); },
     snapshotTemplates() { return templateSnapshot; },

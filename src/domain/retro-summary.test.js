@@ -7,6 +7,7 @@ const LABELS = Object.freeze({
   cards: 'Cards', untitledZone: 'Untitled zone', unassigned: 'No zone', actionItems: 'Action items',
   noActionItems: 'No action items', hiddenCard: 'Hidden card', emptyCard: '(empty)',
   votes: n => `${n} votes`, hiddenCount: n => `${n} hidden cards not shown`,
+  mood: 'Mood', moodScore: score => `score ${score}`, moodAverage: (average, count) => `avg ${average} of ${count}`,
 });
 
 const zone = (id, title, x) => ({ id, type: 'zone', title, x, y: 0, w: 400, h: 400 });
@@ -73,4 +74,16 @@ test('participants merge online names and card authors without duplicates', () =
   const markdown = summarize([sticky('a', 'x', 0, { authorName: 'Ada' })], new Map(), { participants: [{ name: 'Ada' }, { name: 'Bo' }] });
   assert.match(markdown, /^\*\*Participants:\*\* Ada, Bo$/m);
   assert.match(markdown, /^# Sprint 42$/m);
+});
+
+test('a closed mood round adds an anonymous histogram with the average', () => {
+  const mood = { count: 3, histogram: [0, 1, 0, 2, 0], average: 3.3 };
+  const markdown = summarize([], new Map(), { mood });
+  const lines = section(markdown, 'Mood').split('\n');
+  assert.deepEqual(lines.filter(line => line.startsWith('- ')), [
+    '- 😫 score 1: 0', '- 😕 score 2: 1', '- 😐 score 3: 0', '- 🙂 score 4: 2', '- 😄 score 5: 0',
+  ]);
+  assert.ok(lines.includes('avg 3.3 of 3'));
+  assert.equal(section(summarize([], new Map(), { mood: { count: 0, histogram: [0, 0, 0, 0, 0], average: null } }), 'Mood'), '');
+  assert.equal(section(summarize([]), 'Mood'), '');
 });

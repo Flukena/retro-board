@@ -30,10 +30,11 @@ export const TOPBAR_ICON_SIZE_PX = Object.freeze({
   ACTION: 16, MENU: 15, CHIP: 12, TOGGLE: 14, BRAND: 18, CROWN: 9,
 });
 
-export function topStackHeightPx({ hasFollow, timerCount }) {
-  const itemCount = Number(hasFollow) + timerCount;
+/** Banners (follow, presenter, phase) share FOLLOW_BANNER_H_PX; timer docks are taller. */
+export function topStackHeightPx({ bannerCount, timerCount }) {
+  const itemCount = bannerCount + timerCount;
   const gaps = Math.max(0, itemCount - 1);
-  return Number(hasFollow) * FOLLOW_BANNER_H_PX + timerCount * TIMER_DOCK_H_PX
+  return bannerCount * FOLLOW_BANNER_H_PX + timerCount * TIMER_DOCK_H_PX
     + gaps * TOP_STACK_ITEM_GAP_PX;
 }
 

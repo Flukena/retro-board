@@ -1,8 +1,8 @@
 import { BOARD_MODE } from '../../domain/public-wall-contract.js';
 import React, { useRef } from 'react';
 import {
-  Check, ClipboardCopy, Crown, Download, FileDown, FileImage, FileText, HelpCircle, ListTodo, LocateFixed,
-  RotateCcw, Trash2, Unlock, Upload, X, ZoomIn,
+  Check, ClipboardCopy, Crown, Download, FileDown, FileImage, FileText, HelpCircle, ListTodo, LocateFixed, Milestone, Presentation,
+  RotateCcw, SmilePlus, Trash2, Unlock, Upload, X, ZoomIn,
 } from 'lucide-react';
 import { Avatar } from '../ui/Avatar.jsx';
 import { Button, Divider, MenuItem, Surface } from '../ui/UiPrimitives.jsx';
@@ -38,7 +38,7 @@ export function Popover({ children, onClose, className, shortcutsOff }) {
 }
 
 export function MorePopover({
-  mode = BOARD_MODE.PRIVATE, isAdmin, exports = {}, scrollWheelZoomEnabled, onToggleScrollWheelZoom,
+  mode = BOARD_MODE.PRIVATE, isAdmin, exports = {}, presenter = null, phase = null, mood = null, scrollWheelZoomEnabled, onToggleScrollWheelZoom,
   onImport, onHelp, onUnlockAll, onResetVotes,
   onClear, onTransfer, onClose,
 }) {
@@ -54,6 +54,30 @@ export function MorePopover({
         onClick={onToggleScrollWheelZoom}
       />
       <Divider orientation={DIVIDER_ORIENTATION.HORIZONTAL} />
+      {presenter?.available && (
+      <MenuItem
+        icon={<Presentation size={TOPBAR_ICON_SIZE_PX.MENU} />}
+        label={presenter.presenting ? t('presenter.stop') : t('presenter.start')}
+        disabled={!presenter.presenting && !isAdmin}
+        onClick={closeThen(presenter.presenting ? presenter.stopPresenting : presenter.startPresenting)}
+      />
+      )}
+      {phase?.available && (
+      <MenuItem
+        icon={<Milestone size={TOPBAR_ICON_SIZE_PX.MENU} />}
+        label={phase.running ? t('phase.stop') : t('phase.start')}
+        disabled={!isAdmin}
+        onClick={closeThen(phase.running ? phase.end : phase.start)}
+      />
+      )}
+      {mood?.available && (
+      <MenuItem
+        icon={<SmilePlus size={TOPBAR_ICON_SIZE_PX.MENU} />}
+        label={mood.open ? t('mood.close') : t('mood.start')}
+        disabled={!isAdmin}
+        onClick={closeThen(mood.open ? mood.close : mood.start)}
+      />
+      )}
       <MenuItem
         icon={<ListTodo size={TOPBAR_ICON_SIZE_PX.MENU} />}
         label={exports.openActionCount ? t('action.menuCount', { n: exports.openActionCount }) : t('action.title')}

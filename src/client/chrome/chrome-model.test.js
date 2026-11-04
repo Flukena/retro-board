@@ -40,3 +40,8 @@ test('follow model preserves name precedence and shared default name', () => {
   assert.equal(followBannerModel(null, {}, { name: 'Cached' }, false).name, 'Cached');
   assert.equal(followBannerModel(null, {}, {}, true).waiting, true);
 });
+
+test('the follow banner says when the followed player is the room presenter', () => {
+  assert.equal(followBannerModel(null, { name: 'Ada' }, {}, false).presenter, false);
+  assert.equal(followBannerModel(null, { name: 'Ada' }, {}, false, true).presenter, true);
+});

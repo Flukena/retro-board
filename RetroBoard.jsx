@@ -15,6 +15,11 @@ import { readBoardImport, prepareBoardImport, ImportBundleLimitError } from './s
 import { useBoardExports } from './src/client/transfer/use-board-exports.js';
 import { ActionItemsDialog } from './src/client/board/ActionItemsDialog.jsx';
 import { useActionItems } from './src/client/board/use-action-items.js';
+import { useRetroPhase } from './src/client/board/use-retro-phase.js';
+import { useMoodCheck } from './src/client/board/use-mood-check.js';
+import { MoodCheckDialog } from './src/client/board/MoodCheck.jsx';
+import { useFollowMotion } from './src/client/board/use-follow-motion.js';
+import { usePresenterFollow } from './src/client/board/use-presenter-follow.js';
 import { actionTogglePatch } from './src/domain/action-item.js';
 import { geometryErrorForItem, geometryErrorForPatch, sizeForPlacement } from './src/domain/board-geometry.js';
 import {
@@ -88,7 +93,6 @@ import {
 } from './src/domain/minimap.js';
 import {
   cursorScreenPosition,
-  PLAYER_CURSOR_STALE_MS,
   playerViewFromViewport,
   visiblePlayerCursors,
 } from './src/client/session/player-cursors.js';
@@ -403,10 +407,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     : null;
   const stackFollow = followedUserId ? followBannerModel(
     hueFromId(followedUserId), followedPlayer, presence[followedUserId], !followedView && !followedCursor,
+    followedUserId === board.presenterUserId,
   ) : null;
   const stackTimers = board.items.filter((item) => item.type === 'zone' && item.voteTimer)
     .map((zone) => timerDockModel(zone, now));
-  const stackHeightPx = topStackHeightPx({ hasFollow: !!stackFollow, timerCount: stackTimers.length });
   const remoteEditorsByItem = useMemo(
     () => summarizeRemoteEditors(remoteEditingItems),
     [remoteEditingItems],
@@ -1652,6 +1656,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     followLastCommitAtRef.current = 0;
     setFollowedUserId(targetUserId);
   }, []);
+  const presenter = usePresenterFollow({ mode, presenterUserId: board.presenterUserId, userId, presence,
+    followedUserId, startFollowing, stopFollowing, patchMeta });
+  const stackPresenter = presenter.banner ? { kind: presenter.banner, name: presence[presenter.presenterId]?.name,
+    onAction: presenter.presenting ? presenter.stopPresenting : presenter.rejoin } : null;
 
   useEffect(() => {
     if (!followedUserId) return;
@@ -1694,58 +1702,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     liveApplyViewport, stopFollowing, setToast,
   ]);
 
-  // Awareness motion reaches this listener before the React presence update.
-  // Apply the newest target viewport center/zoom directly on the next paint so
-  // a busy board cannot make Follow wait for a full component render. Cursor
-  // is only a compatibility fallback for clients that have not refreshed yet.
-  useEffect(() => {
-    if (!followedUserId) return undefined;
-    const applyLatest = () => {
-      followMotionFrameRef.current = null;
-      const player = followMotionPlayerRef.current;
-      followMotionPlayerRef.current = null;
-      if (!followedUserIdRef.current || !player) return;
-      const hasViewCenter = Number.isFinite(player.view?.x) && Number.isFinite(player.view?.y);
-      const targetPoint = hasViewCenter ? player.view : player.cursor;
-      if (!targetPoint) return;
-      if (!hasViewCenter
-        && Date.now() - Number(player.cursor?.updatedAt || 0) >= PLAYER_CURSOR_STALE_MS) return;
-      const next = centerViewportOnWorld(
-        {
-          ...viewportRef.current,
-          zoom: player.view?.zoom || viewportRef.current.zoom,
-        },
-        viewportSize,
-        targetPoint,
-      );
-      liveApplyViewport(next, { broadcastView: false });
-    };
-    const onPresenceChange = (event) => {
-      const targetId = followedUserIdRef.current;
-      const player = targetId ? event?.detail?.[targetId] : null;
-      const hasViewCenter = Number.isFinite(player?.view?.x) && Number.isFinite(player?.view?.y);
-      if (!hasViewCenter && !player?.cursor) return;
-      const signature = hasViewCenter
-        ? `${targetId}:view:${player.view.updatedAt || 0}`
-        : `${targetId}:cursor:${player.cursor.updatedAt || 0}`;
-      if (signature === followMotionSignatureRef.current) return;
-      followMotionSignatureRef.current = signature;
-      followMotionPlayerRef.current = player;
-      if (followMotionFrameRef.current == null) {
-        followMotionFrameRef.current = requestAnimationFrame(applyLatest);
-      }
-    };
-    const unsubscribe = storage.onPresenceChange(onPresenceChange);
-    onPresenceChange({ detail: storage.getPresenceSnapshot() });
-    return () => {
-      unsubscribe?.();
-      followMotionPlayerRef.current = null;
-      if (followMotionFrameRef.current != null) {
-        cancelAnimationFrame(followMotionFrameRef.current);
-        followMotionFrameRef.current = null;
-      }
-    };
-  }, [followedUserId, viewportSize, liveApplyViewport]);
+  const followMotionRefs = useMemo(() => ({ followedUserIdRef, playerRef: followMotionPlayerRef,
+    frameRef: followMotionFrameRef, signatureRef: followMotionSignatureRef, viewportRef }), []);
+  useFollowMotion({ storage, followedUserId, refs: followMotionRefs, viewportSize, liveApplyViewport });
 
   // A gesture starting after a live wheel frame must preserve that frame while
   // discarding any not-yet-applied wheel events. This prevents a later React
@@ -3108,6 +3067,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
       allRevealed: false,
       votingLocked: false,
       editingLocked: false,
+      phase: null, moodCheck: null,
     })) return;
     setConfirmClear(false);
   }, [isAdmin, replaceBoardLocal]);
@@ -3184,7 +3144,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
   const confirmImport = useCallback(async () => {
     if (!pendingImport || !isAdmin || importBusy) return;
     const {
-      voteEntries, commentEntries, customTemplates: importedTemplates,
+      voteEntries, commentEntries, moodEntries, customTemplates: importedTemplates,
     } = pendingImport;
     setImportBusy(true);
     let nextBoard;
@@ -3199,7 +3159,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
       return;
     }
     const imported = window.storage?.importBundle?.(
-      nextBoard, voteEntries, commentEntries, importedTemplates,
+      nextBoard, voteEntries, commentEntries, importedTemplates, moodEntries,
     );
     if (!imported) {
       setImportBusy(false);
@@ -3223,6 +3183,14 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
   const zoneHeaderActions = useZoneHeaderActions({ isAdmin, boardRef, canModifyOwnedItem, canDeleteItem,
     updateFocusedText, setTimerSetupZoneId, adminStopTimer, adminStartTimer, updateItem,
     exportZoneCsv: boardExports.exportCsv, openSaveTemplate, bringToFront, sendToBack, deleteItemsIfAllowed });
+  const retroPhase = useRetroPhase({ mode, isAdmin, board, now, patchMeta, adminToggle, zoneActions: zoneHeaderActions,
+    fitToItems, showActionItems: actionItems.show });
+  const stackPhase = retroPhase.bar && { bar: retroPhase.bar, onShortcut: retroPhase.runShortcut, onAdvance: retroPhase.advance };
+  const mood = useMoodCheck({ mode, isAdmin, userId, moodCheck: board.moodCheck, patchMeta, storage: window.storage, newRoundId: uid });
+  const stackMood = (mood.banner || mood.result) && { banner: mood.banner, result: mood.result,
+    onReopen: mood.reopen, onClose: mood.close, onDismiss: mood.dismissResult };
+  const stackHeightPx = topStackHeightPx({ bannerCount: [stackFollow, stackPresenter, stackPhase, mood.banner].filter(Boolean).length,
+    timerCount: stackTimers.length });
   const renderZone = (it) => (
     <ZoneCard mode={mode} zoom={viewport.zoom}
       key={it.id}
@@ -3530,6 +3498,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
       userId={userId}
       userName={userName}
       themePref={themePref}
+      presenter={presenter} phase={retroPhase} mood={mood}
       exports={{ ...boardExports, onActionItems: actionItems.show, openActionCount: actionItems.openCount }}
       scrollWheelZoomEnabled={scrollWheelZoomEnabled}
       onHome={() => { window.location.href = '/'; }}
@@ -3872,7 +3841,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
       {renderTopBar()}
       <TopCenterStack
         board={board} userId={userId} roomHandle={window.storage.getRoomHandle?.()} now={now}
-        follow={stackFollow}
+        follow={stackFollow} presenter={stackPresenter} phase={stackPhase} mood={stackMood}
         timers={stackTimers}
         votesUsed={votesUsed}
         isAdmin={isAdmin}
@@ -3975,6 +3944,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
           onConfirm={confirmImport}
         />
       )}
+      {mood.dialogOpen && <MoodCheckDialog onAnswer={mood.answer} onSkip={mood.skip} />}
       {actionItems.open && (
         <ActionItemsDialog rows={actionItems.rows} onClose={actionItems.hide}
           canEdit={(id) => canModifyOwnedItem(board.items.find((it) => it.id === id))}

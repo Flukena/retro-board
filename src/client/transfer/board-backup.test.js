@@ -116,3 +116,18 @@ test('summary and image exports share the CSV naming scheme with their own exten
   const name = exportFileName({ fallbackBoardCode: 'Room1234', pathname: '/b/Room1234', exportedAt: 1_700_000_000_000, extension: 'md' });
   assert.equal(name, 'retro-Room1234-2023-11-14-22-13.md');
 });
+
+test('JSON backup round-trips the mood round and its answers through the import decoder', () => {
+  const moodCheck = { id: 'round1', startedAt: 1_700_000_000_000, open: false };
+  const moods = { 'user-a': 4, 'user-b': 1, 'user-c': 4 };
+  const artifact = createJsonBackupArtifact({
+    fallbackBoardCode: 'Room1234', pathname: '/b/Room1234', exportedAt: 1_700_000_000_000,
+    board: { items: [], moodCheck }, votes: {}, comments: {}, moods, customTemplates: [],
+  });
+  const payload = JSON.parse(artifact.contents);
+  assert.deepEqual(payload.moods, moods);
+  const manifest = normalizeImportManifest(payload, payload.exportedAt);
+  assert.deepEqual(manifest.boardMeta.moodCheck, moodCheck);
+  assert.deepEqual(Object.fromEntries(manifest.moodEntries.map((entry) => [entry.userId, entry.score])), moods);
+  assert.ok(manifest.moodEntries.every((entry) => entry.roundId === 'round1'));
+});

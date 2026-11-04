@@ -53,3 +53,22 @@ test('importing a backup without a title keeps the current room title', async ()
   assert.equal((await prepareBoardImport(manifest, { title: 'Current room' })).title, 'Current room');
   assert.equal((await prepareBoardImport(manifest, {})).title, null);
 });
+
+test('import ends any live presenter session and meeting phase instead of carrying them over', async () => {
+  const manifest = await readBoardImport(file(), IMPORTED_AT_MS);
+  const board = await prepareBoardImport(manifest, { adminUserId: 'owner', presenterUserId: 'owner', phase: { id: 'vote', startedAt: 1 } });
+  assert.equal(board.presenterUserId, null);
+  assert.equal(board.phase, null);
+});
+
+test('import keeps the backed-up mood round, closed, and its answers', async () => {
+  const moodCheck = { id: 'round1', startedAt: IMPORTED_AT_MS, open: true };
+  const withMoods = new File([JSON.stringify({ ...payload, board: { ...payload.board, moodCheck }, moods: { 'user-a': 3 } })],
+    'board.json', { type: 'application/json' });
+  const manifest = await readBoardImport(withMoods, IMPORTED_AT_MS);
+  const board = await prepareBoardImport(manifest, { moodCheck: { id: 'current', startedAt: 1, open: true } });
+  assert.deepEqual(board.moodCheck, { ...moodCheck, open: false });
+  assert.deepEqual(manifest.moodEntries, [{ roundId: 'round1', userId: 'user-a', score: 3 }]);
+  const plain = await prepareBoardImport(await readBoardImport(file(), IMPORTED_AT_MS), { moodCheck });
+  assert.equal(plain.moodCheck, null);
+});

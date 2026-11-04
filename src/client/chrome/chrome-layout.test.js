@@ -36,7 +36,7 @@ test('chrome offsets preserve minimap placement and clear the dock', () => {
 });
 
 test('empty stack preserves the existing toolbar clamp', () => {
-  const height = topStackHeightPx({ hasFollow: false, timerCount: 0 });
+  const height = topStackHeightPx({ bannerCount: 0, timerCount: 0 });
   assert.equal(height, 0);
   for (const rawY of [-1000, 0, TOPBAR_BOTTOM_PX, 1000]) {
     assert.equal(toolbarAnchorY(rawY, height), toolbarAnchorY(rawY));
@@ -44,12 +44,12 @@ test('empty stack preserves the existing toolbar clamp', () => {
 });
 
 test('stack height sums fixed item heights and gaps, and toolbar clears its bottom', () => {
-  for (const hasFollow of [false, true]) {
+  for (const bannerCount of [0, 1, 2]) {
     for (const timerCount of [0, 1, 3]) {
-      const itemCount = Number(hasFollow) + timerCount;
-      const expected = Number(hasFollow) * FOLLOW_BANNER_H_PX + timerCount * TIMER_DOCK_H_PX
+      const itemCount = bannerCount + timerCount;
+      const expected = bannerCount * FOLLOW_BANNER_H_PX + timerCount * TIMER_DOCK_H_PX
         + Math.max(0, itemCount - 1) * TOP_STACK_ITEM_GAP_PX;
-      const height = topStackHeightPx({ hasFollow, timerCount });
+      const height = topStackHeightPx({ bannerCount, timerCount });
       assert.equal(height, expected);
       const stackBottom = TOPBAR_BOTTOM_PX + (itemCount > 0 ? TOP_STACK_GAP_PX + expected : 0);
       const minimum = stackBottom + TOOLBAR_TOPBAR_CLEARANCE_PX;

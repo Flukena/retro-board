@@ -77,7 +77,7 @@ function PresenceButton({ players, onClick }) {
 
 export function TopBar({
   mode = BOARD_MODE.PRIVATE, code, title = null, canUndo, canRedo, editingLocked, isAdmin, admin, canClaim, players,
-  userId, userName, themePref, exports = {}, scrollWheelZoomEnabled,
+  userId, userName, themePref, exports = {}, presenter = null, phase = null, mood = null, scrollWheelZoomEnabled,
   onHome, onCopyLink, onUndo, onRedo, onToggleEditingLock, onClaimAdmin,
   onEditName, onToggleTheme, onToggleScrollWheelZoom,
   onImport, onHelp, onUnlockAll, onResetVotes, onClear,
@@ -204,6 +204,9 @@ export function TopBar({
           <MorePopover mode={mode}
             isAdmin={isAdmin}
             exports={exports}
+            presenter={presenter}
+            phase={phase}
+            mood={mood}
             scrollWheelZoomEnabled={scrollWheelZoomEnabled}
             onToggleScrollWheelZoom={onToggleScrollWheelZoom}
             onImport={onImport}

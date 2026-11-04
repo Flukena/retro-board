@@ -1,6 +1,7 @@
 import { actionItemsOf } from './action-item.js';
 import { effectiveOwnerZone } from './board-ownership.js';
 import { isStickyHiddenForUser } from './board-visibility.js';
+import { MOOD_SCALE } from './mood-check.js';
 import { RESULT_TOP_SIZE, compareStableText, compareVoteRank } from './vote-ranking.js';
 
 // Card text always follows a list or heading marker, so only inline syntax needs escaping.
@@ -74,11 +75,18 @@ function actionSection(items, viewer, labels) {
   return ['', `## ${labels.actionItems}`, ...(rows.length ? rows.map(row => actionLine(row, labels)) : [labels.noActionItems])];
 }
 
+// `mood` is a closed round's moodSummary(); absent or empty rounds add nothing.
+function moodSection(mood, labels) {
+  if (!mood?.count) return [];
+  const rows = MOOD_SCALE.map(({ score, emoji }, index) => `- ${emoji} ${labels.moodScore(score)}: ${mood.histogram[index]}`);
+  return ['', `## ${labels.mood}`, ...rows, '', labels.moodAverage(mood.average, mood.count)];
+}
+
 /**
  * Markdown summary of a retro for pasting into chat or docs. Cards hidden from
  * this viewer are left out of the card lists and only counted.
  */
-export function buildRetroSummary({ title, dateText, items, votesByItem, userId, allRevealed, participants = [], labels }) {
+export function buildRetroSummary({ title, dateText, items, votesByItem, userId, allRevealed, participants = [], mood = null, labels }) {
   const viewer = { userId, allRevealed };
   const stickies = items.filter(item => item.type === 'sticky');
   const visible = stickies.filter(sticky => !isStickyHiddenForUser(sticky, items, allRevealed, userId));
@@ -89,6 +97,7 @@ export function buildRetroSummary({ title, dateText, items, votesByItem, userId,
     '',
     `**${labels.date}:** ${dateText}`,
     ...(names.length ? [`**${labels.participants}:** ${names.map(markdownInline).join(', ')}`] : []),
+    ...moodSection(mood, labels),
     ...topSection(visible, votesByItem, labels),
     ...(visible.length ? zoneSections(visible, items, votesByItem, labels) : []),
     ...(hiddenCount ? ['', `_${labels.hiddenCount(hiddenCount)}_`] : []),

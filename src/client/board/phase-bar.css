@@ -1,0 +1,38 @@
+.rb-phase-steps {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rb-phase-step {
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-pill);
+  font: 600 12px var(--font-ui);
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.rb-phase-step--done {
+  color: var(--text-muted);
+}
+
+.rb-phase-step--current {
+  background: var(--accent-bg);
+  color: var(--accent-text);
+}
+
+.rb-phase-elapsed {
+  font: 400 12px var(--font-ui);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* Narrow screens keep only the current step so the bar fits. */
+@media (max-width: 720px) {
+  .rb-phase-step:not(.rb-phase-step--current) {
+    display: none;
+  }
+}
