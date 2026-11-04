@@ -38,10 +38,10 @@ test('a zone stretched far past the cap stops at the cap with the opposite corne
   }
 });
 
-test('a zone can be stretched to 5,760 px per side (owner, 2026-11-04: 20% above the old 4,800)', () => {
+test('a zone can be stretched to 7,488 px per side (owner, 2026-11-04: 4,800 +20%, then +30%)', () => {
   const initial = { x: 0, y: 0, w: 1200, h: 1080 };
-  const rect = clampCornerResize(initial, 'se', draggedRect(initial, 'se', 4_560, 4_680), itemSizeBounds('zone', initial));
-  assert.deepEqual(rect, { x: 0, y: 0, w: 5_760, h: 5_760 });
+  const rect = clampCornerResize(initial, 'se', draggedRect(initial, 'se', 6_288, 6_408), itemSizeBounds('zone', initial));
+  assert.deepEqual(rect, { x: 0, y: 0, w: 7_488, h: 7_488 });
 });
 
 test('every resizable type has a cap well below what crashed iPhone Safari', () => {
@@ -53,14 +53,14 @@ test('every resizable type has a cap well below what crashed iPhone Safari', () 
 });
 
 test('an item already larger than the cap can shrink but not grow, and does not jump on grab', () => {
-  const initial = { x: 0, y: 0, w: 10_031, h: 7_207 };
+  const initial = { x: 0, y: 0, w: 10_031, h: 9_207 };
   const bounds = itemSizeBounds('zone', initial);
   const grown = clampCornerResize(initial, 'se', draggedRect(initial, 'se', 500, 500), bounds);
   assert.deepEqual(grown, initial);
   const untouched = clampCornerResize(initial, 'se', draggedRect(initial, 'se', 0, 0), bounds);
   assert.deepEqual(untouched, initial);
   const shrunk = clampCornerResize(initial, 'se', draggedRect(initial, 'se', -1_000, -1_000), bounds);
-  assert.deepEqual(shrunk, { x: 0, y: 0, w: 9_031, h: 6_207 });
+  assert.deepEqual(shrunk, { x: 0, y: 0, w: 9_031, h: 8_207 });
 });
 
 test('the existing minimum still holds and keeps the opposite corner fixed', () => {
