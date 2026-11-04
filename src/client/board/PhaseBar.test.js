@@ -32,3 +32,12 @@ test('viewers see the phase read-only; the last phase offers Finish', async () =
     assert.match(last, new RegExp(t('phase.finish')));
   });
 });
+
+test('the bar shows the meeting zone name, with a fallback for an untitled zone', async () => {
+  await withChromeModule('/src/client/board/PhaseBar.jsx', ({ PhaseBar }, { t }) => {
+    const bar = { steps, elapsedMinutes: 0, shortcut: null, canAdvance: false, isLast: false };
+    assert.match(renderToStaticMarkup(PhaseBar({ bar: { ...bar, zoneTitle: 'Went well' } })), /rb-phase-zone[^>]*>Went well</);
+    assert.match(renderToStaticMarkup(PhaseBar({ bar: { ...bar, zoneTitle: '' } })), new RegExp(t('export.csv.untitledZone').replace(/[()]/g, '\\$&')));
+    assert.doesNotMatch(renderToStaticMarkup(PhaseBar({ bar: { ...bar, zoneTitle: null } })), /rb-phase-zone/);
+  });
+});

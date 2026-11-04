@@ -30,9 +30,11 @@ function PhaseShortcut({ shortcut, onShortcut }) {
 export function PhaseBar({ bar, onShortcut, onAdvance }) {
   const advanceLabel = bar.isLast ? t('phase.finish') : t('phase.next');
   const AdvanceIcon = bar.isLast ? Check : ChevronRight;
+  const zoneLabel = bar.zoneTitle == null ? null : bar.zoneTitle || t('export.csv.untitledZone');
   return (
     <div role="status" aria-label={t('phase.title')} className="rb-follow-banner"
       style={{ '--rb-follow-banner-height': `${FOLLOW_BANNER_H_PX}px` }}>
+      {zoneLabel && <span className="rb-phase-zone" title={zoneLabel}>{zoneLabel}</span>}
       <ol className="rb-phase-steps">
         {bar.steps.map((step) => (
           <li key={step.id} className={`rb-phase-step rb-phase-step--${step.state}`}

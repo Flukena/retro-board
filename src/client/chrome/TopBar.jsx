@@ -12,6 +12,7 @@ import { TOPBAR_H_PX, TOPBAR_INSET_PX, TOPBAR_ICON_SIZE_PX, Z } from './chrome-l
 import { t } from '../ui/i18n.js';
 import { LanguagePicker } from '../ui/LanguagePicker.jsx';
 import { boardManagementPermissions } from '../../domain/public-board-permissions.js';
+import { PhaseZoneDialog } from '../board/PhaseZoneDialog.jsx';
 import './topbar.css';
 import '../ui/mobile-layout.css';
 
@@ -218,6 +219,7 @@ export function TopBar({
             onClose={() => setMoreMenuOpen(false)}
           />
         )}
+        {phase?.choices && <PhaseZoneDialog choices={phase.choices} onPick={phase.startIn} onCancel={phase.cancelChoose} />}
         {transferOpen && isAdmin && (
           <TransferPopover
             players={players}

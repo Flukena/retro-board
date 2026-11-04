@@ -1,10 +1,12 @@
 import { effectiveOwnerZone } from './board-ownership.js';
 import { BOARD_MODE } from './public-wall-contract.js';
-import { zoneEffectiveRevealed } from './zone-actions.js';
+import { isSafeId } from './comment-schema.js';
+import { zoneEffectiveRevealed, zoneGroupIds } from './zone-actions.js';
 
 // Meeting phases guide a retro; they do not lock anything by themselves.
-// `meta.phase` only records where the meeting is, and each phase offers one
-// shortcut that runs an existing (undoable) board action.
+// `meta.phase` records where the meeting is and, optionally, the top-level
+// zone it runs on (`zoneId`; null means the whole board). Each phase offers
+// one shortcut that runs an existing (undoable) board action.
 
 export const RETRO_PHASES = Object.freeze(['write', 'reveal', 'group', 'vote', 'discuss', 'actions']);
 export const PHASE_SHORTCUT = Object.freeze({
@@ -19,6 +21,7 @@ export const isPhaseState = (value) => value === null || (
   typeof value === 'object' && !Array.isArray(value)
   && RETRO_PHASES.includes(value.id)
   && Number.isFinite(value.startedAt) && value.startedAt >= 0
+  && (value.zoneId == null || isSafeId(value.zoneId))
 );
 
 /** First phase when none is running; null after the last phase. */
@@ -35,21 +38,33 @@ const topLevelZones = (items) => items
   .filter((item) => item.type === 'zone' && !effectiveOwnerZone(item, items))
   .sort(byPosition);
 
+/** Top-level zones the meeting can run on, top to bottom, with their card counts. */
+export const phaseZoneChoices = (items) => topLevelZones(items).map((zone) => {
+  const group = zoneGroupIds(zone, items);
+  return { id: zone.id, title: zone.title ?? '', cardCount: items.filter((item) => item.type === 'sticky' && group.has(item.id)).length };
+});
+
+/** The chosen meeting zone while it is still a top-level zone; otherwise null (whole board). */
+export const phaseZone = (phase, items) => (phase?.zoneId
+  ? topLevelZones(items).find((zone) => zone.id === phase.zoneId) ?? null : null);
+
 /**
  * The suggested action for a phase as data, or null when there is nothing to do.
- * Reveal and vote act on top-level zones only, because nested zones follow their parent.
+ * Reveal and vote act on the meeting zone, or on every top-level zone when the
+ * meeting runs on the whole board; nested zones follow their parent.
  */
-export function phaseShortcut(phaseId, { items, allRevealed, editingLocked }) {
+export function phaseShortcut(phaseId, { items, allRevealed, editingLocked }, zone = null) {
+  const zones = zone ? [zone] : topLevelZones(items);
   switch (phaseId) {
     case 'write':
       return editingLocked ? { kind: PHASE_SHORTCUT.UNLOCK } : null;
     case 'reveal': {
-      const zoneIds = topLevelZones(items).filter((zone) => !zoneEffectiveRevealed(zone, items, allRevealed)).map((zone) => zone.id);
+      const zoneIds = zones.filter((candidate) => !zoneEffectiveRevealed(candidate, items, allRevealed)).map((candidate) => candidate.id);
       return zoneIds.length ? { kind: PHASE_SHORTCUT.REVEAL, zoneIds } : null;
     }
     case 'vote': {
-      const zone = topLevelZones(items).find((candidate) => !candidate.voteTimer);
-      return zone ? { kind: PHASE_SHORTCUT.VOTE, zoneId: zone.id } : null;
+      const target = zones.find((candidate) => !candidate.voteTimer);
+      return target ? { kind: PHASE_SHORTCUT.VOTE, zoneId: target.id } : null;
     }
     case 'discuss':
       return editingLocked ? null : { kind: PHASE_SHORTCUT.LOCK };

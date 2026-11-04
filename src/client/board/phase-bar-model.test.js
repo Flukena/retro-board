@@ -29,3 +29,17 @@ test('only the admin gets the shortcut and the Next control', () => {
 test('the last phase finishes instead of advancing', () => {
   assert.equal(phaseBarModel({ phase: { id: 'actions', startedAt: 0 }, now: 0, board, isAdmin: true }).isLast, true);
 });
+
+test('the bar names the meeting zone and scopes the shortcut to it', () => {
+  const zones = [
+    { id: 'a', type: 'zone', x: 0, y: 0, w: 400, h: 400, title: 'Ideas', parentZoneId: null },
+    { id: 'b', type: 'zone', x: 0, y: 600, w: 400, h: 400, title: '', parentZoneId: null },
+  ];
+  const scoped = { ...board, items: zones };
+  const onB = phaseBarModel({ phase: { id: 'vote', startedAt: 0, zoneId: 'b' }, now: 0, board: scoped, isAdmin: true });
+  assert.equal(onB.zoneTitle, '');
+  assert.deepEqual(onB.shortcut, { kind: PHASE_SHORTCUT.VOTE, zoneId: 'b' });
+  const whole = phaseBarModel({ phase: { id: 'vote', startedAt: 0, zoneId: null }, now: 0, board: scoped, isAdmin: true });
+  assert.equal(whole.zoneTitle, null);
+  assert.deepEqual(whole.shortcut, { kind: PHASE_SHORTCUT.VOTE, zoneId: 'a' });
+});

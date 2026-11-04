@@ -22,16 +22,29 @@ function renderPhase(props) {
   return { api, calls };
 }
 
-test('phase changes are silent writes that walk the phases and end', () => {
-  const { api, calls } = renderPhase({ board: { items: [], phase: { id: 'discuss', startedAt: 0 } } });
+test('phase changes are silent writes that walk the phases on the same zone and end', () => {
+  const { api, calls } = renderPhase({ board: { items: [], phase: { id: 'discuss', startedAt: 0, zoneId: 'z1' } } });
   api.advance();
   api.end();
   assert.equal(calls[0][1].phase.id, 'actions');
+  assert.equal(calls[0][1].phase.zoneId, 'z1');
   assert.deepEqual(calls[0][2], { silent: true });
   assert.deepEqual(calls[1], ['patchMeta', { phase: null }, { silent: true }]);
+});
+
+test('start only asks for a zone; picking one starts Write there and frames it', () => {
   const fresh = renderPhase({});
+  assert.equal(fresh.api.choices, null);
   fresh.api.start();
+  assert.deepEqual(fresh.calls, [], 'nothing is written until a zone is picked');
+  fresh.api.startIn('z1');
   assert.equal(fresh.calls[0][1].phase.id, 'write');
+  assert.equal(fresh.calls[0][1].phase.zoneId, 'z1');
+  assert.deepEqual(fresh.calls[1], ['fitToItems', ['z1']]);
+  const whole = renderPhase({});
+  whole.api.startIn(null);
+  assert.equal(whole.calls[0][1].phase.zoneId, null);
+  assert.equal(whole.calls.length, 1, 'the whole board is not framed');
 });
 
 test('shortcuts call the existing board actions', () => {

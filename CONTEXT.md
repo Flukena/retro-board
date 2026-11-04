@@ -18,8 +18,10 @@ session state and reset on import.
 ## Facilitation state
 
 Room meta fields written silently (never undone by Ctrl+Z), private boards only:
-`presenterUserId` (everyone follows this viewer), `phase` (`{ id, startedAt }`,
-one of write/reveal/group/vote/discuss/actions) and `moodCheck`
+`presenterUserId` (everyone follows this viewer), `phase` (`{ id, startedAt,
+zoneId }`, one of write/reveal/group/vote/discuss/actions; `zoneId` is the
+top-level zone the meeting runs on, picked at start, or null for the whole
+board, and scopes the Reveal/Vote shortcuts) and `moodCheck`
 (`{ id, startedAt, open }`). A mood answer is the kv key
 `s||mood:<roundId>:<userId>` with an integer 1-5; it is the answerer's own
 undoable write, and one round lives in the room at a time (starting a round

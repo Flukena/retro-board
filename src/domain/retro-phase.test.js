@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  PHASE_SHORTCUT, RETRO_PHASES, isPhaseState, nextPhaseId, phaseElapsedMinutes, phaseShortcut, phasesAvailable,
+  PHASE_SHORTCUT, RETRO_PHASES, isPhaseState, nextPhaseId, phaseElapsedMinutes, phaseShortcut, phaseZone,
+  phaseZoneChoices, phasesAvailable,
 } from './retro-phase.js';
 
 const zone = (id, x, y, extra = {}) => ({ id, type: 'zone', x, y, w: 400, h: 400, parentZoneId: null, ...extra });
@@ -59,4 +60,36 @@ test('elapsed minutes round down and never go negative', () => {
 test('phases are not offered on public boards', () => {
   assert.equal(phasesAvailable('public'), false);
   assert.equal(phasesAvailable('private'), true);
+});
+
+test('the phase may name a safe zone id, or none for the whole board', () => {
+  assert.equal(isPhaseState({ id: 'vote', startedAt: 5, zoneId: 'zone-1' }), true);
+  assert.equal(isPhaseState({ id: 'vote', startedAt: 5, zoneId: null }), true);
+  assert.equal(isPhaseState({ id: 'vote', startedAt: 5, zoneId: 'bad id' }), false);
+  assert.equal(isPhaseState({ id: 'vote', startedAt: 5, zoneId: 7 }), false);
+});
+
+test('zone choices are top-level zones, top to bottom, with the cards inside each', () => {
+  const outer = zone('outer', 0, 500, { title: 'Went well' });
+  const inner = zone('inner', 10, 510, { w: 100, h: 100, parentZoneId: 'outer' });
+  const first = zone('first', 0, 0, { title: 'Ideas' });
+  const card = (id, parentZoneId) => ({ id, type: 'sticky', x: 20, y: 520, w: 50, h: 50, parentZoneId });
+  const items = [outer, inner, first, card('s1', 'outer'), card('s2', 'inner')];
+  assert.deepEqual(phaseZoneChoices(items), [
+    { id: 'first', title: 'Ideas', cardCount: 0 }, { id: 'outer', title: 'Went well', cardCount: 2 },
+  ]);
+  assert.equal(phaseZone({ zoneId: 'outer' }, items), outer);
+  assert.equal(phaseZone({ zoneId: 'inner' }, items), null, 'a nested zone is not a meeting zone');
+  assert.equal(phaseZone({ zoneId: 'gone' }, items), null);
+  assert.equal(phaseZone({ zoneId: null }, items), null);
+});
+
+test('with a meeting zone, reveal and vote act on that zone only', () => {
+  const picked = zone('picked', 0, 600);
+  const other = zone('other', 0, 0);
+  const items = board([other, picked]);
+  assert.deepEqual(phaseShortcut('reveal', items, picked), { kind: PHASE_SHORTCUT.REVEAL, zoneIds: ['picked'] });
+  assert.deepEqual(phaseShortcut('vote', items, picked), { kind: PHASE_SHORTCUT.VOTE, zoneId: 'picked' });
+  assert.equal(phaseShortcut('reveal', items, { ...picked, revealed: true }), null);
+  assert.equal(phaseShortcut('vote', items, { ...picked, voteTimer: { startedAt: 1 } }), null);
 });

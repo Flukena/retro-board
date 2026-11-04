@@ -128,7 +128,13 @@ await runLiveCheck('facilitation-live-check.mjs', async ({ a, b, report }) => {
   await step(report, 'A starts meeting phases; B sees Write in Thai', async () => {
     await addZone(a, ZONE_TITLE, ZONE_DRAG_PX);
     await openMenu(a, 'en', LABELS.en.phaseStart);
+    const picker = a.getByRole('dialog');
+    await picker.waitFor({ timeout: SYNC_TIMEOUT_MS });
+    await shot(a, 'phase-zone-picker-en.png', report);
+    await picker.getByRole('button', { name: new RegExp(ZONE_TITLE) }).click();
     await Promise.all([currentStepIs(a, PHASE_STEPS[0].en), currentStepIs(b, PHASE_STEPS[0].th)]);
+    await Promise.all([a, b].map((page) => page.locator('.rb-phase-zone', { hasText: ZONE_TITLE })
+      .waitFor({ timeout: SYNC_TIMEOUT_MS })));
     await shot(a, 'phase-write-en.png', report);
     await shot(b, 'phase-write-th.png', report);
   });
