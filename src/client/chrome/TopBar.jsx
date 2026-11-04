@@ -77,10 +77,10 @@ function PresenceButton({ players, onClick }) {
 
 export function TopBar({
   mode = BOARD_MODE.PRIVATE, code, title = null, canUndo, canRedo, editingLocked, isAdmin, admin, canClaim, players,
-  userId, userName, themePref, exportBusy, scrollWheelZoomEnabled,
+  userId, userName, themePref, exports = {}, scrollWheelZoomEnabled,
   onHome, onCopyLink, onUndo, onRedo, onToggleEditingLock, onClaimAdmin,
   onEditName, onToggleTheme, onToggleScrollWheelZoom,
-  onExport, onExportCsv, onImport, onHelp, onUnlockAll, onResetVotes, onClear,
+  onImport, onHelp, onUnlockAll, onResetVotes, onClear,
   onTransferAdmin, onFollow, onStopFollowing,
 }) {
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
@@ -203,11 +203,9 @@ export function TopBar({
         {moreMenuOpen && (
           <MorePopover mode={mode}
             isAdmin={isAdmin}
-            exportBusy={exportBusy}
+            exports={exports}
             scrollWheelZoomEnabled={scrollWheelZoomEnabled}
             onToggleScrollWheelZoom={onToggleScrollWheelZoom}
-            onExport={onExport}
-            onExportCsv={onExportCsv}
             onImport={onImport}
             onHelp={onHelp}
             onUnlockAll={onUnlockAll}

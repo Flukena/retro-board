@@ -48,6 +48,7 @@ export function selectionToolbarSections(type) {
     fontSize: type === 'sticky' || type === 'text',
     fontColor: type === 'sticky' || type === 'text',
     privacy: type === 'sticky',
+    actionItem: type === 'sticky',
   };
 }
 

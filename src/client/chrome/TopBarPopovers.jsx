@@ -1,7 +1,7 @@
 import { BOARD_MODE } from '../../domain/public-wall-contract.js';
 import React, { useRef } from 'react';
 import {
-  Check, Crown, Download, HelpCircle, LocateFixed,
+  Check, ClipboardCopy, Crown, Download, FileDown, FileImage, FileText, HelpCircle, ListTodo, LocateFixed,
   RotateCcw, Trash2, Unlock, Upload, X, ZoomIn,
 } from 'lucide-react';
 import { Avatar } from '../ui/Avatar.jsx';
@@ -38,11 +38,11 @@ export function Popover({ children, onClose, className, shortcutsOff }) {
 }
 
 export function MorePopover({
-  mode = BOARD_MODE.PRIVATE, isAdmin, exportBusy, scrollWheelZoomEnabled, onToggleScrollWheelZoom,
-  onExport, onExportCsv, onImport, onHelp, onUnlockAll, onResetVotes,
+  mode = BOARD_MODE.PRIVATE, isAdmin, exports = {}, scrollWheelZoomEnabled, onToggleScrollWheelZoom,
+  onImport, onHelp, onUnlockAll, onResetVotes,
   onClear, onTransfer, onClose,
 }) {
-  const closeThen = (action) => () => { onClose(); action(); };
+  const closeThen = (action) => () => { onClose(); action?.(); };
   const permissions = boardManagementPermissions(mode, isAdmin);
   return (
     <Popover onClose={onClose} className="rb-topbar-popover--more">
@@ -55,14 +55,43 @@ export function MorePopover({
       />
       <Divider orientation={DIVIDER_ORIENTATION.HORIZONTAL} />
       <MenuItem
+        icon={<ListTodo size={TOPBAR_ICON_SIZE_PX.MENU} />}
+        label={exports.openActionCount ? t('action.menuCount', { n: exports.openActionCount }) : t('action.title')}
+        onClick={closeThen(exports.onActionItems)}
+      />
+      <MenuItem
+        icon={<ClipboardCopy size={TOPBAR_ICON_SIZE_PX.MENU} />}
+        label={t('summary.copy')}
+        onClick={closeThen(exports.copySummary)}
+      />
+      <MenuItem
+        icon={<FileText size={TOPBAR_ICON_SIZE_PX.MENU} />}
+        label={t('summary.download')}
+        onClick={closeThen(exports.downloadSummary)}
+      />
+      <Divider orientation={DIVIDER_ORIENTATION.HORIZONTAL} />
+      <MenuItem
         icon={<Download size={TOPBAR_ICON_SIZE_PX.MENU} />}
-        label={exportBusy ? t('export.processing') : t('topbar.export')}
-        onClick={closeThen(onExport)}
+        label={exports.busy ? t('export.processing') : t('topbar.export')}
+        disabled={exports.busy}
+        onClick={closeThen(exports.exportJson)}
       />
       <MenuItem
         icon={<Download size={TOPBAR_ICON_SIZE_PX.MENU} />}
         label={t('topbar.exportCsv')}
-        onClick={closeThen(onExportCsv)}
+        onClick={closeThen(exports.exportCsv)}
+      />
+      <MenuItem
+        icon={<FileImage size={TOPBAR_ICON_SIZE_PX.MENU} />}
+        label={t('topbar.exportPng')}
+        disabled={exports.busy}
+        onClick={closeThen(exports.exportPng)}
+      />
+      <MenuItem
+        icon={<FileDown size={TOPBAR_ICON_SIZE_PX.MENU} />}
+        label={t('topbar.exportPdf')}
+        disabled={exports.busy}
+        onClick={closeThen(exports.exportPdf)}
       />
       <MenuItem
         icon={<Upload size={TOPBAR_ICON_SIZE_PX.MENU} />}

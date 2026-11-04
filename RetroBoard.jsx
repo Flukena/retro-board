@@ -11,8 +11,11 @@ import {
   MousePointer2, RotateCcw,
   Upload,
 } from 'lucide-react';
-import { createBoardExport, createCsvBoardExport, readBoardImport, prepareBoardImport, ImportBundleLimitError } from './src/client/transfer/board-transfer.js';
-import { downloadArtifact } from './src/client/transfer/browser-download.js';
+import { readBoardImport, prepareBoardImport, ImportBundleLimitError } from './src/client/transfer/board-transfer.js';
+import { useBoardExports } from './src/client/transfer/use-board-exports.js';
+import { ActionItemsDialog } from './src/client/board/ActionItemsDialog.jsx';
+import { useActionItems } from './src/client/board/use-action-items.js';
+import { actionTogglePatch } from './src/domain/action-item.js';
 import { geometryErrorForItem, geometryErrorForPatch, sizeForPlacement } from './src/domain/board-geometry.js';
 import {
   BOARD_TEXT_MAX_LENGTH,
@@ -2039,16 +2042,17 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     commitViewportImmediately(fitViewportToItems(boardRef.current.items, rect.width, rect.height));
   }, [commitViewportImmediately, stopFollowing]);
 
-  const fitToSelection = useCallback(() => {
+  const fitToItems = useCallback((idList) => {
     if (interactionRef.current !== null || !canvasRef.current) return;
     stopFollowing();
-    const ids = selectedIdsRef.current;
+    const ids = new Set(idList);
     if (ids.size === 0) return;
     const items = boardRef.current.items.filter((it) => ids.has(it.id));
     if (items.length === 0) return;
     const rect = canvasRef.current.getBoundingClientRect();
     commitViewportImmediately(fitViewportToItems(items, rect.width, rect.height));
   }, [commitViewportImmediately, stopFollowing]);
+  const fitToSelection = useCallback(() => fitToItems(selectedIdsRef.current), [fitToItems]);
 
   const zoomBy = useCallback((factor) => {
     if (interactionRef.current !== null || !canvasRef.current) return;
@@ -3153,49 +3157,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
   }, [isAdmin, patchMeta, reportWriteFailure]);
 
   /* ----- Export / Import ----- */
-  const [exportBusy, setExportBusy] = useState(false);
-  const exportBoard = useCallback(async () => {
-    if (exportBusy) return;
-    setExportBusy(true);
-    setToast({ msg: t('export.processing'), type: 'info' });
-    let artifact;
-    try {
-      artifact = await createBoardExport(boardRef.current, { boardCode, userId });
-    } catch (err) {
-      setExportBusy(false);
-      setToast({ msg: t('export.fail', { err: err.message }), type: 'warn' });
-      return;
-    }
-    setExportBusy(false);
-    downloadArtifact(artifact);
-    const { positions, zoneDimensions } = artifact.geometryRepairs;
-    setToast({
-      msg: positions || zoneDimensions
-        ? t('export.repaired', { file: artifact.fileName, positions, zones: zoneDimensions })
-        : t('export.done', { file: artifact.fileName }),
-      type: 'info',
-    });
-  }, [boardCode, userId, exportBusy]);
-
-  // Export only the sticky cards inside one zone as CSV. The all-zones version
-  // got swapped out for this per-zone flow — users wanted to grab a single
-  // column's output without the rest of the board.
-  const exportZoneCsv = useCallback((zone) => {
-    if (!zone || zone.type !== 'zone') return;
-    const artifact = createCsvBoardExport(boardRef.current, { boardCode, userId, zone });
-    downloadArtifact(artifact);
-    setToast({ msg: t('export.done', { file: artifact.fileName }), type: 'info' });
-  }, [boardCode, userId]);
-
-  // Whole-room CSV: every sticky, grouped by zone. Overlapping zones (e.g.
-  // Retro Loop's wrapper around Good/Bad/Try) resolve to the smallest
-  // enclosing zone, same convention as the timer's auto-sort-by-vote feature.
-  // Stickies outside every zone land in a "(no zone)" group.
-  const exportBoardCsv = useCallback(() => {
-    const artifact = createCsvBoardExport(boardRef.current, { boardCode, userId });
-    downloadArtifact(artifact);
-    setToast({ msg: t('export.done', { file: artifact.fileName }), type: 'info' });
-  }, [boardCode, userId]);
+  const boardExports = useBoardExports({ boardRef, boardCode, userId, setToast });
+  const actionItems = useActionItems({ items: board.items, userId, allRevealed: board.allRevealed });
 
   const fileInputRef = useRef(null);
   const [pendingImport, setPendingImport] = useState(null); // normalized manifest awaiting confirmation
@@ -3259,7 +3222,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
 
   const zoneHeaderActions = useZoneHeaderActions({ isAdmin, boardRef, canModifyOwnedItem, canDeleteItem,
     updateFocusedText, setTimerSetupZoneId, adminStopTimer, adminStartTimer, updateItem,
-    exportZoneCsv, openSaveTemplate, bringToFront, sendToBack, deleteItemsIfAllowed });
+    exportZoneCsv: boardExports.exportCsv, openSaveTemplate, bringToFront, sendToBack, deleteItemsIfAllowed });
   const renderZone = (it) => (
     <ZoneCard mode={mode} zoom={viewport.zoom}
       key={it.id}
@@ -3423,7 +3386,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
         item={{
           type: selectedItem.type, colorIndex: selectedItem.color,
           fontSize: selectedItem.fontSize, fontColor: selectedItem.fontColor,
-          private: selectedItem.private, locked: selectedItem.locked,
+          private: selectedItem.private, locked: selectedItem.locked, actionItem: selectedItem.actionItem,
         }}
         can={can}
         canDelete={canDelete}
@@ -3432,6 +3395,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
         onFontSize={(fontSize) => can && updateItem(selectedItem.id, { fontSize })}
         onFontColor={(fontColor) => updateItem(selectedItem.id, { fontColor })}
         onTogglePrivate={() => can && updateItem(selectedItem.id, { private: !selectedItem.private })}
+        onToggleAction={() => can && updateItem(selectedItem.id, actionTogglePatch(selectedItem))}
         onBringToFront={() => can && bringToFront(new Set([selectedItem.id]))}
         onSendToBack={() => can && sendToBack(new Set([selectedItem.id]))}
         onDelete={() => deleteItemsIfAllowed([selectedItem.id])}
@@ -3566,7 +3530,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
       userId={userId}
       userName={userName}
       themePref={themePref}
-      exportBusy={exportBusy}
+      exports={{ ...boardExports, onActionItems: actionItems.show, openActionCount: actionItems.openCount }}
       scrollWheelZoomEnabled={scrollWheelZoomEnabled}
       onHome={() => { window.location.href = '/'; }}
       onCopyLink={copyRoomLink}
@@ -3577,8 +3541,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
       onEditName={() => { setNameDraft(userName); setNameModalOpen(true); }}
       onToggleTheme={() => setThemePref(nextThemePref(themePref))}
       onToggleScrollWheelZoom={toggleScrollWheelZoom}
-      onExport={exportBoard}
-      onExportCsv={exportBoardCsv}
       onImport={onImportPick}
       onHelp={() => setHelpOpen(true)}
       onUnlockAll={() => topbarAdminAction(() => setConfirmUnlockAll(true))}
@@ -4012,6 +3974,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
           onCancel={() => setPendingImport(null)}
           onConfirm={confirmImport}
         />
+      )}
+      {actionItems.open && (
+        <ActionItemsDialog rows={actionItems.rows} onClose={actionItems.hide}
+          canEdit={(id) => canModifyOwnedItem(board.items.find((it) => it.id === id))}
+          onPatch={updateItem} onLocate={(id) => { actionItems.hide(); setSelectedIds(new Set([id])); fitToItems([id]); }} />
       )}
       {commentsOpenReadable && (
         <CommentsDialog

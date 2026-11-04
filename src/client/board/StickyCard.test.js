@@ -191,3 +191,14 @@ test('overview preserves readable text and votes while active cards retain full 
     }
   });
 });
+
+test('an action-item sticky shows its badge and leaves room for it above the text', async () => {
+  await withChromeModule('/src/client/board/StickyCard.jsx', ({ StickyCard }) => {
+    const plain = renderCard(StickyCard, { isOwner: true });
+    const action = renderCard(StickyCard, { isOwner: true, item: { ...ITEM, actionItem: true, actionOwner: 'Nok' } });
+    assert.equal(byClass(plain.tree, 'rb-action-badge'), undefined);
+    assert.match(action.html, /rb-action-badge[^>]*>.*Nok/);
+    const contentTop = (tree) => byClass(tree, 'rb-sticky__content').props.style.paddingTop;
+    assert.ok(contentTop(action.tree) > contentTop(plain.tree));
+  });
+});

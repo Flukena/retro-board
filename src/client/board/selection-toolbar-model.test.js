@@ -67,8 +67,13 @@ test('zone toolbar stays above the body for every title size', () => {
 
 test('zones have no floating toolbar sections', () => {
   assert.deepEqual(selectionToolbarSections('zone'), {
-    palette: false, fontSize: false, fontColor: false, privacy: false,
+    palette: false, fontSize: false, fontColor: false, privacy: false, actionItem: false,
   });
+});
+
+test('only stickies can be marked as action items from the toolbar', () => {
+  assert.equal(selectionToolbarSections('sticky').actionItem, true);
+  for (const type of ['text', 'image', 'zone']) assert.equal(selectionToolbarSections(type).actionItem, false, type);
 });
 
 test('zone font controls start at auto size and keep the chosen step pinned after resizing', () => {

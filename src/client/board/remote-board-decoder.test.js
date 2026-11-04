@@ -19,11 +19,17 @@ test('valid runtime values survive unchanged, including live vote timers and rev
   assert.deepEqual(decodeRemoteBoard(items, meta), { ...meta, items });
 });
 
+test('valid action-item fields reach React unchanged', () => {
+  const action = { ...STICKY, actionItem: true, actionOwner: 'Nok', actionDue: '2026-11-30', actionDone: true };
+  assert.deepEqual(decodeRemoteBoard([action, ZONE], {}).items, [action, ZONE]);
+});
+
 test('malformed fields cannot become React children, styles or voting controls', () => {
   const badPatches = [
     { text: {} }, { authorName: {} }, { x: NaN }, { color: {} }, { fontSize: {} },
     { parentZoneId: {} }, { voteTimer: { voteLimit: {} } }, { createdAt: {} },
     { lastResultsAt: {} }, { votingLocked: {} }, { id: '__proto__' },
+    { actionItem: 'yes' }, { actionOwner: {} }, { actionDue: 'soon' }, { actionDone: 1 },
   ];
   for (const patch of badPatches) {
     assert.deepEqual(decodeRemoteBoard([{ ...STICKY, ...patch }, ZONE], {}).items, [ZONE]);

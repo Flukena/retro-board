@@ -1,0 +1,68 @@
+.rb-action-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rb-action-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.rb-action-row__done[aria-pressed="true"] {
+  color: var(--accent);
+}
+
+.rb-action-row__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.rb-action-row__text {
+  color: var(--text);
+  font-size: 14px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.rb-action-row--done .rb-action-row__text {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.rb-action-row__fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.rb-action-row__owner,
+.rb-action-row__due {
+  min-width: 0;
+  height: 32px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--modal-input-font-size);
+}
+
+.rb-action-row__owner {
+  flex: 1 1 140px;
+}
+
+.rb-action-row__due--overdue {
+  border-color: var(--danger);
+  color: var(--danger);
+}

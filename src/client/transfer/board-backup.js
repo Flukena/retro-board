@@ -96,6 +96,13 @@ export async function createPortableJsonBackupArtifact(options, readImage) {
   return { ...artifact, payload, contents };
 }
 
+/** `retro-<code>[-zone]-<YYYY-MM-DD-HH-MM>.<extension>` for every non-backup export. */
+export const exportFileName = ({ fallbackBoardCode, pathname, zoneTitle, exportedAt = Date.now(), extension }) => {
+  const boardCode = resolveExportBoardCode(fallbackBoardCode, pathname);
+  const zonePart = zoneTitle == null ? '' : `-${zoneSlug(zoneTitle)}`;
+  return `retro-${boardCode}${zonePart}-${csvTimestamp(exportedAt)}.${extension}`;
+};
+
 export const createCsvExportArtifact = ({
   csv,
   fallbackBoardCode,
@@ -103,10 +110,8 @@ export const createCsvExportArtifact = ({
   zoneTitle,
   exportedAt = Date.now(),
 }) => {
-  const boardCode = resolveExportBoardCode(fallbackBoardCode, pathname);
-  const zonePart = zoneTitle == null ? '' : `-${zoneSlug(zoneTitle)}`;
   return {
-    fileName: `retro-${boardCode}${zonePart}-${csvTimestamp(exportedAt)}.csv`,
+    fileName: exportFileName({ fallbackBoardCode, pathname, zoneTitle, exportedAt, extension: 'csv' }),
     mimeType: 'text/csv;charset=utf-8',
     contents: String(csv ?? ''),
   };

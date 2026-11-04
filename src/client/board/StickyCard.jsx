@@ -11,6 +11,8 @@ import { CARD_OVERVIEW_MAX_EDGE_PX, CARD_OVERVIEW_TEXT_MAX_LENGTH, CARD_OVERVIEW
 import { OverviewRasterContext } from './overview-raster-context.js';
 import { observeContentSize } from './observe-content-size.js';
 import { useTapToEdit } from './tap-to-edit.js';
+import { ActionItemBadge } from './ActionItemBadge.jsx';
+import { isActionItem } from '../../domain/action-item.js';
 
 // Let notes grow while typing, but keep a pasted essay from turning into a
 // many-thousand-pixel card. At the cap the editor becomes internally scrollable.
@@ -164,6 +166,7 @@ export const StickyCard = React.memo(function StickyCard({
       }}
     >
       <div className="rb-sticky__badges">
+        <ActionItemBadge item={it} hidden={hideContent} />
         {it.private && !allRevealed && isOwner && (
           <Lock size={14} className="rb-sticky__lock" />
         )}
@@ -223,7 +226,7 @@ export const StickyCard = React.memo(function StickyCard({
         style={{
           userSelect: hideContent ? 'none' : 'auto',
           color: it.fontColor || STICKY_AUTO_TEXT,
-          paddingTop: showCommentPreview ? 24 : (top3 ? 16 : 0),
+          paddingTop: showCommentPreview || isActionItem(it) ? 24 : (top3 ? 16 : 0),
         }}
       >
         {(() => {

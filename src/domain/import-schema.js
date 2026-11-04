@@ -23,6 +23,7 @@ import {
 } from './board-geometry.js';
 import { isValidFontColor, isValidFontSize, isValidZIndex } from './item-appearance.js';
 import { isBoardTitle } from './board-title.js';
+import { normalizeActionFields } from './action-item.js';
 
 // Portable JSON backups include raster bytes expanded by base64. This file
 // budget is separate from the small Yjs transaction after image uploads.
@@ -250,6 +251,7 @@ const normalizeBoardItem = (item, index, importedAt, zLimit) => {
     const privateValue = readOptionalBoolean(item, 'private', `item ${item.id} private`);
     normalized.private = privateValue ?? false;
     Object.assign(normalized, stickyRevealOverride(item));
+    Object.assign(normalized, normalizeActionFields(item, `item ${item.id}`));
   }
   if (item.type === 'zone') Object.assign(normalized, normalizeZoneFields(item));
   if (item.type === 'image') Object.assign(normalized, normalizeImageFields(item));

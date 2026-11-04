@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createCsvExportArtifact, buildBoardCsv, buildZoneCsv, createJsonBackupArtifact } from './board-backup.js';
+import { createCsvExportArtifact, buildBoardCsv, buildZoneCsv, createJsonBackupArtifact, exportFileName } from './board-backup.js';
 import { normalizeImportManifest } from '../../domain/import-schema.js';
 
 test('JSON backup is immediately re-importable even when trusted room geometry is corrupt', () => {
@@ -93,4 +93,26 @@ test('JSON backup round-trips the board title through the import decoder', () =>
   });
   const payload = JSON.parse(artifact.contents);
   assert.equal(normalizeImportManifest(payload, payload.exportedAt).boardMeta.title, 'ทีม A · Sprint 42');
+});
+
+test('JSON backup round-trips sticky action-item fields through the import decoder', () => {
+  const actionSticky = {
+    id: 'sticky-a', type: 'sticky', x: 0, y: 0, w: 200, h: 180, text: 'Fix CI',
+    actionItem: true, actionOwner: 'Nok', actionDue: '2026-11-30', actionDone: false,
+  };
+  const artifact = createJsonBackupArtifact({
+    fallbackBoardCode: 'Room1234', pathname: '/b/Room1234', exportedAt: 1_700_000_000_000,
+    board: { items: [actionSticky] }, votes: {}, comments: {}, customTemplates: [],
+  });
+  const payload = JSON.parse(artifact.contents);
+  const [item] = normalizeImportManifest(payload, payload.exportedAt).items;
+  assert.equal(item.actionItem, true);
+  assert.equal(item.actionOwner, 'Nok');
+  assert.equal(item.actionDue, '2026-11-30');
+  assert.equal(item.actionDone, false);
+});
+
+test('summary and image exports share the CSV naming scheme with their own extension', () => {
+  const name = exportFileName({ fallbackBoardCode: 'Room1234', pathname: '/b/Room1234', exportedAt: 1_700_000_000_000, extension: 'md' });
+  assert.equal(name, 'retro-Room1234-2023-11-14-22-13.md');
 });

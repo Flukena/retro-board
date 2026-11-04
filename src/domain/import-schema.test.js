@@ -172,3 +172,18 @@ test('board title imports when valid and rejects explicit invalid values', () =>
     assert.throws(() => normalizeImportManifest(withTitle(bad), importedAt), /title/, JSON.stringify(bad));
   }
 });
+
+test('sticky action fields import when valid and reject explicit invalid values', () => {
+  const withAction = (fields) => {
+    const manifest = validManifest();
+    Object.assign(manifest.board.items[1], fields);
+    return manifest;
+  };
+  const sticky = normalizeImportManifest(withAction({ actionItem: true, actionDue: '2026-11-30' }), importedAt)
+    .items.find(item => item.id === 'sticky-1');
+  assert.equal(sticky.actionItem, true);
+  assert.equal(sticky.actionDue, '2026-11-30');
+  for (const bad of [{ actionItem: 'true' }, { actionDue: '2026-02-30' }, { actionDone: 0 }, { actionOwner: 7 }]) {
+    assert.throws(() => normalizeImportManifest(withAction(bad), importedAt), /action/, JSON.stringify(bad));
+  }
+});
