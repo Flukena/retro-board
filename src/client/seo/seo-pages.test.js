@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { withChromeModule } from '../../test-support/chrome-test-helper.js';
 import {
-  SEO_PAGES, SITE_ORIGIN, canonicalUrl, localizedPath, pageAlternates, seoPageForPath, sitemapXml, splitLangPath,
+  SEO_LANGS, SEO_PAGES, SITE_ORIGIN, canonicalUrl, localizedPath, pageAlternates, seoPageForPath, sitemapXml, splitLangPath,
 } from './seo-pages.js';
 
 const read = (path) => readFileSync(new URL(`../../../${path}`, import.meta.url), 'utf8');
@@ -12,11 +12,11 @@ test('the sitemap lists exactly the indexable pages and nothing private or user-
   const sitemap = read('public/sitemap.xml');
   assert.equal(sitemap, sitemapXml());
   const locs = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]);
-  assert.deepEqual(locs, SEO_PAGES.flatMap((page) => [canonicalUrl(page.path), canonicalUrl(localizedPath(page.path, 'th'))]));
+  assert.deepEqual(locs, SEO_PAGES.flatMap((page) => SEO_LANGS.map((lang) => canonicalUrl(localizedPath(page.path, lang)))));
   assert.ok(locs.every((loc) => loc.startsWith(`${SITE_ORIGIN}/`)));
   assert.ok(!locs.some((loc) => /\/(b|p|public)(\/|$)/.test(new URL(loc).pathname)), 'boards, poker rooms and the Public Wall stay out');
   for (const path of ['/', '/planning-poker', '/th/planning-poker', '/templates/start-stop-continue', '/templates/mad-sad-glad', '/templates/4ls-retrospective',
-    '/th', '/th/templates/retro-loop', '/th/privacy']) {
+    '/th', '/th/templates/retro-loop', '/th/privacy', '/agile-scrum', '/ja/agile-scrum', '/de', '/zh/planning-poker']) {
     assert.ok(locs.includes(canonicalUrl(path)), path);
   }
 });
@@ -63,11 +63,14 @@ test('Thai pages live under /th and the lookup finds the same page through the p
 });
 
 test('every language version of a page points at all versions, with English as x-default', () => {
-  assert.deepEqual(pageAlternates('/privacy'), [
+  const alternates = pageAlternates('/privacy');
+  assert.deepEqual(alternates.slice(0, 3), [
     { hreflang: 'en', href: 'https://retroroom.party/privacy' },
     { hreflang: 'th', href: 'https://retroroom.party/th/privacy' },
-    { hreflang: 'x-default', href: 'https://retroroom.party/privacy' },
+    { hreflang: 'zh', href: 'https://retroroom.party/zh/privacy' },
   ]);
+  assert.equal(alternates.length, 12, '11 languages plus x-default');
+  assert.deepEqual(alternates.at(-1), { hreflang: 'x-default', href: 'https://retroroom.party/privacy' });
 });
 
 // RFC 9116: Contact and Expires are required, and an expired file must be renewed, not ignored.
@@ -80,4 +83,16 @@ test('security.txt names a contact, a future expiry and its canonical URL', () =
   const expires = Date.parse(fields.Expires);
   assert.ok(Number.isFinite(expires) && expires > Date.now(), 'security.txt has expired: set a new Expires date');
   assert.equal(fields.Canonical, `${SITE_ORIGIN}/.well-known/security.txt`);
+});
+
+test('every app language gets its own path prefix and English stays at the root', () => {
+  assert.deepEqual([...SEO_LANGS], ['en', 'th', 'zh', 'ja', 'ko', 'es', 'pt', 'de', 'fr', 'vi', 'id']);
+  assert.equal(localizedPath('/', 'en'), '/');
+  assert.equal(localizedPath('/', 'ja'), '/ja');
+  assert.equal(localizedPath('/agile-scrum', 'pt'), '/pt/agile-scrum');
+  assert.deepEqual(splitLangPath('/ko/agile-scrum'), { lang: 'ko', path: '/agile-scrum' });
+  assert.deepEqual(splitLangPath('/id'), { lang: 'id', path: '/' });
+  assert.deepEqual(splitLangPath('/idea'), { lang: null, path: '/idea' }, 'a prefix must be a whole segment');
+  const hreflangs = pageAlternates('/agile-scrum').map((alternate) => alternate.hreflang);
+  assert.deepEqual(hreflangs, [...SEO_LANGS, 'x-default']);
 });

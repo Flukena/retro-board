@@ -16,7 +16,7 @@ import LandingGuide from './LandingGuide.jsx';
 import FormatChips from './FormatChips.jsx';
 import PublicWallPreview from '../public-wall/PublicWallPreview.jsx';
 import PokerFeature from '../poker/PokerFeature.jsx';
-import { PLANNING_POKER_PATH } from '../seo/seo-pages.js';
+import { AGILE_GUIDE_PATH, PLANNING_POKER_PATH } from '../seo/seo-pages.js';
 import { LEGAL_PAGE, LEGAL_PATH } from '../legal/legal-content.js';
 import SiteMasthead from './SiteMasthead.jsx';
 import './landing.css';
@@ -28,6 +28,7 @@ const LANDING_LINKS = Object.freeze([
   { href: '#landing-guide-templates', labelKey: 'landing.nav.templates' },
   { href: '#landing-guide-faq', labelKey: 'landing.nav.faq' },
   { href: PLANNING_POKER_PATH, labelKey: 'poker.title' },
+  { href: AGILE_GUIDE_PATH, labelKey: 'agileGuide.nav.guide' },
 ]);
 
 function useBlockBrowserZoom() {

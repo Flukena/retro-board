@@ -4,6 +4,7 @@ import { t, useLang } from '../ui/i18n.js';
 import { LanguagePicker } from '../ui/LanguagePicker.jsx';
 import { LEGAL_PAGE, LEGAL_PATH } from '../legal/legal-content.js';
 import { starterFormat, starterSlugs } from '../templates/starter-formats.js';
+import { AGILE_GUIDE_PATH } from '../seo/seo-pages.js';
 import '../legal/legal.css';
 import '../templates/template-page.css';
 
@@ -20,6 +21,7 @@ export function SiteLinks({ current = null }) {
         const format = starterFormat(slug);
         return <a key={slug} href={format.path}>{t(format.headingKey)}</a>;
       })}
+      {current !== AGILE_GUIDE_PATH && <a href={AGILE_GUIDE_PATH}>{t('agileGuide.brand')}</a>}
       <a href={LEGAL_PATH[LEGAL_PAGE.PRIVACY]}>{t('legal.footer.privacy')}</a>
       <a href={LEGAL_PATH[LEGAL_PAGE.TERMS]}>{t('legal.footer.terms')}</a>
     </nav>

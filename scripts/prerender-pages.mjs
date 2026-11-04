@@ -11,7 +11,7 @@ const { prerenderedPages } = await import(pathToFileURL(join(ssrDir, 'prerender-
 const { pageDocument } = await import(pathToFileURL(resolve('src/client/seo/page-document.js')).href);
 
 const template = readFileSync(join(distDir, 'index.html'), 'utf8');
-for (const { file, options } of prerenderedPages()) {
+for (const { file, options } of await prerenderedPages()) {
   const target = join(distDir, file);
   mkdirSync(dirname(target), { recursive: true });
   writeFileSync(target, pageDocument(template, options));

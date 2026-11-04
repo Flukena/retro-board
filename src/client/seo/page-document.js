@@ -10,6 +10,10 @@ const ROOT_ELEMENT = '<div id="root"></div>';
 const TITLE_ELEMENT = /<title>[^<]*<\/title>/;
 const HTML_OPEN = /<html lang="[^"]*">/;
 
+// JSON inside a <script> must not be able to close the element early.
+const jsonForScript = (data) => JSON.stringify(data).replace(/</g, '\\u003c');
+const structuredDataTag = (data) => `<script type="application/ld+json">${jsonForScript(data)}</script>`;
+
 const tokenBlock = (tokens) => Object.entries(tokens).map(([name, value]) => `${name}:${value}`).join(';');
 
 /** CSS variables for both themes, so pre-rendered content is styled before scripts run. */
@@ -52,9 +56,12 @@ const replaceOnce = (html, pattern, replacement, label) => {
 };
 
 /** Build one page's HTML from the built index.html template. */
-export function pageDocument(template, { lang, title, description = null, canonical = null, robots = null, image = null, alternates = [], body = '', css = '' }) {
+export function pageDocument(template, {
+  lang, title, description = null, canonical = null, robots = null, image = null, alternates = [], body = '', css = '', structuredData = null,
+}) {
   let html = replaceOnce(template, HTML_OPEN, `<html lang="${escapeHtml(lang)}">`, '<html lang>');
   html = replaceOnce(html, TITLE_ELEMENT, headTags({ title, description, canonical, robots, image, alternates })
-    + (css ? `\n    <style>${css}</style>` : ''), '<title>');
+    + (css ? `\n    <style>${css}</style>` : '')
+    + (structuredData ? `\n    ${structuredDataTag(structuredData)}` : ''), '<title>');
   return replaceOnce(html, ROOT_ELEMENT, `<div id="root">${body}</div>`, 'root element');
 }

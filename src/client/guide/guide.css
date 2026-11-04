@@ -1,0 +1,36 @@
+/* Agile & Scrum guide: one reading column that scrolls with the page. */
+.rb-guide-home { height: auto; overflow: visible; padding-bottom: var(--space-6); }
+.rb-guide-home__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  box-sizing: border-box;
+  width: calc(100% - 2 * var(--landing-hero-padding));
+  max-width: var(--guide-max-width);
+  margin: var(--space-8) auto 0;
+}
+.rb-guide-home__title { font-family: var(--font-display); font-size: var(--legal-title-size); line-height: var(--legal-title-line-height); margin: 0; }
+.rb-guide-home__lede { color: var(--text-muted); line-height: var(--legal-line-height); margin: 0; }
+.rb-guide-home__cta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.rb-guide-home__cta-title { flex: 1 1 100%; margin: 0; font-weight: var(--legal-link-weight); }
+.rb-guide-home__cta a { display: inline-flex; align-items: center; gap: var(--space-2); text-decoration: none; }
+.rb-guide-home__article { line-height: var(--legal-line-height); }
+.rb-guide-home__article > .rb-legal__section:first-child h2 { margin-top: 0; }
+.rb-guide-home__article h3 { font-size: var(--guide-subheading-size); margin: var(--space-4) 0 var(--space-2); }
+/* Wide tables scroll inside their own box so the page never scrolls sideways on phones. */
+.rb-guide-table { overflow-x: auto; margin: 0 0 var(--space-3); border: var(--legal-border-width) solid var(--border-soft); border-radius: var(--radius-md); }
+.rb-guide-table table { width: 100%; min-width: var(--guide-table-min-width); border-collapse: collapse; font-size: var(--guide-table-font-size); line-height: var(--guide-table-line-height); }
+.rb-guide-table th,
+.rb-guide-table td { padding: var(--space-2) var(--space-3); text-align: start; vertical-align: top; border-top: var(--legal-border-width) solid var(--border-soft); }
+.rb-guide-table thead th { border-top: 0; background: var(--bg-elev); font-weight: var(--legal-link-weight); }
+.rb-guide-table tbody th { font-weight: var(--legal-link-weight); }
+.rb-guide-table a,
+.rb-guide-home__sources a { color: var(--accent-text); font-weight: var(--legal-link-weight); }
+@media (max-width: 767px), (max-width: 1024px) and (pointer: coarse) {
+  .rb-guide-home__title { font-size: var(--legal-title-size-mobile); }
+}
+/* Phones keep only the logo in the top bar, as the poker page does; the page heading right
+   below already names the guide. */
+@media (max-width: 599px) {
+  .rb-guide-home .rb-landing__wordmark { display: none; }
+}

@@ -4,7 +4,7 @@
 import { PUBLIC_PATH } from '../../domain/public-wall-contract.js';
 import { legalPageForPath } from '../legal/legal-content.js';
 import { TEMPLATE_PATH_PREFIX, starterFormat } from '../templates/starter-formats.js';
-import { PLANNING_POKER_PATH, splitLangPath } from '../seo/seo-pages.js';
+import { AGILE_GUIDE_PATH, PLANNING_POKER_PATH, splitLangPath } from '../seo/seo-pages.js';
 
 const BOARD_PATH = /^\/b\/([A-Za-z0-9_-]{3,32})\/?$/;
 const POKER_PATH = /^\/p\/([A-Za-z0-9_-]{3,32})\/?$/;
@@ -45,7 +45,9 @@ function contentRoute(path) {
   const legalPage = legalPageForPath(path);
   if (legalPage) return { kind: 'legal', page: legalPage };
   if (LANDING_PATHS.has(path)) return { kind: 'landing' };
-  if (path.replace(/\/$/, '') === PLANNING_POKER_PATH) return { kind: 'pokerGuide' };
+  const trimmed = path.replace(/\/$/, '');
+  if (trimmed === PLANNING_POKER_PATH) return { kind: 'pokerGuide' };
+  if (trimmed === AGILE_GUIDE_PATH) return { kind: 'agileGuide' };
   const slug = templateSlugForPath(path);
   if (slug) return { kind: 'template', slug };
   return null;

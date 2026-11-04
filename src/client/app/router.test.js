@@ -179,3 +179,17 @@ test('recents of one kind leave out the other kind, so home lists boards and the
   assert.deepEqual(recentsOfKind(ROOM_KIND.BOARD).map((r) => r.code), ['Board123']);
   assert.deepEqual(recentsOfKind(ROOM_KIND.POKER).map((r) => r.code), ['Poker123']);
 });
+
+test('the Agile and Scrum guide routes in English and Thai', async () => {
+  const { parseRoute } = await import('./router.js');
+  const original = globalThis.window;
+  try {
+    const route = (pathname) => { globalThis.window = { location: { pathname, hash: '' } }; return parseRoute(); };
+    assert.deepEqual(route('/agile-scrum'), { kind: 'agileGuide' });
+    assert.deepEqual(route('/agile-scrum/'), { kind: 'agileGuide' });
+    assert.deepEqual(route('/th/agile-scrum'), { kind: 'agileGuide', lang: 'th' });
+    assert.deepEqual(route('/agile-scrums'), { kind: 'notFound' });
+  } finally {
+    globalThis.window = original;
+  }
+});

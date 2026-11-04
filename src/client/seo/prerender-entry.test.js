@@ -3,13 +3,13 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { withChromeModule } from '../../test-support/chrome-test-helper.js';
 import { pageDocument } from './page-document.js';
-import { SEO_PAGES, SITE_ORIGIN, SOCIAL_IMAGE, canonicalUrl, localizedPath, pageAlternates } from './seo-pages.js';
+import { SEO_LANGS, SEO_PAGES, SITE_ORIGIN, SOCIAL_IMAGE, canonicalUrl, localizedPath, pageAlternates } from './seo-pages.js';
 
 const TEMPLATE = readFileSync(new URL('../../../index.html', import.meta.url), 'utf8');
 const hrefs = (html) => new Set([...html.matchAll(/<a [^>]*href="([^"]+)"/g)].map((match) => match[1]));
 
-const renderAll = (check) => withChromeModule('/src/client/seo/prerender-entry.jsx', ({ prerenderedPages }) => {
-  const pages = new Map(prerenderedPages().map(({ file, options }) => [file, pageDocument(TEMPLATE, options)]));
+const renderAll = (check) => withChromeModule('/src/client/seo/prerender-entry.jsx', async ({ prerenderedPages }) => {
+  const pages = new Map((await prerenderedPages()).map(({ file, options }) => [file, pageDocument(TEMPLATE, options)]));
   return check(pages);
 });
 
@@ -90,7 +90,7 @@ test('both language versions of a page carry the same reciprocal hreflang set', 
     for (const page of SEO_PAGES) {
       const expected = pageAlternates(page.path)
         .map(({ hreflang, href }) => `<link rel="alternate" hreflang="${hreflang}" href="${href}" />`);
-      for (const lang of ['en', 'th']) {
+      for (const lang of SEO_LANGS) {
         const html = pages.get(fileFor(localizedPath(page.path, lang)));
         assert.deepEqual(linkTags(html, 'alternate'), expected, `${lang} ${page.path}`);
       }
@@ -137,4 +137,48 @@ test('the preview image file is a PNG of the declared size and small enough for 
   assert.equal(png.readUInt32BE(PNG_WIDTH_OFFSET), SOCIAL_IMAGE.widthPx);
   assert.equal(png.readUInt32BE(PNG_HEIGHT_OFFSET), SOCIAL_IMAGE.heightPx);
   assert.ok(png.length < MAX_SOCIAL_IMAGE_BYTES);
+});
+
+test('every public page ships in every app language with its own translated head and body', async () => {
+  await renderAll((pages) => {
+    for (const lang of SEO_LANGS.filter((code) => code !== 'en')) {
+      for (const page of SEO_PAGES) {
+        const path = localizedPath(page.path, lang);
+        const html = pages.get(fileFor(path));
+        const english = pages.get(fileFor(page.path));
+        assert.ok(html, path);
+        assert.match(html, new RegExp(`<html lang="${lang}">`), path);
+        assert.match(html, new RegExp(`<link rel="canonical" href="${canonicalUrl(path)}" />`), path);
+        const titleOf = (doc) => doc.match(/<title>([^<]+)<\/title>/)[1];
+        assert.notEqual(titleOf(html), titleOf(english), `${path}: translated title`);
+        assert.equal((html.match(/<h1[\s>]/g) || []).length, 1, `${path}: one h1`);
+      }
+    }
+    for (const page of SEO_PAGES) {
+      const titles = SEO_LANGS.map((lang) => pages.get(fileFor(localizedPath(page.path, lang))).match(/<title>([^<]+)<\/title>/)[1]);
+      assert.equal(new Set(titles).size, SEO_LANGS.length, `${page.path}: each language has its own title`);
+    }
+  });
+});
+
+const structuredDataOf = (html) => {
+  const blocks = [...html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)];
+  return blocks.map((match) => JSON.parse(match[1]));
+};
+
+test('the Agile guide tells search engines it is an article, in its language, citing its sources', async () => {
+  await renderAll((pages) => {
+    for (const lang of SEO_LANGS) {
+      const path = localizedPath('/agile-scrum', lang);
+      const [article, ...extra] = structuredDataOf(pages.get(fileFor(path)));
+      assert.deepEqual(extra, [], path);
+      assert.equal(article['@type'], 'Article');
+      assert.equal(article.inLanguage, lang);
+      assert.equal(article.url, canonicalUrl(path));
+      assert.ok(article.headline && article.description, path);
+      assert.deepEqual(article.citation, ['https://scrumguides.org/scrum-guide.html', 'https://agilemanifesto.org/', 'https://agilemanifesto.org/principles.html']);
+      assert.equal(article.publisher.name, 'RetroRoom');
+    }
+    assert.deepEqual(structuredDataOf(pages.get('index.html')), [], 'other pages carry no article data');
+  });
 });

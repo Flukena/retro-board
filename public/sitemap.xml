@@ -7,10 +7,97 @@
     <loc>https://retroroom.party/th</loc>
   </url>
   <url>
+    <loc>https://retroroom.party/zh</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/ja</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/ko</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/es</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/pt</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/de</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/fr</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/vi</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/id</loc>
+  </url>
+  <url>
     <loc>https://retroroom.party/planning-poker</loc>
   </url>
   <url>
     <loc>https://retroroom.party/th/planning-poker</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/zh/planning-poker</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/ja/planning-poker</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/ko/planning-poker</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/es/planning-poker</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/pt/planning-poker</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/de/planning-poker</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/fr/planning-poker</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/vi/planning-poker</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/id/planning-poker</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/agile-scrum</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/th/agile-scrum</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/zh/agile-scrum</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/ja/agile-scrum</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/ko/agile-scrum</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/es/agile-scrum</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/pt/agile-scrum</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/de/agile-scrum</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/fr/agile-scrum</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/vi/agile-scrum</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/id/agile-scrum</loc>
   </url>
   <url>
     <loc>https://retroroom.party/templates/retro-loop</loc>
@@ -19,10 +106,64 @@
     <loc>https://retroroom.party/th/templates/retro-loop</loc>
   </url>
   <url>
+    <loc>https://retroroom.party/zh/templates/retro-loop</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/ja/templates/retro-loop</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/ko/templates/retro-loop</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/es/templates/retro-loop</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/pt/templates/retro-loop</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/de/templates/retro-loop</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/fr/templates/retro-loop</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/vi/templates/retro-loop</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/id/templates/retro-loop</loc>
+  </url>
+  <url>
     <loc>https://retroroom.party/templates/start-stop-continue</loc>
   </url>
   <url>
     <loc>https://retroroom.party/th/templates/start-stop-continue</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/zh/templates/start-stop-continue</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/ja/templates/start-stop-continue</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/ko/templates/start-stop-continue</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/es/templates/start-stop-continue</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/pt/templates/start-stop-continue</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/de/templates/start-stop-continue</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/fr/templates/start-stop-continue</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/vi/templates/start-stop-continue</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/id/templates/start-stop-continue</loc>
   </url>
   <url>
     <loc>https://retroroom.party/templates/mad-sad-glad</loc>
@@ -31,10 +172,64 @@
     <loc>https://retroroom.party/th/templates/mad-sad-glad</loc>
   </url>
   <url>
+    <loc>https://retroroom.party/zh/templates/mad-sad-glad</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/ja/templates/mad-sad-glad</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/ko/templates/mad-sad-glad</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/es/templates/mad-sad-glad</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/pt/templates/mad-sad-glad</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/de/templates/mad-sad-glad</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/fr/templates/mad-sad-glad</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/vi/templates/mad-sad-glad</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/id/templates/mad-sad-glad</loc>
+  </url>
+  <url>
     <loc>https://retroroom.party/templates/4ls-retrospective</loc>
   </url>
   <url>
     <loc>https://retroroom.party/th/templates/4ls-retrospective</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/zh/templates/4ls-retrospective</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/ja/templates/4ls-retrospective</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/ko/templates/4ls-retrospective</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/es/templates/4ls-retrospective</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/pt/templates/4ls-retrospective</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/de/templates/4ls-retrospective</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/fr/templates/4ls-retrospective</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/vi/templates/4ls-retrospective</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/id/templates/4ls-retrospective</loc>
   </url>
   <url>
     <loc>https://retroroom.party/privacy</loc>
@@ -43,9 +238,63 @@
     <loc>https://retroroom.party/th/privacy</loc>
   </url>
   <url>
+    <loc>https://retroroom.party/zh/privacy</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/ja/privacy</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/ko/privacy</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/es/privacy</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/pt/privacy</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/de/privacy</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/fr/privacy</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/vi/privacy</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/id/privacy</loc>
+  </url>
+  <url>
     <loc>https://retroroom.party/terms</loc>
   </url>
   <url>
     <loc>https://retroroom.party/th/terms</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/zh/terms</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/ja/terms</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/ko/terms</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/es/terms</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/pt/terms</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/de/terms</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/fr/terms</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/vi/terms</loc>
+  </url>
+  <url>
+    <loc>https://retroroom.party/id/terms</loc>
   </url>
 </urlset>

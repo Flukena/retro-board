@@ -54,3 +54,11 @@ test('an indexable page lists its language alternates; a noindex page lists none
   const shell = pageDocument(TEMPLATE, { lang: 'en', title: 'Shell', robots: 'noindex', alternates });
   assert.doesNotMatch(shell, /hreflang/);
 });
+
+test('structured data is embedded as JSON-LD that cannot close its script element early', () => {
+  const html = pageDocument(TEMPLATE, { lang: 'en', title: 'X', structuredData: { headline: '</script><b>x' } });
+  const block = html.match(/<script type="application\/ld\+json">([^<]*)<\/script>/);
+  assert.ok(block, 'one JSON-LD block');
+  assert.deepEqual(JSON.parse(block[1]), { headline: '</script><b>x' });
+  assert.doesNotMatch(pageDocument(TEMPLATE, { lang: 'en', title: 'X' }), /ld\+json/);
+});

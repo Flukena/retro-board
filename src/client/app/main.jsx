@@ -18,6 +18,7 @@ import RoomBootstrapScreen from './RoomBootstrapScreen.jsx';
 import { ROOM_BOOTSTRAP_STATUS, useRoomBootstrap } from './use-room-bootstrap.js';
 import PokerBootstrap from '../poker/PokerBootstrap.jsx';
 import PokerGuidePage from '../poker/PokerGuidePage.jsx';
+import AgileGuidePage from '../guide/AgileGuidePage.jsx';
 import {
   isBoardCreatedByMe, parseRoute, recentBoardName, rememberRecent,
 } from './router.js';
@@ -29,7 +30,7 @@ import {
 
 const route = parseRoute();
 // A language-prefixed page (/th/...) is shown in that language from the first paint.
-if (route.lang) setLang(route.lang);
+const routeLanguageReady = route.lang ? setLang(route.lang) : null;
 
 function BoardBootstrap({ code, token, mode = BOARD_MODE.PRIVATE }) {
   const state = useRoomBootstrap(async () => {
@@ -67,6 +68,7 @@ const ROUTE_VIEWS = {
   public: () => <BoardBootstrap mode={BOARD_MODE.PUBLIC} />,
   poker: () => <PokerBootstrap code={route.code} token={route.token} />,
   pokerGuide: () => <PokerGuidePage />,
+  agileGuide: () => <AgileGuidePage />,
   legal: () => <LegalPage page={route.page} />,
   template: () => <TemplatePage slug={route.slug} />,
   notFound: () => <NotFoundPage />,
@@ -87,7 +89,7 @@ function PageHead() {
   return null;
 }
 
-// A saved on-demand language loads first, so the page never flashes English.
-languageReady.then(() => createRoot(document.getElementById('root')).render(
+// A saved or path language (/ja/...) loads first, so the page never flashes English.
+Promise.all([languageReady, routeLanguageReady]).then(() => createRoot(document.getElementById('root')).render(
   <React.StrictMode><BoardErrorBoundary><PageHead /><App /></BoardErrorBoundary></React.StrictMode>,
 ));
