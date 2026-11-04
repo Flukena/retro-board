@@ -38,6 +38,12 @@ test('a zone stretched far past the cap stops at the cap with the opposite corne
   }
 });
 
+test('a zone can be stretched to 5,760 px per side (owner, 2026-11-04: 20% above the old 4,800)', () => {
+  const initial = { x: 0, y: 0, w: 1200, h: 1080 };
+  const rect = clampCornerResize(initial, 'se', draggedRect(initial, 'se', 4_560, 4_680), itemSizeBounds('zone', initial));
+  assert.deepEqual(rect, { x: 0, y: 0, w: 5_760, h: 5_760 });
+});
+
 test('every resizable type has a cap well below what crashed iPhone Safari', () => {
   const crashedImageSidePx = 9_520;
   for (const type of ['zone', 'image', 'sticky', 'text']) {
@@ -76,7 +82,7 @@ test('an aspect-locked image grows only until its longer side reaches the cap', 
 });
 
 test('a group stops scaling when its first item reaches its cap', () => {
-  const zoneSide = 2_400;
+  const zoneSide = ITEM_MAX_SIDE_PX.zone / 2;
   const range = groupScaleRange([
     { type: 'zone', w: zoneSide, h: zoneSide },
     { type: 'sticky', w: 200, h: 180 },
