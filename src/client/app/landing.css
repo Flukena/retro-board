@@ -230,6 +230,7 @@
 .rb-landing__chip:focus-visible,
 .rb-landing__template-start:focus-visible,
 .rb-landing__template-actions a:focus-visible,
+.rb-landing__more:focus-visible,
 .rb-landing__faq summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .rb-landing__chip:disabled { cursor: not-allowed; color: var(--text-faint); }
 .rb-landing__chip .rb-template-thumbnail { width: var(--landing-chip-thumb-width); height: var(--landing-chip-thumb-height); }
@@ -455,8 +456,11 @@
 .rb-landing__template .rb-template-thumbnail { width: var(--landing-thumb-width); height: var(--landing-thumb-height); }
 .rb-landing__template p { flex: 1; }
 .rb-landing__template-actions { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-top: var(--space-4); }
-.rb-landing__template-actions a { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--accent-text); font-size: var(--landing-body-font-size); font-weight: var(--landing-heading-font-weight); text-decoration: none; border-radius: var(--radius-sm); }
-.rb-landing__template-actions a:hover { text-decoration: underline; }
+.rb-landing__template-actions a,
+.rb-landing__more { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--accent-text); font-size: var(--landing-body-font-size); font-weight: var(--landing-heading-font-weight); text-decoration: none; border-radius: var(--radius-sm); }
+.rb-landing__template-actions a:hover,
+.rb-landing__more:hover { text-decoration: underline; }
+.rb-landing__more { margin-top: var(--space-4); }
 .rb-landing__page .rb-landing__template-start { min-height: var(--landing-control-height); padding: 0 var(--space-4); font-weight: var(--landing-heading-font-weight); color: var(--text); }
 .rb-landing__faqs { max-width: var(--landing-faq-max-width); margin-top: var(--space-6); border-top: var(--landing-line-width) solid var(--border); }
 .rb-landing__faq { border-bottom: var(--landing-line-width) solid var(--border); }

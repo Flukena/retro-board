@@ -34,6 +34,17 @@ test('the home guide renders feature cards, step cards, template cards and a col
   });
 });
 
+test('the retro steps link to the Agile & Scrum guide, so phones (no top menu) can reach it', async () => {
+  await withChromeModule('/src/client/app/LandingGuide.jsx', ({ default: LandingGuide }, { setLang, t }) => {
+    for (const lang of ['th', 'en']) {
+      setLang(lang);
+      const markup = renderToStaticMarkup(React.createElement(LandingGuide));
+      const steps = markup.match(/<section[^>]*id="landing-guide-steps"[\s\S]*?<\/section>/)?.[0] ?? '';
+      assert.match(steps, new RegExp(`<a [^>]*href="/agile-scrum"[^>]*>${t('agileGuide.brand').replaceAll('&', '&amp;')}`), lang);
+    }
+  });
+});
+
 test('a template card Start button hands its format to the page', async () => {
   await withChromeModule('/src/client/app/LandingGuide.jsx', ({ default: LandingGuide }) => {
     const started = [];

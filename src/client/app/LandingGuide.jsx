@@ -4,6 +4,7 @@ import { t } from '../ui/i18n.js';
 import { paletteStyleVars } from '../ui/palette.js';
 import { TemplateThumbnail } from '../templates/TemplateThumbnail.jsx';
 import { starterFormat, starterSlugs, starterTemplate } from '../templates/starter-formats.js';
+import { AGILE_GUIDE_PATH } from '../seo/seo-pages.js';
 import CreateBoardError from './CreateBoardError.jsx';
 
 // Plain-language guide below the hero: what the board does, how to run a
@@ -74,6 +75,9 @@ export default function LandingGuide({ onStartFormat, creating = false, createEr
         <ol className="rb-landing__steps">
           {GUIDE_STEP_KEYS.map((key) => <li key={key}>{t(`guide.steps.${key}`)}</li>)}
         </ol>
+        <a className="rb-landing__more" href={AGILE_GUIDE_PATH}>
+          {t('agileGuide.brand')} <ArrowRight size={LINK_ICON_SIZE_PX} aria-hidden="true" />
+        </a>
       </GuideSection>
       <GuideSection id="landing-guide-templates" titleKey="guide.templates.title">
         <p className="rb-landing__lede">{t('guide.templates.body')}</p>
