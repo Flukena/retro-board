@@ -86,3 +86,14 @@ test('unrelated path returns false and writes nothing', () => {
   assert.equal(res.status, undefined);
   assert.equal(res.ended, false);
 });
+
+test('preflight for room creation and session exchange answers 204; with a query it is not handled', () => {
+  for (const path of ['/api/rooms', '/api/room-session']) {
+    const res = response();
+    assert.equal(handleRoomRoute(req('OPTIONS', { origin: ORIGIN }), res, path, context()), true);
+    assert.equal(res.status, 204);
+    assert.equal(res.headers['access-control-allow-methods'], 'POST, OPTIONS');
+  }
+  const res = response();
+  assert.equal(handleRoomRoute(req('OPTIONS', { origin: ORIGIN }), res, '/api/rooms', context({ hasQueryOrFragment: true })), false);
+});

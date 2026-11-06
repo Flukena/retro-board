@@ -6,7 +6,7 @@ import { RelayProtocol } from './src/server/relay-protocol.js';
 
 import { envInt, envBool, readRelayConfig, syncResponseLimits, MILLISECONDS_PER_SECOND, MILLISECONDS_PER_MINUTE, MILLISECONDS_PER_HOUR, ROOM_BLOCK_TTL_MS, BLOCKED_ROOM_ENTRIES_PER_ACTIVE_ROOM, LARGE_UPDATE_LOG_THRESHOLD_BYTES, VOTE_EXPIRY_RETRY_INTERVAL_MS, MAINTENANCE_INTERVAL_MS, STORE_OPERATION_OVERHEAD_BYTES, MAX_HTTP_TARGET_CHARACTERS, MAX_REQUESTS_PER_SOCKET, RETRY_AFTER_SHORT_SECONDS, RETRY_AFTER_LONG_SECONDS } from './src/server/relay-config.js';
 import { evictOldestBucket, refillTokens, takeTrafficTokens, takeTrafficBudget, createTrafficBucket, tokenWaitSeconds } from './src/server/relay-rate-bucket.js';
-import { isExactAllowedOrigin, acceptCredentialOrigin, readJsonBody, sendJson, sendIfWritable, sendUpgradeRejection, sendCredentialPreflight } from './src/server/relay-http.js';
+import { isExactAllowedOrigin, acceptCredentialOrigin, readJsonBody, sendJson, sendIfWritable, sendUpgradeRejection } from './src/server/relay-http.js';
 import { handleRoomRoute } from './src/server/relay-room-routes.js';
 import { roomLogId } from './src/server/relay-log-id.js';
 import { createUploadState, scanUploadUsage, createRelayUploads, createImageReadBudgets, MIME_EXT, matchesMagicBytes, UPLOAD_STORAGE_FAILURE_EVENT, ROOM_UPLOAD_USAGE_META } from './src/server/relay-uploads.js';
@@ -1384,10 +1384,6 @@ const server = http.createServer({ maxHeaderSize: MAX_HEADER_BYTES }, (req, res)
     const ok = isRelayReady(storageFailure, shuttingDown);
     res.writeHead(ok ? 200 : 503, { 'content-type': 'text/plain' });
     res.end(ok ? 'ready' : 'not ready');
-    return;
-  }
-  if (req.method === 'OPTIONS' && !hasQueryOrFragment && (routePath === '/api/rooms' || routePath === '/api/room-session')) {
-    sendCredentialPreflight(req, res, { allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, methods: 'POST, OPTIONS' });
     return;
   }
   if (req.method === 'POST' && !hasQueryOrFragment && routePath === '/api/rooms') {

@@ -3,7 +3,8 @@ import { acceptCredentialOrigin, isExactAllowedOrigin, setCredentialCors, sendCr
 const UPLOAD_PATH = /^\/rooms\/([A-Za-z0-9_-]{32})\/upload$/;
 const ROOM_IMAGE_PATH = /^\/rooms\/([A-Za-z0-9_-]{32})\/images\/([a-f0-9-]+\.(?:png|jpe?g|webp|gif))$/;
 const LEGACY_IMAGE_PREFIX = '/images/';
-const UPLOAD_PREFLIGHT_METHODS = 'POST, OPTIONS';
+const PREFLIGHT_METHODS = 'POST, OPTIONS';
+const API_PREFLIGHT_PATHS = new Set(['/api/rooms', '/api/room-session']);
 
 const reply = (res, status) => {
   res.writeHead(status);
@@ -16,7 +17,7 @@ const handleUploadPreflight = (req, res, handle, ctx) => {
   if (!acceptCredentialOrigin(req, res, ctx.allowedOrigins, ctx.allowInsecureHttp)) return;
   if (!ctx.rooms.has(handle)) { reply(res, 404); return; }
   // Origin was already accepted above; the shared helper re-checks it and writes the 204.
-  sendCredentialPreflight(req, res, { ...credentialOptions(ctx), methods: UPLOAD_PREFLIGHT_METHODS });
+  sendCredentialPreflight(req, res, { ...credentialOptions(ctx), methods: PREFLIGHT_METHODS });
 };
 
 const handleUploadPost = (req, res, handle, ctx) => {
@@ -44,6 +45,10 @@ const handleRoomImageGet = (req, res, [, handle, imageName], ctx) => {
 export const handleRoomRoute = (req, res, routePath, ctx) => {
   const uploadMatch = ctx.hasQueryOrFragment ? null : routePath.match(UPLOAD_PATH);
   const imageMatch = ctx.hasQueryOrFragment ? null : routePath.match(ROOM_IMAGE_PATH);
+  if (req.method === 'OPTIONS' && !ctx.hasQueryOrFragment && API_PREFLIGHT_PATHS.has(routePath)) {
+    sendCredentialPreflight(req, res, { ...credentialOptions(ctx), methods: PREFLIGHT_METHODS });
+    return true;
+  }
   if (req.method === 'OPTIONS' && uploadMatch) { handleUploadPreflight(req, res, uploadMatch[1], ctx); return true; }
   if (req.method === 'POST' && uploadMatch) { handleUploadPost(req, res, uploadMatch[1], ctx); return true; }
   if (req.method === 'GET' && imageMatch) { handleRoomImageGet(req, res, imageMatch, ctx); return true; }
