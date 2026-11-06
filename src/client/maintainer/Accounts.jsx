@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
+import { PLAN } from '../../domain/plan-entitlements.js';
 import { t } from '../ui/i18n.js';
 
 const ACCOUNTS_TIMEOUT_MS = 8000;
-const PLAN = Object.freeze({ FREE: 'free', PRO: 'pro' });
 const STATUS_UNAUTHORIZED = 401;
 const STATUS_NOT_FOUND = 404;
 

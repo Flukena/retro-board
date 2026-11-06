@@ -141,6 +141,7 @@ const MODE_INDEPENDENT_TOKENS = Object.freeze({
   '--landing-recent-detail-gap': '4px',
   '--landing-recent-font-weight': '600',
   '--landing-small-font-size': '12px',
+  '--account-plan-font-size': '11px',
   '--landing-remove-size': '32px',
   '--legal-max-width': '760px',
   '--legal-radius': '16px',

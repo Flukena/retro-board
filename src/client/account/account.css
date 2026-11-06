@@ -3,7 +3,7 @@
 .rb-account__trigger { display: inline-flex; align-items: center; gap: var(--space-2); }
 .rb-account__name { max-width: 14ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rb-account__plan {
-  font-size: 11px;
+  font-size: var(--account-plan-font-size);
   padding: 1px var(--space-2);
   border-radius: var(--radius-pill);
   background: var(--bg-panel-2);
@@ -19,7 +19,7 @@
 }
 .rb-account__email {
   padding: var(--space-2) var(--space-3);
-  font-size: 12px;
+  font-size: var(--landing-small-font-size);
   color: var(--text-muted);
   overflow-wrap: anywhere;
 }
@@ -28,6 +28,6 @@
   align-items: center;
   gap: var(--space-2);
   max-width: 320px;
-  font-size: 12px;
+  font-size: var(--landing-small-font-size);
   color: var(--text-muted);
 }

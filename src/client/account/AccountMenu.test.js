@@ -1,6 +1,7 @@
 import React from 'react';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { withChromeModule } from '../../test-support/chrome-test-helper.js';
 import { AUTH_ERROR_CODES } from '../../domain/auth-errors.js';
@@ -86,4 +87,19 @@ test('AccountFrame renders no wrapper or toast for disabled and loading, but doe
       assert.ok(html.includes('rb-account') && html.includes('child') && html.includes('boom'), status);
     }
   });
+});
+
+test('AccountMenu labels the trigger with the email when Google gave no name', async () => {
+  await withChromeModule('/src/client/account/AccountMenu.jsx', (mod, { setLang }) => {
+    setLang('en');
+    const html = render(mod, { session: { status: 'signed-in', account: { ...ACCOUNT, name: '' } } });
+    assert.match(html, /<span class="rb-account__name">ada@example\.com<\/span>/);
+  });
+});
+
+test('account styles take font sizes from theme tokens', () => {
+  const css = readFileSync(new URL('./account.css', import.meta.url), 'utf8');
+  const sizes = [...css.matchAll(/font-size:\s*([^;]+);/g)].map((match) => match[1].trim());
+  assert.ok(sizes.length > 0);
+  for (const size of sizes) assert.match(size, /^var\(--[a-z-]+\)$/, size);
 });

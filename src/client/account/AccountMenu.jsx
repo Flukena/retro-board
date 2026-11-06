@@ -43,7 +43,7 @@ export function SignedInMenu({ account, open, onToggle, onSignOut, onSignOutAll,
   return (
     <>
       <Button className="rb-btn--pill rb-account__trigger" onClick={onToggle} aria-haspopup="menu" aria-expanded={open} aria-label={t('account.menu')}>
-        <span className="rb-account__name">{account.name}</span>
+        <span className="rb-account__name">{account.name || account.email}</span>
         <PlanBadge plan={account.plan} />
         <ChevronDown size={TOPBAR_ICON_SIZE_PX.TOGGLE} aria-hidden="true" />
       </Button>
