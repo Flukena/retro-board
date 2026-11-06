@@ -79,7 +79,7 @@ Dependency: client/server → domain เท่านั้น (`src/architecture
 1. `GET /yjs/api/auth/google/start?return=<same-origin path>` → relay สร้าง `state`, `nonce`, PKCE `code_verifier`; เก็บใน cookie ชั่วคราวลงลายเซ็น (`HttpOnly; Secure; SameSite=Lax`, path `/yjs/api/auth`, อายุ 10 นาที) → 302 ไป Google (`scope=openid email profile`)
 2. Google → `GET /yjs/api/auth/google/callback?code&state`
 3. Relay ตรวจ `state` กับ cookie (ใช้ครั้งเดียว ลบทันที), แลก code ที่ token endpoint ด้วย client secret + `code_verifier`
-4. ตรวจ `id_token`: `iss` ∈ {`https://accounts.google.com`, `accounts.google.com`}, `aud` = client ID, `exp`, `nonce`, `email_verified`; ลายเซ็นตรวจด้วย JWKS ของ Google (cache ตาม `Cache-Control`)
+4. ตรวจ `id_token`: `iss` ∈ {`https://accounts.google.com`, `accounts.google.com`}, `aud` = client ID, `exp`, `nonce`, `email_verified`; ไม่ตรวจลายเซ็นด้วย JWKS: token มาจาก token endpoint ของ Google ผ่าน TLS โดยตรง (OIDC Core §3.1.3.7 ข้อ 6) — ดู §4.7 ข้อ 1
 5. Upsert บัญชีด้วย `sub` → ออก account cookie → 302 ไป `return` (ตรวจว่าเป็น path ภายในเท่านั้น กัน open redirect)
 
 Error ทุกกรณี (state ไม่ตรง, Google ปฏิเสธ, ผู้ใช้กดยกเลิก, timeout) → 302 ไปหน้าเดิมพร้อม `?auth_error=<code>` ที่ client แปลเป็นข้อความ `t()`; log แค่ error code ไม่ log token/email
@@ -103,13 +103,21 @@ Record: `{ id, googleSub, email, name, plan: 'free'|'pro', planGrantedAt, sessio
 
 ### 4.5 Maintainer console
 
-หน้า Accounts ใน console เดิม (listener/owner key เดิม): ค้นด้วย email → แสดง plan → grant/revoke pro. การเปลี่ยน plan เป็น durable record (เขียน LevelDB แบบ sync เหมือน registry) ไม่ใช่ log
+หน้า Accounts ใน console เดิม (listener/owner key เดิม): ค้นด้วย email → แสดง plan → grant/revoke pro. การเปลี่ยน plan เป็น durable record (เขียน LevelDB เป็น batch เดียวด้วย `sync: true` — registry เดิมใช้ `db.put` ที่ไม่ sync (`y-leveldb.js:135`) จึงใช้แบบเดียวกันไม่ได้ ดู §4.7 ข้อ 4) ไม่ใช่ log
 
 ### 4.6 Config / secret
 
-ENV ใหม่ (ชื่อเท่านั้น): `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI`, `ACCOUNT_SESSION_KEY`. ไม่ตั้ง client ID → ปุ่ม login ไม่แสดง, endpoint auth ตอบ 404, ฟีเจอร์อื่นทำงานปกติ (dev/test ไม่ต้องมี Google)
+ENV ใหม่ (ชื่อเท่านั้น): `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI`, `YJS_ACCOUNT_SESSION_SECRET` (ไม่ตั้ง = ใช้ไฟล์ `<YJS_DB_DIR>/.account-session-key` ตามแบบ room key; ดู §4.7 ข้อ 2). ไม่ตั้ง client ID → ปุ่ม login ไม่แสดง, endpoint auth ตอบ 404, ฟีเจอร์อื่นทำงานปกติ (dev/test ไม่ต้องมี Google)
 
-Network: relay ต้องออกไป `oauth2.googleapis.com` และ `www.googleapis.com` ได้ — เพิ่ม network ที่มี egress ให้ service `yjs` (ทางเลือกสำรอง: auth container แยก; ไม่เลือกเพราะเพิ่มชิ้นส่วน + ต้องแชร์ signing key)
+Network: relay ต้องออกไป `oauth2.googleapis.com` ได้ (ไม่ต้องใช้ `www.googleapis.com` เพราะไม่ใช้ JWKS) — เพิ่ม network ที่มี egress ให้ service `yjs` (ทางเลือกสำรอง: auth container แยก; ไม่เลือกเพราะเพิ่มชิ้นส่วน + ต้องแชร์ signing key)
+
+### 4.7 ข้อที่ต่างจากร่างแรก (ตัดสินระหว่างทำ 2026-11-06)
+
+1. **ตรวจ `id_token` ผ่าน TLS อย่างเดียว ไม่ใช้ JWKS.** token มาจาก token endpoint ที่ตายตัวของ Google ผ่าน HTTPS โดยตรง ซึ่ง OIDC Core §3.1.3.7 ข้อ 6 และเอกสาร Google อนุญาตแทนการตรวจลายเซ็น. ขอบเขตความเชื่อใจ: endpoint เป็นค่าคงที่ใน production (override ได้เฉพาะ dev ที่เปิด insecure HTTP), ตรวจ certificate ปกติ, `redirect: 'error'`, ไม่รับ ID token จากเบราว์เซอร์เด็ดขาด. claims ยังตรวจครบ (`iss`, `aud`, `exp` พร้อมเพดานบน, `iat`, `nonce`, `email_verified`). ผลต่อ deploy: relay ต้อง egress ออก `oauth2.googleapis.com:443` แบบทั่วไป ไม่ใช่กรองตามชื่อโฮสต์ (`www.googleapis.com` ไม่ต้องใช้แล้ว)
+2. **Key ของ account cookie ตามแบบ room key:** `YJS_ACCOUNT_SESSION_SECRET` หรือไฟล์ `<YJS_DB_DIR>/.account-session-key` (สร้างเองและเก็บถาวร) ไม่ใช่ env ชื่อ `ACCOUNT_SESSION_KEY`
+3. **Redirect URI ตอน dev** คือ `http://localhost:1234/api/auth/google/callback` (relay dev ไม่มี prefix `/yjs` และอยู่พอร์ต 1234)
+4. **การเขียน registry ไม่ใช่ sync** (`y-leveldb.js:135` ใช้ `db.put` ไม่มี option). บัญชีจึงเขียนด้วย batch เดียวที่ `sync: true` ผ่าน `durableMetaBatch` ใน `relay-storage.js`
+5. Sign-in ปิดเสมอบน relay Public Wall และเมื่อ `YJS_ALLOWED_ORIGINS` ว่าง (ทุก route ตอบ 404)
 
 ## 5. เฟส 2 — รหัสผ่านห้อง
 

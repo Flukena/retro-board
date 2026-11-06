@@ -19,18 +19,18 @@ const ACCOUNT_ID_ENCODING = 'base64url';
 const INITIAL_SESSION_GENERATION = 0;
 const SESSION_GENERATION_STEP = 1;
 const MISSING_NAME = '';
-const ACCOUNT_KEY_PREFIX = 'acct:';
-const SUB_KEY_PREFIX = 'sub:';
-const EMAIL_KEY_PREFIX = 'email:';
+export const ACCOUNT_KEY_PREFIX = 'acct:';
+export const SUB_KEY_PREFIX = 'sub:';
+export const EMAIL_KEY_PREFIX = 'email:';
 
 const codedError = (message, code) => Object.assign(new Error(message), { code });
 const unavailableError = () => codedError(ACCOUNT_STORE_UNAVAILABLE_MESSAGE, ACCOUNT_STORE_UNAVAILABLE_CODE);
 const defaultRandomId = () => randomBytes(ACCOUNT_ID_BYTES).toString(ACCOUNT_ID_ENCODING);
 const ignoreRejection = () => {};
 
-const accountKey = (id) => `${ACCOUNT_KEY_PREFIX}${id}`;
-const subKey = (sub) => `${SUB_KEY_PREFIX}${sub}`;
-const emailKey = (email) => `${EMAIL_KEY_PREFIX}${email.toLowerCase()}`;
+export const accountKey = (id) => `${ACCOUNT_KEY_PREFIX}${id}`;
+export const subKey = (sub) => `${SUB_KEY_PREFIX}${sub}`;
+export const emailKey = (email) => `${EMAIL_KEY_PREFIX}${email.toLowerCase()}`;
 const put = (key, value) => ({ type: 'put', key, value });
 const del = (key) => ({ type: 'del', key });
 const isNonEmptyString = (value) => typeof value === 'string' && value.length > 0;

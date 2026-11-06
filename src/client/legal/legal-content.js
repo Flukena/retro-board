@@ -9,13 +9,13 @@ export const LEGAL_PATH = Object.freeze({
 });
 
 // Shown on both pages; update together with any change to the wording.
-export const LEGAL_EFFECTIVE_DATE_ISO = '2026-10-25';
+export const LEGAL_EFFECTIVE_DATE_ISO = '2026-11-06';
 
 // Owner-provided address people can write to about their data or these terms.
 export const LEGAL_CONTACT_EMAIL = 's.theerasuwanajak@gmail.com';
 
 const SECTION_IDS = Object.freeze({
-  [LEGAL_PAGE.PRIVACY]: ['intro', 'collect', 'browser', 'use', 'share', 'retention', 'security', 'rights', 'changes', 'contact'],
+  [LEGAL_PAGE.PRIVACY]: ['intro', 'collect', 'browser', 'accounts', 'use', 'share', 'retention', 'security', 'rights', 'changes', 'contact'],
   [LEGAL_PAGE.TERMS]: ['accept', 'service', 'links', 'content', 'conduct', 'removal', 'warranty', 'liability', 'law', 'changes', 'contact'],
 });
 

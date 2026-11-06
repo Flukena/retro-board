@@ -22,6 +22,7 @@ BACKUP_VERIFY_DB_DIR="$scratch/$database" BACKUP_VERIFY_MODE="$database" BACKUP_
   import { LeveldbPersistence } from "y-leveldb";
   import { ROOM_REGISTRATION_META } from "./src/server/relay-room-registry.js";
   import { verifyPublicUploadFiles } from "./src/server/public-upload-backup.js";
+  import { verifyBackupAccounts } from "./scripts/verify-backup-accounts.mjs";
   const persistence = new LeveldbPersistence(process.env.BACKUP_VERIFY_DB_DIR);
   try {
     const names = await persistence.getAllDocNames();
@@ -42,7 +43,8 @@ BACKUP_VERIFY_DB_DIR="$scratch/$database" BACKUP_VERIFY_MODE="$database" BACKUP_
     if (isPublic && committed !== PUBLIC_REGISTERED_ROOM_COUNT) {
       throw new Error("public backup must contain exactly one registered room");
     }
-    console.log(`restored ${process.env.BACKUP_VERIFY_MODE} LevelDB opens; ${committed} documents decoded`);
+    const { accounts } = await verifyBackupAccounts(persistence);
+    console.log(`restored ${process.env.BACKUP_VERIFY_MODE} LevelDB opens; ${committed} documents and ${accounts} accounts decoded`);
   } finally { await persistence.destroy(); }
 '
 done

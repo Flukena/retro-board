@@ -136,7 +136,8 @@ as a deliberate, backed-up maintenance operation.
   The production Compose stack satisfies this by publishing no application
   ports and using Cloudflare Tunnel as the sole ingress.
 - Keep both legacy switches off after any controlled migration window.
-- Persist and back up the LevelDB volume, including `.room-session-key`, and
+- Persist and back up the LevelDB volume, including `.room-session-key` and
+  `.account-session-key` (losing the latter only signs everyone out), and
   the uploads volume together. Alternatively provide a stable secret of at
   least 32 bytes through `YJS_SESSION_SECRET`.
 - Protect tunnel credentials outside the repository, restrict their file
@@ -183,6 +184,51 @@ restart. Separately review retained uploads as described above.
 Do not include live room links, fragment tokens, cookies, board exports,
 browser traces, or tunnel credentials in bug reports. Redact them before
 sharing diagnostics.
+
+## Accounts (optional Google sign-in)
+
+Sign-in is optional. When it is off, every `/api/auth/*` and `/api/account*`
+route answers 404 and nothing else changes. It is enabled only when the
+Google client id, secret and redirect URI are all set, `YJS_ALLOWED_ORIGINS`
+is non-empty and the relay is not the Public Wall relay.
+
+- **Identity.** The account key is the Google `sub`, never the email. Scopes
+  are exactly `openid email profile`; no other Google data is requested.
+- **Stored fields.** Per account: id, Google `sub`, email, name (may be empty),
+  plan, `planGrantedAt`, `sessionGeneration`, `createdAt`. They live as meta
+  keys of one reserved document in the relay LevelDB (`acct:<id>`,
+  `sub:<sub>`, `email:<lower-cased>`), written as one fsynced batch per change.
+  A storage failure takes the relay down through the same path as rooms.
+- **Single-use flows.** `start` sets a signed `rb_oauth_flow` cookie
+  (`HttpOnly; SameSite=Lax; Max-Age=600`, `Path` limited to the auth routes,
+  host-only) holding `state`, `nonce`, the PKCE verifier and the validated
+  return URL. The callback checks the signature, query `state` and expiry,
+  then claims `state` in an in-memory ledger exactly once; a replay fails. The
+  return URL is re-validated against `YJS_ALLOWED_ORIGINS` before any redirect.
+- **Token trust boundary.** The `id_token` is trusted because it comes from
+  Google's fixed HTTPS token endpoint, with normal certificate validation, no
+  redirects and a size cap. It is never accepted from the browser, so its
+  signature is not checked against JWKS. Issuer, audience, expiry (with an
+  upper bound), issued-at, nonce and `email_verified` are still checked. The
+  endpoint can be overridden only when `YJS_ALLOW_INSECURE_HTTP` is on (dev).
+- **Account cookie.** `rb_account`: `HttpOnly; SameSite=Lax; Max-Age=2592000`
+  (30 days), `Secure` unless insecure dev, `Path=/yjs/api` in production. It is
+  HMAC-signed with a key separate from the room-session key and carries the
+  account id and `sessionGeneration`; the generation is checked against the
+  store on every request, so "sign out everywhere" bumps it.
+- **Request checks.** `POST /api/account/logout`, `logout-all` and `delete`
+  require an allowed `Origin`. `GET /api/account` refuses a foreign `Origin`.
+  Every auth and account response sets `Cache-Control: no-store` and
+  `Referrer-Policy: no-referrer`. Start and callback share a per-IP limit and
+  the flow ledger is bounded.
+- **Logs.** Callback failures are counted by error code in the periodic
+  rejection summary. Tokens, codes, cookies, query strings, emails and names
+  are never logged.
+- **Accounts do not change room capability rules.** Room access is still the
+  link and its session cookie. Signing in grants no access to any room, and the
+  plan only gates account features (today: both plans may create locked rooms).
+  Deleting an account removes its record and indexes; rooms it created stay
+  under the normal retention rules and have no manager afterwards.
 
 ## Public wall
 

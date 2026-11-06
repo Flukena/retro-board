@@ -40,7 +40,7 @@ BACKUP_KEY_FILE=/absolute/path/to/backup.key ./scripts/verify-production-backup.
 ```
 
 The verification command extracts to a temporary directory, opens the restored
-LevelDB, and decodes every document. Keep the passphrase separately from the
+LevelDB, decodes every document and checks every account record. Keep the passphrase separately from the
 encrypted archives and copy archives to a different machine or storage account;
 a backup that exists only on the Docker host does not cover host failure. Run
 verification periodically and before a risky migration or release.
@@ -48,6 +48,49 @@ verification periodically and before a risky migration or release.
 Never enable `YJS_ALLOW_INSECURE_HTTP`, `YJS_ALLOW_LEGACY_URL_TOKENS`, or
 `YJS_ALLOW_LEGACY_ROOMS` in normal production operation. Enable a legacy flag
 only for a bounded migration, then remove it.
+
+## Google sign-in
+
+Sign-in is off until the relay has all three variables below and a non-empty
+`YJS_ALLOWED_ORIGINS`. It is always off on the Public Wall relay, so do not set
+Google variables on that container. Never commit real values; keep them in the
+ignored `.env` or a protected secret store.
+
+| Variable | Value |
+| --- | --- |
+| `GOOGLE_OAUTH_CLIENT_ID` | OAuth client id from Google Cloud |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | OAuth client secret |
+| `GOOGLE_OAUTH_REDIRECT_URI` | `https://retroroom.party/yjs/api/auth/google/callback` |
+
+Google Cloud console, once:
+
+1. Create or pick a project, then **OAuth consent screen**: user type
+   **External**, app name, support email, and publish it to production.
+2. Scopes: only `openid`, `email` and `profile`.
+3. **Credentials**: create an OAuth client of type **Web application**.
+4. **Authorized JavaScript origins**: `https://retroroom.party`.
+5. **Authorized redirect URIs**: exactly the `GOOGLE_OAUTH_REDIRECT_URI` value.
+
+Local development uses `http://localhost:1234/api/auth/google/callback`
+against `npm run yjs:dev`, with the stub from `scripts/fake-google-oidc.mjs`
+instead of Google.
+
+**Egress.** The relay calls `https://oauth2.googleapis.com` (port 443) to
+exchange the sign-in code. Today the `yjs` service sits only on `app_internal`,
+which is `internal: true` and has no outbound access, so sign-in cannot
+complete. Enabling it needs a Compose change that gives `yjs` a network with
+egress; the Compose `yjs` service must keep publishing no ports. Because the
+token is trusted by TLS alone, the change is general egress, not a
+hostname filter. This change needs owner approval and is not part of the
+documentation step.
+
+**Account data and backups.** Accounts are stored in the relay LevelDB
+(`yjs_data`), so the existing backup already covers them. The account cookie key is
+`<db dir>/.account-session-key` (or `YJS_ACCOUNT_SESSION_SECRET`); back it up with
+the volume. Deleting it, or changing the secret, signs every user out but loses
+no accounts. `scripts/verify-production-backup.sh` decodes every account
+record and checks that the `sub:` and `email:` indexes point at existing
+accounts and that every account has both, without writing to the restored copy.
 
 ## Release gate
 
