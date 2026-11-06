@@ -44,7 +44,7 @@ Moving existing logic out is welcome (AGENTS.md); later tasks need wiring lines 
 
 **Files:**
 - Create: `src/server/relay-room-routes.js`, `src/server/relay-room-routes.test.mjs`
-- Modify: `yjs-server.mjs:1387-1438` (the `uploadMatch`/`roomImageMatch` regexes, the room OPTIONS preflight, room upload POST, room image GET and legacy image GET), `Dockerfile.yjs` server COPY list
+- Modify: `yjs-server.mjs:1378-1438` (the `uploadMatch`/`roomImageMatch` regexes, the room OPTIONS preflight, room upload POST, room image GET and legacy image GET), `Dockerfile.yjs` server COPY list
 
 **Interfaces:**
 - Produces: `handleRoomRoute(req, res, routePath, ctx) → boolean` where `ctx = { hasQueryOrFragment, allowedOrigins, allowInsecureHttp, unavailable, rooms /* Map handle→docName */, authenticate /* (req, handle) → {docName}|null */, uploads, clientIp }`. Returns `true` when it answered. Also exports `CORS_ROOM_METHODS = 'POST, OPTIONS'` reused by Task 5's preflight.
