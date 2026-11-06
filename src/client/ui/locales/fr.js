@@ -109,6 +109,7 @@ export default Object.freeze({
   "account.error.token_exchange_failed": "Impossible de vous vérifier auprès de Google. Réessayez.",
   "account.error.invalid_id_token": "Google a renvoyé une identité non acceptée. Réessayez.",
   "account.error.email_unverified": "L'e-mail de ce compte Google n'est pas vérifié.",
+  "account.error.unavailable": "La connexion est temporairement indisponible. Réessayez plus tard.",
   "maintainer.seconds": "{n} secondes",
   "tool.sticky": "Post-it",
   "tool.sticky.title": "Ajouter un post-it",

@@ -8,7 +8,7 @@ import { STORAGE_FAILURE_CODE, durableMetaBatch } from './relay-storage.js';
 export const ACCOUNTS_DOC_NAME = '\u0000accounts';
 export const ACCOUNT_STORAGE_FAILURE_EVENT = 'storage-failure';
 const ACCOUNT_STORE_UNAVAILABLE_CODE = 'ACCOUNT_STORE_UNAVAILABLE';
-const DATABASE_CAPACITY_CODE = 'DATABASE_CAPACITY';
+export const DATABASE_CAPACITY_CODE = 'DATABASE_CAPACITY';
 const UNKNOWN_PLAN_CODE = 'UNKNOWN_PLAN';
 const ACCOUNT_STORE_UNAVAILABLE_MESSAGE = 'account store unavailable';
 const DATABASE_CAPACITY_MESSAGE = 'database capacity reached';

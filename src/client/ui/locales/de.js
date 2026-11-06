@@ -109,6 +109,7 @@ export default Object.freeze({
   "account.error.token_exchange_failed": "Die Bestätigung bei Google ist fehlgeschlagen. Bitte erneut versuchen.",
   "account.error.invalid_id_token": "Google hat eine nicht akzeptierte Identität geliefert. Bitte erneut versuchen.",
   "account.error.email_unverified": "Die E-Mail-Adresse dieses Google-Kontos ist nicht bestätigt.",
+  "account.error.unavailable": "Die Anmeldung ist vorübergehend nicht verfügbar. Bitte später erneut versuchen.",
   "maintainer.seconds": "{n} Sekunden",
   "tool.sticky": "Notiz",
   "tool.sticky.title": "Haftnotiz hinzufügen",

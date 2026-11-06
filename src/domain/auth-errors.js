@@ -7,6 +7,8 @@ export const AUTH_ERROR = Object.freeze({
   TOKEN_EXCHANGE_FAILED: 'token_exchange_failed',
   INVALID_ID_TOKEN: 'invalid_id_token',
   EMAIL_UNVERIFIED: 'email_unverified',
+  // Relay busy, shutting down or out of storage; nothing was signed in.
+  UNAVAILABLE: 'unavailable',
 });
 
 export const AUTH_ERROR_CODES = Object.freeze(Object.values(AUTH_ERROR));

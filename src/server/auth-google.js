@@ -244,7 +244,7 @@ export function verifyFlow(query, flowCookieValue, signingKey, ledger, now = Dat
   return Object.freeze({ state: flow.state, nonce, verifier, returnTo, expiresAt });
 }
 
-async function postTokenRequest(config, flow, code, fetchImpl) {
+async function postTokenRequest(config, flow, code, { fetchImpl, signal }) {
   const body = new URLSearchParams({
     grant_type: 'authorization_code',
     code,
@@ -259,7 +259,7 @@ async function postTokenRequest(config, flow, code, fetchImpl) {
       headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
       body: body.toString(),
       redirect: 'error',
-      signal: AbortSignal.timeout(TOKEN_EXCHANGE_TIMEOUT_MS),
+      signal: AbortSignal.any([AbortSignal.timeout(TOKEN_EXCHANGE_TIMEOUT_MS), ...(signal ? [signal] : [])]),
     });
   } catch {
     throw tokenExchangeFailed();
@@ -320,11 +320,11 @@ function hasValidClaims(claims, config, flow, nowMs) {
 
 /**
  * Redeems the authorization code and returns the Google profile behind it.
- * `nowMs` defaults to the time the token response arrives.
+ * `nowMs` defaults to the time the token response arrives; `signal` cancels the token request.
  * @returns {Promise<{ sub: string, email: string, name: string }>}
  */
-export async function exchangeCode(config, flow, code, { fetchImpl = fetch, nowMs } = {}) {
-  const response = await postTokenRequest(config, flow, code, fetchImpl);
+export async function exchangeCode(config, flow, code, { fetchImpl = fetch, nowMs, signal } = {}) {
+  const response = await postTokenRequest(config, flow, code, { fetchImpl, signal });
   const claims = idTokenClaims((await tokenResponseJson(response)).id_token);
   if (!hasValidClaims(claims, config, flow, nowMs ?? Date.now())) throw invalidIdToken();
   if (claims.email_verified !== true) throw new AuthError(AUTH_ERROR.EMAIL_UNVERIFIED);

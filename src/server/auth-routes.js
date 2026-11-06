@@ -4,6 +4,7 @@ import {
   AuthError, clearFlowCookie, exchangeCode, googleOAuthConfig, readFlowCookie, returnUrl, startAuthorization,
   verifyFlow, withAuthError,
 } from './auth-google.js';
+import { DATABASE_CAPACITY_CODE } from './account-store.js';
 import { accountCookiePath, authenticateAccount } from './auth-session.js';
 import { RETRY_AFTER_SHORT_SECONDS } from './relay-config.js';
 import {
@@ -16,6 +17,11 @@ import { takeTrafficTokens, trafficBucketFor } from './relay-rate-bucket.js';
 // through the relay's rejection counters, which flush as one periodic summary.
 
 export const AUTH_FLOWS_PER_IP_PER_MINUTE = 20;
+// Callbacks with a token request to Google in flight, relay-wide. The HTTP slot
+// is released when a client disconnects, so this bounds outbound work on its
+// own: a quarter of the default 128-request HTTP budget (YJS_MAX_HTTP_REQUESTS),
+// which at the 10 s token timeout still clears more than 3 sign-ins a second.
+export const MAX_PENDING_EXCHANGES = 32;
 const SECONDS_PER_MINUTE = 60;
 const MAX_FLOW_RATE_BUCKETS = 10_000;
 // One token per start or callback; byte budgets are unused.
@@ -29,7 +35,8 @@ const OAUTH_NO_ALLOWED_ORIGINS = 'OAUTH_NO_ALLOWED_ORIGINS';
 const OAUTH_PUBLIC_WALL = 'OAUTH_PUBLIC_WALL';
 const CALLBACK_FAILURE_REASON = 'auth-callback';
 const PROVIDER_ACCESS_DENIED = 'access_denied';
-const DATABASE_CAPACITY_CODE = 'DATABASE_CAPACITY';
+// Counter codes for callbacks refused before the flow is claimed; the user sees 'unavailable'.
+const CALLBACK_REFUSAL = Object.freeze({ RATE_LIMITED: 'rate-limited', EXCHANGE_CAP: 'exchange-cap' });
 const QUERY_BASE_URL = 'http://relay.invalid';
 const ACCOUNT_PREFLIGHT_METHODS = 'GET, POST, OPTIONS';
 const ALLOW_GET = 'GET';
@@ -44,7 +51,6 @@ const HTTP_NOT_FOUND = 404;
 const HTTP_METHOD_NOT_ALLOWED = 405;
 const HTTP_TOO_MANY_REQUESTS = 429;
 const HTTP_UNAVAILABLE = 503;
-const HTTP_INSUFFICIENT_STORAGE = 507;
 const RESPONSE_HEADERS = Object.freeze({ 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' });
 
 const PATH = Object.freeze({
@@ -75,7 +81,15 @@ const reply = (res, status, headers = {}) => sendIfWritable(res, status, headers
 const redirect = (res, location, cookies) => reply(res, HTTP_FOUND, { location, 'set-cookie': cookies });
 const tooManyRequests = (res) => reply(res, HTTP_TOO_MANY_REQUESTS, { 'retry-after': String(RETRY_AFTER_SHORT_SECONDS) });
 const requestQuery = (req) => new URL(req.url, QUERY_BASE_URL).searchParams;
-const storeFailureStatus = (error) => (error?.code === DATABASE_CAPACITY_CODE ? HTTP_INSUFFICIENT_STORAGE : HTTP_UNAVAILABLE);
+// Capacity keeps its own counter code; every other store failure counts as unavailable.
+const storeFailureCode = (error) => (error?.code === DATABASE_CAPACITY_CODE ? DATABASE_CAPACITY_CODE : AUTH_ERROR.UNAVAILABLE);
+
+// Cancels the token request when the client goes away before the answer is sent.
+function disconnectSignal(res) {
+  const controller = new AbortController();
+  res.once('close', () => { if (!res.writableFinished) controller.abort(); });
+  return controller.signal;
+}
 
 // Google's `error` wins over `code`; a callback with neither is a provider fault.
 function providerError(query) {
@@ -98,7 +112,10 @@ export function createAuthRoutes({
   );
   const recordFailure = (code) => rejectionCounters.increment(CALLBACK_FAILURE_REASON, code);
   const clearAccountCookie = (prefixed) => sessions.clearCookie(accountCookiePath(prefixed));
-  const unauthorized = (res, prefixed) => reply(res, HTTP_UNAUTHORIZED, { 'set-cookie': clearAccountCookie(prefixed) });
+  // Guests who sent no rb_account get no Set-Cookie.
+  const unauthorized = (req, res, prefixed) => reply(
+    res, HTTP_UNAUTHORIZED, sessions.hasCookie(req) ? { 'set-cookie': clearAccountCookie(prefixed) } : {},
+  );
 
   function start(req, res, { prefixed, clientIp }) {
     if (!takeFlowToken(clientIp)) { tooManyRequests(res); return; }
@@ -117,29 +134,41 @@ export function createAuthRoutes({
     }
   }
 
-  function failCallback(res, returnTo, code, clearFlow) {
-    recordFailure(code);
+  // Every callback answer is a redirect back to the board, so no user is left on a blank relay page.
+  function failCallback(res, returnTo, code, clearFlow, countedCode = code) {
+    recordFailure(countedCode);
     redirect(res, withAuthError(returnTo, code), [clearFlow]);
   }
 
   async function completeSignIn(res, flow, code, { prefixed, unavailable }, clearFlow) {
     const returnTo = returnUrl(flow.returnTo, allowedOrigins, allowInsecureHttp);
+    const fail = (authCode, countedCode) => failCallback(res, returnTo, authCode, clearFlow, countedCode);
     let account;
     try {
-      const profile = await exchangeCode(oauth, flow, code, { fetchImpl });
-      if (unavailable()) { reply(res, HTTP_UNAVAILABLE, { 'set-cookie': [clearFlow] }); return; }
+      const profile = await exchangeCode(oauth, flow, code, { fetchImpl, signal: disconnectSignal(res) });
+      if (unavailable()) { fail(AUTH_ERROR.UNAVAILABLE); return; }
       account = await store.upsertFromGoogle(profile);
     } catch (error) {
-      if (error instanceof AuthError) { failCallback(res, returnTo, error.code, clearFlow); return; }
-      reply(res, storeFailureStatus(error), { 'set-cookie': [clearFlow] });
+      if (error instanceof AuthError) fail(error.code);
+      else fail(AUTH_ERROR.UNAVAILABLE, storeFailureCode(error));
       return;
     }
+    // Shutdown or a storage failure can begin while the queued write runs.
+    if (unavailable()) { fail(AUTH_ERROR.UNAVAILABLE); return; }
     redirect(res, returnTo, [clearFlow, sessions.createCookie(account.id, account.sessionGeneration, accountCookiePath(prefixed))]);
   }
 
+  // Checked before the flow is claimed, so a refused callback can be retried with the same flow.
+  function callbackRefusal({ unavailable, clientIp }) {
+    if (unavailable()) return AUTH_ERROR.UNAVAILABLE;
+    if (!takeFlowToken(clientIp)) return CALLBACK_REFUSAL.RATE_LIMITED;
+    return pendingExchanges >= MAX_PENDING_EXCHANGES ? CALLBACK_REFUSAL.EXCHANGE_CAP : null;
+  }
+
   async function callback(req, res, ctx) {
-    if (!takeFlowToken(ctx.clientIp)) { tooManyRequests(res); return; }
     const clearFlow = clearFlowCookie(oauth, { prefixed: ctx.prefixed });
+    const refusal = callbackRefusal(ctx);
+    if (refusal) { failCallback(res, fallbackUrl(), AUTH_ERROR.UNAVAILABLE, clearFlow, refusal); return; }
     const query = requestQuery(req);
     const flow = verifiedFlow(req, query);
     if (!flow) { failCallback(res, fallbackUrl(), AUTH_ERROR.STATE_MISMATCH, clearFlow); return; }
@@ -165,7 +194,7 @@ export function createAuthRoutes({
   async function accountGet(req, res, { prefixed }) {
     if (!acceptOptionalOrigin(req, res)) return;
     const account = await authenticateAccount(req, sessions, store);
-    if (!account) { unauthorized(res, prefixed); return; }
+    if (!account) { unauthorized(req, res, prefixed); return; }
     const { name, email, plan } = account;
     sendJson(res, HTTP_OK, { name, email, plan, entitlements: entitlementsFor(plan) });
   }
@@ -174,19 +203,23 @@ export function createAuthRoutes({
     if (!acceptCredentialOrigin(req, res, allowedOrigins, allowInsecureHttp)) return;
     if (change) {
       const account = await authenticateAccount(req, sessions, store);
-      if (!account) { unauthorized(res, prefixed); return; }
-      await change(account.id);
+      // The store re-checks the generation in its queue, so a concurrent logout-all wins.
+      const changed = account && await change(account.id, { expectedGeneration: account.sessionGeneration });
+      if (!changed) { unauthorized(req, res, prefixed); return; }
     }
     reply(res, HTTP_NO_CONTENT, { 'set-cookie': clearAccountCookie(prefixed) });
   };
 
   const routes = new Map([
     [PATH.START, { handlers: { GET: start }, allow: ALLOW_GET }],
-    [PATH.CALLBACK, { handlers: { GET: callback }, allow: ALLOW_GET, clearsFlowCookie: true }],
+    [PATH.CALLBACK, { handlers: { GET: callback }, allow: ALLOW_GET, clearsFlowCookie: true, answersWhileUnavailable: true }],
     [PATH.ACCOUNT, { handlers: { GET: accountGet }, allow: ALLOW_ACCOUNT_GET, preflight: true }],
-    [PATH.LOGOUT, { handlers: { POST: accountAction(null) }, allow: ALLOW_ACCOUNT_POST, preflight: true }],
-    [PATH.LOGOUT_ALL, { handlers: { POST: accountAction((id) => store.bumpSessionGeneration(id)) }, allow: ALLOW_ACCOUNT_POST, preflight: true }],
-    [PATH.DELETE, { handlers: { POST: accountAction((id) => store.delete(id)) }, allow: ALLOW_ACCOUNT_POST, preflight: true }],
+    // Plain logout never touches the store, so it still signs out while the relay is unavailable.
+    [PATH.LOGOUT, { handlers: { POST: accountAction(null) }, allow: ALLOW_ACCOUNT_POST, preflight: true, answersWhileUnavailable: true }],
+    [PATH.LOGOUT_ALL, {
+      handlers: { POST: accountAction((id, options) => store.bumpSessionGeneration(id, options)) }, allow: ALLOW_ACCOUNT_POST, preflight: true,
+    }],
+    [PATH.DELETE, { handlers: { POST: accountAction((id, options) => store.delete(id, options)) }, allow: ALLOW_ACCOUNT_POST, preflight: true }],
   ]);
 
   async function run(handler, req, res, ctx) {
@@ -197,8 +230,13 @@ export function createAuthRoutes({
     }
   }
 
+  // The dev client reads /api/account cross-origin, so the 404 meaning "sign-in off" carries credential CORS too.
+  function answerDisabled(req, res) {
+    if (acceptOptionalOrigin(req, res)) reply(res, HTTP_NOT_FOUND);
+  }
+
   function dispatch(req, res, route, ctx) {
-    if (!oauth) { reply(res, HTTP_NOT_FOUND); return; }
+    if (!oauth) { answerDisabled(req, res); return; }
     // Default for every callback answer (429, 405, 503 included); responses that set cookies repeat it.
     if (route.clearsFlowCookie) res.setHeader('set-cookie', [clearFlowCookie(oauth, { prefixed: ctx.prefixed })]);
     if (req.method === 'OPTIONS' && route.preflight) {
@@ -207,7 +245,7 @@ export function createAuthRoutes({
     }
     const handler = Object.hasOwn(route.handlers, req.method) ? route.handlers[req.method] : null;
     if (!handler) { reply(res, HTTP_METHOD_NOT_ALLOWED, { allow: route.allow }); return; }
-    if (ctx.unavailable()) { reply(res, HTTP_UNAVAILABLE); return; }
+    if (!route.answersWhileUnavailable && ctx.unavailable()) { reply(res, HTTP_UNAVAILABLE); return; }
     void run(handler, req, res, ctx);
   }
 

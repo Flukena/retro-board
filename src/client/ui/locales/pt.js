@@ -109,6 +109,7 @@ export default Object.freeze({
   "account.error.token_exchange_failed": "Não foi possível verificar você no Google. Tente novamente.",
   "account.error.invalid_id_token": "O Google retornou uma identidade não aceita. Tente novamente.",
   "account.error.email_unverified": "O e-mail desta conta do Google não está verificado.",
+  "account.error.unavailable": "O login está temporariamente indisponível. Tente novamente mais tarde.",
   "maintainer.seconds": "{n} segundos",
   "tool.sticky": "Nota",
   "tool.sticky.title": "Adicionar uma nota adesiva",

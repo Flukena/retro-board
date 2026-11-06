@@ -140,7 +140,9 @@ test('sign-in routes answer 404 when allowed origins are empty and the relay say
   assert.match(relay.output(), /OAUTH_NO_ALLOWED_ORIGINS/);
 });
 
-test('drain waits for an in-flight token exchange', async (t) => {
+// The grace period disconnects the client, which cancels its token request, so
+// drain neither waits for Google's answer nor writes an account for nobody.
+test('drain cancels a token exchange whose client the grace period disconnected', async (t) => {
   let relay;
   let releasedAt = 0;
   const stub = await startStub(t, {
@@ -155,10 +157,9 @@ test('drain waits for an in-flight token exchange', async (t) => {
     YJS_HTTP_SHUTDOWN_GRACE_MS: String(HTTP_SHUTDOWN_GRACE_MS),
   });
   const { flowCookie, url } = await approvedCallback(relay, stub, '', `${DEV_ORIGIN}/`);
-  // The grace period closes this connection long before the token answer arrives.
   await get(url, { cookie: cookiePair(flowCookie) }).catch(() => null);
-  const { code, at } = await relay.exited;
-  assert.ok(releasedAt > 0 && at >= releasedAt, `relay exited ${releasedAt ? at - releasedAt : 'before the token request'} ms after the token answer`);
+  const { code } = await relay.exited;
+  assert.equal(releasedAt, 0, 'the relay exited before the held token answer');
   assert.equal(code, 0, relay.output());
   assert.match(relay.output(), /\[yjs\] drained/);
 });
@@ -171,7 +172,8 @@ test('account storage failure takes the relay down through its storage-failure p
   assert.equal((await get(`${relay.url}/readyz`)).status, 200);
   const { flowCookie, url } = await approvedCallback(relay, stub, '', `${DEV_ORIGIN}/`);
   const response = await get(url, { cookie: cookiePair(flowCookie) });
-  assert.equal(response.status, 503, relay.output());
+  assert.equal(response.status, 302, relay.output());
+  assert.equal(new URL(response.headers.get('location')).searchParams.get('auth_error'), 'unavailable');
   assert.equal(response.headers.getSetCookie().some((cookie) => cookie.startsWith('rb_account=v1.')), false);
   const { code } = await exitWithin(relay, STORAGE_FAILURE_EXIT_TIMEOUT_MS);
   assert.ok(code !== null, `relay kept running after the account storage failure\n${relay.output()}`);

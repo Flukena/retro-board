@@ -56,6 +56,12 @@ export class AccountSessions {
     return `${COOKIE_NAME}=; Path=${path}; ${COOKIE_ATTRIBUTES}; Max-Age=0${this.#secureAttribute()}`;
   }
 
+  /** True when any rb_account cookie was sent, valid or not. */
+  hasCookie(req) {
+    const header = req.headers.cookie;
+    return typeof header === 'string' && header.split(';').some((part) => part.split('=')[0].trim() === COOKIE_NAME);
+  }
+
   /** @returns {{ accountId: string, generation: number, expiresAt: number } | null} */
   read(req) {
     const session = decodedSession(singleCookieValue(req, COOKIE_NAME, this.#config.maxCookieHeaderBytes));

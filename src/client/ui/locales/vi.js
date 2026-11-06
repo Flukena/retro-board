@@ -109,6 +109,7 @@ export default Object.freeze({
   "account.error.token_exchange_failed": "Không xác minh được bạn với Google. Hãy thử lại.",
   "account.error.invalid_id_token": "Google trả về danh tính không được chấp nhận. Hãy thử lại.",
   "account.error.email_unverified": "Email của tài khoản Google này chưa được xác minh.",
+  "account.error.unavailable": "Đăng nhập tạm thời không khả dụng. Vui lòng thử lại sau.",
   "maintainer.seconds": "{n} giây",
   "tool.sticky": "Ghi chú",
   "tool.sticky.title": "Thêm ghi chú dán",

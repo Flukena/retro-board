@@ -109,6 +109,7 @@ export default Object.freeze({
   "account.error.token_exchange_failed": "Gagal memverifikasi Anda dengan Google. Silakan coba lagi.",
   "account.error.invalid_id_token": "Google mengirim identitas yang tidak dapat diterima. Silakan coba lagi.",
   "account.error.email_unverified": "Email pada akun Google ini belum diverifikasi.",
+  "account.error.unavailable": "Masuk sedang tidak tersedia untuk sementara. Coba lagi nanti.",
   "maintainer.seconds": "{n} detik",
   "tool.sticky": "Sticky",
   "tool.sticky.title": "Tambah sticky note",

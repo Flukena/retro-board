@@ -109,6 +109,7 @@ export default Object.freeze({
   "account.error.token_exchange_failed": "无法通过 Google 验证你的身份，请重试。",
   "account.error.invalid_id_token": "Google 返回了无法接受的身份信息，请重试。",
   "account.error.email_unverified": "此 Google 账号的邮箱尚未验证。",
+  "account.error.unavailable": "登录暂时不可用，请稍后重试。",
   "maintainer.seconds": "{n} 秒",
   "tool.sticky": "便签",
   "tool.sticky.title": "添加便签",

@@ -109,6 +109,7 @@ export default Object.freeze({
   "account.error.token_exchange_failed": "Googleでの本人確認に失敗しました。もう一度お試しください。",
   "account.error.invalid_id_token": "Googleから受け付けられない身元情報が返されました。もう一度お試しください。",
   "account.error.email_unverified": "このGoogleアカウントのメールアドレスは未確認です。",
+  "account.error.unavailable": "現在ログインを利用できません。しばらくしてからもう一度お試しください。",
   "maintainer.seconds": "{n}秒",
   "tool.sticky": "付箋",
   "tool.sticky.title": "付箋を追加",

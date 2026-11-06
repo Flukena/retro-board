@@ -109,6 +109,7 @@ export default Object.freeze({
   "account.error.token_exchange_failed": "Google 인증에 실패했습니다. 다시 시도하세요.",
   "account.error.invalid_id_token": "Google이 받아들일 수 없는 신원 정보를 보냈습니다. 다시 시도하세요.",
   "account.error.email_unverified": "이 Google 계정의 이메일이 확인되지 않았습니다.",
+  "account.error.unavailable": "지금은 로그인을 일시적으로 사용할 수 없습니다. 나중에 다시 시도하세요.",
   "maintainer.seconds": "{n}초",
   "tool.sticky": "스티커",
   "tool.sticky.title": "스티커 메모 추가",

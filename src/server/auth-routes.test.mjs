@@ -6,7 +6,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
-import { AUTH_FLOWS_PER_IP_PER_MINUTE, createAuthRoutes, enabledOAuthConfig } from './auth-routes.js';
+import { AUTH_FLOWS_PER_IP_PER_MINUTE, MAX_PENDING_EXCHANGES, createAuthRoutes, enabledOAuthConfig } from './auth-routes.js';
 import { AccountStore } from './account-store.js';
 import { AccountSessions } from './auth-session.js';
 import { FlowLedger, startAuthorization } from './auth-google.js';
@@ -21,6 +21,8 @@ const OTHER_ORIGIN = 'https://evil.example';
 const ALLOWED_ORIGINS = Object.freeze([BOARD_ORIGIN]);
 const FALLBACK_URL = `${BOARD_ORIGIN}/`;
 const RETURN_URL = `${BOARD_ORIGIN}/board?room=1`;
+const DEV_ORIGIN = 'http://localhost:5173';
+const UNAVAILABLE = 'unavailable';
 const MAX_COOKIE_HEADER_BYTES = 4096;
 const ACCOUNT_KEY_BYTES = 32;
 const SECONDS_PER_HOUR = 3600;
@@ -51,10 +53,15 @@ function idTokenFor(nonce, profile = PROFILE) {
 
 /** Stands in for Google's token endpoint: answers with an ID token for the nonce the test last started. */
 function fakeGoogle() {
-  const google = { nonce: null, profile: PROFILE, requests: 0, hold: null, fail: false };
-  google.fetchImpl = async () => {
+  const google = { nonce: null, profile: PROFILE, requests: 0, aborts: [], hold: null, fail: false };
+  google.fetchImpl = async (url, { signal }) => {
     google.requests += 1;
-    if (google.hold) await google.hold;
+    const aborted = new Promise((resolve, reject) => signal.addEventListener('abort', () => {
+      google.aborts.push(signal.reason.name);
+      reject(signal.reason);
+    }, { once: true }));
+    aborted.catch(() => {});
+    if (google.hold) await Promise.race([google.hold, aborted]);
     if (google.fail) throw new TypeError('network down');
     return new Response(JSON.stringify({ id_token: idTokenFor(google.nonce, google.profile) }), { status: 200 });
   };
@@ -67,6 +74,26 @@ async function openStore(t, getMetaOverride) {
   t.after(async () => { await ldb.destroy(); await rm(directory, { recursive: true, force: true }); });
   const { getMeta } = checkedStorage(ldb, Y);
   return new AccountStore({ ldb, getMeta: getMetaOverride ? getMetaOverride(getMeta) : getMeta, hasCapacity: () => true });
+}
+
+/** getMeta wrapper: after hold(prefix), the next read of a key with that prefix waits for release(). */
+function heldReads() {
+  const gate = { prefix: null, release: null, waiting: false };
+  const wrap = (getMeta) => async (docName, key) => {
+    if (gate.prefix !== null && key.startsWith(gate.prefix)) {
+      gate.prefix = null;
+      gate.waiting = true;
+      await new Promise((resolve) => { gate.release = resolve; });
+    }
+    return getMeta(docName, key);
+  };
+  const hold = (prefix) => { gate.prefix = prefix; };
+  return { wrap, hold, gate, release: () => gate.release() };
+}
+
+const nextTurn = () => new Promise((resolve) => setImmediate(resolve));
+async function until(condition) {
+  while (!condition()) await nextTurn();
 }
 
 async function startRoutes(t, overrides = {}) {
@@ -94,7 +121,7 @@ async function startRoutes(t, overrides = {}) {
   t.after(() => new Promise((resolve) => { server.closeAllConnections(); server.close(resolve); }));
   const base = `http://127.0.0.1:${server.address().port}`;
   const request = (path, { method = 'GET', headers = {} } = {}) => fetch(`${base}${path}`, { method, headers, redirect: 'manual' });
-  return { routes, store, google, failures, ledger, lifecycle, accountKey, request };
+  return { routes, store, google, failures, ledger, lifecycle, accountKey, request, base };
 }
 
 const cookieValue = (setCookie) => setCookie.split(';')[0];
@@ -137,6 +164,22 @@ test('auth routes answer 404 when Google is not configured', async (t) => {
     assert.equal(response.status, 404, `${method} ${path}`);
   }
   assert.equal((await ctx.request('/api/rooms')).status, 418, 'unrelated paths are not claimed');
+});
+
+test('disabled routes still answer an allowed Origin with credential CORS and refuse a foreign one', async (t) => {
+  const disabled = await startRoutes(t, { routes: { oauth: null } });
+  const allowed = await accountGet(disabled, '', BOARD_ORIGIN);
+  assert.equal(allowed.status, 404);
+  assert.equal(allowed.headers.get('access-control-allow-origin'), BOARD_ORIGIN);
+  assert.equal(allowed.headers.get('access-control-allow-credentials'), 'true');
+  assert.equal((await accountGet(disabled, '', OTHER_ORIGIN)).status, 403);
+  const sameOrigin = await accountGet(disabled, '');
+  assert.equal(sameOrigin.status, 404);
+  assert.equal(sameOrigin.headers.get('access-control-allow-origin'), null);
+  const dev = await startRoutes(t, { routes: { oauth: null, allowedOrigins: [], allowInsecureHttp: true } });
+  const devResponse = await accountGet(dev, '', DEV_ORIGIN);
+  assert.equal(devResponse.status, 404, 'yjs:dev without allowed origins admits the local Vite origin');
+  assert.equal(devResponse.headers.get('access-control-allow-origin'), DEV_ORIGIN);
 });
 
 test('enabledOAuthConfig refuses sign-in without allowed origins and warns once with a code only', () => {
@@ -244,9 +287,11 @@ test('callback after store stop or storage failure issues no session', async (t)
   const storageFailures = [];
   store.on('storage-failure', (error) => storageFailures.push(error.code));
   const ctx = await startRoutes(t, { store });
-  const expectNoSession = async (expectedStatus) => {
+  const expectNoSession = async () => {
     const response = await callback(ctx, await beginSignIn(ctx), { code: 'auth-code' });
-    assert.equal(response.status, expectedStatus);
+    assert.equal(response.status, 302);
+    assert.equal(authErrorOf(response), UNAVAILABLE);
+    assert.equal(withoutAuthError(response), RETURN_URL);
     const cookies = response.headers.getSetCookie();
     assert.equal(cookies.some((cookie) => ACCOUNT_COOKIE.test(cookie)), false);
     assert.match(cookies[0], CLEARED_FLOW_COOKIE);
@@ -260,18 +305,92 @@ test('callback after store stop or storage failure issues no session', async (t)
   ctx.lifecycle.unavailable = true;
   release();
   const drained = await pending;
-  assert.equal(drained.status, 503, 'shutdown during the exchange issues no session');
+  assert.equal(drained.status, 302, 'shutdown during the exchange issues no session');
+  assert.equal(authErrorOf(drained), UNAVAILABLE);
   assert.equal(drained.headers.getSetCookie().some((cookie) => ACCOUNT_COOKIE.test(cookie)), false);
   assert.equal(ctx.routes.pendingExchanges, 0);
   ctx.google.hold = null;
   ctx.lifecycle.unavailable = false;
 
   failReads = true;
-  await expectNoSession(503);
+  await expectNoSession();
   assert.deepEqual(storageFailures, ['STORAGE_FAILURE']);
   failReads = false;
   await store.stop();
-  await expectNoSession(503);
+  await expectNoSession();
+  assert.ok(ctx.failures.includes(`auth-callback:${UNAVAILABLE}`));
+});
+
+test('a full database sends the callback back with unavailable and counts the capacity code', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'auth-routes-full-'));
+  const ldb = new LeveldbPersistence(directory);
+  t.after(async () => { await ldb.destroy(); await rm(directory, { recursive: true, force: true }); });
+  const store = new AccountStore({ ldb, getMeta: checkedStorage(ldb, Y).getMeta, hasCapacity: () => false });
+  const ctx = await startRoutes(t, { store });
+  const response = await callback(ctx, await beginSignIn(ctx), { code: 'auth-code' });
+  assert.equal(response.status, 302);
+  assert.equal(authErrorOf(response), UNAVAILABLE);
+  assert.equal(response.headers.getSetCookie().some((cookie) => ACCOUNT_COOKIE.test(cookie)), false);
+  assert.deepEqual(ctx.failures, ['auth-callback:DATABASE_CAPACITY']);
+});
+
+test('a lifecycle change while the account is being written issues no session', async (t) => {
+  const reads = heldReads();
+  const store = await openStore(t, reads.wrap);
+  const ctx = await startRoutes(t, { store });
+  reads.hold('sub:');
+  const pending = callback(ctx, await beginSignIn(ctx), { code: 'auth-code' });
+  await until(() => reads.gate.waiting);
+  ctx.lifecycle.unavailable = true;
+  reads.release();
+  const response = await pending;
+  assert.equal(response.status, 302);
+  assert.equal(authErrorOf(response), UNAVAILABLE);
+  assert.equal(response.headers.getSetCookie().some((cookie) => ACCOUNT_COOKIE.test(cookie)), false);
+  assert.ok(await store.findByEmail(PROFILE.email), 'the queued write still finished');
+});
+
+test('callbacks beyond the pending-exchange cap go back with unavailable and leave the flow unclaimed', async (t) => {
+  const ctx = await startRoutes(t);
+  let release;
+  ctx.google.hold = new Promise((resolve) => { release = resolve; });
+  const held = [];
+  for (let index = 0; index < MAX_PENDING_EXCHANGES; index += 1) {
+    const ip = `198.51.100.${index}`;
+    const flow = await beginSignIn(ctx, { ip });
+    held.push(ctx.request(`${CALLBACK}?${new URLSearchParams({ state: flow.state, code: 'auth-code' })}`, {
+      headers: { cookie: flow.flowCookie, 'x-test-ip': ip },
+    }));
+  }
+  await until(() => ctx.google.requests === MAX_PENDING_EXCHANGES);
+  assert.equal(ctx.routes.pendingExchanges, MAX_PENDING_EXCHANGES);
+  const extra = await beginSignIn(ctx);
+  const refused = await callback(ctx, extra, { code: 'auth-code' });
+  assert.equal(refused.status, 302);
+  assert.equal(authErrorOf(refused), UNAVAILABLE);
+  assert.equal(withoutAuthError(refused), FALLBACK_URL);
+  assert.equal(ctx.google.requests, MAX_PENDING_EXCHANGES, 'no token request for the refused callback');
+  ctx.google.hold = null;
+  release();
+  await Promise.all(held);
+  assert.equal(ctx.routes.pendingExchanges, 0);
+  const retried = await callback(ctx, extra, { code: 'auth-code' });
+  assert.equal(retried.status, 302);
+  assert.ok(retried.headers.getSetCookie().some((cookie) => ACCOUNT_COOKIE.test(cookie)), 'the refused flow can still finish');
+});
+
+test('a client that disconnects during the exchange aborts the token request', async (t) => {
+  const ctx = await startRoutes(t);
+  ctx.google.hold = new Promise(() => {});
+  const flow = await beginSignIn(ctx);
+  const target = new URL(`${CALLBACK}?${new URLSearchParams({ state: flow.state, code: 'auth-code' })}`, ctx.base);
+  const client = http.get(target, { headers: { cookie: flow.flowCookie } });
+  client.on('error', () => {});
+  await until(() => ctx.google.requests === 1);
+  client.destroy();
+  await until(() => ctx.google.aborts.length === 1);
+  assert.deepEqual(ctx.google.aborts, ['AbortError'], 'aborted by the disconnect, not the token timeout');
+  await until(() => ctx.routes.pendingExchanges === 0);
 });
 
 test('callback answers that never reach sign-in still clear rb_oauth_flow', async (t) => {
@@ -283,7 +402,9 @@ test('callback answers that never reach sign-in still clear rb_oauth_flow', asyn
   clearsFlowOnly(wrongMethod);
   ctx.lifecycle.unavailable = true;
   const unavailable = await callback(ctx, flow, { code: 'auth-code' });
-  assert.equal(unavailable.status, 503);
+  assert.equal(unavailable.status, 302);
+  assert.equal(authErrorOf(unavailable), UNAVAILABLE);
+  assert.equal(withoutAuthError(unavailable), FALLBACK_URL);
   clearsFlowOnly(unavailable);
   assert.equal(ctx.google.requests, 0);
 
@@ -358,6 +479,49 @@ test('logout clears the cookie without touching the account', async (t) => {
   assert.equal((await accountGet(ctx, cookie)).status, 200, 'a copied cookie still works until logout-all');
 });
 
+test('plain logout still signs out while the relay is unavailable; logout-all and delete do not', async (t) => {
+  const ctx = await startRoutes(t);
+  const { cookie } = await signIn(ctx);
+  ctx.lifecycle.unavailable = true;
+  const response = await accountPost(ctx, LOGOUT, cookie);
+  assert.equal(response.status, 204);
+  assert.match(response.headers.getSetCookie()[0], CLEARED_ACCOUNT_COOKIE);
+  assert.equal((await accountPost(ctx, LOGOUT, cookie, OTHER_ORIGIN)).status, 403);
+  assert.equal((await accountPost(ctx, LOGOUT_ALL, cookie)).status, 503);
+  assert.equal((await accountPost(ctx, DELETE, cookie)).status, 503);
+});
+
+test('signed-out account GET clears rb_account only when the request sent one', async (t) => {
+  const ctx = await startRoutes(t);
+  const none = await accountGet(ctx, '');
+  assert.equal(none.status, 401);
+  assert.deepEqual(none.headers.getSetCookie(), []);
+  for (const cookie of ['rb_account=bogus', 'rb_account=a; rb_account=b', 'theme=dark; rb_account=']) {
+    const response = await accountGet(ctx, cookie);
+    assert.equal(response.status, 401, cookie);
+    assert.match(response.headers.getSetCookie()[0], CLEARED_ACCOUNT_COOKIE, cookie);
+  }
+});
+
+test('delete with a cookie from before an overlapping logout-all answers 401 and keeps the account', async (t) => {
+  const reads = heldReads();
+  const store = await openStore(t, reads.wrap);
+  const ctx = await startRoutes(t, { store });
+  const { cookie } = await signIn(ctx);
+  const id = cookie.split('.')[1];
+  reads.hold('acct:');
+  const loggedOutElsewhere = store.bumpSessionGeneration(id);
+  await until(() => reads.gate.waiting);
+  const deleting = accountPost(ctx, DELETE, cookie);
+  await until(() => store.pendingOperations === 2);
+  reads.release();
+  assert.equal((await loggedOutElsewhere).sessionGeneration, 1);
+  const response = await deleting;
+  assert.equal(response.status, 401);
+  assert.match(response.headers.getSetCookie()[0], CLEARED_ACCOUNT_COOKIE);
+  assert.equal((await store.get(id)).sessionGeneration, 1, 'the account survives');
+});
+
 test('account answers 401 and clears the cookie after logout-all', async (t) => {
   const ctx = await startRoutes(t);
   const { cookie } = await signIn(ctx);
@@ -394,7 +558,9 @@ test('start beyond 20 per minute from one IP answers 429', async (t) => {
   assert.equal(limited.status, 429);
   assert.ok(Number(limited.headers.get('retry-after')) > 0);
   const limitedCallback = await ctx.request(CALLBACK);
-  assert.equal(limitedCallback.status, 429, 'callback shares the per-IP budget');
+  assert.equal(limitedCallback.status, 302, 'callback shares the per-IP budget');
+  assert.equal(authErrorOf(limitedCallback), UNAVAILABLE);
+  assert.equal(withoutAuthError(limitedCallback), FALLBACK_URL);
   assert.deepEqual(limitedCallback.headers.getSetCookie().map((cookie) => CLEARED_FLOW_COOKIE.test(cookie)), [true]);
   assert.equal((await beginSignIn(ctx, { ip: '203.0.113.2' })).response.status, 302, 'other IPs keep their own budget');
 });
