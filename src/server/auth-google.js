@@ -178,12 +178,15 @@ function authorizationLocation(config, flow) {
  */
 export function startAuthorization(config, returnTo, signingKey, ledger, { prefixed = false, nowMs = Date.now() } = {}) {
   const flow = { state: randomValue(), nonce: randomValue(), verifier: randomValue(), returnTo, expiresAt: nowMs + ledger.ttlMs };
+  let value = encodedFlow(flow, signingKey);
+  // JSON escaping can double a long returnTo past the cookie cap; its origin root always fits.
+  if (value.length > MAX_FLOW_COOKIE_CHARACTERS) {
+    flow.returnTo = `${new URL(returnTo).origin}/`;
+    value = encodedFlow(flow, signingKey);
+  }
   if (!ledger.register(flow.state, flow.expiresAt, nowMs)) return null;
   const maxAgeSeconds = Math.floor(ledger.ttlMs / MILLISECONDS_PER_SECOND);
-  return {
-    location: authorizationLocation(config, flow),
-    flowCookie: flowCookieHeader(config, prefixed, encodedFlow(flow, signingKey), maxAgeSeconds),
-  };
+  return { location: authorizationLocation(config, flow), flowCookie: flowCookieHeader(config, prefixed, value, maxAgeSeconds) };
 }
 
 export const readFlowCookie = (req, maxCookieHeaderBytes) => singleCookieValue(req, FLOW_COOKIE_NAME, maxCookieHeaderBytes);

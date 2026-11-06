@@ -25,7 +25,11 @@ import {
 import { finalizeRelayVotes } from './src/server/relay-vote-maintenance.js';
 import { RoomRegistry, REGISTRY_STORAGE_FAILURE_EVENT, TOKENIZED_ROOM_RE, databaseCapacityError } from './src/server/relay-room-registry.js';
 import { RelayMaintenance, MAINTENANCE_STORAGE_FAILURE_EVENT } from './src/server/relay-maintenance.js';
-import { directorySizeSync, loadSessionSigningKey } from './src/server/relay-local-files.js';
+import { directorySizeSync, loadSessionSigningKey, loadSigningKey, ACCOUNT_SESSION_KEY } from './src/server/relay-local-files.js';
+import { AccountStore, ACCOUNT_STORAGE_FAILURE_EVENT } from './src/server/account-store.js';
+import { AccountSessions } from './src/server/auth-session.js';
+import { FlowLedger } from './src/server/auth-google.js';
+import { createAuthRoutes, enabledOAuthConfig } from './src/server/auth-routes.js';
 import { publicRelayEnvironment, isPublicWallEnabled, PUBLIC_RELAY_PREFIX, PUBLIC_SNAPSHOT_DIRECTORY, PUBLIC_ACTION_LIMIT_REASON } from './src/server/public-wall-config.js';
 import { claimPublicDirectory, PublicWallHistory } from './src/server/public-wall-history.js';
 import { provisionPublicWall, RelayPublicWall, retainPublicDocument } from './src/server/relay-public-wall.js';
@@ -333,6 +337,8 @@ const markStorageFailure = (err) => {
 };
 
 roomRegistry.on(REGISTRY_STORAGE_FAILURE_EVENT, markStorageFailure);
+const accountStore = new AccountStore({ ldb, getMeta: checkedGetMeta, hasCapacity: registryPersistence.hasCapacity });
+accountStore.on(ACCOUNT_STORAGE_FAILURE_EVENT, markStorageFailure);
 
 const reconcileUploadUsage = async () => {
   const scanned = scanUploadUsage(relayConfig);
@@ -1312,6 +1318,13 @@ if (publicWall) {
   retainPublicDocument(publicDoc);
 }
 const rejectionCounters = createRejectionCounters((message, counts) => console.log(message, counts));
+const ACCOUNT_SIGNING_KEY = loadSigningKey(DB_DIR, ACCOUNT_SESSION_KEY);
+const authRoutes = createAuthRoutes({
+  oauth: enabledOAuthConfig(process.env, { allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, log: console }),
+  sessions: new AccountSessions({ signingKey: ACCOUNT_SIGNING_KEY, allowInsecureHttp: ALLOW_INSECURE_HTTP, maxCookieHeaderBytes: MAX_COOKIE_HEADER_BYTES }),
+  accountKey: ACCOUNT_SIGNING_KEY, store: accountStore, ledger: new FlowLedger(), allowedOrigins: ALLOWED_ORIGINS,
+  allowInsecureHttp: ALLOW_INSECURE_HTTP, maxCookieHeaderBytes: MAX_COOKIE_HEADER_BYTES, rejectionCounters,
+});
 const rejectUpgrade = (socket, status) => {
   rejectionCounters.upgrade(status);
   sendUpgradeRejection(socket, status);
@@ -1394,6 +1407,7 @@ const server = http.createServer({ maxHeaderSize: MAX_HEADER_BYTES }, (req, res)
     void handleRoomSession(req, res, clientIp, prefixed);
     return;
   }
+  if (authRoutes.handle(req, res, routePath, { prefixed, clientIp, unavailable: () => shuttingDown || Boolean(storageFailure) })) return;
   if (handleRoomRoute(req, res, routePath, {
     hasQueryOrFragment, allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP,
     unavailable: shuttingDown || Boolean(storageFailure), rooms: registeredRoomsByHandle,
@@ -1768,9 +1782,10 @@ const lifecycle = createRelayLifecycle({
     const roomCount = docs.size;
     await drainRelay({
       server, clients: wss.clients, httpGraceMs: HTTP_SHUTDOWN_GRACE_MS,
-      isBusy: () => maintenance.running || roomRegistry.pendingRoomCreations > 0 || uploadState.active > 0 || pendingStoreOps > 0,
+      isBusy: () => maintenance.running || roomRegistry.pendingRoomCreations > 0 || uploadState.active > 0 || pendingStoreOps > 0
+        || accountStore.pendingOperations > 0 || authRoutes.pendingExchanges > 0,
       compactions: () => [...roomPersistenceChurn.values()].map((churn) => churn.compactionPromise).filter(Boolean),
-      destroyStorage: async () => { await roomRegistry.activity.stop(); await ldb.destroy(); },
+      destroyStorage: async () => { await roomRegistry.activity.stop(); await accountStore.stop(); await ldb.destroy(); },
     });
     console.log('[yjs] drained', { rooms: roomCount });
   },

@@ -225,6 +225,20 @@ test('ledger full makes start return null', () => {
   assert.ok(start(nowMs + FLOW_TTL_MS), 'expired flows are pruned to make room');
 });
 
+test('oversized returnTo falls back so the flow cookie stays within its cap', () => {
+  const MAX_FLOW_COOKIE_CHARACTERS = 3300;
+  const key = newKey();
+  const ledger = new FlowLedger();
+  // returnUrl keeps backslashes in the query and allows 2048 characters; JSON doubles each one.
+  const escaped = returnUrl(`${BOARD_ORIGIN}/b?q=${'\\'.repeat(2000)}`, ALLOWED_ORIGINS, false);
+  assert.ok(escaped.length > 2000, 'returnUrl accepted the long target');
+  const flowStart = startAuthorization(config(), escaped, key, ledger, { prefixed: true });
+  const value = cookieValue(flowStart.flowCookie);
+  assert.ok(value.length <= MAX_FLOW_COOKIE_CHARACTERS, `cookie is ${value.length} characters`);
+  const flow = verifyFlow(callbackQuery(stateOf(flowStart.location)), value, key, ledger);
+  assert.equal(flow.returnTo, `${BOARD_ORIGIN}/`);
+});
+
 test('ledger claim is single use and refuses expired entries', () => {
   const nowMs = Date.now();
   const ledger = new FlowLedger({ maxFlows: 4, ttlMs: MILLISECONDS_PER_MINUTE });
