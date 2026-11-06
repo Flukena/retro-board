@@ -76,7 +76,7 @@ Notes:
   to keep it without egress. Its `environment` list is its own, so it inherits
   no Google variables. After the change, confirm with `docker inspect` (step C5).
 - `YJS_ALLOWED_ORIGINS=https://retroroom.party` is a literal in the compose file
-  (lines 59 and 125), not read from `.env`, so it is non-empty. The Google
+  (lines 59 and 120), not read from `.env`, so it is non-empty. The Google
   variables are passed through from `.env`; the owner adds
   `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` there (never in the
   repo). `YJS_ACCOUNT_SESSION_SECRET` is optional; without it the relay creates
