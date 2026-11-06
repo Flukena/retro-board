@@ -5,6 +5,7 @@ import { Monitoring } from './Monitoring.jsx';
 import { RoomActivity } from './RoomActivity.jsx';
 import { RoomAccess } from './RoomAccess.jsx';
 import { IdleRooms } from './IdleRooms.jsx';
+import { Accounts } from './Accounts.jsx';
 import { formatMib } from './monitoring-format.js';
 
 const REFRESH_INTERVAL_MS = 5000;
@@ -60,6 +61,7 @@ function Dashboard({ data, history }) {
     <Monitoring data={data} history={history} />
     <IdleRooms rooms={data.rooms} now={Date.parse(data.at)} publicWall={data.publicWall} />
     <Rooms rooms={data.rooms} now={Date.parse(data.at)} />
+    <Accounts />
   </>;
 }
 

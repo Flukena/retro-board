@@ -5,6 +5,7 @@ import { MAINTAINER_REFRESH_MS } from './maintainer-snapshot.js';
 import { envBool } from './relay-config.js';
 import { createMaintainerSessions } from './maintainer-session.js';
 import { createMaintainerRoomLinks } from './maintainer-room-access.js';
+import { handleMaintainerAccounts } from './maintainer-accounts.js';
 
 const DEFAULT_PORT = 1240;
 const MAX_PORT = 65535;
@@ -55,7 +56,7 @@ const respond = (res, status, body = '', type = 'text/plain', headers = {}) => {
   res.end(body);
 };
 
-export function createMaintainerServer({ key, origins = new Set(), container = false, snapshot, roomLink = () => null, retireIdle = null, assets = new Map() }) {
+export function createMaintainerServer({ key, origins = new Set(), container = false, snapshot, roomLink = () => null, retireIdle = null, accounts = null, assets = new Map() }) {
   const expected = digest(`Bearer ${key}`);
   let sessions;
   const authenticatedKey = req => req.headersDistinct.authorization?.length === 1
@@ -80,6 +81,7 @@ export function createMaintainerServer({ key, origins = new Set(), container = f
     const url = roomLink(handle);
     respond(res, url ? 200 : 404, url ? JSON.stringify({ url }) : '', 'application/json');
   };
+  const ownerAuthenticated = req => authenticatedKey(req) || sessions.valid(req.headers.cookie);
   let cached;
   let expiresAt = 0;
   let retiring = null;
@@ -98,6 +100,7 @@ export function createMaintainerServer({ key, origins = new Set(), container = f
   const server = createServer({ maxHeaderSize: MAX_HEADER_BYTES }, (req, res) => {
     if (!allowedRequest(req, origins, container)) { respond(res, 403); return; }
     if (req.url === '/api/session') { sessionRequest(req, res); return; }
+    if (handleMaintainerAccounts(req, res, { store: accounts, origins, authenticated: ownerAuthenticated })) return;
     if (req.url === RETIRE_IDLE_PATH) { retireIdleRooms(req, res); return; }
     const join = /^\/api\/rooms\/([A-Za-z0-9_-]{32})\/join$/.exec(req.url);
     if (join) { joinRoom(req, res, join[1]); return; }
@@ -133,12 +136,12 @@ export function createMaintainerServer({ key, origins = new Set(), container = f
   return server;
 }
 
-export async function startMaintainer(env, snapshot, roomAccess, retireIdle = null) {
+export async function startMaintainer(env, snapshot, roomAccess, retireIdle = null, accounts = null) {
   const config = maintainerConfig(env);
   if (!config) return null;
   const root = new URL('../../dist-maintainer/', import.meta.url);
   const assets = new Map(ASSETS.map(([path, file, type]) => [path, { body: readFileSync(new URL(file, root)), type }]));
-  const server = createMaintainerServer({ ...config, snapshot, assets, roomLink: createMaintainerRoomLinks(roomAccess), retireIdle });
+  const server = createMaintainerServer({ ...config, snapshot, assets, roomLink: createMaintainerRoomLinks(roomAccess), retireIdle, accounts });
   await new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(config.port, config.container ? '0.0.0.0' : '127.0.0.1', resolve);

@@ -1340,7 +1340,7 @@ const maintainer = await startMaintainer(process.env, () => maintainerSnapshot({
 }), { registry: roomRegistry, boardOrigin: ALLOWED_ORIGINS[0], publicWall: PUBLIC_WALL }, () => retireIdleRooms({
   registry: roomRegistry, docs, connections: wsConnectionsByRoom, blockedRooms, roomPersistenceChurn,
   publicWall: PUBLIC_WALL, uploadsDir: UPLOADS_DIR, io: fs.promises, reconcileUploadUsage, log: console,
-}));
+}), accountStore);
 maintenance.on(MAINTENANCE_STORAGE_FAILURE_EVENT, markStorageFailure);
 const runMaintenance = () => maintenance.run({
   publicWall: publicWall && { docName: publicWall.docName, history: publicHistory },
