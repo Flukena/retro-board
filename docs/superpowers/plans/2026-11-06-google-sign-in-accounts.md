@@ -47,7 +47,8 @@ Moving existing logic out is welcome (AGENTS.md); later tasks need wiring lines 
 - Modify: `yjs-server.mjs:1378-1438` (the `uploadMatch`/`roomImageMatch` regexes, the room OPTIONS preflight, room upload POST, room image GET and legacy image GET), `Dockerfile.yjs` server COPY list
 
 **Interfaces:**
-- Produces: `handleRoomRoute(req, res, routePath, ctx) → boolean` where `ctx = { hasQueryOrFragment, allowedOrigins, allowInsecureHttp, unavailable, rooms /* Map handle→docName */, authenticate /* (req, handle) → {docName}|null */, uploads, clientIp }`. Returns `true` when it answered. Also exports `CORS_ROOM_METHODS = 'POST, OPTIONS'` reused by Task 5's preflight.
+- Produces: `handleRoomRoute(req, res, routePath, ctx) → boolean` where `ctx = { hasQueryOrFragment, allowedOrigins, allowInsecureHttp, unavailable, rooms /* Map handle→docName */, authenticate /* (req, handle) → {docName}|null */, uploads, clientIp }`. Returns `true` when it answered.
+- Produces (in `src/server/relay-http.js`): `sendCredentialPreflight(req, res, { allowedOrigins, allowInsecureHttp, methods }) → void` — the one credential-preflight writer (Origin check, 204, `access-control-allow-methods`, `Content-Type` header, `CORS_PREFLIGHT_MAX_AGE_SECONDS`, `no-store`). Used by the coordinator's `/api/rooms`/`/api/room-session` preflight, by `handleRoomRoute`, and by Task 5.
 
 - [ ] **Step 1: Write failing tests** in `relay-room-routes.test.mjs` with a fake `res` and stub `uploads`:
   - `preflight for a registered room upload answers 204 with POST, OPTIONS`
@@ -56,7 +57,7 @@ Moving existing logic out is welcome (AGENTS.md); later tasks need wiring lines 
   - `room image with a foreign Origin answers 403`
   - `unrelated path returns false and writes nothing`
 - [ ] **Step 2:** `npm test -- src/server/relay-room-routes.test.mjs` → FAIL (module missing)
-- [ ] **Step 3:** Move the blocks verbatim into `handleRoomRoute`; `yjs-server.mjs` calls it once after the `/readyz` branch. Keep the `/api/rooms` and `/api/room-session` OPTIONS handling where it is.
+- [ ] **Step 3:** Move the blocks verbatim into `handleRoomRoute`; `yjs-server.mjs` calls it once after the `/readyz` branch. Replace the inline preflight body with `sendCredentialPreflight` at both sites (add a `relay-http.test.mjs` case `preflight rejects a foreign Origin and sets max-age`).
 - [ ] **Step 4:** `npm test -- --test-concurrency=1` → all PASS; `wc -l yjs-server.mjs` ≤ 1800
 - [ ] **Step 5:** Commit `refactor(relay): move room upload and image routes out of the coordinator`
 
@@ -80,6 +81,7 @@ Moving existing logic out is welcome (AGENTS.md); later tasks need wiring lines 
   - `setPlan rejects unknown plans and stamps planGrantedAt`
   - `delete removes record, sub and email indexes`
   - `accounts never appear in getAllDocNames` (after writes, `getAllDocNames()` excludes `ACCOUNTS_DOC_NAME`)
+  - `account records survive closing and reopening the database` (proves the `\u0000`-prefixed doc name round-trips through y-leveldb key encoding)
   - relay-storage: `delMeta null result raises STORAGE_FAILURE`
 - [ ] **Step 2:** run → FAIL
 - [ ] **Step 3:** Implement. `delMeta` follows the `setMeta` null-check contract in `checkedStorage`.
@@ -152,7 +154,7 @@ Moving existing logic out is welcome (AGENTS.md); later tasks need wiring lines 
 | `POST /api/account/delete` | delete account, 204 + clear cookie |
 | `OPTIONS /api/account*` | credential preflight like existing routes |
 
-- `GET /api/account` and every POST pass `acceptCredentialOrigin`. Start/callback are top-level navigations (no Origin check), rate-limited per IP with `trafficBucketFor` at `AUTH_FLOWS_PER_IP_PER_MINUTE = 20` → 429. Callback failures log `[auth] google callback failed { code }` only.
+- `GET /api/account` follows the room-image GET pattern (`yjs-server.mjs:1426-1431`): set credential CORS when an allowed Origin is present, reject 403 only when an Origin is present **and** foreign — a same-origin production `fetch` GET sends no Origin header. Every POST passes `acceptCredentialOrigin`. Start/callback are top-level navigations (no Origin check), rate-limited per IP with `trafficBucketFor` at `AUTH_FLOWS_PER_IP_PER_MINUTE = 20` → 429. Callback failures log `[auth] google callback failed { code }` only.
 
 - [ ] **Step 1: Failing tests** (real `AccountStore` on temp LevelDB, stubbed `fetchImpl` via an injected oauth stub):
   - `auth routes answer 404 when Google is not configured`
@@ -161,6 +163,8 @@ Moving existing logic out is welcome (AGENTS.md); later tasks need wiring lines 
   - `callback rejects a reused flow cookie`
   - `callback maps provider error to auth_error`
   - `account answers 401 and clears the cookie after logout-all`
+  - `account GET without an Origin header answers 200` (production same-origin shape)
+  - `account GET with a foreign Origin answers 403`
   - `account POSTs reject a foreign Origin with 403`
   - `delete removes the account and later callbacks create a new free account`
   - `start beyond 20 per minute from one IP answers 429`
@@ -211,18 +215,18 @@ Moving existing logic out is welcome (AGENTS.md); later tasks need wiring lines 
 
 **Interfaces:**
 - `fake-google-oidc.mjs` listens on `127.0.0.1:${FAKE_OIDC_PORT:-4455}`: `/o/oauth2/v2/auth` shows a one-button page that redirects back with a code; `/token` checks the PKCE verifier and returns an unsigned-JWT `id_token` with `iss = http://127.0.0.1:4455`, the requested `nonce`, `email_verified: true`. Run relay with `GOOGLE_OAUTH_ENDPOINT_BASE=http://127.0.0.1:4455` plus dummy client id/secret and `GOOGLE_OAUTH_REDIRECT_URI=http://localhost:1234/api/auth/google/callback`.
-- `account-live-check.mjs` (two Playwright contexts): A signs in → masthead shows name + Free; B stays a guest and can still create and open a board; maintainer API grants Pro → A sees Pro after reload; A "Sign out everywhere" → A signed-out; cancel at the stub → `auth_error=access_denied` toast; run once with `rb_lang=th` and once `en`.
+- `account-live-check.mjs` (two Playwright contexts): A signs in → masthead shows name + Free; B stays a guest and can still create and open a board; maintainer API grants Pro → A sees Pro after reload; A "Sign out everywhere" → A signed-out; cancel at the stub → `auth_error=access_denied` toast; a Node `fetch` of `GET <relay>/api/account` with the signed-in cookie and **no** Origin header → 200; run once with `rb_lang=th` and once `en`. CLI shape matches the other live checks: `node scripts/account-live-check.mjs <local-base-url> <BaseData output>`; screenshots, `report.json` and browser scratch stay in the output directory.
 
 - [ ] **Step 1:** Write both scripts.
-- [ ] **Step 2:** Run `npm run oidc:dev`, relay with the env above, `npm run dev`, then `node scripts/account-live-check.mjs > <session scratchpad>/account-live.log 2>&1`; `tail` → all checks PASS.
+- [ ] **Step 2:** Run `npm run oidc:dev`, relay with the env above, `npm run dev`, then `node scripts/account-live-check.mjs http://localhost:5173 /Volumes/ssd-fluke/BaseData/retro-board/account-live-<YYYYMMDD>`; `report.json` → all checks PASS (volume unmounted → stop and report).
 - [ ] **Step 3:** Commit `test(account): dev OIDC stub and two-context live check`
 
 ### Task 9: Docs and legal
 
 **Files:**
-- Modify: `SECURITY.md` (new "Accounts" section: optional Google identity, what is stored, cookie flags, accounts do not change room capability rules yet), `DEPLOYMENT.md` (env names, Google console setup, egress requirement), `src/client/legal/legal-content.js` + i18n keys (privacy: data collected = Google `sub`, email, name, plan; purpose; deletion via Delete account; bump `LEGAL_EFFECTIVE_DATE_ISO`), spec §4 (apply the three deviations above)
+- Modify: `SECURITY.md` (new "Accounts" section: optional Google identity, what is stored, cookie flags, accounts do not change room capability rules yet), `DEPLOYMENT.md` (env names, Google console setup, egress requirement, and the backup decision: accounts live in the existing LevelDB so `scripts/backup-production.sh` already captures them; `getAllDocNames()` hides them so verify neither checks nor breaks on them), `scripts/verify-production-backup.sh` (one assertion: the restored DB answers `getMeta('\u0000accounts', …)` without a storage failure), `src/rule-ratchets.test.js` (lower `YJS_SERVER_MAX_LINES` to the final `wc -l yjs-server.mjs`), `src/client/legal/legal-content.js` + i18n keys (privacy: data collected = Google `sub`, email, name, plan; purpose; deletion via Delete account; bump `LEGAL_EFFECTIVE_DATE_ISO`), spec §4 (apply the three deviations above)
 
-- [ ] **Step 1:** Add a legal-content test `privacy policy has an accounts section in th and en`; run → FAIL
+- [ ] **Step 1:** Add a legal-content test `privacy policy has an accounts section in th and en`; run → FAIL. (`verify-production-backup.sh` is owner-approval territory per AGENTS.md: prepare that diff in Task 10's rollout doc instead of committing it if the owner has not approved.)
 - [ ] **Step 2:** Write the docs/legal changes; run → PASS
 - [ ] **Step 3:** Commit `docs(accounts): security model, deployment and privacy policy for Google sign-in`
 
