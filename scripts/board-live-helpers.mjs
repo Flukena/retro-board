@@ -1,5 +1,5 @@
 // Shared Playwright helpers for two-participant board live checks
-// (retro-outcomes-live-check.mjs, facilitation-live-check.mjs).
+// (retro-outcomes-live-check.mjs, facilitation-live-check.mjs, account-live-check.mjs).
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -16,18 +16,18 @@ const JSON_INDENT_SPACES = 2;
 export const BASE_LABELS = {
   en: { create: 'Create', namePlaceholder: 'e.g. "Fluke"', nameConfirm: 'Enter room', sticky: 'Double-click to edit',
     more: 'More', reveal: 'Off: hide in the normal UI (not encrypted)' },
-  th: { namePlaceholder: 'เช่น "ฟลุค"', nameConfirm: 'เข้าห้อง', sticky: 'ดับเบิลคลิกเพื่อแก้ไข', more: 'เพิ่มเติม',
+  th: { create: 'สร้างห้อง', namePlaceholder: 'เช่น "ฟลุค"', nameConfirm: 'เข้าห้อง', sticky: 'ดับเบิลคลิกเพื่อแก้ไข', more: 'เพิ่มเติม',
     reveal: 'ปิด: ซ่อนในหน้าจอปกติ (ไม่ได้เข้ารหัส)' },
 };
 
-async function loadPlaywright() {
+export async function loadPlaywright() {
   const dir = process.env.PLAYWRIGHT_MODULE || join(execFileSync('npm', ['root', '-g'], { encoding: 'utf8' }).trim(), 'playwright');
   const entry = join(dir, 'index.mjs');
   if (!existsSync(entry)) throw new Error(`Playwright missing at ${entry}`);
   return import(pathToFileURL(entry).href);
 }
 
-async function participant(browser, lang, report, name) {
+export async function participant(browser, lang, report, name) {
   const context = await browser.newContext({ viewport: VIEWPORT, acceptDownloads: true });
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await context.addInitScript((value) => { if (!localStorage.getItem('rb_lang')) localStorage.setItem('rb_lang', value); }, lang);
@@ -129,8 +129,11 @@ async function sharedBoard(browser, baseUrl, report) {
   return { a, b };
 }
 
-/** CLI entry: `<script> <base-url> <output-dir>`; `scenario({a, b, report})` runs the steps. */
-export async function runLiveCheck(scriptName, scenario) {
+/**
+ * CLI entry: `<script> <base-url> <output-dir>`; `scenario({a, b, report, browser, baseUrl})` runs the steps.
+ * `setup(browser, baseUrl, report)` prepares the participants; by default A creates a board and B joins it.
+ */
+export async function runLiveCheck(scriptName, scenario, { setup = sharedBoard } = {}) {
   const [baseUrl, out] = process.argv.slice(2);
   if (!baseUrl || !out) throw new Error(`usage: ${scriptName} <base-url> <output-dir>`);
   await mkdir(out, { recursive: true });
@@ -138,7 +141,7 @@ export async function runLiveCheck(scriptName, scenario) {
   const { chromium } = await loadPlaywright();
   const browser = await chromium.launch();
   try {
-    await scenario({ ...(await sharedBoard(browser, baseUrl, report)), report });
+    await scenario({ ...(await setup(browser, baseUrl, report)), report, browser, baseUrl });
   } catch (error) {
     console.error(`FAIL: ${error.message}`);
     process.exitCode = 1;

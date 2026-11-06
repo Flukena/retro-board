@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { fileURLToPath } from 'node:url';
 import { FAKE_GOOGLE_PROFILE, startFakeGoogleOidc } from './fake-google-oidc.mjs';
 
 const VERIFIER = 'v'.repeat(43);
@@ -55,4 +58,35 @@ test('stub cancel returns access_denied with the state', async (t) => {
   assert.equal(location.searchParams.get('state'), AUTH_PARAMS.state);
   const consent = await fetch(`${stub.url}/auth?${new URLSearchParams(AUTH_PARAMS)}`);
   assert.match(await consent.text(), /id="approve"/);
+});
+
+const STUB_SCRIPT = fileURLToPath(new URL('./fake-google-oidc.mjs', import.meta.url));
+const LISTENING_LINE_RE = /listening on (http:\/\/127\.0\.0\.1:\d+)/;
+
+async function listeningUrl(child) {
+  let output = '';
+  for await (const chunk of child.stdout) {
+    output += chunk;
+    const match = LISTENING_LINE_RE.exec(output);
+    if (match) return match[1];
+  }
+  throw new Error(`stub CLI exited without a URL: ${output}`);
+}
+
+test('CLI serves the consent page on FAKE_OIDC_PORT and stops on SIGTERM', async (t) => {
+  const child = spawn(process.execPath, [STUB_SCRIPT], { env: { ...process.env, FAKE_OIDC_PORT: '0' }, stdio: ['ignore', 'pipe', 'inherit'] });
+  t.after(() => child.kill('SIGKILL'));
+  const url = await listeningUrl(child);
+  const consent = await fetch(`${url}/auth?${new URLSearchParams(AUTH_PARAMS)}`);
+  assert.match(await consent.text(), /id="cancel"/);
+  const exited = once(child, 'exit');
+  child.kill('SIGTERM');
+  const [code] = await exited;
+  assert.equal(code, 0, 'SIGTERM closes the server and exits cleanly');
+});
+
+test('CLI refuses an invalid FAKE_OIDC_PORT', async () => {
+  const child = spawn(process.execPath, [STUB_SCRIPT], { env: { ...process.env, FAKE_OIDC_PORT: 'nope' }, stdio: ['ignore', 'ignore', 'pipe'] });
+  const [code] = await once(child, 'exit');
+  assert.notEqual(code, 0);
 });

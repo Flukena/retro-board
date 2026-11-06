@@ -1,8 +1,12 @@
 // Dev-only stand-in for Google's OIDC endpoints, matching the relay's
 // GOOGLE_OAUTH_ENDPOINT_BASE override: `${url}/auth`, `${url}/token`, iss === url.
 // It issues unsigned ID tokens, so it must never face real users.
+// CLI (`npm run oidc:dev`): listens on 127.0.0.1:${FAKE_OIDC_PORT:-4455}, prints its URL
+// (use it as GOOGLE_OAUTH_ENDPOINT_BASE) and stops on SIGINT/SIGTERM.
 import http from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const LOOPBACK_HOST = '127.0.0.1';
 const AUTH_PATH = '/auth';
@@ -22,6 +26,9 @@ const HTTP_NOT_FOUND = 404;
 const HTTP_PAYLOAD_TOO_LARGE = 413;
 const INVALID_GRANT = 'invalid_grant';
 const UNSIGNED_JWT_HEADER = Object.freeze({ alg: 'none', typ: 'JWT' });
+const DEFAULT_CLI_PORT = 4455;
+const MAX_PORT = 65_535;
+const STOP_SIGNALS = Object.freeze(['SIGINT', 'SIGTERM']);
 const AUTH_PARAMS = Object.freeze(['client_id', 'redirect_uri', 'state', 'nonce', 'code_challenge']);
 export const FAKE_GOOGLE_PROFILE = Object.freeze({ sub: 'fake-google-sub-1', email: 'dev.user@example.com', name: 'Dev User' });
 
@@ -144,3 +151,17 @@ export async function startFakeGoogleOidc({ port = 0, issuer = null, onTokenRequ
   const close = () => new Promise((resolve) => { server.closeAllConnections(); server.close(() => resolve()); });
   return { url, close };
 }
+
+function cliPort(raw = String(DEFAULT_CLI_PORT)) {
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port < 0 || port > MAX_PORT) throw new Error(`Invalid FAKE_OIDC_PORT: ${raw}`);
+  return port;
+}
+
+async function main() {
+  const stub = await startFakeGoogleOidc({ port: cliPort(process.env.FAKE_OIDC_PORT) });
+  console.log(`fake Google OIDC listening on ${stub.url}`);
+  for (const signal of STOP_SIGNALS) process.once(signal, () => { void stub.close(); });
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
