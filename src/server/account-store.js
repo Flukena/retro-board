@@ -1,0 +1,206 @@
+import { EventEmitter } from 'node:events';
+import { randomBytes } from 'node:crypto';
+import { PLAN, isKnownPlan } from '../domain/plan-entitlements.js';
+import { STORAGE_FAILURE_CODE, durableMetaBatch } from './relay-storage.js';
+
+// Leading NUL keeps the accounts document out of every room/handle namespace.
+// Accounts are meta-only (no Yjs updates), so getAllDocNames never lists it.
+export const ACCOUNTS_DOC_NAME = '\u0000accounts';
+export const ACCOUNT_STORAGE_FAILURE_EVENT = 'storage-failure';
+const ACCOUNT_STORE_UNAVAILABLE_CODE = 'ACCOUNT_STORE_UNAVAILABLE';
+const DATABASE_CAPACITY_CODE = 'DATABASE_CAPACITY';
+const UNKNOWN_PLAN_CODE = 'UNKNOWN_PLAN';
+const ACCOUNT_STORE_UNAVAILABLE_MESSAGE = 'account store unavailable';
+const DATABASE_CAPACITY_MESSAGE = 'database capacity reached';
+const UNKNOWN_PLAN_MESSAGE = 'unknown plan';
+const INVALID_PROFILE_MESSAGE = 'Google profile needs a sub and an email';
+const ACCOUNT_ID_BYTES = 16;
+const ACCOUNT_ID_ENCODING = 'base64url';
+const INITIAL_SESSION_GENERATION = 0;
+const SESSION_GENERATION_STEP = 1;
+const MISSING_NAME = '';
+const ACCOUNT_KEY_PREFIX = 'acct:';
+const SUB_KEY_PREFIX = 'sub:';
+const EMAIL_KEY_PREFIX = 'email:';
+
+const codedError = (message, code) => Object.assign(new Error(message), { code });
+const unavailableError = () => codedError(ACCOUNT_STORE_UNAVAILABLE_MESSAGE, ACCOUNT_STORE_UNAVAILABLE_CODE);
+const defaultRandomId = () => randomBytes(ACCOUNT_ID_BYTES).toString(ACCOUNT_ID_ENCODING);
+const ignoreRejection = () => {};
+
+const accountKey = (id) => `${ACCOUNT_KEY_PREFIX}${id}`;
+const subKey = (sub) => `${SUB_KEY_PREFIX}${sub}`;
+const emailKey = (email) => `${EMAIL_KEY_PREFIX}${email.toLowerCase()}`;
+const put = (key, value) => ({ type: 'put', key, value });
+const del = (key) => ({ type: 'del', key });
+const isNonEmptyString = (value) => typeof value === 'string' && value.length > 0;
+
+function googleProfile({ sub, email, name }) {
+  if (!isNonEmptyString(sub) || !isNonEmptyString(email)) throw new TypeError(INVALID_PROFILE_MESSAGE);
+  return { sub, email, name: typeof name === 'string' ? name : MISSING_NAME };
+}
+
+/**
+ * @typedef {object} Account
+ * @property {string} id
+ * @property {string} googleSub identity key; email is only an index
+ * @property {string} email
+ * @property {string} name '' when Google omits it
+ * @property {string} plan
+ * @property {number|null} planGrantedAt ms
+ * @property {number} sessionGeneration integer >= 0
+ * @property {number} createdAt ms
+ */
+
+/**
+ * Durable account records in the relay's LevelDB, as meta keys of one doc:
+ * `acct:<id>` -> Account, `sub:<googleSub>` -> id, `email:<lower-cased>` -> id.
+ * Mutations run one at a time; each logical change is one fsynced batch.
+ * A STORAGE_FAILURE is fatal: it is emitted once as 'storage-failure' and every
+ * later mutation rejects ACCOUNT_STORE_UNAVAILABLE. Other rejections (capacity,
+ * unknown plan, bad input) only fail their own call.
+ */
+export class AccountStore extends EventEmitter {
+  #ldb;
+  #getMeta;
+  #hasCapacity;
+  #now;
+  #randomId;
+  #chain = Promise.resolve();
+  #pending = 0;
+  #stopped = false;
+  #failure = null;
+
+  constructor({ ldb, getMeta, hasCapacity, now = Date.now, randomId = defaultRandomId }) {
+    super();
+    this.#ldb = ldb;
+    this.#getMeta = getMeta;
+    this.#hasCapacity = hasCapacity;
+    this.#now = now;
+    this.#randomId = randomId;
+  }
+
+  get pendingOperations() { return this.#pending; }
+
+  /** @returns {Promise<Account|null>} */
+  get(id) { return this.#read(accountKey(id)); }
+
+  /** @returns {Promise<Account|null>} */
+  async findByEmail(email) {
+    const id = await this.#read(emailKey(email));
+    return id === null ? null : this.get(id);
+  }
+
+  /** @returns {Promise<Account>} */
+  upsertFromGoogle(profile) { return this.#enqueue(() => this.#upsert(googleProfile(profile))); }
+
+  /** @returns {Promise<Account|null>} */
+  setPlan(id, plan) { return this.#enqueue(() => this.#setPlan(id, plan)); }
+
+  /** @returns {Promise<Account|null>} */
+  bumpSessionGeneration(id) {
+    return this.#enqueue(() => this.#update(id, (account) => ({
+      sessionGeneration: account.sessionGeneration + SESSION_GENERATION_STEP,
+    })));
+  }
+
+  /** @returns {Promise<boolean>} */
+  delete(id) { return this.#enqueue(() => this.#delete(id)); }
+
+  // Mutations queued before stop() still run; stop() resolves once they settle.
+  async stop() {
+    this.#stopped = true;
+    await this.#chain;
+  }
+
+  #enqueue(operation) {
+    if (this.#stopped) return Promise.reject(unavailableError());
+    this.#pending += 1;
+    const run = this.#chain
+      .then(() => this.#runIfAvailable(operation))
+      .finally(() => { this.#pending -= 1; });
+    this.#chain = run.catch(ignoreRejection);
+    return run;
+  }
+
+  #runIfAvailable(operation) {
+    if (this.#failure) throw unavailableError();
+    return operation();
+  }
+
+  #reportStorageFailure(error) {
+    if (error?.code !== STORAGE_FAILURE_CODE || this.#failure) return;
+    this.#failure = error;
+    this.emit(ACCOUNT_STORAGE_FAILURE_EVENT, error);
+  }
+
+  async #read(key) {
+    try {
+      return (await this.#getMeta(ACCOUNTS_DOC_NAME, key)) ?? null;
+    } catch (error) {
+      this.#reportStorageFailure(error);
+      throw error;
+    }
+  }
+
+  async #write(ops) {
+    try {
+      await durableMetaBatch(this.#ldb, ACCOUNTS_DOC_NAME, ops);
+    } catch (error) {
+      this.#reportStorageFailure(error);
+      throw error;
+    }
+  }
+
+  // Index entries are removed only while they still point at this account, so a
+  // newer owner of the same email (identity is sub, not email) keeps its index.
+  async #releaseIndex(key, id) {
+    return (await this.#read(key)) === id ? [del(key)] : [];
+  }
+
+  async #upsert(profile) {
+    const id = await this.#read(subKey(profile.sub));
+    const existing = id === null ? null : await this.get(id);
+    return existing ? this.#refresh(existing, profile) : this.#create(profile);
+  }
+
+  async #create({ sub, email, name }) {
+    if (!this.#hasCapacity()) throw codedError(DATABASE_CAPACITY_MESSAGE, DATABASE_CAPACITY_CODE);
+    const account = {
+      id: this.#randomId(), googleSub: sub, email, name, plan: PLAN.FREE,
+      planGrantedAt: null, sessionGeneration: INITIAL_SESSION_GENERATION, createdAt: this.#now(),
+    };
+    await this.#write([put(accountKey(account.id), account), put(subKey(sub), account.id), put(emailKey(email), account.id)]);
+    return account;
+  }
+
+  async #refresh(account, { email, name }) {
+    if (account.email === email && account.name === name) return account;
+    const refreshed = { ...account, email, name };
+    const releasedEmail = emailKey(account.email) === emailKey(email) ? [] : await this.#releaseIndex(emailKey(account.email), account.id);
+    await this.#write([put(accountKey(account.id), refreshed), ...releasedEmail, put(emailKey(email), account.id)]);
+    return refreshed;
+  }
+
+  #setPlan(id, plan) {
+    if (!isKnownPlan(plan)) throw codedError(UNKNOWN_PLAN_MESSAGE, UNKNOWN_PLAN_CODE);
+    return this.#update(id, () => ({ plan, planGrantedAt: this.#now() }));
+  }
+
+  async #update(id, changes) {
+    const account = await this.get(id);
+    if (!account) return null;
+    const updated = { ...account, ...changes(account) };
+    await this.#write([put(accountKey(id), updated)]);
+    return updated;
+  }
+
+  async #delete(id) {
+    const account = await this.get(id);
+    if (!account) return false;
+    const releasedSub = await this.#releaseIndex(subKey(account.googleSub), id);
+    const releasedEmail = await this.#releaseIndex(emailKey(account.email), id);
+    await this.#write([del(accountKey(id)), ...releasedSub, ...releasedEmail]);
+    return true;
+  }
+}

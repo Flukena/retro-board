@@ -1,6 +1,16 @@
+import { createRequire } from 'node:module';
 import { roomLogId } from './relay-log-id.js';
 
-const STORAGE_FAILURE_CODE = 'STORAGE_FAILURE';
+const require = createRequire(import.meta.url);
+// Same lib0 copy y-leveldb's CommonJS build uses, so values decode in getMeta.
+const { encodeAny } = require('lib0/buffer');
+
+export const STORAGE_FAILURE_CODE = 'STORAGE_FAILURE';
+const META_KEY_VERSION = 'v1';
+const META_KEY_KIND = 'meta';
+const DURABLE_WRITE_OPTIONS = Object.freeze({ sync: true });
+const PUT_OPERATION = 'put';
+const DURABLE_META_BATCH_FAILURE = 'durable meta batch failed';
 
 export const storageOperationError = (message) => Object.assign(new Error(message), {
   code: STORAGE_FAILURE_CODE,
@@ -52,4 +62,23 @@ export function checkedStorage(ldb, Y) {
       failIfNull(await ldb.setMeta(docName, key, value), `setMeta failed: ${roomLogId(docName)}`);
     },
   };
+}
+
+const metaKey = (docName, key) => [META_KEY_VERSION, docName, META_KEY_KIND, key];
+const levelMetaOperation = (docName, { type, key, value }) => (type === PUT_OPERATION
+  ? { type, key: metaKey(docName, key), value: Buffer.from(encodeAny(value)) }
+  : { type, key: metaKey(docName, key) });
+
+// Applies every put/del to `docName`'s meta keys as ONE atomic, fsynced LevelDB
+// batch, for durable records (accounts) where setMeta's unsynced put is not enough.
+// Relies on y-leveldb 0.2.0 internals (package.json pins ^0.2.0; re-check on any
+// upgrade): the private `_transact` queue (y-leveldb.js ~453), the
+// ['v1', docName, 'meta', key] key layout (~311) and encodeAny values read back
+// by getMeta (~560, ~577). `_transact` resolves null on any error and a
+// successful batch resolves undefined, so only null means failure. The error
+// message is fixed: keys can carry email addresses.
+export async function durableMetaBatch(ldb, docName, ops) {
+  const operations = ops.map((operation) => levelMetaOperation(docName, operation));
+  const result = await ldb._transact((db) => db.batch(operations, DURABLE_WRITE_OPTIONS));
+  if (result === null) throw storageOperationError(DURABLE_META_BATCH_FAILURE);
 }
