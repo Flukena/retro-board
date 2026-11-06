@@ -12,6 +12,8 @@ const START_TIMEOUT_MS = 5_000;
 const KILL_TIMEOUT_MS = 3_000;
 const HTTP_SHUTDOWN_GRACE_MS = 100;
 const TOKEN_HOLD_MS = 600;
+// Long enough that the client is still connected when the held token answer arrives.
+const LONG_HTTP_SHUTDOWN_GRACE_MS = TOKEN_HOLD_MS * 5;
 const GOOGLE_ISSUER = 'https://accounts.google.com';
 const GOOGLE_TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
 const SECURE_ORIGIN = 'https://board.example';
@@ -138,6 +140,31 @@ test('sign-in routes answer 404 when allowed origins are empty and the relay say
   assert.equal((await get(`${relay.url}/api/auth/google/start`)).status, 404);
   assert.equal((relay.output().match(/google sign-in disabled/g) || []).length, 1);
   assert.match(relay.output(), /OAUTH_NO_ALLOWED_ORIGINS/);
+});
+
+test('drain waits for the token exchange of a client that is still connected', async (t) => {
+  let relay;
+  let releasedAt = 0;
+  const stub = await startStub(t, {
+    onTokenRequest: async () => {
+      relay.child.kill('SIGTERM');
+      await new Promise((resolve) => setTimeout(resolve, TOKEN_HOLD_MS));
+      releasedAt = Date.now();
+    },
+  });
+  relay = await startRelay(t, {
+    YJS_ALLOW_INSECURE_HTTP: 'true', YJS_ALLOWED_ORIGINS: DEV_ORIGIN, GOOGLE_OAUTH_ENDPOINT_BASE: stub.url,
+    YJS_HTTP_SHUTDOWN_GRACE_MS: String(LONG_HTTP_SHUTDOWN_GRACE_MS),
+  });
+  const { flowCookie, url } = await approvedCallback(relay, stub, '', `${DEV_ORIGIN}/`);
+  const response = await get(url, { cookie: cookiePair(flowCookie) });
+  assert.equal(response.status, 302, relay.output());
+  assert.equal(new URL(response.headers.get('location')).searchParams.get('auth_error'), 'unavailable', 'no session while draining');
+  assert.equal(response.headers.getSetCookie().some((cookie) => cookie.startsWith('rb_account=v1.')), false);
+  const { code, at } = await relay.exited;
+  assert.ok(releasedAt > 0 && at >= releasedAt, `relay exited ${releasedAt ? at - releasedAt : 'before the token answer'} ms after it`);
+  assert.equal(code, 0, relay.output());
+  assert.match(relay.output(), /\[yjs\] drained/);
 });
 
 // The grace period disconnects the client, which cancels its token request, so
