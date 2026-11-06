@@ -12,17 +12,25 @@ const MIN_COOKIE_MAX_AGE_SECONDS = 1;
 const EXPIRY_PATTERN = /^\d{13}$/;
 const SIGNATURE_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
-function cookieValue(req, maxHeaderBytes) {
+/** Value of the one cookie called `name`; null when absent, oversized, or sent twice. */
+export function singleCookieValue(req, name, maxHeaderBytes) {
   const header = req.headers.cookie;
   if (typeof header !== 'string' || header.length > maxHeaderBytes) return null;
   let found = null;
   for (const part of header.split(';')) {
     const separator = part.indexOf('=');
-    if (separator < 1 || part.slice(0, separator).trim() !== COOKIE_NAME) continue;
+    if (separator < 1 || part.slice(0, separator).trim() !== name) continue;
     if (found !== null) return null;
     found = part.slice(separator + 1).trim();
   }
   return found;
+}
+
+/** Canonical 32-byte base64url HMAC; alternate spellings with nonzero unused padding bits are tampering. */
+export function canonicalSignature(rawSignature) {
+  if (!SIGNATURE_PATTERN.test(rawSignature)) return null;
+  const signature = Buffer.from(rawSignature, SIGNATURE_ENCODING);
+  return signature.toString(SIGNATURE_ENCODING) === rawSignature ? signature : null;
 }
 
 function decodedSession(value) {
@@ -30,10 +38,8 @@ function decodedSession(value) {
   const parts = value.split('.');
   if (parts.length !== COOKIE_PART_COUNT || parts[0] !== SESSION_VERSION) return null;
   const [, handle, rawExpiry, rawSignature] = parts;
-  if (!ROOM_HANDLE_RE.test(handle) || !EXPIRY_PATTERN.test(rawExpiry) || !SIGNATURE_PATTERN.test(rawSignature)) return null;
-  const signature = Buffer.from(rawSignature, SIGNATURE_ENCODING);
-  // Alternate spellings with nonzero unused padding bits are tampering too.
-  if (signature.toString(SIGNATURE_ENCODING) !== rawSignature) return null;
+  const signature = canonicalSignature(rawSignature);
+  if (!ROOM_HANDLE_RE.test(handle) || !EXPIRY_PATTERN.test(rawExpiry) || !signature) return null;
   return { handle, expiresAt: Number(rawExpiry), signature };
 }
 
@@ -57,7 +63,7 @@ export class RoomSessions {
   authenticate(req, requestedHandle) {
     if (!ROOM_HANDLE_RE.test(requestedHandle)) return null;
     const docName = this.#config.rooms.get(requestedHandle);
-    const session = decodedSession(cookieValue(req, this.#config.maxCookieHeaderBytes));
+    const session = decodedSession(singleCookieValue(req, COOKIE_NAME, this.#config.maxCookieHeaderBytes));
     if (!docName || !session) return null;
     const now = Date.now();
     const { expiresAt } = session;

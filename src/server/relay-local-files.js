@@ -29,36 +29,51 @@ export const directorySizeSync = (root, { excludedRootDirectories = [] } = {}) =
   return total;
 };
 
-export const loadSessionSigningKey = (DB_DIR) => {
-  const fromEnv = process.env.YJS_SESSION_SECRET;
+const SIGNING_KEY_BYTES = 32;
+const MIN_ENV_KEY_BYTES = 32;
+const ENCODED_KEY_RE = /^[A-Za-z0-9_-]{43}$/;
+const KEY_DIRECTORY_MODE = 0o700;
+const KEY_FILE_MODE = 0o600;
+const ROOM_SESSION_KEY = Object.freeze({ envName: 'YJS_SESSION_SECRET', fileName: '.room-session-key' });
+
+export const ACCOUNT_SESSION_KEY = Object.freeze({ envName: 'YJS_ACCOUNT_SESSION_SECRET', fileName: '.account-session-key' });
+
+const readPersistedKey = (keyPath, fileName) => {
+  const encoded = fs.readFileSync(keyPath, 'utf8').trim();
+  const key = ENCODED_KEY_RE.test(encoded) ? Buffer.from(encoded, 'base64url') : null;
+  if (key?.byteLength !== SIGNING_KEY_BYTES) throw new Error(`invalid persisted signing key ${fileName}`);
+  return key;
+};
+
+const createPersistedKey = (keyPath, fileName) => {
+  const encoded = randomBytes(SIGNING_KEY_BYTES).toString('base64url');
+  try {
+    fs.writeFileSync(keyPath, `${encoded}\n`, { flag: 'wx', mode: KEY_FILE_MODE });
+    return Buffer.from(encoded, 'base64url');
+  } catch (err) {
+    if (err.code !== 'EEXIST') throw err;
+    return readPersistedKey(keyPath, fileName);
+  }
+};
+
+/** Key from `envName`, else a persisted 0600 base64url file `fileName` in `dbDir` (created on first use). */
+export const loadSigningKey = (dbDir, { envName, fileName }) => {
+  const fromEnv = process.env[envName];
   if (fromEnv) {
     const key = Buffer.from(fromEnv, 'utf8');
-    if (key.byteLength < 32) throw new Error('YJS_SESSION_SECRET must contain at least 32 bytes');
+    if (key.byteLength < MIN_ENV_KEY_BYTES) throw new Error(`${envName} must contain at least ${MIN_ENV_KEY_BYTES} bytes`);
     return key;
   }
-  fs.mkdirSync(DB_DIR, { recursive: true, mode: 0o700 });
-  const keyPath = join(DB_DIR, '.room-session-key');
-  const readKey = () => {
-    const encoded = fs.readFileSync(keyPath, 'utf8').trim();
-    if (!/^[A-Za-z0-9_-]{43}$/.test(encoded)) throw new Error('invalid persisted room session key');
-    const key = Buffer.from(encoded, 'base64url');
-    if (key.byteLength !== 32) throw new Error('invalid persisted room session key');
-    return key;
-  };
+  fs.mkdirSync(dbDir, { recursive: true, mode: KEY_DIRECTORY_MODE });
+  const keyPath = join(dbDir, fileName);
   try {
-    const key = readKey();
-    try { fs.chmodSync(keyPath, 0o600); } catch { /* best effort on mounted filesystems */ }
+    const key = readPersistedKey(keyPath, fileName);
+    try { fs.chmodSync(keyPath, KEY_FILE_MODE); } catch { /* best effort on mounted filesystems */ }
     return key;
   } catch (err) {
     if (err.code !== 'ENOENT') throw err;
   }
-  const encoded = randomBytes(32).toString('base64url');
-  try {
-    fs.writeFileSync(keyPath, `${encoded}\n`, { flag: 'wx', mode: 0o600 });
-    return Buffer.from(encoded, 'base64url');
-  } catch (err) {
-    if (err.code !== 'EEXIST') throw err;
-    return readKey();
-  }
+  return createPersistedKey(keyPath, fileName);
 };
 
+export const loadSessionSigningKey = (dbDir) => loadSigningKey(dbDir, ROOM_SESSION_KEY);
