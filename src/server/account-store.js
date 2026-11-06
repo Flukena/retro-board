@@ -97,15 +97,19 @@ export class AccountStore extends EventEmitter {
   /** @returns {Promise<Account|null>} */
   setPlan(id, plan) { return this.#enqueue(() => this.#setPlan(id, plan)); }
 
-  /** @returns {Promise<Account|null>} */
-  bumpSessionGeneration(id) {
+  /**
+   * With `expectedGeneration`, an account whose generation has moved on is left
+   * unchanged and resolves null, the same as a missing one.
+   * @returns {Promise<Account|null>}
+   */
+  bumpSessionGeneration(id, { expectedGeneration } = {}) {
     return this.#enqueue(() => this.#update(id, (account) => ({
       sessionGeneration: account.sessionGeneration + SESSION_GENERATION_STEP,
-    })));
+    }), expectedGeneration));
   }
 
-  /** @returns {Promise<boolean>} */
-  delete(id) { return this.#enqueue(() => this.#delete(id)); }
+  /** @returns {Promise<boolean>} false when missing or, with `expectedGeneration`, stale */
+  delete(id, { expectedGeneration } = {}) { return this.#enqueue(() => this.#delete(id, expectedGeneration)); }
 
   // Mutations queued before stop() still run; stop() resolves once they settle.
   async stop() {
@@ -189,16 +193,24 @@ export class AccountStore extends EventEmitter {
     return this.#update(id, () => ({ plan, planGrantedAt: this.#now() }));
   }
 
-  async #update(id, changes) {
+  // The generation check runs inside the queued operation, so a request that
+  // authenticated before a concurrent logout-all cannot act on its old session.
+  async #current(id, expectedGeneration) {
     const account = await this.get(id);
+    const stale = account && expectedGeneration !== undefined && account.sessionGeneration !== expectedGeneration;
+    return stale ? null : account;
+  }
+
+  async #update(id, changes, expectedGeneration) {
+    const account = await this.#current(id, expectedGeneration);
     if (!account) return null;
     const updated = { ...account, ...changes(account) };
     await this.#write([put(accountKey(id), updated)]);
     return updated;
   }
 
-  async #delete(id) {
-    const account = await this.get(id);
+  async #delete(id, expectedGeneration) {
+    const account = await this.#current(id, expectedGeneration);
     if (!account) return false;
     const releasedSub = await this.#releaseIndex(subKey(account.googleSub), id);
     const releasedEmail = await this.#releaseIndex(emailKey(account.email), id);

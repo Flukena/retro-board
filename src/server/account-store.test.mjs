@@ -157,6 +157,34 @@ test('delete removes record, sub and email indexes', async (t) => {
   assert.notEqual((await store.upsertFromGoogle(PROFILE)).id, created.id);
 });
 
+test('logout-all and delete with an older expected generation change nothing', async (t) => {
+  const { store } = await openStore(t);
+  const created = await store.upsertFromGoogle(PROFILE);
+  const [bumped, staleDelete] = await Promise.all([
+    store.bumpSessionGeneration(created.id, { expectedGeneration: 0 }),
+    store.delete(created.id, { expectedGeneration: 0 }),
+  ]);
+  assert.equal(bumped.sessionGeneration, 1);
+  assert.equal(staleDelete, false, 'the delete queued behind logout-all sees the new generation');
+  assert.equal(await store.bumpSessionGeneration(created.id, { expectedGeneration: 0 }), null);
+  assert.deepEqual(await store.get(created.id), bumped);
+  assert.equal(await store.delete(created.id, { expectedGeneration: 1 }), true);
+  assert.equal(await store.get(created.id), null);
+});
+
+// Recorded ruling: the latest sign-in owns a shared email index, so the other
+// account loses its email lookup until it signs in again.
+test('deleting the latest owner of a shared email leaves the other account without an email index', async (t) => {
+  const { store } = await openStore(t, { randomId: sequentialIds().randomId });
+  const original = await store.upsertFromGoogle(PROFILE);
+  const successor = await store.upsertFromGoogle({ sub: 'google-sub-2', email: PROFILE.email });
+  await store.delete(successor.id);
+  assert.deepEqual(await store.get(original.id), original);
+  assert.equal(await store.findByEmail(PROFILE.email), null);
+  assert.deepEqual(await store.upsertFromGoogle(PROFILE), original);
+  assert.deepEqual(await store.findByEmail(PROFILE.email), original, 'signing in again restores the lookup');
+});
+
 test('accounts never appear in getAllDocNames', async (t) => {
   const { store, ldb } = await openStore(t);
   const created = await store.upsertFromGoogle(PROFILE);

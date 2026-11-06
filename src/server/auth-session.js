@@ -1,4 +1,5 @@
 import { createHmac } from 'node:crypto';
+import { isAccountId, isSessionGenerationText } from '../domain/account-identity.js';
 import { MILLISECONDS_PER_DAY, MILLISECONDS_PER_SECOND } from './relay-config.js';
 import { canonicalSignature, singleCookieValue } from './relay-session.js';
 import { fixedDigestEqual } from './relay-room-registry.js';
@@ -11,8 +12,6 @@ const SIGNATURE_DOMAIN = 'account-session-v1\0';
 const SIGNATURE_ENCODING = 'base64url';
 const COOKIE_VALUE_MAX_CHARACTERS = 160;
 const COOKIE_PART_COUNT = 5;
-const ACCOUNT_ID_PATTERN = /^[A-Za-z0-9_-]{16,64}$/;
-const GENERATION_PATTERN = /^\d{1,15}$/;
 const EXPIRY_PATTERN = /^\d{13}$/;
 const PREFIXED_COOKIE_PATH = '/yjs/api';
 const UNPREFIXED_COOKIE_PATH = '/api';
@@ -26,7 +25,7 @@ function decodedSession(value) {
   if (parts.length !== COOKIE_PART_COUNT || parts[0] !== SESSION_VERSION) return null;
   const [, accountId, rawGeneration, rawExpiry, rawSignature] = parts;
   const signature = canonicalSignature(rawSignature);
-  if (!ACCOUNT_ID_PATTERN.test(accountId) || !GENERATION_PATTERN.test(rawGeneration)
+  if (!isAccountId(accountId) || !isSessionGenerationText(rawGeneration)
     || !EXPIRY_PATTERN.test(rawExpiry) || !signature) return null;
   return { accountId, generation: Number(rawGeneration), expiresAt: Number(rawExpiry), signature };
 }

@@ -1,6 +1,7 @@
 import {
   ACCOUNTS_DOC_NAME, ACCOUNT_KEY_PREFIX, EMAIL_KEY_PREFIX, SUB_KEY_PREFIX, emailKey, subKey,
 } from '../src/server/account-store.js';
+import { isAccountId, isSessionGeneration } from '../src/domain/account-identity.js';
 import { isKnownPlan } from '../src/domain/plan-entitlements.js';
 
 // Messages are fixed strings: account keys can carry email addresses.
@@ -12,8 +13,6 @@ const DANGLING_EMAIL = 'email index points to a missing account';
 const MISMATCHED_SUB = 'sub index points to an account with a different sub';
 const MISMATCHED_EMAIL = 'email index points to an account with a different email';
 const MISSING_SUB = 'account has no sub index';
-const MISSING_EMAIL = 'account has no email index';
-const MIN_SESSION_GENERATION = 0;
 
 const isNonEmptyString = (value) => typeof value === 'string' && value.length > 0;
 const isFiniteNumber = (value) => typeof value === 'number' && Number.isFinite(value);
@@ -23,13 +22,13 @@ const fail = (message) => { throw new Error(message); };
 function isValidAccount(id, account) {
   return isPlainRecord(account)
     && account.id === id
+    && isAccountId(id)
     && isNonEmptyString(account.googleSub)
     && isNonEmptyString(account.email)
     && typeof account.name === 'string'
     && isKnownPlan(account.plan)
     && (account.planGrantedAt === null || isFiniteNumber(account.planGrantedAt))
-    && Number.isSafeInteger(account.sessionGeneration)
-    && account.sessionGeneration >= MIN_SESSION_GENERATION
+    && isSessionGeneration(account.sessionGeneration)
     && isFiniteNumber(account.createdAt);
 }
 
@@ -54,10 +53,11 @@ function checkIndexEntries(index, accounts, { dangling, mismatched, matches }) {
   }
 }
 
-function checkAccountsHaveIndexes({ accounts, subIndex, emailIndex }) {
+// The latest sign-in owns a shared email index, so an account may lack its
+// email entry (maintainer lookup misses it until it signs in again).
+function checkAccountsHaveSubIndexes({ accounts, subIndex }) {
   for (const [id, account] of accounts) {
     if (subIndex.get(subKey(account.googleSub)) !== id) fail(MISSING_SUB);
-    if (!emailIndex.has(emailKey(account.email))) fail(MISSING_EMAIL);
   }
 }
 
@@ -65,7 +65,9 @@ function checkAccountsHaveIndexes({ accounts, subIndex, emailIndex }) {
  * Read-only consistency check of the accounts namespace of a restored relay
  * LevelDB. Every account record must decode and have a valid shape, every
  * `sub:`/`email:` index must point at an existing account that owns that key,
- * and every account must have a `sub:` index of its own and an `email:` entry.
+ * and every account must have a `sub:` index of its own. An account may lack
+ * its `email:` entry when another account signed in later with the same email.
+ * Ids and generations must be ones the account cookie can carry.
  * A database without the namespace (a pre-accounts backup) verifies with 0.
  * @param {{ getMetas(docName: string): Promise<Map<string, unknown>> }} persistence y-leveldb persistence
  * @returns {Promise<{ accounts: number }>}
@@ -88,6 +90,6 @@ export async function verifyBackupAccounts(persistence) {
     mismatched: MISMATCHED_EMAIL,
     matches: (key, account) => emailKey(account.email) === key,
   });
-  checkAccountsHaveIndexes(layout);
+  checkAccountsHaveSubIndexes(layout);
   return { accounts: layout.accounts.size };
 }

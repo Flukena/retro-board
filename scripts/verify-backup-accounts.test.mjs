@@ -62,11 +62,46 @@ test('a dangling sub index fails', async (t) => {
   await assert.rejects(verifyBackupAccounts(ldb), /sub index points to a missing account/);
 });
 
-test('an account missing its email index fails', async (t) => {
+// Recorded ruling: the latest sign-in owns a shared email index, so an account
+// may lack its email index; sub indexes stay mandatory.
+test('an account missing its email index still verifies', async (t) => {
   const { ldb, store } = await openFixture(t);
   await seedAccounts(store);
   await durableMetaBatch(ldb, ACCOUNTS_DOC_NAME, [{ type: 'del', key: 'email:grace@example.com' }]);
-  await assert.rejects(verifyBackupAccounts(ldb), /account has no email index/);
+  assert.deepEqual(await verifyBackupAccounts(ldb), { accounts: 2 });
+});
+
+test('deleting the owner of a shared email still verifies and leaves the other account unfindable by email', async (t) => {
+  const { ldb, store } = await openFixture(t);
+  const original = await store.upsertFromGoogle({ sub: 'sub-old', email: 'shared@example.com', name: 'Old' });
+  const successor = await store.upsertFromGoogle({ sub: 'sub-new', email: 'shared@example.com', name: 'New' });
+  await store.delete(successor.id);
+  assert.deepEqual(await verifyBackupAccounts(ldb), { accounts: 1 });
+  assert.ok(await store.get(original.id));
+  assert.equal(await store.findByEmail('shared@example.com'), null);
+});
+
+test('an email change by the owner of a shared email still verifies', async (t) => {
+  const { ldb, store } = await openFixture(t);
+  const original = await store.upsertFromGoogle({ sub: 'sub-old', email: 'shared@example.com', name: 'Old' });
+  await store.upsertFromGoogle({ sub: 'sub-new', email: 'shared@example.com', name: 'New' });
+  await store.upsertFromGoogle({ sub: 'sub-new', email: 'moved@example.com', name: 'New' });
+  assert.deepEqual(await verifyBackupAccounts(ldb), { accounts: 2 });
+  assert.ok(await store.get(original.id));
+  assert.equal(await store.findByEmail('shared@example.com'), null);
+});
+
+test('account ids and generations the session cookie cannot carry fail', async (t) => {
+  const { ldb, store } = await openFixture(t);
+  const { ada } = await seedAccounts(store);
+  await durableMetaBatch(ldb, ACCOUNTS_DOC_NAME, [{ type: 'put', key: `acct:${ada.id}`, value: { ...ada, sessionGeneration: 1e15 } }]);
+  await assert.rejects(verifyBackupAccounts(ldb), /account record is invalid/);
+  const { ldb: shortIdDb } = await openFixture(t);
+  await durableMetaBatch(shortIdDb, ACCOUNTS_DOC_NAME, [
+    { type: 'put', key: 'acct:x', value: { ...ada, id: 'x' } },
+    { type: 'put', key: `sub:${ada.googleSub}`, value: 'x' },
+  ]);
+  await assert.rejects(verifyBackupAccounts(shortIdDb), /account record is invalid/);
 });
 
 test('an account missing its sub index fails', async (t) => {
