@@ -1,0 +1,75 @@
+import React from 'react';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { withChromeModule } from '../../test-support/chrome-test-helper.js';
+import { AUTH_ERROR_CODES } from '../../domain/auth-errors.js';
+
+const ACCOUNT = { name: 'Ada', email: 'ada@example.com', plan: 'pro' };
+const HREF = 'https://retroroom.party/yjs/api/auth/google/start?return=x';
+const noop = () => {};
+const render = ({ AccountMenuView }, props) => renderToStaticMarkup(
+  React.createElement(AccountMenuView, { href: HREF, inApp: false, onCopyLink: noop, onRetry: noop, ...props }),
+);
+
+test('AccountMenu renders nothing when disabled', async () => {
+  await withChromeModule('/src/client/account/AccountMenu.jsx', (mod) => {
+    assert.equal(render(mod, { session: { status: 'disabled' } }), '');
+    assert.equal(render(mod, { session: { status: null } }), '');
+  });
+});
+
+test('AccountMenu shows the sign-in link when signed out', async () => {
+  await withChromeModule('/src/client/account/AccountMenu.jsx', (mod, { t, setLang }) => {
+    setLang('en');
+    const html = render(mod, { session: { status: 'signed-out' } });
+    assert.ok(html.includes(`href="${HREF.replace('&', '&amp;')}"`));
+    assert.ok(html.includes(t('account.signIn')));
+  });
+});
+
+test('AccountMenu shows in-app notice instead of the sign-in link inside LINE', async () => {
+  await withChromeModule('/src/client/account/AccountMenu.jsx', (mod, { t, setLang }) => {
+    setLang('en');
+    const html = render(mod, { session: { status: 'signed-out' }, inApp: true });
+    assert.ok(html.includes(t('account.inAppBrowser')));
+    assert.ok(html.includes(t('account.copyLink')));
+    assert.ok(!html.includes('href='));
+    assert.ok(!html.includes(t('account.signIn')));
+  });
+});
+
+test('AccountMenu offers a retry when the account cannot be loaded', async () => {
+  await withChromeModule('/src/client/account/AccountMenu.jsx', (mod, { t, setLang }) => {
+    setLang('en');
+    assert.ok(render(mod, { session: { status: 'unavailable' } }).includes(t('account.retry')));
+  });
+});
+
+test('AccountMenu signed in shows name and plan, and lists the actions only when open', async () => {
+  await withChromeModule('/src/client/account/AccountMenu.jsx', (mod, { t, setLang }) => {
+    for (const lang of ['th', 'en']) {
+      setLang(lang);
+      const session = { status: 'signed-in', account: ACCOUNT };
+      const closed = render(mod, { session });
+      assert.ok(closed.includes('Ada') && closed.includes(t('account.plan.pro')));
+      assert.ok(!closed.includes(t('account.signOut')));
+      const open = render(mod, { session, open: true });
+      for (const key of ['account.signOut', 'account.signOutAll', 'account.delete']) assert.ok(open.includes(t(key)), key);
+      assert.ok(open.includes('ada@example.com'));
+      assert.ok(!open.includes(t('account.deleteConfirm')));
+      assert.ok(render(mod, { session, confirmingDelete: true }).includes(t('account.deleteConfirm')));
+    }
+  });
+});
+
+test('every account.* key exists in th, en and every on-demand locale', async () => {
+  await withChromeModule('/src/client/account/AccountMenu.jsx', async (_mod, { t, setLang, LANGUAGE_OPTIONS }) => {
+    const keys = ['signIn', 'signOut', 'signOutAll', 'delete', 'deleteConfirm', 'plan.free', 'plan.pro', 'inAppBrowser',
+      'copyLink', 'copied', 'retry', 'menu', 'failed', ...AUTH_ERROR_CODES.map((code) => `error.${code}`)].map((k) => `account.${k}`);
+    for (const { code } of LANGUAGE_OPTIONS) {
+      await setLang(code);
+      for (const key of keys) assert.notEqual(t(key), key, `${code}: ${key}`);
+    }
+  });
+});

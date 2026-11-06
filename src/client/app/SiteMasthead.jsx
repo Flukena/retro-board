@@ -4,6 +4,7 @@ import { t, useLang } from '../ui/i18n.js';
 import { LanguagePicker } from '../ui/LanguagePicker.jsx';
 import { useTheme, nextThemePref } from '../ui/theme.js';
 import { Button } from '../ui/UiPrimitives.jsx';
+import AccountMenu from '../account/AccountMenu.jsx';
 import { TOPBAR_ICON_SIZE_PX } from '../chrome/chrome-layout.js';
 import './landing.css';
 
@@ -16,6 +17,7 @@ function CornerToggles() {
   const themeTitle = `${t('settings.theme')}: ${t(`settings.theme.${themePref}`)}`;
   return (
     <div className="rb-landing__corner">
+      <AccountMenu />
       <LanguagePicker />
       <Button
         className="rb-btn--pill"
