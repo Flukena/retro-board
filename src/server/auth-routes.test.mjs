@@ -143,11 +143,19 @@ test('enabledOAuthConfig refuses sign-in without allowed origins and warns once 
   const env = { GOOGLE_OAUTH_CLIENT_ID: 'id', GOOGLE_OAUTH_CLIENT_SECRET: 'secret', GOOGLE_OAUTH_REDIRECT_URI: 'https://board.example/cb' };
   const warnings = [];
   const log = { warn: (...args) => warnings.push(args) };
-  assert.equal(enabledOAuthConfig(env, { allowedOrigins: [], allowInsecureHttp: false, log }), null);
+  assert.equal(enabledOAuthConfig(env, { allowedOrigins: [], allowInsecureHttp: false, publicWall: false, log }), null);
   assert.deepEqual(warnings, [['[yjs] google sign-in disabled', { code: 'OAUTH_NO_ALLOWED_ORIGINS' }]]);
-  assert.equal(enabledOAuthConfig(env, { allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: false, log }).clientId, 'id');
-  assert.equal(enabledOAuthConfig({}, { allowedOrigins: [], allowInsecureHttp: false, log }), null);
+  assert.equal(enabledOAuthConfig(env, { allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: false, publicWall: false, log }).clientId, 'id');
+  assert.equal(enabledOAuthConfig({}, { allowedOrigins: [], allowInsecureHttp: false, publicWall: false, log }), null);
   assert.equal(warnings.length, 1, 'unconfigured Google is silent');
+});
+
+test('enabledOAuthConfig keeps sign-in off on the Public Wall relay even when Google is configured', () => {
+  const env = { GOOGLE_OAUTH_CLIENT_ID: 'id', GOOGLE_OAUTH_CLIENT_SECRET: 'secret', GOOGLE_OAUTH_REDIRECT_URI: 'https://board.example/cb' };
+  const warnings = [];
+  const log = { warn: (...args) => warnings.push(args) };
+  assert.equal(enabledOAuthConfig(env, { allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: false, publicWall: true, log }), null);
+  assert.deepEqual(warnings, [['[yjs] google sign-in disabled', { code: 'OAUTH_PUBLIC_WALL' }]]);
 });
 
 test('start sets rb_oauth_flow and redirects to the authorize endpoint', async (t) => {

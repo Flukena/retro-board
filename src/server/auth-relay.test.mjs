@@ -26,6 +26,23 @@ const TOKEN_REDIRECT_PRELOAD = `
   globalThis.fetch = (url, init) => original(String(url) === '${GOOGLE_TOKEN_ENDPOINT}' ? process.env.TEST_TOKEN_URL : url, init);
 `;
 
+// y-leveldb reports a failed read by resolving null; fail only the accounts document.
+const ACCOUNT_READ_FAILURE_PRELOAD = `
+  import { createRequire } from 'node:module';
+  const require = createRequire(process.cwd() + '/package.json');
+  const { LeveldbPersistence } = require('y-leveldb');
+  const getMeta = LeveldbPersistence.prototype.getMeta;
+  LeveldbPersistence.prototype.getMeta = function (docName, key) {
+    return docName === '\\u0000accounts' ? Promise.resolve(null) : getMeta.call(this, docName, key);
+  };
+`;
+const STORAGE_FAILURE_LOG = '[yjs] storage degraded';
+const STORAGE_FAILURE_EXIT_TIMEOUT_MS = 5_000;
+const exitWithin = (relay, timeoutMs) => Promise.race([
+  relay.exited,
+  new Promise((resolve) => { setTimeout(() => resolve({ code: null }), timeoutMs).unref(); }),
+]);
+
 async function startRelay(t, env, { preload = null } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'auth-relay-'));
   const args = preload ? ['--import', `data:text/javascript,${encodeURIComponent(preload)}`, 'yjs-server.mjs'] : ['yjs-server.mjs'];
@@ -144,4 +161,29 @@ test('drain waits for an in-flight token exchange', async (t) => {
   assert.ok(releasedAt > 0 && at >= releasedAt, `relay exited ${releasedAt ? at - releasedAt : 'before the token request'} ms after the token answer`);
   assert.equal(code, 0, relay.output());
   assert.match(relay.output(), /\[yjs\] drained/);
+});
+
+test('account storage failure takes the relay down through its storage-failure path and issues no session', async (t) => {
+  const stub = await startStub(t);
+  const relay = await startRelay(t, {
+    YJS_ALLOW_INSECURE_HTTP: 'true', YJS_ALLOWED_ORIGINS: DEV_ORIGIN, GOOGLE_OAUTH_ENDPOINT_BASE: stub.url,
+  }, { preload: ACCOUNT_READ_FAILURE_PRELOAD });
+  assert.equal((await get(`${relay.url}/readyz`)).status, 200);
+  const { flowCookie, url } = await approvedCallback(relay, stub, '', `${DEV_ORIGIN}/`);
+  const response = await get(url, { cookie: cookiePair(flowCookie) });
+  assert.equal(response.status, 503, relay.output());
+  assert.equal(response.headers.getSetCookie().some((cookie) => cookie.startsWith('rb_account=v1.')), false);
+  const { code } = await exitWithin(relay, STORAGE_FAILURE_EXIT_TIMEOUT_MS);
+  assert.ok(code !== null, `relay kept running after the account storage failure\n${relay.output()}`);
+  assert.notEqual(code, 0, 'a storage failure exits non-zero so the orchestrator restarts the relay');
+  assert.equal((relay.output().match(/storage degraded/g) || []).length, 1, relay.output());
+  assert.ok(relay.output().includes(STORAGE_FAILURE_LOG));
+});
+
+test('sign-in routes answer 404 on the Public Wall relay even with Google configured', async (t) => {
+  const relay = await startRelay(t, { YJS_PUBLIC_WALL: 'true', YJS_ALLOW_INSECURE_HTTP: '0', YJS_ALLOWED_ORIGINS: SECURE_ORIGIN });
+  for (const path of ['/api/auth/google/start', '/yjs-public/api/auth/google/start', '/api/account', '/yjs-public/api/account']) {
+    assert.equal((await get(`${relay.url}${path}`, { origin: SECURE_ORIGIN })).status, 404, `${path}\n${relay.output()}`);
+  }
+  assert.match(relay.output(), /OAUTH_PUBLIC_WALL/);
 });

@@ -26,6 +26,7 @@ const FLOW_RATE_LIMITS = Object.freeze({
 const FLOW_TOKEN_BYTES = 0;
 const OAUTH_DISABLED_LOG = '[yjs] google sign-in disabled';
 const OAUTH_NO_ALLOWED_ORIGINS = 'OAUTH_NO_ALLOWED_ORIGINS';
+const OAUTH_PUBLIC_WALL = 'OAUTH_PUBLIC_WALL';
 const CALLBACK_FAILURE_REASON = 'auth-callback';
 const PROVIDER_ACCESS_DENIED = 'access_denied';
 const DATABASE_CAPACITY_CODE = 'DATABASE_CAPACITY';
@@ -55,11 +56,18 @@ const PATH = Object.freeze({
   DELETE: '/api/account/delete',
 });
 
-/** Google settings, or null when unset or when no allowed origin exists to send the browser back to. */
-export function enabledOAuthConfig(env, { allowedOrigins, allowInsecureHttp, log }) {
+// The Public Wall relay never has accounts; otherwise sign-in needs an allowed origin to return to.
+const disabledReason = ({ allowedOrigins, publicWall }) => {
+  if (publicWall) return OAUTH_PUBLIC_WALL;
+  return allowedOrigins.length ? null : OAUTH_NO_ALLOWED_ORIGINS;
+};
+
+/** Google settings, or null when unset, on the Public Wall relay, or without an allowed origin. */
+export function enabledOAuthConfig(env, { allowedOrigins, allowInsecureHttp, publicWall, log }) {
   const config = googleOAuthConfig(env, { allowInsecureHttp });
-  if (!config || allowedOrigins.length) return config;
-  log.warn(OAUTH_DISABLED_LOG, { code: OAUTH_NO_ALLOWED_ORIGINS });
+  const reason = disabledReason({ allowedOrigins, publicWall });
+  if (!config || !reason) return config;
+  log.warn(OAUTH_DISABLED_LOG, { code: reason });
   return null;
 }
 
