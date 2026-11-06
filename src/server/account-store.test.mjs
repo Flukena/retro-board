@@ -108,6 +108,14 @@ test('an email taken over by another sub stays with its latest owner', async (t)
   assert.equal((await store.findByEmail(PROFILE.email)).id, successor.id);
 });
 
+test('latest sign-in reclaims a shared email index', async (t) => {
+  const { store } = await openStore(t, { randomId: sequentialIds().randomId });
+  const first = await store.upsertFromGoogle(PROFILE);
+  await store.upsertFromGoogle({ sub: 'google-sub-2', email: PROFILE.email, name: PROFILE.name });
+  assert.deepEqual(await store.upsertFromGoogle(PROFILE), first);
+  assert.deepEqual(await store.findByEmail(PROFILE.email), first);
+});
+
 test('findByEmail is case-insensitive', async (t) => {
   const { store } = await openStore(t);
   const created = await store.upsertFromGoogle(PROFILE);

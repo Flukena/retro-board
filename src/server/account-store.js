@@ -174,8 +174,10 @@ export class AccountStore extends EventEmitter {
     return account;
   }
 
+  // An unchanged profile still reclaims its email index if another sub took it.
   async #refresh(account, { email, name }) {
-    if (account.email === email && account.name === name) return account;
+    const ownsEmail = (await this.#read(emailKey(email))) === account.id;
+    if (ownsEmail && account.email === email && account.name === name) return account;
     const refreshed = { ...account, email, name };
     const releasedEmail = emailKey(account.email) === emailKey(email) ? [] : await this.#releaseIndex(emailKey(account.email), account.id);
     await this.#write([put(accountKey(account.id), refreshed), ...releasedEmail, put(emailKey(email), account.id)]);
