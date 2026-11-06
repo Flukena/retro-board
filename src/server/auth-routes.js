@@ -182,7 +182,7 @@ export function createAuthRoutes({
 
   const routes = new Map([
     [PATH.START, { handlers: { GET: start }, allow: ALLOW_GET }],
-    [PATH.CALLBACK, { handlers: { GET: callback }, allow: ALLOW_GET }],
+    [PATH.CALLBACK, { handlers: { GET: callback }, allow: ALLOW_GET, clearsFlowCookie: true }],
     [PATH.ACCOUNT, { handlers: { GET: accountGet }, allow: ALLOW_ACCOUNT_GET, preflight: true }],
     [PATH.LOGOUT, { handlers: { POST: accountAction(null) }, allow: ALLOW_ACCOUNT_POST, preflight: true }],
     [PATH.LOGOUT_ALL, { handlers: { POST: accountAction((id) => store.bumpSessionGeneration(id)) }, allow: ALLOW_ACCOUNT_POST, preflight: true }],
@@ -199,6 +199,8 @@ export function createAuthRoutes({
 
   function dispatch(req, res, route, ctx) {
     if (!oauth) { reply(res, HTTP_NOT_FOUND); return; }
+    // Default for every callback answer (429, 405, 503 included); responses that set cookies repeat it.
+    if (route.clearsFlowCookie) res.setHeader('set-cookie', [clearFlowCookie(oauth, { prefixed: ctx.prefixed })]);
     if (req.method === 'OPTIONS' && route.preflight) {
       sendCredentialPreflight(req, res, { allowedOrigins, allowInsecureHttp, methods: ACCOUNT_PREFLIGHT_METHODS });
       return;

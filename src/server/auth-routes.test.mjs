@@ -274,6 +274,27 @@ test('callback after store stop or storage failure issues no session', async (t)
   await expectNoSession(503);
 });
 
+test('callback answers that never reach sign-in still clear rb_oauth_flow', async (t) => {
+  const ctx = await startRoutes(t);
+  const flow = await beginSignIn(ctx);
+  const clearsFlowOnly = (response) => assert.deepEqual(response.headers.getSetCookie().map((cookie) => CLEARED_FLOW_COOKIE.test(cookie)), [true]);
+  const wrongMethod = await ctx.request(CALLBACK, { method: 'POST', headers: { cookie: flow.flowCookie } });
+  assert.equal(wrongMethod.status, 405);
+  clearsFlowOnly(wrongMethod);
+  ctx.lifecycle.unavailable = true;
+  const unavailable = await callback(ctx, flow, { code: 'auth-code' });
+  assert.equal(unavailable.status, 503);
+  clearsFlowOnly(unavailable);
+  assert.equal(ctx.google.requests, 0);
+
+  const failingLedger = new FlowLedger();
+  failingLedger.claim = () => { throw new Error('ledger broke'); };
+  const broken = await startRoutes(t, { ledger: failingLedger });
+  const crashed = await callback(broken, await beginSignIn(broken), { code: 'auth-code' });
+  assert.equal(crashed.status, 503, 'the terminal catch answers');
+  clearsFlowOnly(crashed);
+});
+
 test('account GET without an Origin header answers 200', async (t) => {
   const ctx = await startRoutes(t);
   const { cookie } = await signIn(ctx);
@@ -372,7 +393,9 @@ test('start beyond 20 per minute from one IP answers 429', async (t) => {
   const limited = await ctx.request(START);
   assert.equal(limited.status, 429);
   assert.ok(Number(limited.headers.get('retry-after')) > 0);
-  assert.equal((await ctx.request(CALLBACK)).status, 429, 'callback shares the per-IP budget');
+  const limitedCallback = await ctx.request(CALLBACK);
+  assert.equal(limitedCallback.status, 429, 'callback shares the per-IP budget');
+  assert.deepEqual(limitedCallback.headers.getSetCookie().map((cookie) => CLEARED_FLOW_COOKIE.test(cookie)), [true]);
   assert.equal((await beginSignIn(ctx, { ip: '203.0.113.2' })).response.status, 302, 'other IPs keep their own budget');
 });
 
