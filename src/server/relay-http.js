@@ -1,3 +1,5 @@
+import { CORS_PREFLIGHT_MAX_AGE_SECONDS } from './relay-config.js';
+
 export const isExactAllowedOrigin = (origin, allowedOrigins, allowInsecureHttp) => {
   if (!origin) return false;
   if (allowedOrigins.length) return allowedOrigins.includes(origin);
@@ -79,4 +81,15 @@ export const acceptCredentialOrigin = (req, res, allowedOrigins, allowInsecureHt
   }
   setCredentialCors(origin, res);
   return true;
+};
+
+export const sendCredentialPreflight = (req, res, { allowedOrigins, allowInsecureHttp, methods }) => {
+  if (!acceptCredentialOrigin(req, res, allowedOrigins, allowInsecureHttp)) return;
+  res.writeHead(204, {
+    'access-control-allow-methods': methods,
+    'access-control-allow-headers': 'Content-Type',
+    'access-control-max-age': String(CORS_PREFLIGHT_MAX_AGE_SECONDS),
+    'cache-control': 'no-store',
+  });
+  res.end();
 };

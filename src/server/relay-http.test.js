@@ -8,7 +8,8 @@ import { PUBLIC_RELAY_PREFIX } from '../domain/public-wall-contract.js';
 import * as Y from 'yjs';
 import * as configHelpers from './relay-config.js';
 import { isRelayReady } from './relay-lifecycle.js';
-import { setCredentialCors, acceptCredentialOrigin, isExactAllowedOrigin, readJsonBody, sendJson, sendIfWritable, sendUpgradeRejection } from './relay-http.js';
+import { handleRoomRoute } from './relay-room-routes.js';
+import { setCredentialCors, acceptCredentialOrigin, isExactAllowedOrigin, readJsonBody, sendJson, sendIfWritable, sendUpgradeRejection, sendCredentialPreflight } from './relay-http.js';
 
 const ORIGIN = 'https://allowed.example';
 const MAX_BODY_BYTES = 16;
@@ -106,7 +107,7 @@ const entrypointHttp = (overrides = {}) => {
   const context = {
     ...configHelpers, ...configHelpers.readRelayConfig({}),
     URL, Buffer, Object, Date, String, Number,
-    isRelayReady, isExactAllowedOrigin, setCredentialCors, acceptCredentialOrigin, readJsonBody, sendJson, sendIfWritable,
+    isRelayReady, isExactAllowedOrigin, setCredentialCors, acceptCredentialOrigin, readJsonBody, sendJson, sendIfWritable, sendCredentialPreflight, handleRoomRoute,
     ALLOWED_ORIGINS: [ORIGIN], ALLOW_INSECURE_HTTP: false,
     shuttingDown: false, storageFailure: null, PUBLIC_WALL: false, publicWall: null,
     registeredRoomsByHandle: new Map([[ROOM_HANDLE, 'doc']]),
@@ -281,4 +282,17 @@ test('allowed-origin image authentication errors remain readable for the client 
   const { dispatch } = entrypointHttp(); const res=routeResponse();
   dispatch(routeRequest('GET', `/rooms/${ROOM_HANDLE}/images/abcdef01.png`),res);
   assert.equal(res.status,401); assert.equal(res.headers['access-control-allow-origin'],ORIGIN);
+});
+
+test('preflight rejects a foreign Origin and sets max-age', () => {
+  const denied = response();
+  sendCredentialPreflight({ headers: { origin: 'https://hostile.example' } }, denied, { allowedOrigins: [ORIGIN], allowInsecureHttp: false, methods: 'POST, OPTIONS' });
+  assert.equal(denied.status, 403);
+  const accepted = response();
+  sendCredentialPreflight({ headers: { origin: ORIGIN } }, accepted, { allowedOrigins: [ORIGIN], allowInsecureHttp: false, methods: 'POST, OPTIONS' });
+  assert.equal(accepted.status, 204);
+  assert.equal(accepted.headers['access-control-allow-methods'], 'POST, OPTIONS');
+  assert.equal(accepted.headers['access-control-allow-headers'], 'Content-Type');
+  assert.equal(accepted.headers['access-control-max-age'], String(configHelpers.CORS_PREFLIGHT_MAX_AGE_SECONDS));
+  assert.equal(accepted.headers['cache-control'], 'no-store');
 });

@@ -4,9 +4,10 @@ import { RelayProtocol } from './src/server/relay-protocol.js';
 // Yjs WebSocket relay with LevelDB persistence.
 // Single source of truth for collaborative state.
 
-import { envInt, envBool, readRelayConfig, syncResponseLimits, MILLISECONDS_PER_SECOND, MILLISECONDS_PER_MINUTE, MILLISECONDS_PER_HOUR, ROOM_BLOCK_TTL_MS, BLOCKED_ROOM_ENTRIES_PER_ACTIVE_ROOM, LARGE_UPDATE_LOG_THRESHOLD_BYTES, VOTE_EXPIRY_RETRY_INTERVAL_MS, MAINTENANCE_INTERVAL_MS, STORE_OPERATION_OVERHEAD_BYTES, MAX_HTTP_TARGET_CHARACTERS, CORS_PREFLIGHT_MAX_AGE_SECONDS, MAX_REQUESTS_PER_SOCKET, RETRY_AFTER_SHORT_SECONDS, RETRY_AFTER_LONG_SECONDS } from './src/server/relay-config.js';
+import { envInt, envBool, readRelayConfig, syncResponseLimits, MILLISECONDS_PER_SECOND, MILLISECONDS_PER_MINUTE, MILLISECONDS_PER_HOUR, ROOM_BLOCK_TTL_MS, BLOCKED_ROOM_ENTRIES_PER_ACTIVE_ROOM, LARGE_UPDATE_LOG_THRESHOLD_BYTES, VOTE_EXPIRY_RETRY_INTERVAL_MS, MAINTENANCE_INTERVAL_MS, STORE_OPERATION_OVERHEAD_BYTES, MAX_HTTP_TARGET_CHARACTERS, MAX_REQUESTS_PER_SOCKET, RETRY_AFTER_SHORT_SECONDS, RETRY_AFTER_LONG_SECONDS } from './src/server/relay-config.js';
 import { evictOldestBucket, refillTokens, takeTrafficTokens, takeTrafficBudget, createTrafficBucket, tokenWaitSeconds } from './src/server/relay-rate-bucket.js';
-import { isExactAllowedOrigin, setCredentialCors, acceptCredentialOrigin, readJsonBody, sendJson, sendIfWritable, sendUpgradeRejection } from './src/server/relay-http.js';
+import { isExactAllowedOrigin, acceptCredentialOrigin, readJsonBody, sendJson, sendIfWritable, sendUpgradeRejection, sendCredentialPreflight } from './src/server/relay-http.js';
+import { handleRoomRoute } from './src/server/relay-room-routes.js';
 import { roomLogId } from './src/server/relay-log-id.js';
 import { createUploadState, scanUploadUsage, createRelayUploads, createImageReadBudgets, MIME_EXT, matchesMagicBytes, UPLOAD_STORAGE_FAILURE_EVENT, ROOM_UPLOAD_USAGE_META } from './src/server/relay-uploads.js';
 import http from 'http';
@@ -1375,12 +1376,6 @@ const server = http.createServer({ maxHeaderSize: MAX_HEADER_BYTES }, (req, res)
     takeSessionExchangeToken: () => takeSessionExchangeToken(clientIp),
     sessionTtlMs: ROOM_SESSION_TTL_MS, createSessionCookie, sessionAuthenticated: Boolean(authenticatedDocFromRequest(req, publicWall.roomHandle)),
   })) return;
-  const uploadMatch = !hasQueryOrFragment
-    ? routePath.match(/^\/rooms\/([A-Za-z0-9_-]{32})\/upload$/)
-    : null;
-  const roomImageMatch = !hasQueryOrFragment
-    ? routePath.match(/^\/rooms\/([A-Za-z0-9_-]{32})\/images\/([a-f0-9-]+\.(?:png|jpe?g|webp|gif))$/)
-    : null;
   // Readiness is separate from liveness: the process can be perfectly alive
   // while LevelDB is unwritable, and the catch-all below answers 200 either
   // way. An orchestrator polling this stops routing new traffic here instead
@@ -1391,18 +1386,8 @@ const server = http.createServer({ maxHeaderSize: MAX_HEADER_BYTES }, (req, res)
     res.end(ok ? 'ready' : 'not ready');
     return;
   }
-  if (req.method === 'OPTIONS'
-      && !hasQueryOrFragment
-      && (routePath === '/api/rooms' || routePath === '/api/room-session' || uploadMatch)) {
-    if (!acceptCredentialOrigin(req, res, ALLOWED_ORIGINS, ALLOW_INSECURE_HTTP)) return;
-    if (uploadMatch && !registeredRoomsByHandle.has(uploadMatch[1])) { res.writeHead(404); res.end(); return; }
-    res.writeHead(204, {
-      'access-control-allow-methods': 'POST, OPTIONS',
-      'access-control-allow-headers': 'Content-Type',
-      'access-control-max-age': String(CORS_PREFLIGHT_MAX_AGE_SECONDS),
-      'cache-control': 'no-store',
-    });
-    res.end();
+  if (req.method === 'OPTIONS' && !hasQueryOrFragment && (routePath === '/api/rooms' || routePath === '/api/room-session')) {
+    sendCredentialPreflight(req, res, { allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, methods: 'POST, OPTIONS' });
     return;
   }
   if (req.method === 'POST' && !hasQueryOrFragment && routePath === '/api/rooms') {
@@ -1413,29 +1398,11 @@ const server = http.createServer({ maxHeaderSize: MAX_HEADER_BYTES }, (req, res)
     void handleRoomSession(req, res, clientIp, prefixed);
     return;
   }
-  if (req.method === 'POST' && uploadMatch) {
-    if (!acceptCredentialOrigin(req, res, ALLOWED_ORIGINS, ALLOW_INSECURE_HTTP)) return;
-    res.setHeader('cache-control', 'no-store');
-    if (shuttingDown || storageFailure) { res.writeHead(503); res.end(); return; }
-    if (!registeredRoomsByHandle.has(uploadMatch[1])) { res.writeHead(404); res.end(); return; }
-    const session = authenticatedDocFromRequest(req, uploadMatch[1]);
-    if (!session) { res.writeHead(401); res.end(); return; }
-    void uploads.handleUpload(req, res, clientIp, session.docName, uploadMatch[1]);
-    return;
-  }
-  if (req.method === 'GET' && roomImageMatch) {
-    if (!registeredRoomsByHandle.has(roomImageMatch[1])) { res.writeHead(404); res.end(); return; }
-    if (isExactAllowedOrigin(req.headers.origin, ALLOWED_ORIGINS, ALLOW_INSECURE_HTTP)) setCredentialCors(req.headers.origin, res);
-    const session = authenticatedDocFromRequest(req, roomImageMatch[1]);
-    if (!session) { res.writeHead(401); res.end(); return; }
-    if (req.headers.origin && !acceptCredentialOrigin(req, res, ALLOWED_ORIGINS, ALLOW_INSECURE_HTTP)) return;
-    uploads.handleGetRoomImage(roomImageMatch[1], roomImageMatch[2], clientIp, res);
-    return;
-  }
-  if (req.method === 'GET' && routePath.startsWith('/images/')) {
-    uploads.handleGetLegacyImage(routePath.slice('/images/'.length), clientIp, res);
-    return;
-  }
+  if (handleRoomRoute(req, res, routePath, {
+    hasQueryOrFragment, allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP,
+    unavailable: shuttingDown || Boolean(storageFailure), rooms: registeredRoomsByHandle,
+    authenticate: authenticatedDocFromRequest, uploads, clientIp,
+  })) return;
   if (req.method === 'GET' && routePath === '/') {
     res.writeHead(200, { 'content-type': 'text/plain' });
     res.end('yjs-ws ok');
