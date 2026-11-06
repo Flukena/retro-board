@@ -80,7 +80,9 @@ Notes:
   variables are passed through from `.env`; the owner adds
   `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` there (never in the
   repo). `YJS_ACCOUNT_SESSION_SECRET` is optional; without it the relay creates
-  and persists `/data/.account-session-key` in `yjs_data`.
+  and persists `/data/.account-session-key` in `yjs_data`. If you do not set it,
+  leave the line out of `.env` entirely; an empty `YJS_ACCOUNT_SESSION_SECRET=`
+  is passed to the container as an empty string.
 - The running containers use `miro-release-*` image tags, so the owner's deploy
   flow retags builds. The candidate images below use other names; deploy must use
   images built and scanned the way you normally release.
@@ -134,7 +136,7 @@ docker compose -f docker-compose.prod.yml config --quiet
 docker compose -f docker-compose.prod.yml build --pull --no-cache volume-init yjs web cloudflared
 ./scripts/scan-production-images.sh
 
-# C4. Deploy
+# C4. Deploy (bare command kept on purpose, see note below)
 docker compose -f docker-compose.prod.yml up -d --no-build
 docker compose -f docker-compose.prod.yml ps
 
@@ -145,6 +147,16 @@ docker inspect --format '{{json .NetworkSettings.Networks}}' <yjs-public-contain
 docker inspect --format '{{.Config.Env}}' <yjs-public-container> | grep -c GOOGLE   # expect 0
 ```
 
+C4 note: `up -d --no-build` recreates every service whose image or config
+changed. Expect: `volume-init` (runs once, then exits), `yjs`, `yjs-public`
+(same `miro-yjs` image, so it restarts on the new code even though it gains no
+feature; live Public Wall rooms drop briefly and clients reconnect), `web`, and
+`cloudflared` / `cloudflared-retroroom` if their images were rebuilt in C3. The
+tunnel restart briefly takes the whole site offline. The bare command is kept
+because naming only `yjs` would leave `web` (new account UI) and `yjs-public`
+on mismatched code and `depends_on` would still recreate dependants. Pick a
+quiet time.
+
 ## 4. Post-deploy smoke check (owner)
 
 1. Signed out: `curl -si https://retroroom.party/yjs/api/account` returns
@@ -153,7 +165,9 @@ docker inspect --format '{{.Config.Env}}' <yjs-public-container> | grep -c GOOGL
    consent. You return to the page you came from and the account menu shows you.
 3. DevTools, Application, Cookies: the account cookie has `Secure`, `HttpOnly`,
    and `Path=/yjs/api`. The Set-Cookie response on the callback shows the same
-   flags.
+   flags. On the sign-in start response (the redirect to Google) the
+   `rb_oauth_flow` Set-Cookie also has `Secure`, `HttpOnly` and
+   `Path=/yjs/api/auth`.
 4. Reload: still signed in.
 5. In a second browser (or private window) sign in as the same account, then use
    **Sign out everywhere** in it. The first browser is signed out on its next
@@ -169,7 +183,10 @@ docker inspect --format '{{.Config.Env}}' <yjs-public-container> | grep -c GOOGL
 1. Remove the four Google lines from the `yjs` environment and the
    `relay_egress` network entries (the `yjs` `networks` item, the `yjs-public`
    override, and the top-level network), or revert the compose commit.
-2. `docker compose -f docker-compose.prod.yml up -d --no-build` (recreates `yjs`;
+2. `docker compose -f docker-compose.prod.yml up -d --no-build --remove-orphans`
+   (recreates `yjs`; the Compose project is `miro`, so the now-unused network is
+   `miro_relay_egress`. If it is still listed in `docker network ls` afterwards,
+   run `docker network rm miro_relay_egress` once no container uses it;
    to return to the previous image, retag the previous `miro-release-*` image
    as the compose image first).
 3. Sign-in is then off and `yjs` has no egress again. Accounts already created
