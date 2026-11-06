@@ -90,6 +90,20 @@ export function AccountMenuView({ session, inApp, href, open = false, confirming
   );
 }
 
+const HIDDEN_STATUSES = Object.freeze([null, ACCOUNT_STATUS.DISABLED]);
+
+// Wrapper and toast mount only when something shows, so guests on a relay
+// without sign-in get no empty box (and no extra flex gap in the masthead).
+export function AccountFrame({ status, rootRef, toast, onCloseToast, children }) {
+  if (HIDDEN_STATUSES.includes(status)) return null;
+  return (
+    <div className="rb-account" ref={rootRef}>
+      {children}
+      <Toast toast={toast} onClose={onCloseToast} />
+    </div>
+  );
+}
+
 export default function AccountMenu() {
   useLang();
   const { session, toast, closeToast, reload, run, copyLink } = useAccountMenu();
@@ -100,7 +114,7 @@ export default function AccountMenu() {
   const afterRun = async (name) => { setOpen(false); await run(name); };
   const confirmDelete = async () => { if (await run('deleteAccount')) setConfirmingDelete(false); };
   return (
-    <div className="rb-account" ref={rootRef}>
+    <AccountFrame status={session.status} rootRef={rootRef} toast={toast} onCloseToast={closeToast}>
       <AccountMenuView
         session={session}
         inApp={isInAppBrowser(navigator.userAgent)}
@@ -116,7 +130,6 @@ export default function AccountMenu() {
         onCopyLink={() => void copyLink()}
         onRetry={() => void reload()}
       />
-      <Toast toast={toast} onClose={closeToast} />
-    </div>
+    </AccountFrame>
   );
 }

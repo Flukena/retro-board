@@ -73,3 +73,17 @@ test('every account.* key exists in th, en and every on-demand locale', async ()
     }
   });
 });
+
+test('AccountFrame renders no wrapper or toast for disabled and loading, but does when signed out', async () => {
+  await withChromeModule('/src/client/account/AccountMenu.jsx', ({ AccountFrame }) => {
+    const frame = (status) => renderToStaticMarkup(
+      React.createElement(AccountFrame, { status, toast: { msg: 'boom', type: 'warn' }, onCloseToast: noop }, 'child'),
+    );
+    assert.equal(frame('disabled'), '');
+    assert.equal(frame(null), '');
+    for (const status of ['signed-out', 'signed-in', 'unavailable']) {
+      const html = frame(status);
+      assert.ok(html.includes('rb-account') && html.includes('child') && html.includes('boom'), status);
+    }
+  });
+});
