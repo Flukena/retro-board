@@ -11,17 +11,16 @@
  * Creates one disposable board; report.json contains its full capability URL.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, realpathSync } from 'node:fs';
-import { mkdir, stat, writeFile } from 'node:fs/promises';
-import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { existsSync } from 'node:fs';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { isAbsolute, join, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { pathToFileURL } from 'node:url';
 import { Z } from '../src/client/chrome/chrome-layout.js';
+import { prepareDataVolumeOutput } from './board-live-helpers.mjs';
 import japanese from '../src/client/ui/locales/ja.js';
 
 const DEFAULT_BASE_URL = 'http://127.0.0.1:5180';
-const BASE_DATA_DIR = '/Volumes/BaseDisk/Base';
-const SSD_MOUNT_DIR = '/Volumes/BaseDisk';
 const VIEWPORT_DESKTOP = { width: 1440, height: 900 };
 const VIEWPORT_NARROW = { width: 390, height: 844 };
 const ACTION_TIMEOUT_MS = 15_000;
@@ -109,22 +108,6 @@ function parseOptions(args) {
   options.baseUrl = url.origin;
   options.out = resolve(options.out);
   return options;
-}
-
-function isWithinDirectory(path, directory) {
-  return path === directory || path.startsWith(`${directory}${sep}`);
-}
-
-async function prepareOutput(out) {
-  const [mount, parent] = await Promise.all([stat(SSD_MOUNT_DIR), stat(dirname(SSD_MOUNT_DIR))]);
-  if (mount.dev === parent.dev) throw new Error('BaseData SSD is not mounted; refusing output fallback.');
-  const base = realpathSync(BASE_DATA_DIR);
-  if (!isWithinDirectory(out, base)) throw new Error(`--out must be under ${BASE_DATA_DIR}.`);
-  let ancestor = out;
-  while (!existsSync(ancestor)) ancestor = dirname(ancestor);
-  if (!isWithinDirectory(realpathSync(ancestor), base)) throw new Error('--out traverses a symlink outside BaseData.');
-  await mkdir(out, { recursive: true });
-  return realpathSync(out);
 }
 
 async function loadPlaywright() {
@@ -466,7 +449,7 @@ async function executeChecks(options, report) {
 
 async function main() {
   const options = parseOptions(process.argv.slice(NODE_ARGUMENT_OFFSET_COUNT));
-  options.out = await prepareOutput(options.out);
+  options.out = await prepareDataVolumeOutput(options.out);
   const report = {
     startedAt: new Date().toISOString(), baseUrl: options.baseUrl,
     strictConsole: options.strictConsole, boardUrl: null, steps: [], screenshots: [],

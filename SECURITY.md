@@ -198,6 +198,8 @@ is non-empty and the relay is not the Public Wall relay.
   plan, `planGrantedAt`, `sessionGeneration`, `createdAt`. They live as meta
   keys of one reserved document in the relay LevelDB (`acct:<id>`,
   `sub:<sub>`, `email:<lower-cased>`), written as one fsynced batch per change.
+  Two accounts may share an email: the latest sign-in owns the `email:` index,
+  so maintainer lookup misses the other one until it signs in again.
   A storage failure takes the relay down through the same path as rooms.
 - **Single-use flows.** `start` sets a signed `rb_oauth_flow` cookie
   (`HttpOnly; SameSite=Lax; Max-Age=600`, `Path` limited to the auth routes,

@@ -1,9 +1,9 @@
 // Shared Playwright helpers for two-participant board live checks
 // (retro-outcomes-live-check.mjs, facilitation-live-check.mjs, account-live-check.mjs).
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { existsSync, realpathSync } from 'node:fs';
+import { mkdir, stat, writeFile } from 'node:fs/promises';
+import { dirname, join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 export const VIEWPORT = { width: 1440, height: 900 };
@@ -12,6 +12,27 @@ export const CANVAS_SELECTOR = '.rb-no-select';
 const ACTION_TIMEOUT_MS = 15_000;
 const BOARD_URL_PATTERN = /\/b\/[A-Za-z0-9_-]+#[A-Za-z0-9_-]+$/;
 const JSON_INDENT_SPACES = 2;
+// AGENTS.md §Data location: live-check output lives on a mounted data volume, never a fallback.
+export const DATA_VOLUME_ROOTS = Object.freeze(['/Volumes/ssd-fluke/BaseData', '/Volumes/BaseDisk/Base']);
+const VOLUMES_DIR = '/Volumes';
+const MOUNT_PATH_SEGMENTS = 3;
+
+const isWithinDirectory = (path, directory) => path === directory || path.startsWith(`${directory}${sep}`);
+const mountOf = (root) => root.split(sep).slice(0, MOUNT_PATH_SEGMENTS).join(sep);
+
+/** Creates `out` under a mounted data volume and returns its real path; anything else throws. */
+export async function prepareDataVolumeOutput(out, roots = DATA_VOLUME_ROOTS) {
+  const target = resolve(out);
+  const root = roots.find((candidate) => isWithinDirectory(target, candidate));
+  if (!root) throw new Error(`output must be under ${roots.join(' or ')}; no fallback.`);
+  const [mount, volumes] = await Promise.all([stat(mountOf(root)), stat(VOLUMES_DIR)]);
+  if (mount.dev === volumes.dev) throw new Error(`${mountOf(root)} is not mounted; refusing output fallback.`);
+  let ancestor = target;
+  while (!existsSync(ancestor)) ancestor = dirname(ancestor);
+  if (!isWithinDirectory(realpathSync(ancestor), realpathSync(root))) throw new Error('output traverses a symlink outside its data volume.');
+  await mkdir(target, { recursive: true });
+  return realpathSync(target);
+}
 
 export const BASE_LABELS = {
   en: { create: 'Create', namePlaceholder: 'e.g. "Fluke"', nameConfirm: 'Enter room', sticky: 'Double-click to edit',
@@ -136,7 +157,7 @@ async function sharedBoard(browser, baseUrl, report) {
 export async function runLiveCheck(scriptName, scenario, { setup = sharedBoard } = {}) {
   const [baseUrl, out] = process.argv.slice(2);
   if (!baseUrl || !out) throw new Error(`usage: ${scriptName} <base-url> <output-dir>`);
-  await mkdir(out, { recursive: true });
+  await prepareDataVolumeOutput(out);
   const report = { baseUrl, out, pages: [], steps: [], files: [], screenshots: [], pageErrors: [], consoleErrors: [] };
   const { chromium } = await loadPlaywright();
   const browser = await chromium.launch();

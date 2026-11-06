@@ -102,7 +102,8 @@ Notes:
 
 ## 3. Release gate
 
-Run from the worktree at `ad5da81` on 2026-11-06 (logs in `$TMPDIR/t10`).
+Run from the worktree at `ad5da81` on 2026-11-06 (logs in
+`/Volumes/BaseDisk/Base/retro-board/signin-release-gate-20261106/`).
 
 | Step | Command | Result |
 | --- | --- | --- |
