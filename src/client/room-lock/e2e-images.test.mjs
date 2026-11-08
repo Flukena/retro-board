@@ -109,7 +109,7 @@ test('card leases share one fetch per source and revoke the blob URL with the la
   assert.deepEqual(revoked, [a]);
 });
 
-function boardWith(srcs) {
+function boardWith(srcs, roomHandle) {
   const doc = new Y.Doc();
   const items = doc.getMap('items');
   srcs.forEach((src, index) => {
@@ -120,10 +120,16 @@ function boardWith(srcs) {
   });
   const storage = {
     listImageSources: () => listImageSources(items),
-    rewriteImageSources: (map) => rewriteImageSources(doc, items, map, 'image-repair'),
+    rewriteImageSources: (map) => rewriteImageSources(doc, items, map, 'image-repair', roomHandle),
   };
   const srcOf = (id) => items.get(id).get('src');
-  return { doc, storage, srcOf };
+  const add = (id, src) => {
+    const item = new Y.Map();
+    item.set('type', 'image');
+    item.set('src', src);
+    items.set(id, item);
+  };
+  return { doc, items, storage, srcOf, add };
 }
 
 async function twoEpochRoom(t) {
@@ -138,12 +144,11 @@ test('repair moves an old-epoch image to a new id under the new key and rewrites
   const { key, oldKey } = await twoEpochRoom(t);
   const oldSrc = await uploadEncryptedImage(imageBlob(), { key: oldKey });
   const currentSrc = await uploadEncryptedImage(imageBlob(), { key });
-  const board = boardWith([oldSrc, currentSrc, oldSrc]);
+  const board = boardWith([oldSrc, currentSrc, oldSrc], key.roomHandle);
   let transactions = 0;
   board.doc.on('afterTransaction', (tr) => { if (tr.changed.size) transactions += 1; });
-  const dropped = [];
-  const result = await repairOldEpochImagesOnce({ storage: board.storage, key, dropKey: (epoch) => dropped.push(epoch) });
-  assert.deepEqual(result, { repaired: 2, broken: 0 });
+  const result = await repairOldEpochImagesOnce({ storage: board.storage, key });
+  assert.deepEqual(result, { repaired: 2, broken: 0, failed: 0 });
   assert.equal(transactions, 1, 'all rewrites share one local transaction');
   assert.notEqual(board.srcOf('i0'), oldSrc);
   assert.equal(board.srcOf('i0'), board.srcOf('i2'));
@@ -151,29 +156,71 @@ test('repair moves an old-epoch image to a new id under the new key and rewrites
   const moved = await readE2EImage(board.srcOf('i0'), { key: { ...key, previousKeys: new Map() } });
   assert.equal(moved.epoch, NEW_EPOCH, 'the new copy opens with the new key alone');
   assert.ok((await bytesOf(moved.blob)).equals(IMAGE));
-  assert.deepEqual(dropped, [OLD_EPOCH]);
+  assert.equal(key.previousKeys.has(OLD_EPOCH), true, 'earlier keys stay for the whole page lifetime');
 });
 
-test('repair keeps the previous key when an image could not be fetched, and counts undecryptable ones as broken', async (t) => {
+test('repair counts a transport failure as failed and an undecryptable image as broken', async (t) => {
   const { key, oldKey } = await twoEpochRoom(t);
   const oldSrc = await uploadEncryptedImage(imageBlob(), { key: oldKey });
   const missing = `/rooms/${key.roomHandle}/e2e-blobs/${globalThis.crypto.randomUUID()}`;
-  const board = boardWith([oldSrc, missing]);
-  const dropped = [];
-  const result = await repairOldEpochImagesOnce({ storage: board.storage, key, dropKey: (epoch) => dropped.push(epoch) });
-  assert.equal(result.repaired, 1);
-  assert.deepEqual(dropped, [], 'a transport failure must not discard the only key that could repair it');
+  const result = await repairOldEpochImagesOnce({ storage: boardWith([oldSrc, missing], key.roomHandle).storage, key });
+  assert.deepEqual(result, { repaired: 1, broken: 0, failed: 1 });
   const stranger = await createNextRoomKey('yet another password');
   const foreign = await uploadEncryptedImage(imageBlob(), { key: { ...key, dek: stranger.dek } });
-  const broken = await repairOldEpochImagesOnce({ storage: boardWith([foreign]).storage, key, dropKey: () => {} });
-  assert.deepEqual(broken, { repaired: 0, broken: 1 });
+  const broken = await repairOldEpochImagesOnce({ storage: boardWith([foreign], key.roomHandle).storage, key });
+  assert.deepEqual(broken, { repaired: 0, broken: 1, failed: 0 });
+});
+
+test('a deleted then undone old reference is still repaired later, because earlier keys are kept', async (t) => {
+  const { key, oldKey } = await twoEpochRoom(t);
+  const oldSrc = await uploadEncryptedImage(imageBlob(), { key: oldKey });
+  const board = boardWith([oldSrc], key.roomHandle);
+  const undo = new Y.UndoManager(board.items);
+  board.items.delete('i0');
+  assert.deepEqual(await repairOldEpochImagesOnce({ storage: board.storage, key }), { repaired: 0, broken: 0, failed: 0 });
+  undo.undo();
+  assert.equal(board.srcOf('i0'), oldSrc, 'undo brings the old reference back');
+  assert.ok(key.previousKeys.has(OLD_EPOCH));
+  assert.equal((await readE2EImage(oldSrc, { key })).epoch, OLD_EPOCH, 'it still renders');
+  assert.deepEqual(await repairOldEpochImagesOnce({ storage: board.storage, key }), { repaired: 1, broken: 0, failed: 0 });
+});
+
+test('an item whose source changed during repair is left alone', async (t) => {
+  const { key, oldKey } = await twoEpochRoom(t);
+  const oldSrc = await uploadEncryptedImage(imageBlob(), { key: oldKey });
+  const other = await uploadEncryptedImage(imageBlob(), { key });
+  const board = boardWith([oldSrc], key.roomHandle);
+  const racing = { ...board.storage, rewriteImageSources: (map) => {
+    board.items.get('i0').set('src', other);
+    return board.storage.rewriteImageSources(map);
+  } };
+  assert.deepEqual(await repairOldEpochImagesOnce({ storage: racing, key }), { repaired: 0, broken: 0, failed: 0 });
+  assert.equal(board.srcOf('i0'), other);
+});
+
+test('the rewrite refuses sources that are not canonical encrypted sources of this room', async (t) => {
+  const { key } = await twoEpochRoom(t);
+  const own = (id = globalThis.crypto.randomUUID()) => `/rooms/${key.roomHandle}/e2e-blobs/${id}`;
+  const board = boardWith([own()], key.roomHandle);
+  const good = own();
+  const cases = [
+    new Map([[board.srcOf('i0'), `/rooms/${'z'.repeat(32)}/e2e-blobs/${globalThis.crypto.randomUUID()}`]]),
+    new Map([[board.srcOf('i0'), 'javascript:alert(1)']]),
+    new Map([[board.srcOf('i0'), `/yjs${good}`]]),
+    new Map([[board.srcOf('i0'), own('not-a-uuid')]]),
+    new Map([[`/rooms/${'z'.repeat(32)}/e2e-blobs/${globalThis.crypto.randomUUID()}`, good]]),
+    new Map([['/images/abcdef12.png', good]]),
+  ];
+  const before = board.srcOf('i0');
+  for (const replacements of cases) assert.throws(() => board.storage.rewriteImageSources(replacements), RangeError);
+  assert.equal(board.srcOf('i0'), before);
 });
 
 test('repair never runs twice at once: a second request joins the running one', async (t) => {
   const { key, oldKey } = await twoEpochRoom(t);
   const oldSrc = await uploadEncryptedImage(imageBlob(), { key: oldKey });
-  const board = boardWith([oldSrc]);
-  const options = { storage: board.storage, key, dropKey: () => {} };
+  const board = boardWith([oldSrc], key.roomHandle);
+  const options = { storage: board.storage, key };
   const first = repairOldEpochImages(options);
   const second = repairOldEpochImages(options);
   assert.equal(first, second);
@@ -183,6 +230,6 @@ test('repair never runs twice at once: a second request joins the running one', 
 
 test('without earlier keys repair does nothing', async (t) => {
   const { key } = await openRoom(t);
-  const board = boardWith([`/rooms/${key.roomHandle}/e2e-blobs/${globalThis.crypto.randomUUID()}`]);
-  assert.deepEqual(await repairOldEpochImagesOnce({ storage: board.storage, key }), { repaired: 0, broken: 0 });
+  const board = boardWith([`/rooms/${key.roomHandle}/e2e-blobs/${globalThis.crypto.randomUUID()}`], key.roomHandle);
+  assert.deepEqual(await repairOldEpochImagesOnce({ storage: board.storage, key }), { repaired: 0, broken: 0, failed: 0 });
 });

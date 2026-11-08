@@ -66,6 +66,9 @@ export async function uploadEncryptedImage(blob, { signal, key = getRoomKey() } 
   return e2eImagePath(key.roomHandle, id);
 }
 
+/** True when this page already opened the source under the current key: nothing to repair, no fetch needed. */
+export const isKnownCurrentEpoch = (src, key) => epochBySource.get(src) === key.keyEpoch;
+
 function rememberEpoch(src, epoch) {
   epochBySource.delete(src);
   epochBySource.set(src, epoch);

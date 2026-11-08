@@ -561,5 +561,100 @@ test('image repair rewrites sources locally without creating an undo step', asyn
     assert.equal(browser.storage.rewriteImageSources(new Map([[before, after]])), 1);
     assert.deepEqual(browser.storage.listImageSources(), [{ id: 'img', src: after }]);
     assert.equal(browser.storage.canUndo(), false, 'a repair is not an undo step');
+  }, { locked: true });
+});
+
+test('a normal room refuses the image rewrite', async () => {
+  await withStorage(async (browser) => {
+    assert.throws(() => browser.storage.rewriteImageSources(new Map()), RangeError);
   });
+});
+
+const LOCKED_BLOB_ROUTE = /\/e2e-blobs$/;
+const GIF_BASE64 = 'R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+
+// Records what leaves the browser for blob uploads; the session exchange still answers from the room fake.
+function captureBlobUploads() {
+  const sent = [];
+  const relaySession = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    if (LOCKED_BLOB_ROUTE.test(String(url))) {
+      sent.push(Buffer.from(init.body));
+      return new Response(JSON.stringify({ id: new Headers(init.headers).get('x-blob-id') }), { status: 201 });
+    }
+    if (String(url).endsWith('/upload')) sent.push(Buffer.from('plaintext route used'));
+    return relaySession(url, init);
+  };
+  return sent;
+}
+
+test('paste, file and drop uploads (uploadWithRetry) send only ciphertext in a locked room', async () => {
+  await withStorage(async (_browser, _cache, server) => {
+    const sent = captureBlobUploads();
+    const { uploadWithRetry } = await server.ssrLoadModule('/src/client/transfer/image-upload.js');
+    const src = await uploadWithRetry(pngBlob());
+    assert.match(src, /\/e2e-blobs\//);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].includes(Buffer.from(IMAGE_MARKER)), false);
+  }, { locked: true });
+});
+
+test('successive drawing checkpoints keep saving through the encrypted upload boundary', async () => {
+  await withStorage(async (browser, _cache, server) => {
+    const sent = captureBlobUploads();
+    const { uploadWithRetry } = await server.ssrLoadModule('/src/client/transfer/image-upload.js');
+    const { saveDrawingArtifact } = await server.ssrLoadModule('/src/client/board/drawing-save.js');
+    const artifact = { blob: pngBlob(), bounds: { x: 10, y: 20, w: 100, h: 80 }, natW: 100, natH: 80 };
+    let created = 0;
+    const operations = {
+      isCurrent: () => true, canEdit: () => true, canCreateImage: () => true, uploadFailed: () => assert.fail('upload failed'),
+      uploadImage: (blob) => uploadWithRetry(blob), author: () => ({ authorId: 'a', authorName: 'Ada' }),
+      createId: () => `drawing-${created++}`, now: () => 1000, items: () => Array.from(browser.__rbYItems, ([id, item]) => ({ id, ...item.toJSON() })),
+      stopUndoCapture: () => {}, addItem: (item) => browser.storage.addItem(item),
+      updateItem: (id, patch) => browser.storage.updateItem(id, patch), selectItem: () => {},
+    };
+    assert.equal(await saveDrawingArtifact(artifact, operations), true);
+    const [first] = operations.items();
+    assert.match(first.src, /\/e2e-blobs\//);
+    for (let checkpoint = 0; checkpoint < 2; checkpoint += 1) {
+      const [current] = operations.items();
+      assert.equal(await saveDrawingArtifact(artifact, operations, current), true, `checkpoint ${checkpoint + 2}`);
+    }
+    assert.equal(sent.length, 3);
+    assert.equal(sent.some((body) => body.includes(Buffer.from(IMAGE_MARKER))), false);
+    assert.notEqual(operations.items()[0].src, first.src);
+  }, { locked: true });
+});
+
+test('production import (sanitizeImportedImages with prepareImageBlob) re-encrypts a GIF into the locked room', async () => {
+  await withStorage(async (browser, _cache, server) => {
+    const sent = captureBlobUploads();
+    const saved = { Image: globalThis.Image };
+    globalThis.Image = class {
+      naturalWidth = 1;
+      naturalHeight = 1;
+      set src(value) { queueMicrotask(() => this.onload()); }
+    };
+    try {
+      const { sanitizeImportedImages } = await server.ssrLoadModule('/src/client/transfer/image-upload.js');
+      const items = [{ id: 'g', type: 'image', x: 0, y: 0, w: 10, h: 10, src: `data:image/gif;base64,${GIF_BASE64}` }];
+      const [restored] = await sanitizeImportedImages(items);
+      assert.match(restored.src, /\/e2e-blobs\//);
+      assert.equal(sent.length, 1);
+      assert.equal(sent[0].includes(Buffer.from('GIF89a')), false, 'the GIF bytes are not in the request');
+    } finally {
+      if (saved.Image === undefined) delete globalThis.Image; else globalThis.Image = saved.Image;
+    }
+  }, { locked: true });
+});
+
+test('the image rewrite is for locked rooms and only accepts canonical encrypted sources of that room', async () => {
+  await withStorage(async (browser) => {
+    const own = (id) => `/rooms/${LOCKED_TEST_HANDLE}/e2e-blobs/${id}`;
+    const before = own('3f2b8c1e-4d5a-4e6f-8a9b-0c1d2e3f4a5b');
+    browser.__rbYDoc.transact(() => putItem(browser, { id: 'img', type: 'image', x: 0, y: 0, w: 10, h: 10, src: before }), 'system');
+    assert.throws(() => browser.storage.rewriteImageSources(new Map([[before, 'javascript:alert(1)']])), RangeError);
+    assert.throws(() => browser.storage.rewriteImageSources(new Map([[before, `/rooms/${'z'.repeat(32)}/e2e-blobs/4f2b8c1e-4d5a-4e6f-8a9b-0c1d2e3f4a5b`]])), RangeError);
+    assert.equal(browser.storage.rewriteImageSources(new Map([[before, own('4f2b8c1e-4d5a-4e6f-8a9b-0c1d2e3f4a5b')]])), 1);
+  }, { locked: true });
 });

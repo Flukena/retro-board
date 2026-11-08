@@ -1028,7 +1028,10 @@ if (provider) {
 
     // Image sources of the live board, and the one local transaction that image repair rewrites them in.
     listImageSources() { return listImageSources(yItems); },
-    rewriteImageSources(replacements) { return rewriteImageSources(ydoc, yItems, replacements, IMAGE_REPAIR_ORIGIN); },
+    rewriteImageSources(replacements) {
+      if (!isEncryptedRoom(getRoomKey(), activeRoomSession.roomHandle)) throw new RangeError('image rewrite is for locked rooms');
+      return rewriteImageSources(ydoc, yItems, replacements, IMAGE_REPAIR_ORIGIN, activeRoomSession.roomHandle);
+    },
 
     // --- Granular board writes (delta-only; see helpers above) ---
     canCreateItems(items) { return Array.isArray(items) && permitPublicCreations(items); },

@@ -38,11 +38,15 @@ async function twoLockedRooms(t) {
   return { env, roomA, roomB, sent };
 }
 
+// Stands in for prepareImageBlob (which re-encodes through a canvas and needs a browser) with a fixed pass-through,
+// so these round-trips assert transport and encryption only. The production preparer runs in storage-bridge.test.js.
+const deterministicPrepare = async (blob) => ({ blob, nw: NATURAL_SIZE_PX, nh: NATURAL_SIZE_PX });
+
 // The seam the board uses (`window.storage.uploadImage`) encrypts in a locked room; storage-bridge.test.js covers the bridge itself.
 const lockedUpload = (blob) => uploadEncryptedImage(blob);
 const restore = (manifest, extra) => restoreBackupImages(manifest.items, {
   readImage: readBackupImage,
-  prepareImage: async (blob) => ({ blob, nw: NATURAL_SIZE_PX, nh: NATURAL_SIZE_PX }),
+  prepareImage: deterministicPrepare,
   uploadImage: lockedUpload,
   resolveSource: safeRuntimeImageSource,
   ...extra,
