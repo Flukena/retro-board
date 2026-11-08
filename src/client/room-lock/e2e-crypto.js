@@ -6,14 +6,16 @@ const { subtle } = globalThis.crypto;
 const textEncoder = new TextEncoder();
 
 const BITS_PER_BYTE = 8;
-const DEK_BYTES = 32;
-const MASTER_BITS = 256;
+const AES_KEY_BITS = 256;
+const DEK_BYTES = AES_KEY_BITS / BITS_PER_BYTE;
+const MASTER_BITS = AES_KEY_BITS;
+const GCM_IV_BYTES = 12;
 const AUTH_BITS = LOCK_BYTES.authKey * BITS_PER_BYTE;
 const GCM_TAG_BYTES = 16;
 const KEK_INFO = textEncoder.encode('retroroom/kek/v1');
 const AUTH_INFO = textEncoder.encode('retroroom/auth/v1');
 const WRAP_AAD = textEncoder.encode('retroroom/kek-wrap/v1');
-const AES_KEY_PARAMS = Object.freeze({ name: 'AES-GCM', length: 256 });
+const AES_KEY_PARAMS = Object.freeze({ name: 'AES-GCM', length: AES_KEY_BITS });
 const HKDF_EMPTY_SALT = new Uint8Array(0);
 const SHA256_ALGORITHM = 'SHA-256';
 
@@ -129,7 +131,7 @@ export async function rewrapRoomLock({ currentPassword, lock, newPassword }) {
 }
 
 export async function encryptFrame(dek, aad, plaintext) {
-  const iv = randomBytes(LOCK_BYTES.wrapIv);
+  const iv = randomBytes(GCM_IV_BYTES);
   const ciphertext = new Uint8Array(await subtle.encrypt({ name: 'AES-GCM', iv, additionalData: aad }, dek, plaintext));
   const frame = new Uint8Array(iv.length + ciphertext.length);
   frame.set(iv);
@@ -138,10 +140,10 @@ export async function encryptFrame(dek, aad, plaintext) {
 }
 
 export async function decryptFrame(dek, aad, bytes) {
-  if (!(bytes instanceof Uint8Array) || bytes.length < LOCK_BYTES.wrapIv + GCM_TAG_BYTES) throw new RoomKeyError('tampered');
-  const iv = bytes.subarray(0, LOCK_BYTES.wrapIv);
+  if (!(bytes instanceof Uint8Array) || bytes.length < GCM_IV_BYTES + GCM_TAG_BYTES) throw new RoomKeyError('tampered');
+  const iv = bytes.subarray(0, GCM_IV_BYTES);
   try {
-    return new Uint8Array(await subtle.decrypt({ name: 'AES-GCM', iv, additionalData: aad }, dek, bytes.subarray(LOCK_BYTES.wrapIv)));
+    return new Uint8Array(await subtle.decrypt({ name: 'AES-GCM', iv, additionalData: aad }, dek, bytes.subarray(GCM_IV_BYTES)));
   } catch {
     throw new RoomKeyError('tampered');
   }

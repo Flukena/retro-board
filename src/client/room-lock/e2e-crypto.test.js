@@ -14,6 +14,22 @@ const IV_BYTES = 12;
 const GCM_TAG_BYTES = 16;
 const EMOJI_BELOW_MIN_COUNT = 9;
 const SHA256_ALGORITHM = 'SHA-256';
+const LITERAL_ITERATIONS = 600000;
+const MASTER_BITS = 256;
+const AUTH_BITS = 256;
+const utf8 = (text) => new TextEncoder().encode(text);
+const { subtle } = globalThis.crypto;
+
+// Independent re-derivation using only literals from the spec.
+async function referenceSecrets(password, saltB64) {
+  const base = await subtle.importKey('raw', utf8(password), 'PBKDF2', false, ['deriveBits']);
+  const master = await subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', iterations: LITERAL_ITERATIONS, salt: decodeBase64Url(saltB64) }, base, MASTER_BITS);
+  const hkdf = await subtle.importKey('raw', master, 'HKDF', false, ['deriveBits', 'deriveKey']);
+  const params = (info) => ({ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: utf8(info) });
+  const auth = new Uint8Array(await subtle.deriveBits(params('retroroom/auth/v1'), hkdf, AUTH_BITS));
+  const kek = await subtle.deriveKey(params('retroroom/kek/v1'), hkdf, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  return { authKey: encodeBase64Url(auth), kek };
+}
 
 const sha256Base64Url = async (bytes) => encodeBase64Url(new Uint8Array(await globalThis.crypto.subtle.digest(SHA256_ALGORITHM, bytes)));
 const flipBit = (bytes, index) => { const copy = Uint8Array.from(bytes); copy[index] ^= 1; return copy; };
@@ -23,10 +39,12 @@ describe('e2e-crypto', () => {
   let created;
   let ciphertext;
   let rewrapped;
+  let reference;
 
   before(async () => {
     created = await createRoomLock(PASSWORD);
     ciphertext = await encryptFrame(created.dek, AAD, PLAINTEXT);
+    reference = await referenceSecrets(PASSWORD, created.lock.salt);
     rewrapped = await rewrapRoomLock({ currentPassword: PASSWORD, lock: created.lock, newPassword: NEW_PASSWORD });
   });
 
@@ -99,5 +117,25 @@ describe('e2e-crypto', () => {
     await assert.rejects(rewrapRoomLock({ currentPassword: PASSWORD, lock: created.lock, newPassword: PASSWORD }), RangeError);
     await assert.rejects(deriveRoomSecrets(PASSWORD, created.lock.salt, { ...LOCK_KDF, iterations: 1 }), RangeError);
     await assert.rejects(deriveRoomSecrets(PASSWORD, 'AAAA', created.lock.kdf), RangeError);
+  });
+
+  it('matches an independent known-answer derivation of authKey and KEK', async () => {
+    assert.equal(created.authKey, reference.authKey);
+    const iv = decodeBase64Url(created.lock.wrapIv);
+    const wrapAad = utf8('retroroom/kek-wrap/v1');
+    const rawDek = await subtle.decrypt({ name: 'AES-GCM', iv, additionalData: wrapAad }, reference.kek, decodeBase64Url(created.lock.wrappedDek));
+    const dek = await subtle.importKey('raw', rawDek, 'AES-GCM', false, ['decrypt']);
+    const frame = ciphertext;
+    const plain = await subtle.decrypt({ name: 'AES-GCM', iv: frame.slice(0, IV_BYTES), additionalData: AAD }, dek, frame.slice(IV_BYTES));
+    assert.deepEqual(new Uint8Array(plain), PLAINTEXT);
+  });
+
+  it('rejects a DEK wrapped with a different or absent AAD', async () => {
+    const rawDek = new Uint8Array(32).fill(7);
+    const iv = new Uint8Array(IV_BYTES).fill(1);
+    for (const additionalData of [utf8('retroroom/other/v1'), undefined]) {
+      const wrapped = new Uint8Array(await subtle.encrypt({ name: 'AES-GCM', iv, additionalData }, reference.kek, rawDek));
+      await rejectsWith(unwrapRoomKey(reference.kek, encodeBase64Url(wrapped), encodeBase64Url(iv)), 'wrong-password');
+    }
   });
 });
