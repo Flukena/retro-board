@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { randomBytes } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import { AccountStore } from './account-store.js';
 import { AccountSessions } from './auth-session.js';
 import { RoomRegistry } from './relay-room-registry.js';
@@ -25,7 +25,10 @@ const IP = '203.0.113.7';
 const KEY_BYTES = 32;
 const TTL_MS = 60_000;
 const COOKIE_HEADER_BYTES = 4096;
-const MAX_BODY_BYTES = 16_384;
+const MAX_BODY_BYTES = 1024;
+const TOO_LARGE = 413;
+const NOT_FOUND = 404;
+const FIXED_NOW_MS = 1_800_000_000_000;
 const MAX_ROOMS = 50;
 const UNLIMITED = Number.MAX_SAFE_INTEGER;
 const OK = 200;
@@ -68,9 +71,10 @@ async function fixture(t, { storedPlan } = {}) {
     upsertFromGoogle: (profile) => realStore.upsertFromGoogle(profile),
     get: async (id) => ({ ...(await realStore.get(id)), plan: storedPlan }),
   };
+  const failures = [];
   const routes = createRoomSessionRoutes({
     registry, sessions, verifier: new RoomLockVerifier(), accountSessions, accountStore,
-    buckets: { takeCreateToken: () => 0, takeSessionExchangeToken: () => true, failureAttemptAvailable: () => true, recordSessionFailure() {} },
+    buckets: { takeCreateToken: () => 0, takeSessionExchangeToken: () => true, failureAttemptAvailable: () => true, recordSessionFailure: () => failures.push(1) },
     config: { allowedOrigins: [ORIGIN], allowInsecureHttp: false, sessionTtlMs: TTL_MS, maxApiBodyBytes: MAX_BODY_BYTES },
     unavailable: () => false, onStorageFailure() {},
   });
@@ -91,7 +95,7 @@ async function fixture(t, { storedPlan } = {}) {
     const cookie = accountSessions.createCookie(account.id, account.sessionGeneration, '/api').split(';')[0];
     return { account, cookie };
   };
-  return { registry, sessions, accountStore, post, signIn };
+  return { registry, sessions, accountStore, post, signIn, signingKey, base, failures };
 }
 
 async function lockedRoom(f, owner) {
@@ -103,7 +107,16 @@ async function lockedRoom(f, owner) {
 const cookieHeaderOf = (response) => response.headers.getSetCookie()[0].split(';')[0];
 const cookieRequest = (cookie) => ({ headers: { cookie } });
 
+// The pre-change cookie format (10673b7:src/server/relay-session.js), built without the code under test.
+const legacyCookie = (key, handle, expiresAt, docName) => {
+  const signature = createHmac('sha256', key).update('room-session-v1\0').update(handle).update('\0')
+    .update(String(expiresAt)).update('\0').update(docName).digest('base64url');
+  const maxAge = Math.max(1, Math.floor((expiresAt - FIXED_NOW_MS) / 1000));
+  return `rb_room_session=v1.${handle}.${expiresAt}.${signature}; Path=/rooms/${handle}; HttpOnly; SameSite=Strict; Max-Age=${maxAge}; Secure`;
+};
+
 test('a normal room is created and exchanged exactly as before, with an unbound cookie', async (t) => {
+  t.mock.method(Date, 'now', () => FIXED_NOW_MS);
   const f = await fixture(t);
   const created = await f.post('/api/rooms', {});
   assert.equal(created.status, CREATED);
@@ -114,11 +127,7 @@ test('a normal room is created and exchanged exactly as before, with an unbound 
   const body = await exchanged.json();
   assert.deepEqual(Object.keys(body).sort(), ['expiresAt', 'roomHandle']);
   const docName = f.registry.registeredDocForCapability(room.code, room.token);
-  const expected = f.sessions.createCookie(body.roomHandle, body.expiresAt, docName, `/rooms/${body.roomHandle}`);
-  const [value, ...attributes] = exchanged.headers.getSetCookie()[0].split('; ');
-  const [expectedValue, ...expectedAttributes] = expected.split('; ');
-  assert.equal(value, expectedValue);
-  assert.deepEqual(attributes.filter((a) => !a.startsWith('Max-Age')), expectedAttributes.filter((a) => !a.startsWith('Max-Age')));
+  assert.equal(exchanged.headers.getSetCookie()[0], legacyCookie(f.signingKey, body.roomHandle, body.expiresAt, docName));
   assert.equal((await f.post('/api/rooms', { other: 1 })).status, BAD_REQUEST);
 });
 
@@ -232,4 +241,35 @@ test('a room whose lock record is unreadable answers 503', async (t) => {
     assert.equal(response.status, UNAVAILABLE);
     assert.deepEqual(response.headers.getSetCookie(), []);
   }
+});
+
+test('a present but non-string authKey is a 400 that does not charge the capability-failure budget', async (t) => {
+  const f = await fixture(t);
+  const normal = await (await f.post('/api/rooms', {})).json();
+  const locked = await lockedRoom(f, await f.signIn('owner@example.com'));
+  for (const room of [normal, locked]) {
+    for (const authKey of [null, 7, {}, [], true]) {
+      const response = await f.post('/api/room-session', { ...room, authKey });
+      assert.equal(response.status, BAD_REQUEST);
+      assert.deepEqual(response.headers.getSetCookie(), []);
+    }
+  }
+  assert.deepEqual(f.failures, [], 'no failed-capability guess was recorded');
+  const guess = await f.post('/api/room-session', { code: 'zzz', token: 'y'.repeat(12), authKey: RIGHT_KEY });
+  assert.equal(guess.status, NOT_FOUND);
+  assert.equal(f.failures.length, 1, 'a real capability miss is still charged');
+});
+
+test('a locked-create body is accepted at exactly 1 KiB and refused one byte over', async (t) => {
+  const f = await fixture(t);
+  const owner = await f.signIn('owner@example.com');
+  const body = JSON.stringify({ lock: lockParams() });
+  const send = (padding) => fetch(`${f.base}/api/rooms`, {
+    method: 'POST', headers: { origin: ORIGIN, 'content-type': 'application/json', cookie: owner.cookie },
+    body: `${body}${' '.repeat(padding)}`,
+  });
+  const exact = MAX_BODY_BYTES - Buffer.byteLength(body);
+  assert.ok(exact > 0, 'fixture fits under the limit');
+  assert.equal((await send(exact)).status, CREATED);
+  assert.equal((await send(exact + 1)).status, TOO_LARGE);
 });

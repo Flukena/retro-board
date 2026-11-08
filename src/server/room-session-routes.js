@@ -1,5 +1,5 @@
 import { entitlementsFor } from '../domain/plan-entitlements.js';
-import { LOCK_KDF, parseAuthKey, parseLockParams } from '../domain/room-lock-contract.js';
+import { LOCK_KDF, hasExactKeys, parseAuthKey, parseLockParams } from '../domain/room-lock-contract.js';
 import { authenticateAccount } from './auth-session.js';
 import { acceptCredentialOrigin, readJsonBody, sendIfWritable, sendJson } from './relay-http.js';
 import { RETRY_AFTER_LONG_SECONDS, RETRY_AFTER_SHORT_SECONDS } from './relay-config.js';
@@ -12,13 +12,9 @@ const HTTP = Object.freeze({
 const INITIAL_KEY_EPOCH = 0;
 const INITIAL_LOCK_REVISION = 0;
 const SESSION_KEYS = ['code', 'token'];
-const LOCKED_SESSION_KEYS = ['authKey', 'code', 'token'];
+const LOCKED_SESSION_KEYS = ['code', 'token', 'authKey'];
+const AUTH_KEY_FIELD = 'authKey';
 const SOFT_CREATE_ERRORS = ['ROOM_CAPACITY', 'SERVER_UNAVAILABLE'];
-
-const sameKeys = (body, keys) => {
-  const actual = Object.keys(body).sort();
-  return actual.length === keys.length && actual.every((key, index) => key === keys[index]);
-};
 
 /**
  * Room creation and session exchange. ctx: registry, sessions (RoomSessions), verifier (RoomLockVerifier),
@@ -61,7 +57,7 @@ export function createRoomSessionRoutes(ctx) {
       sendIfWritable(res, err.code === 'BODY_TOO_LARGE' ? HTTP.TOO_LARGE : HTTP.BAD_REQUEST);
       return;
     }
-    const wantsLock = sameKeys(body, ['lock']);
+    const wantsLock = hasExactKeys(body, ['lock']);
     if (!wantsLock && Object.keys(body).length !== 0) { res.writeHead(HTTP.BAD_REQUEST); res.end(); return; }
     try {
       let lock = null;
@@ -87,7 +83,7 @@ export function createRoomSessionRoutes(ctx) {
     }
   };
 
-  const issueSession = (res, docName, prefixed, keyEpoch) => {
+  const issueSession = (docName, prefixed, keyEpoch) => {
     const roomHandle = registry.roomHandleForDoc(docName);
     const expiresAt = Date.now() + config.sessionTtlMs;
     const cookiePath = `${prefixed ? '/yjs' : ''}/rooms/${roomHandle}`;
@@ -106,7 +102,7 @@ export function createRoomSessionRoutes(ctx) {
     if (verdict === 'wrong') { sendIfWritable(res, HTTP.FORBIDDEN); return; }
     if (verdict !== 'ok') { sendIfWritable(res, HTTP.TOO_MANY, { 'retry-after': String(verdict.limited) }); return; }
     const account = await accountOf(req);
-    const { roomHandle, expiresAt, cookie } = issueSession(res, docName, prefixed, lock.keyEpoch);
+    const { roomHandle, expiresAt, cookie } = issueSession(docName, prefixed, lock.keyEpoch);
     sendJson(res, HTTP.OK, {
       roomHandle, expiresAt,
       lock: { wrappedDek: lock.wrappedDek, wrapIv: lock.wrapIv, keyEpoch: lock.keyEpoch, isOwner: account?.id === lock.ownerAccountId },
@@ -114,7 +110,7 @@ export function createRoomSessionRoutes(ctx) {
   };
 
   const exchangeNormal = (res, docName, prefixed) => {
-    const { roomHandle, expiresAt, cookie } = issueSession(res, docName, prefixed, null);
+    const { roomHandle, expiresAt, cookie } = issueSession(docName, prefixed, null);
     sendJson(res, HTTP.OK, { roomHandle, expiresAt }, { 'set-cookie': cookie });
   };
 
@@ -123,9 +119,11 @@ export function createRoomSessionRoutes(ctx) {
     let body;
     try { body = await readJsonBody(req, config.maxApiBodyBytes); }
     catch (err) { refuseFailedLookup(res, clientIp, err.code === 'BODY_TOO_LARGE' ? HTTP.TOO_LARGE : HTTP.BAD_REQUEST); return; }
-    const hasAuthKey = sameKeys(body, LOCKED_SESSION_KEYS) && typeof body.authKey === 'string';
-    const wellFormed = (hasAuthKey || sameKeys(body, SESSION_KEYS))
+    const hasAuthKeyField = hasExactKeys(body, LOCKED_SESSION_KEYS);
+    const wellFormed = (hasAuthKeyField || hasExactKeys(body, SESSION_KEYS))
       && typeof body.code === 'string' && typeof body.token === 'string';
+    // A present but non-string authKey is a malformed request, not a failed capability guess.
+    if (wellFormed && hasAuthKeyField && typeof body[AUTH_KEY_FIELD] !== 'string') { sendIfWritable(res, HTTP.BAD_REQUEST); return; }
     const docName = wellFormed ? registry.registeredDocForCapability(body.code, body.token) : null;
     if (!docName) { refuseFailedLookup(res, clientIp, HTTP.NOT_FOUND); return; }
     if (!buckets.takeSessionExchangeToken(clientIp)) {
@@ -133,12 +131,12 @@ export function createRoomSessionRoutes(ctx) {
       return;
     }
     if (!registry.isLocked(docName)) {
-      if (hasAuthKey) sendIfWritable(res, HTTP.BAD_REQUEST);
+      if (hasAuthKeyField) sendIfWritable(res, HTTP.BAD_REQUEST);
       else exchangeNormal(res, docName, prefixed);
       return;
     }
     try {
-      await exchangeLocked(req, res, clientIp, prefixed, docName, hasAuthKey ? body.authKey : undefined);
+      await exchangeLocked(req, res, clientIp, prefixed, docName, hasAuthKeyField ? body.authKey : undefined);
     } catch (err) {
       if (err.code === 'STORAGE_FAILURE') ctx.onStorageFailure(err);
       sendIfWritable(res, HTTP.UNAVAILABLE);
