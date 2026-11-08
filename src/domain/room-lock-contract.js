@@ -63,7 +63,7 @@ const hasExactKeys = (value, keys) => {
 
 const hasBytes = (value, length) => decodeBase64Url(value)?.length === length;
 
-const isLockKdf = (kdf) => isPlainObject(kdf) && hasExactKeys(kdf, KDF_FIELDS)
+export const isLockKdf = (kdf) => isPlainObject(kdf) && hasExactKeys(kdf, KDF_FIELDS)
   && KDF_FIELDS.every((key) => kdf[key] === LOCK_KDF[key]);
 
 export function parseLockParams(value) {
