@@ -156,6 +156,7 @@ export function createE2EBlobs({
 
   // File first, then the entry: a failed delete keeps the entry, so the next tick retries it.
   const expireRoom = async (docName, handle, at) => {
+    const generation = store.retiredGeneration(docName);
     const { expired, remainingRetired } = await roomLog.expiredBlobs(docName, at);
     const deleted = [];
     for (const id of expired) {
@@ -167,8 +168,8 @@ export function createE2EBlobs({
       }
     }
     if (deleted.length > 0) await roomLog.removeBlobs(docName, deleted);
-    if (remainingRetired === 0 && deleted.length === expired.length) {
-      store.untrackRetired(docName);
+    // A rotation that retired more blobs while files were being deleted changed the generation: keep tracking.
+    if (remainingRetired === 0 && deleted.length === expired.length && store.untrackRetired(docName, generation)) {
       roomLog.forget(docName);
     }
   };

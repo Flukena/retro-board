@@ -26,7 +26,8 @@ export class E2EBlobStore {
   #io;
   #logger;
   #staged = new Map();
-  #retiredRooms = new Set();
+  // docName -> generation, bumped each time the room retires more blobs
+  #retiredRooms = new Map();
 
   constructor({ uploadsDir, admission, roomUploadUsage, io = fs.promises, logger = console }) {
     this.#uploadsDir = uploadsDir;
@@ -40,11 +41,18 @@ export class E2EBlobStore {
   newTempPath() { return join(this.#uploadsDir, `${BLOB_TEMP_PREFIX}${randomUUID()}.tmp`); }
 
   /** Remembers a room that has old-epoch blobs inside their grace, so expiry finds it even when the room is not in memory. */
-  trackRetired(docName) { this.#retiredRooms.add(docName); }
+  trackRetired(docName) { this.#retiredRooms.set(docName, (this.#retiredRooms.get(docName) ?? 0) + 1); }
 
-  untrackRetired(docName) { this.#retiredRooms.delete(docName); }
+  /** The room's retirement generation: pass it back to untrackRetired to untrack only if nothing was retired since. */
+  retiredGeneration(docName) { return this.#retiredRooms.get(docName); }
 
-  retiredRooms() { return [...this.#retiredRooms]; }
+  /** Stops visiting a room. With `generation`, only when no blob was retired since that generation was read. */
+  untrackRetired(docName, generation = this.#retiredRooms.get(docName)) {
+    if (this.#retiredRooms.get(docName) === generation) this.#retiredRooms.delete(docName);
+    return !this.#retiredRooms.has(docName);
+  }
+
+  retiredRooms() { return [...this.#retiredRooms.keys()]; }
 
   pathOf(handle, id) { return join(this.#uploadsDir, e2eBlobFilename(handle, id)); }
 

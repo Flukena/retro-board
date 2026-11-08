@@ -47,12 +47,16 @@ async function withBlobs(run, { maxUploadBytes = 1024 } = {}) {
   await mkdir(uploadsDir);
   const ldb = new LeveldbPersistence(join(root, 'db'));
   const clock = { now: START_MS };
-  const faults = { unlink: () => false };
+  const faults = { unlink: () => false, beforeUnlink: async () => undefined };
   const warnings = [];
   const logger = { ...quiet, warn: (...args) => warnings.push(args) };
   const io = {
     ...fsPromises,
-    unlink: (path) => (faults.unlink(path) ? Promise.reject(Object.assign(new Error('injected unlink failure'), { code: 'EACCES' })) : fsPromises.unlink(path)),
+    unlink: async (path) => {
+      await faults.beforeUnlink(path);
+      if (faults.unlink(path)) throw Object.assign(new Error('injected unlink failure'), { code: 'EACCES' });
+      return fsPromises.unlink(path);
+    },
   };
   const roomUploadUsage = new Map([[DOC, EMPTY_USAGE()], [OTHER_DOC, EMPTY_USAGE()]]);
   const locks = new Map();
@@ -179,6 +183,31 @@ test('expiry still happens after the room left memory following the rotation', (
   assert.deepEqual(await e2eFiles(uploadsDir), []);
   assert.deepEqual(await inventoryIds(roomLog), []);
   assert.deepEqual(store.retiredRooms(), [], 'a room with nothing retired left is no longer visited');
+}));
+
+test('a rotation that retires more blobs while the sweep deletes files keeps the room tracked', () => withBlobs(async ({ blobs, roomLog, store, clock, locks, faults, uploadsDir }) => {
+  const first = await upload(blobs);
+  await commitRotation(roomLog, await roomLog.blobs(DOC));
+  locks.set(DOC, decodeLockRecord(encodeLockRecord(lockRecord({ keyEpoch: 1, lockRevision: 1 }))));
+  const second = await upload(blobs);
+  clock.now += E2E_BLOB_GRACE_MS;
+  faults.beforeUnlink = async (path) => {
+    faults.beforeUnlink = async () => undefined;
+    if (!path.endsWith(`${first.id}.e2e`)) return;
+    const { rotationId } = await roomLog.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 1, verify: approve });
+    await roomLog.commitRotation(DOC, {
+      rotationId, expectedHead: 0, verify: approve, snapshot: new Uint8Array(4), lockRecord: lockRecord({ keyEpoch: 2 }),
+      blobInventory: (await roomLog.blobs(DOC)).filter((entry) => entry.id !== first.id),
+    });
+  };
+  await blobs.sweepExpired();
+  assert.deepEqual(store.retiredRooms(), [DOC], 'the second rotation retired a blob during the sweep');
+  clock.now += E2E_BLOB_GRACE_MS;
+  await blobs.sweepExpired();
+  assert.deepEqual(await e2eFiles(uploadsDir), []);
+  assert.deepEqual(await inventoryIds(roomLog), []);
+  assert.deepEqual(store.retiredRooms(), []);
+  assert.equal(second.status, 201);
 }));
 
 test('a failed file delete keeps the inventory entry and the next sweep retries it; a missing file counts as deleted', () => withBlobs(async ({ blobs, roomLog, uploadsDir, clock, faults }) => {
