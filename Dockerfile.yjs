@@ -53,7 +53,7 @@ COPY --chown=node:node \
     src/server/relay-lifecycle.js src/server/relay-local-files.js src/server/relay-log-id.js \
     src/server/relay-maintenance.js src/server/relay-protocol.js src/server/relay-public-wall.js \
     src/server/relay-rate-bucket.js src/server/relay-rejection-counters.js src/server/relay-room-registry.js \
-    src/server/relay-room-routes.js src/server/relay-room-target.js src/server/relay-storage.js src/server/relay-ws-traffic.js src/server/room-lock.js src/server/room-session-routes.js src/server/room-lock-record.js src/server/room-retirement.js \
+    src/server/relay-room-routes.js src/server/relay-room-target.js src/server/relay-storage.js src/server/relay-ws-traffic.js src/server/room-lock.js src/server/room-lock-routes.js src/server/room-session-routes.js src/server/room-lock-record.js src/server/room-retirement.js \
     src/server/room-activity.js src/server/relay-session.js src/server/relay-uploads.js src/server/relay-vote-maintenance.js \
     ./src/server/
 

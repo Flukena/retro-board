@@ -1,0 +1,216 @@
+import { BLOB_ID_PATTERN, hasExactKeys, isCounter, parseAuthKey, parseLockParams } from '../domain/room-lock-contract.js';
+import { authenticateAccount } from './auth-session.js';
+import {
+  E2E_BUSY, E2E_CORRUPT, E2E_FROZEN, E2E_LOCK_MISMATCH, E2E_QUOTA, E2E_ROTATION_STALE, MAX_FREEZE_TTL_MS,
+} from './e2e-room-log.js';
+import { acceptCredentialOrigin, readBoundedBody, readJsonBody, sendIfWritable, sendJson } from './relay-http.js';
+import { RETRY_AFTER_SHORT_SECONDS } from './relay-config.js';
+import { CORRUPT_LOCK } from './room-lock-record.js';
+
+export const KEY_ROTATED_CLOSE_CODE = 4001;
+export const KEY_ROTATED_REASON = 'key rotated';
+export const MAX_COMMIT_HEADER_BYTES = 1024 * 1024;
+export const MAX_KEEP_BLOBS = 10_000;
+const HEADER_LENGTH_BYTES = 4;
+const OCTET_STREAM = 'application/octet-stream';
+const LOCK_LIMITED = 'LOCK_LIMITED';
+const STORAGE_FAILURE = 'STORAGE_FAILURE';
+const HTTP = Object.freeze({
+  OK: 200, NO_CONTENT: 204, BAD_REQUEST: 400, UNAUTHORIZED: 401, FORBIDDEN: 403, NOT_FOUND: 404, CONFLICT: 409,
+  TOO_LARGE: 413, UNSUPPORTED: 415, TOO_MANY: 429, UNAVAILABLE: 503,
+});
+const LOCK_PATH = /^\/api\/rooms\/([A-Za-z0-9_-]{32})\/lock\/(password|rotate\/begin|rotate\/commit|rotate\/abort)$/;
+const PASSWORD_KEYS = ['oldAuthKey', 'expectedRevision', 'lock'];
+const BEGIN_KEYS = ['oldAuthKey', 'expectedRevision'];
+const ABORT_KEYS = ['oldAuthKey', 'rotationId'];
+const COMMIT_KEYS = ['oldAuthKey', 'rotationId', 'expectedHead', 'keyEpoch', 'lock', 'keepBlobs'];
+
+const bad = () => Object.assign(new Error('bad request'), { status: HTTP.BAD_REQUEST });
+const tooLarge = () => Object.assign(new Error('too large'), { status: HTTP.TOO_LARGE });
+const conflict = () => Object.assign(new Error('conflict'), { status: HTTP.CONFLICT });
+const isBlobId = (value) => typeof value === 'string' && BLOB_ID_PATTERN.test(value);
+
+/**
+ * Verifies `oldAuthKey` against whatever record the log holds at that moment, with the wrong-password limits.
+ * The log treats a false return as a mismatch; `verdict` tells the route whether that was a wrong key.
+ */
+function authorizer(verifier, clientIp, docName, oldAuthKey) {
+  const attempt = {
+    verdict: null,
+    verify(record) {
+      const verdict = verifier.check(clientIp, docName, record, oldAuthKey);
+      attempt.verdict = verdict;
+      if (verdict === 'ok') return true;
+      if (verdict === 'wrong') return false;
+      throw Object.assign(new Error('wrong-password limit'), { code: LOCK_LIMITED, retryAfter: verdict.limited });
+    },
+  };
+  return attempt;
+}
+
+const requireAuthKey = (value) => {
+  if (!parseAuthKey(value)) throw bad();
+  return value;
+};
+
+const requireKeys = (body, keys) => {
+  if (!hasExactKeys(body, keys)) throw bad();
+  requireAuthKey(body.oldAuthKey);
+};
+
+const parseKeepBlobs = (value) => {
+  const unique = Array.isArray(value) && value.length <= MAX_KEEP_BLOBS && new Set(value).size === value.length;
+  if (!unique || !value.every(isBlobId)) throw bad();
+  return value;
+};
+
+/** Splits `[u32 BE header length][JSON header][snapshot]` and validates the header (Deviation 5). */
+function parseCommitBody(body, maxSnapshotBytes) {
+  if (body.length < HEADER_LENGTH_BYTES) throw bad();
+  const headerLength = body.readUInt32BE(0);
+  if (headerLength > MAX_COMMIT_HEADER_BYTES) throw tooLarge();
+  const snapshotAt = HEADER_LENGTH_BYTES + headerLength;
+  if (snapshotAt > body.length) throw bad();
+  const snapshot = body.subarray(snapshotAt);
+  if (snapshot.length === 0 || snapshot.length > maxSnapshotBytes) throw tooLarge();
+  let header;
+  try { header = JSON.parse(body.subarray(HEADER_LENGTH_BYTES, snapshotAt).toString('utf8')); } catch { throw bad(); }
+  if (!header || typeof header !== 'object' || Array.isArray(header)) throw bad();
+  requireKeys(header, COMMIT_KEYS);
+  const lock = parseLockParams(header.lock);
+  if (!lock || !isBlobId(header.rotationId) || !isCounter(header.expectedHead) || !isCounter(header.keyEpoch)) throw bad();
+  return { ...header, lock, keepBlobs: parseKeepBlobs(header.keepBlobs), snapshot: new Uint8Array(snapshot) };
+}
+
+/**
+ * Owner-only lock routes: password change and barrier-based key rotation (begin / commit / abort).
+ * ctx: registry, roomLog (E2ERoomLog), closeRoom(docName, code, reason), verifier (RoomLockVerifier),
+ * accountSessions, accountStore, config { allowedOrigins, allowInsecureHttp, maxApiBodyBytes },
+ * unavailable() getter, onStorageFailure(error).
+ * @returns {{ handle: (req, res, routePath: string, options: { clientIp: string, hasQueryOrFragment: boolean }) => boolean }}
+ */
+export function createRoomLockRoutes(ctx) {
+  const { registry, roomLog, verifier, config } = ctx;
+
+  const changePassword = async (req, { docName }, clientIp) => {
+    const body = await readJsonBody(req, config.maxApiBodyBytes);
+    requireKeys(body, PASSWORD_KEYS);
+    const params = parseLockParams(body.lock);
+    if (!params || !isCounter(body.expectedRevision)) throw bad();
+    const attempt = authorizer(verifier, clientIp, docName, body.oldAuthKey);
+    const updated = await roomLog.mutateLock(docName, {
+      verify: attempt.verify, expectedRevision: body.expectedRevision, next: (current) => ({ ...current, ...params }),
+    }).catch((error) => { throw Object.assign(error, { attempt }); });
+    registry.publishLock(docName, updated);
+    return { status: HTTP.OK, json: { lockRevision: updated.lockRevision } };
+  };
+
+  const beginRotation = async (req, { docName }, clientIp) => {
+    const body = await readJsonBody(req, config.maxApiBodyBytes);
+    requireKeys(body, BEGIN_KEYS);
+    if (!isCounter(body.expectedRevision)) throw bad();
+    const attempt = authorizer(verifier, clientIp, docName, body.oldAuthKey);
+    const frozen = await roomLog.freeze(docName, MAX_FREEZE_TTL_MS, {
+      expectedRevision: body.expectedRevision, verify: attempt.verify,
+    }).catch((error) => { throw Object.assign(error, { attempt }); });
+    return { status: HTTP.OK, json: { ...frozen, expiresInMs: MAX_FREEZE_TTL_MS } };
+  };
+
+  const abortRotation = async (req, { docName }, clientIp) => {
+    const body = await readJsonBody(req, config.maxApiBodyBytes);
+    requireKeys(body, ABORT_KEYS);
+    if (!isBlobId(body.rotationId)) throw bad();
+    const attempt = authorizer(verifier, clientIp, docName, body.oldAuthKey);
+    const released = await roomLog.release(docName, body.rotationId, { verify: attempt.verify })
+      .catch((error) => { throw Object.assign(error, { attempt }); });
+    if (!released) throw conflict();
+    return { status: HTTP.NO_CONTENT };
+  };
+
+  // The new inventory: blobs staged for this rotation that the client keeps, plus every existing committed blob.
+  const commitInventory = async (docName, rotationId, keepBlobs) => {
+    const blobs = await roomLog.blobs(docName);
+    const staged = new Set(blobs.filter((entry) => entry.stagedFor === rotationId).map((entry) => entry.id));
+    if (!keepBlobs.every((id) => staged.has(id))) throw conflict();
+    const keep = new Set(keepBlobs);
+    return blobs.filter((entry) => (entry.stagedFor ? keep.has(entry.id) && entry.stagedFor === rotationId : true));
+  };
+
+  const commitRotation = async (req, { docName, lock }, clientIp) => {
+    if (String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase() !== OCTET_STREAM) {
+      throw Object.assign(new Error('unsupported content type'), { status: HTTP.UNSUPPORTED });
+    }
+    const maxBody = HEADER_LENGTH_BYTES + MAX_COMMIT_HEADER_BYTES + roomLog.maxSnapshotBytes;
+    const header = parseCommitBody(await readBoundedBody(req, maxBody), roomLog.maxSnapshotBytes);
+    const attempt = authorizer(verifier, clientIp, docName, header.oldAuthKey);
+    const blobInventory = await commitInventory(docName, header.rotationId, header.keepBlobs);
+    const lockRecord = { ...lock, ...header.lock, keyEpoch: header.keyEpoch };
+    const committed = await roomLog.commitRotation(docName, {
+      rotationId: header.rotationId, expectedHead: header.expectedHead, verify: attempt.verify,
+      snapshot: header.snapshot, lockRecord, blobInventory,
+    }).catch((error) => { throw Object.assign(error, { attempt }); });
+    registry.publishLock(docName, committed);
+    ctx.closeRoom(docName, KEY_ROTATED_CLOSE_CODE, KEY_ROTATED_REASON);
+    return { status: HTTP.NO_CONTENT };
+  };
+
+  const ACTIONS = new Map([
+    ['password', changePassword],
+    ['rotate/begin', beginRotation],
+    ['rotate/commit', commitRotation],
+    ['rotate/abort', abortRotation],
+  ]);
+
+  const statusOf = (error) => {
+    if (error.status) return { status: error.status };
+    if (error.code === LOCK_LIMITED) return { status: HTTP.TOO_MANY, headers: { 'retry-after': String(error.retryAfter) } };
+    if (error.code === E2E_LOCK_MISMATCH) return { status: error.attempt?.verdict === 'wrong' ? HTTP.FORBIDDEN : HTTP.CONFLICT };
+    if (error.code === 'BODY_TOO_LARGE') return { status: HTTP.TOO_LARGE };
+    if (error.code === 'BAD_JSON') return { status: HTTP.BAD_REQUEST };
+    if (error.code === E2E_ROTATION_STALE || error.code === E2E_FROZEN) return { status: HTTP.CONFLICT };
+    if (error.code === E2E_QUOTA) return { status: HTTP.TOO_LARGE };
+    if (error.code === E2E_BUSY) return { status: HTTP.TOO_MANY, headers: { 'retry-after': RETRY_AFTER_SHORT_SECONDS } };
+    if (error.code === STORAGE_FAILURE) ctx.onStorageFailure(error);
+    else if (error.code !== E2E_CORRUPT) console.error('[yjs] room lock route failed', { code: error.code || 'UNKNOWN', err: error.message });
+    return { status: HTTP.UNAVAILABLE };
+  };
+
+  // Resolves the target room and its owner, or answers the refusal and returns null.
+  const authorizeOwner = async (req, res, handle) => {
+    const docName = registry.registeredRoomsByHandle.get(handle);
+    if (!docName) { sendIfWritable(res, HTTP.NOT_FOUND); return null; }
+    const lock = registry.lockFor(docName);
+    if (lock === CORRUPT_LOCK) { sendIfWritable(res, HTTP.UNAVAILABLE); return null; }
+    const account = await authenticateAccount(req, ctx.accountSessions, ctx.accountStore);
+    if (!account) { sendIfWritable(res, HTTP.UNAUTHORIZED); return null; }
+    if (!lock) { sendIfWritable(res, HTTP.NOT_FOUND); return null; }
+    if (account.id !== lock.ownerAccountId) { sendIfWritable(res, HTTP.FORBIDDEN); return null; }
+    return { docName, lock };
+  };
+
+  const run = async (req, res, handle, action, clientIp) => {
+    if (!acceptCredentialOrigin(req, res, config.allowedOrigins, config.allowInsecureHttp)) return;
+    res.setHeader('cache-control', 'no-store');
+    if (ctx.unavailable()) { sendIfWritable(res, HTTP.UNAVAILABLE); return; }
+    try {
+      const target = await authorizeOwner(req, res, handle);
+      if (!target) return;
+      const result = await ACTIONS.get(action)(req, target, clientIp);
+      if (result.json) sendJson(res, result.status, result.json);
+      else sendIfWritable(res, result.status);
+    } catch (error) {
+      const { status, headers } = statusOf(error);
+      sendIfWritable(res, status, headers);
+    }
+  };
+
+  return {
+    handle(req, res, routePath, { clientIp, hasQueryOrFragment }) {
+      if (req.method !== 'POST' || hasQueryOrFragment) return false;
+      const match = LOCK_PATH.exec(routePath);
+      if (!match) return false;
+      void run(req, res, match[1], match[2], clientIp);
+      return true;
+    },
+  };
+}

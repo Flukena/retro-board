@@ -134,17 +134,6 @@ export class E2EBlobStore {
     }
   }
 
-  /** Deletes every blob file of a room whose id is not in `keepIds`. Returns how many were removed. */
-  async deleteExcept(docName, handle, keepIds) {
-    const keep = new Set(keepIds);
-    const doomed = [];
-    for (const entry of await this.#io.readdir(this.#uploadsDir, { withFileTypes: true })) {
-      const parsed = entry.isFile() ? parseE2EBlobFilename(entry.name) : null;
-      if (parsed?.handle === handle && !keep.has(parsed.id)) doomed.push({ docName, handle, id: parsed.id });
-    }
-    return this.#removeAll(doomed);
-  }
-
   /**
    * Startup sweep: removes blob files that no locked room's inventory lists and temp files of blob uploads, when
    * they are older than E2E_ORPHAN_MIN_AGE_MS. `inventoried` is a Set of `<handle>.<id>`; files of

@@ -14,17 +14,17 @@ export const setCredentialCors = (origin, res) => {
   res.setHeader('vary', 'Origin');
 };
 
-const validateJsonHeaders = (req, maxBodyBytes) => {
+const validateJsonHeaders = (req) => {
   const contentType = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
   if (contentType !== 'application/json') throw Object.assign(new Error('unsupported content type'), { code: 'BAD_JSON' });
+};
+
+/** Buffers a request body, refusing (BODY_TOO_LARGE) as soon as the declared or streamed size passes the cap. */
+export const readBoundedBody = async (req, maxBodyBytes) => {
   const rawLength = req.headers['content-length'];
   if (rawLength != null && (!/^\d+$/.test(String(rawLength)) || Number(rawLength) > maxBodyBytes)) {
     throw Object.assign(new Error('invalid body length'), { code: 'BODY_TOO_LARGE' });
   }
-};
-
-export const readJsonBody = async (req, maxBodyBytes, { allowEmpty = false } = {}) => {
-  validateJsonHeaders(req, maxBodyBytes);
   const chunks = [];
   let total = 0;
   for await (const chunk of req) {
@@ -32,9 +32,15 @@ export const readJsonBody = async (req, maxBodyBytes, { allowEmpty = false } = {
     if (total > maxBodyBytes) throw Object.assign(new Error('body too large'), { code: 'BODY_TOO_LARGE' });
     chunks.push(chunk);
   }
-  if (total === 0 && allowEmpty) return {};
+  return Buffer.concat(chunks);
+};
+
+export const readJsonBody = async (req, maxBodyBytes, { allowEmpty = false } = {}) => {
+  validateJsonHeaders(req);
+  const body = await readBoundedBody(req, maxBodyBytes);
+  if (body.length === 0 && allowEmpty) return {};
   let value;
-  try { value = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+  try { value = JSON.parse(body.toString('utf8')); }
   catch { throw Object.assign(new Error('invalid json'), { code: 'BAD_JSON' }); }
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw Object.assign(new Error('invalid json'), { code: 'BAD_JSON' });
   return value;

@@ -116,6 +116,7 @@ const entrypointHttp = (overrides = {}) => {
     reserveHttpRequest: () => ({ status: 0, release() {} }),
     rejectionCounters: { observeResponse() {} },
     authRoutes: { handle: () => false },
+    roomLockRoutes: { handle: () => false },
     authenticatedDocFromRequest: () => null,
     takeCreateToken: () => 0, createRegisteredRoom: async () => ({ code: 'abc', token: 'capability' }),
     markStorageFailure() { assert.fail('unexpected storage failure'); },

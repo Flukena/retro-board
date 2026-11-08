@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
-import fsPromises, { mkdtemp, mkdir, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import fsPromises, { mkdtemp, mkdir, readdir, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
@@ -340,18 +340,6 @@ test('a room whose inventory cannot be read keeps all of its files during the st
   }
   assert.equal(await blobs.reconcileOrphans(), 1);
   assert.deepEqual(await e2eFiles(uploadsDir), [unknown]);
-}));
-
-test('deleteExcept removes every blob of the room that is not kept and returns the usage', () => withBlobs(async ({ blobs, store, roomUploadUsage, uploadsDir }) => {
-  const keep = await upload(blobs);
-  const drop = await upload(blobs);
-  const otherRoom = await upload(blobs, { docName: OTHER_DOC, handle: OTHER_HANDLE });
-  assert.equal(await store.deleteExcept(DOC, HANDLE, [keep.id]), 1);
-  assert.deepEqual(await e2eFiles(uploadsDir), [e2eBlobFilename(HANDLE, keep.id), e2eBlobFilename(OTHER_HANDLE, otherRoom.id)].sort());
-  assert.equal(roomUploadUsage.get(DOC).files, 1);
-  assert.equal(roomUploadUsage.get(OTHER_DOC).files, 1);
-  assert.equal((await stat(join(uploadsDir, e2eBlobFilename(HANDLE, keep.id)))).size, BLOB_BYTES);
-  assert.notEqual(drop.id, keep.id);
 }));
 
 test('the startup sweep leaves no locked room pinned in memory, and remembers rooms with retired blobs', () => withBlobs(async ({ blobs, roomLog, assemble, store, clock }) => {

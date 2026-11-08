@@ -47,6 +47,7 @@ import { checkedStorage, durableMetaBatch } from './src/server/relay-storage.js'
 import { RoomLockVerifier } from './src/server/room-lock.js';
 import { CORRUPT_LOCK } from './src/server/room-lock-record.js';
 import { createRoomSessionRoutes } from './src/server/room-session-routes.js';
+import { createRoomLockRoutes } from './src/server/room-lock-routes.js';
 import { retireIdleRooms } from './src/server/room-retirement.js';
 import { admitPublicAction, registerPublicQuotaClient, notifyPublicQuota } from './src/server/public-action-limit.js';
 
@@ -1129,6 +1130,7 @@ const server = http.createServer({ maxHeaderSize: MAX_HEADER_BYTES }, (req, res)
     void handleRoomSession(req, res, clientIp, prefixed);
     return;
   }
+  if (roomLockRoutes.handle(req, res, routePath, { clientIp, hasQueryOrFragment })) return;
   if (authRoutes.handle(req, res, routePath, { prefixed, clientIp, unavailable: () => shuttingDown || Boolean(storageFailure) })) return;
   if (handleRoomRoute(req, res, routePath, {
     hasQueryOrFragment, allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP,
@@ -1176,6 +1178,11 @@ const e2eRelay = createE2ERelay({
 const e2eBlobs = createE2EBlobs({
   config: relayConfig, allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, uploads, store: e2eBlobStore,
   roomLog: e2eRoomLog, registry: roomRegistry, onStorageFailure: markStorageFailure,
+});
+const roomLockRoutes = createRoomLockRoutes({
+  registry: roomRegistry, roomLog: e2eRoomLog, closeRoom: e2eRelay.closeRoom, verifier: roomLockVerifier, accountSessions, accountStore,
+  config: { allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, maxApiBodyBytes: MAX_API_BODY_BYTES },
+  unavailable: () => shuttingDown || Boolean(storageFailure), onStorageFailure: markStorageFailure,
 });
 roomRegistry.activity.watch(e2eRelay.wss, (error) => roomRegistry.reportStorageFailure(error));
 wss.on('connection', (conn, req) => {
