@@ -13,6 +13,8 @@ export const E2E_BLOB_DUPLICATE = 'E2E_BLOB_DUPLICATE';
 export const MAX_PENDING_OPS_PER_ROOM = 256;
 export const MAX_FREEZE_TTL_MS = 120_000;
 export const E2E_BLOB_GRACE_MS = 86_400_000;
+/** Log entries allowed since the last snapshot; clients snapshot at 500, so this is a backstop. */
+export const E2E_MAX_LOG_ENTRIES = 10_000;
 
 const HEAD_KEY = 'e2e-head';
 const SNAPSHOT_KEY = 'e2e-snapshot';
@@ -33,6 +35,13 @@ const put = (key, value) => ({ type: 'put', key, value });
 const del = (key) => ({ type: 'del', key });
 const range = (from, to) => Array.from({ length: Math.max(0, to - from + 1) }, (_, i) => from + i);
 const snapshotValue = (baseSeq, bytes) => ({ baseSeq, bytes, sha256: digestOf(bytes) });
+// Upper bounds for work reserved before it is queued: the widest seq key and head value,
+// and one delete per log entry a snapshot can prune.
+const appendReservationBytes = (docName, ciphertext) => STORE_OVERHEAD_BYTES
+  + metaBatchBytes(docName, [put(updateKey(Number.MAX_SAFE_INTEGER), ciphertext), put(HEAD_KEY, Number.MAX_SAFE_INTEGER)]);
+const snapshotReservationBytes = (docName, value, maxDeletes) => STORE_OVERHEAD_BYTES
+  + metaBatchBytes(docName, [put(SNAPSHOT_KEY, value)])
+  + maxDeletes * metaBatchBytes(docName, [del(updateKey(Number.MAX_SAFE_INTEGER))]);
 
 /** True when a stored snapshot value's bytes still match its recorded digest. */
 export function verifySnapshotDigest(snapshot) {
@@ -64,12 +73,13 @@ export class E2ERoomLog {
   #onResume;
   #deleteStagedBlobs;
   #onError;
+  #maxLogEntries;
   #rooms = new Map();
 
   constructor({
     ldb, maxRoomBytes, reserveStore, hasCapacity = () => true, now = Date.now,
     setTimer = setTimeout, clearTimer = clearTimeout,
-    onResume = noop, deleteStagedBlobs = noop, onError = noop,
+    onResume = noop, deleteStagedBlobs = noop, onError = noop, maxLogEntries = E2E_MAX_LOG_ENTRIES,
   }) {
     this.#ldb = ldb;
     this.#maxRoomBytes = maxRoomBytes;
@@ -81,6 +91,7 @@ export class E2ERoomLog {
     this.#onResume = onResume;
     this.#deleteStagedBlobs = deleteStagedBlobs;
     this.#onError = onError;
+    this.#maxLogEntries = maxLogEntries;
   }
 
   /** Drops in-memory state for a retired or evicted room; storage is untouched. */
@@ -127,21 +138,28 @@ export class E2ERoomLog {
     });
   }
 
+  // Client ops reserve shared store capacity before they queue, so queued payloads count as
+  // pending work; the reservation is released once, when the op settles either way.
   async append(docName, ciphertext) {
+    const release = this.#reserveStore(appendReservationBytes(docName, ciphertext));
     return this.#enqueue(docName, async (room) => {
       await this.#load(docName, room);
       this.#assertNotFrozen(room);
       this.#assertWithinQuota(roomSize(room) + ciphertext.byteLength);
+      if (room.sizes.size >= this.#maxLogEntries) throw codedError(E2E_QUOTA, 'log entry limit reached');
       const seq = room.head + 1;
-      await this.#write(docName, [put(updateKey(seq), ciphertext), put(HEAD_KEY, seq)]);
+      await this.#write(docName, [put(updateKey(seq), ciphertext), put(HEAD_KEY, seq)], { reserved: true });
       room.head = seq;
       room.sizes.set(seq, ciphertext.byteLength);
       this.#notify(room, { kind: 'update', seq, bytes: ciphertext });
       return { seq };
-    });
+    }).finally(release);
   }
 
   async snapshot(docName, baseSeq, ciphertext) {
+    const value = snapshotValue(baseSeq, ciphertext);
+    const maxDeletes = Number.isSafeInteger(baseSeq) ? Math.min(Math.max(baseSeq, 0), this.#maxLogEntries) : 0;
+    const release = this.#reserveStore(snapshotReservationBytes(docName, value, maxDeletes));
     return this.#enqueue(docName, async (room) => {
       await this.#load(docName, room);
       this.#assertNotFrozen(room);
@@ -151,13 +169,13 @@ export class E2ERoomLog {
       const covered = range(room.base + 1, baseSeq);
       const keptBytes = [...room.sizes].filter(([seq]) => seq > baseSeq).reduce((sum, [, n]) => sum + n, 0);
       this.#assertWithinQuota(ciphertext.byteLength + keptBytes);
-      const ops = [put(SNAPSHOT_KEY, snapshotValue(baseSeq, ciphertext)), ...covered.map((seq) => del(updateKey(seq)))];
-      await this.#write(docName, ops);
+      const ops = [put(SNAPSHOT_KEY, value), ...covered.map((seq) => del(updateKey(seq)))];
+      await this.#write(docName, ops, { reserved: true });
       covered.forEach((seq) => room.sizes.delete(seq));
       room.base = baseSeq;
       room.snapshotBytes = ciphertext.byteLength;
       this.#notify(room, { kind: 'snapshot', baseSeq, bytes: ciphertext });
-    });
+    }).finally(release);
   }
 
   async freeze(docName, ttlMs, { expectedRevision, verify }) {
@@ -329,9 +347,9 @@ export class E2ERoomLog {
     if (totalBytes > this.#maxRoomBytes) throw codedError(E2E_QUOTA, 'room size limit exceeded');
   }
 
-  async #write(docName, ops, { durable = false } = {}) {
+  async #write(docName, ops, { durable = false, reserved = false } = {}) {
     if (!this.#hasCapacity()) throw codedError(E2E_QUOTA, 'database capacity reached');
-    const release = this.#reserveStore(metaBatchBytes(docName, ops) + STORE_OVERHEAD_BYTES);
+    const release = reserved ? noop : this.#reserveStore(metaBatchBytes(docName, ops) + STORE_OVERHEAD_BYTES);
     try {
       await metaBatch(this.#ldb, docName, ops, { durable });
     } finally {

@@ -1239,12 +1239,12 @@ server.on('clientError', (err, socket) => {
 const wss = new WebSocketServer({ noServer: true, maxPayload: RL_MAX_BYTES });
 roomRegistry.activity.watch(wss, (error) => roomRegistry.reportStorageFailure(error));
 const e2eRelay = createE2ERelay({
-  wss, traffic: wsTraffic, maxFrameBytes: RL_MAX_BYTES, onStorageFailure: markStorageFailure, touch: (docName) => roomRegistry.activity.touch(docName),
+  traffic: wsTraffic, maxRoomBytes: MAX_DOCUMENT_BYTES, maxAppendBytes: RL_MAX_BYTES, onStorageFailure: markStorageFailure, touch: (docName) => roomRegistry.activity.touch(docName),
   roomLog: new E2ERoomLog({ ldb, maxRoomBytes: MAX_DOCUMENT_BYTES, reserveStore: registryPersistence.reserveStore, hasCapacity: registryPersistence.hasCapacity, onError: markStorageFailure }),
 });
+roomRegistry.activity.watch(e2eRelay.wss, (error) => roomRegistry.reportStorageFailure(error));
 wss.on('connection', (conn, req) => {
   const context = req.wsSecurityContext;
-  if (context?.e2e) return; // attached by e2eRelay; this handler is y-websocket only
   if (!context?.docName) {
     conn.close(1011, 'server setup error');
     return;
@@ -1381,35 +1381,26 @@ server.on('upgrade', (req, socket, head) => {
   }
   const roomTarget = roomTargetFromRequest(req, { publicWall: PUBLIC_WALL });
   const handle = roomTarget?.handle || null;
-  const session = handle ? authenticatedDocFromRequest(req, handle) : null;
-  let docName = session?.docName || null;
-  let expiresAt = session?.expiresAt || null;
-  if (handle && !registeredRoomsByHandle.has(handle)) {
-    rejectUpgrade(socket, 404);
-    return;
-  }
-  // Locked rooms are served only on /e2e and normal rooms never are; an unreadable lock is never served.
-  const lock = handle ? roomRegistry.lockFor(registeredRoomsByHandle.get(handle)) : null;
-  if (handle && (lock === CORRUPT_LOCK || Boolean(lock) !== roomTarget.e2e)) {
-    rejectUpgrade(socket, lock === CORRUPT_LOCK ? 503 : 404);
-    return;
-  }
-  if (handle && !session) {
-    rejectUpgrade(socket, 401);
-    return;
-  }
-  if (!handle && !docName && ALLOW_LEGACY_URL_TOKENS) {
-    const candidate = tokenDocNameFromRequest(req, { allowLegacyRooms: ALLOW_LEGACY_ROOMS });
-    if (candidate && (registeredDocs.has(candidate)
-        || (ALLOW_LEGACY_ROOMS && existingDocNames.has(candidate)))) {
-      docName = candidate;
-      expiresAt = null;
-    }
-  }
+  // Resolve the canonical room first, on every route, so the lock check below covers legacy URLs too.
+  const legacyDoc = !handle && ALLOW_LEGACY_URL_TOKENS ? tokenDocNameFromRequest(req, { allowLegacyRooms: ALLOW_LEGACY_ROOMS }) : null;
+  const docName = handle ? registeredRoomsByHandle.get(handle)
+    : legacyDoc && (registeredDocs.has(legacyDoc) || (ALLOW_LEGACY_ROOMS && existingDocNames.has(legacyDoc))) && legacyDoc;
   if (!docName) {
     rejectUpgrade(socket, 404);
     return;
   }
+  // Locked rooms are served only on /e2e and normal rooms never are; an unreadable lock is never served.
+  const lock = roomRegistry.lockFor(docName);
+  if (lock === CORRUPT_LOCK || Boolean(lock) !== Boolean(roomTarget?.e2e)) {
+    rejectUpgrade(socket, lock === CORRUPT_LOCK ? 503 : 404);
+    return;
+  }
+  const session = handle ? authenticatedDocFromRequest(req, handle) : null;
+  if (handle && !session) {
+    rejectUpgrade(socket, 401);
+    return;
+  }
+  const expiresAt = session?.expiresAt || null;
   // Reject known-doomed upgrades before getYDoc can allocate and hydrate a
   // room that will never receive a connection.
   if (shuttingDown || storageFailure || isRoomBlocked(docName)) {
@@ -1515,11 +1506,12 @@ const lifecycle = createRelayLifecycle({
   },
   drain: async () => {
     const roomCount = docs.size;
+    await e2eRelay.drain();
     await drainRelay({
       server, clients: wss.clients, httpGraceMs: HTTP_SHUTDOWN_GRACE_MS,
       isBusy: () => maintenance.running || roomRegistry.pendingRoomCreations > 0 || uploadState.active > 0 || pendingStoreOps > 0
         || accountStore.pendingOperations > 0 || authRoutes.pendingExchanges > 0,
-      compactions: () => [...[...roomPersistenceChurn.values()].map((churn) => churn.compactionPromise).filter(Boolean), e2eRelay.drain()],
+      compactions: () => [...roomPersistenceChurn.values()].map((churn) => churn.compactionPromise).filter(Boolean),
       destroyStorage: async () => { await roomRegistry.activity.stop(); await accountStore.stop(); await ldb.destroy(); },
     });
     console.log('[yjs] drained', { rooms: roomCount });

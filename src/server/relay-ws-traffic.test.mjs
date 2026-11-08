@@ -138,3 +138,12 @@ test('ingress fails at room: connection and global stay charged', (t) => {
   assert.equal(traffic.attach(new FakeSocket(), ROOM).admitIngress(SMALL), false, 'room spent');
   assert.equal(traffic.attach(new FakeSocket(), OTHER_ROOM).admitIngress(SMALL), false, 'the room refusal still took the last global token');
 });
+
+test('canBuffer admits bytes up to the slow-consumer limit, and always into an empty buffer', () => {
+  const config = configWith({});
+  const traffic = new RelayWsTraffic(config, { log: quietLog });
+  const limit = config.MAX_WS_BUFFERED_BYTES;
+  assert.equal(traffic.canBuffer({ bufferedAmount: limit - 10 }, 10), true);
+  assert.equal(traffic.canBuffer({ bufferedAmount: limit - 10 }, 11), false);
+  assert.equal(traffic.canBuffer({ bufferedAmount: 0 }, limit * 2), true);
+});

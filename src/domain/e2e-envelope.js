@@ -52,6 +52,9 @@ const LAYOUTS = Object.freeze({
 
 const headerBytes = (layout) => layout.fields.reduce((sum, name) => sum + FIELD_SPECS[name].width, TYPE_BYTES);
 
+/** Bytes before the ciphertext in the widest frame; a transport limit adds this to its payload cap. */
+export const E2E_MAX_FRAME_HEADER_BYTES = Math.max(...Object.values(LAYOUTS).map(headerBytes));
+
 export function encodeFrame(type, values = {}) {
   const layout = LAYOUTS[type];
   if (!layout) throw new RangeError(`unknown frame type ${type}`);
@@ -81,12 +84,13 @@ const readFields = (layout, bytes) => {
   return fields;
 };
 
-function decodeFrame(bytes, side, { maxBytes, maxEphemeralBytes = E2E_EPHEMERAL_MAX_BYTES }) {
+function decodeFrame(bytes, side, { maxBytes, maxEphemeralBytes = E2E_EPHEMERAL_MAX_BYTES, maxFrameBytesByType = {} }) {
   if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) throw new TypeError('maxBytes must be a positive safe integer');
   if (!(bytes instanceof Uint8Array) || bytes.length < TYPE_BYTES || bytes.length > maxBytes) return null;
   const type = bytes[0];
   const layout = LAYOUTS[type];
   if (layout?.side !== side) return null;
+  if (bytes.length > (maxFrameBytesByType[type] ?? maxBytes)) return null;
   const bodyStart = headerBytes(layout);
   if (bytes.length < bodyStart) return null;
   const fields = readFields(layout, bytes);

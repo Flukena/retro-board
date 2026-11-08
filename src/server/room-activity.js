@@ -16,6 +16,7 @@ export class RoomActivity {
   #storage;
   #flushing;
   #timer;
+  #servers = new Set();
 
   constructor(storage) { this.#storage = storage; }
   get(docName) { return this.#records.get(docName) ?? decodeActivity(null); }
@@ -55,9 +56,11 @@ export class RoomActivity {
       if (this.get(docName) === record) this.#dirty.delete(docName);
     }
   }
+  // Every watched socket server shares one periodic touch-and-flush timer.
   watch(wss, onFailure) {
-    this.#timer = setInterval(() => {
-      for (const conn of wss.clients) this.touch(conn.activityDocName);
+    this.#servers.add(wss);
+    this.#timer ??= setInterval(() => {
+      for (const server of this.#servers) for (const conn of server.clients) this.touch(conn.activityDocName);
       void this.flush().catch(onFailure);
     }, ACTIVITY_FLUSH_INTERVAL_MS);
     this.#timer.unref();

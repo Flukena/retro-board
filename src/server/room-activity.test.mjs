@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { RoomActivity, ROOM_ACTIVITY_META } from './room-activity.js';
+import { RoomActivity, ROOM_ACTIVITY_META, ACTIVITY_FLUSH_INTERVAL_MS } from './room-activity.js';
 
 function fixture() {
   const persisted = new Map();
@@ -97,4 +97,26 @@ test('invalid legacy metadata is not trusted as a time and rollback drops pendin
   activity.forget('legacy');
   await activity.stop();
   assert.deepEqual(writes, [stamped]);
+});
+
+test('watching a second socket server shares one flush timer and touches its sockets too', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval', 'Date'], now: 1_000 });
+  const { activity } = fixture();
+  await activity.create('first', 1);
+  await activity.create('second', 1);
+  const servers = [new EventEmitter(), new EventEmitter()];
+  for (const [i, server] of servers.entries()) {
+    const conn = new EventEmitter();
+    server.clients = new Set([conn]);
+    activity.watch(server, assert.fail);
+    server.emit('connection', conn, { wsSecurityContext: { docName: i === 0 ? 'first' : 'second' } });
+  }
+  const sessionAt = activity.get('second').lastActiveAt;
+  t.mock.timers.tick(ACTIVITY_FLUSH_INTERVAL_MS);
+  assert.ok(activity.get('first').lastActiveAt > sessionAt);
+  assert.ok(activity.get('second').lastActiveAt > sessionAt, 'the second server is part of the periodic touch');
+  await activity.stop();
+  const stoppedAt = activity.get('first').lastActiveAt;
+  t.mock.timers.tick(ACTIVITY_FLUSH_INTERVAL_MS * 2);
+  assert.equal(activity.get('first').lastActiveAt, stoppedAt, 'stop clears the only timer');
 });

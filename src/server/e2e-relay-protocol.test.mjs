@@ -6,7 +6,7 @@ import { createRequire } from 'node:module';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import WebSocket, { WebSocketServer } from 'ws';
+import WebSocket from 'ws';
 import { E2E_FRAME, E2E_REJECT, decodeServerFrame, encodeFrame } from '../domain/e2e-envelope.js';
 import { E2ERoomLog, MAX_PENDING_OPS_PER_ROOM } from './e2e-room-log.js';
 import { createE2ERelay } from './e2e-relay.js';
@@ -39,17 +39,16 @@ const generousConfig = (env = {}) => readRelayConfig({
   ...env,
 });
 
-async function fixture(t, { config = generousConfig(), expiresAt = null, prepare = () => {} } = {}) {
+async function fixture(t, { config = generousConfig(), expiresAt = null, prepare = () => {}, maxRoomBytes = MAX_ROOM_BYTES, maxAppendBytes = MAX_FRAME_BYTES } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'e2e-relay-protocol-'));
   const ldb = new LeveldbPersistence(dir);
   await ldb.setMeta(DOC, ROOM_LOCK_META, encodeLockRecord(lockRecord()));
   prepare(ldb);
   const failures = [];
   const touched = [];
-  const roomLog = new E2ERoomLog({ ldb, maxRoomBytes: MAX_ROOM_BYTES, reserveStore: () => () => {}, onError: (error) => failures.push(error) });
-  const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
+  const roomLog = new E2ERoomLog({ ldb, maxRoomBytes, reserveStore: () => () => {}, onError: (error) => failures.push(error) });
   const relay = createE2ERelay({
-    wss, roomLog, traffic: new RelayWsTraffic(config, { log: quietLogger }), maxFrameBytes: MAX_FRAME_BYTES,
+    roomLog, traffic: new RelayWsTraffic(config, { log: quietLogger }), maxRoomBytes, maxAppendBytes,
     touch: (docName) => touched.push(docName), onStorageFailure: (error) => failures.push(error), logger: quietLogger,
   });
   const server = http.createServer();
@@ -60,7 +59,7 @@ async function fixture(t, { config = generousConfig(), expiresAt = null, prepare
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(async () => {
-    for (const client of wss.clients) client.terminate();
+    for (const client of relay.wss.clients) client.terminate();
     server.closeAllConnections();
     await new Promise((resolve) => { server.close(resolve); });
     await roomLog.whenIdle();
@@ -110,6 +109,10 @@ class Client {
     });
   }
 }
+
+const within = (promise) => Promise.race([promise, new Promise((_, reject) => {
+  setTimeout(() => reject(new Error('not settled in time')), WAIT_MS).unref();
+})]);
 
 const waitUntil = async (predicate) => {
   const deadline = Date.now() + WAIT_MS;
@@ -197,7 +200,7 @@ test('a storage read failure on join goes to the fatal storage path and closes 1
   const client = new Client(ws);
   assert.equal((await client.closed).code, SERVER_ERROR_CLOSE);
   assert.equal(f.failures.length, 1);
-  assert.equal(f.relay.activeRooms(), 0, 'the room stops counting once its socket is gone');
+  await waitUntil(() => f.relay.activeRooms() === 0);
 });
 
 test('active rooms and per-room connections follow admitted sockets', async (t) => {
@@ -226,4 +229,74 @@ test('an entry notified while a joiner\'s replay is in flight is delivered after
   const client = await Client.join(f);
   await client.until(() => client.has(E2E_FRAME.RESUMED));
   assert.deepEqual(client.frames.map((frame) => frame.type), [E2E_FRAME.SYNCED, E2E_FRAME.RESUMED]);
+});
+
+const SMALL_APPEND_CAP = 1024;
+
+test('APPEND keeps its own frame cap while a SNAPSHOT up to the room quota is stored and fanned out', async (t) => {
+  const f = await fixture(t, { maxAppendBytes: SMALL_APPEND_CAP });
+  const [writer, other] = [await Client.join(f), await Client.join(f)];
+  writer.append(1, bytes(8));
+  await writer.until(() => writer.has(E2E_FRAME.ACK));
+  const snapshot = bytes(MAX_ROOM_BYTES - 8, 5);
+  writer.ws.send(encodeFrame(E2E_FRAME.SNAPSHOT, { seq: 1, ciphertext: snapshot }));
+  await other.until(() => other.has(E2E_FRAME.SNAPSHOT_OUT));
+  assert.equal(other.ofType(E2E_FRAME.SNAPSHOT_OUT)[0].ciphertext.length, snapshot.length);
+  assert.ok(snapshot.length > SMALL_APPEND_CAP);
+  writer.append(2, bytes(SMALL_APPEND_CAP));
+  assert.equal((await writer.closed).code, 1003, 'an APPEND frame over its own cap is malformed');
+  assert.deepEqual(writer.ofType(E2E_FRAME.REJECT), [{ type: E2E_FRAME.REJECT, code: E2E_REJECT.MALFORMED, clientRef: 0 }]);
+});
+
+test('a second SNAPSHOT within the allowance interval is REJECT RATE and is not stored', async (t) => {
+  const f = await fixture(t);
+  const writer = await Client.join(f);
+  for (let ref = 1; ref <= 2; ref += 1) writer.append(ref, bytes(4));
+  await writer.until(() => writer.has(E2E_FRAME.ACK, 2));
+  writer.ws.send(encodeFrame(E2E_FRAME.SNAPSHOT, { seq: 1, ciphertext: bytes(4) }));
+  writer.ws.send(encodeFrame(E2E_FRAME.SNAPSHOT, { seq: 2, ciphertext: bytes(4) }));
+  await writer.until(() => writer.has(E2E_FRAME.REJECT));
+  assert.deepEqual(writer.ofType(E2E_FRAME.REJECT), [{ type: E2E_FRAME.REJECT, code: E2E_REJECT.RATE, clientRef: 0 }]);
+  await f.roomLog.whenIdle();
+  assert.equal((await f.roomLog.open(DOC)).snapshot.baseSeq, 1);
+});
+
+test('a joiner behind a multi-chunk backlog and a live stream sees every seq once, in order', async (t) => {
+  const BACKLOG = 1000;
+  const LIVE = 200;
+  const f = await fixture(t, { maxRoomBytes: 1024 * 1024 });
+  for (let i = 0; i < BACKLOG; i += 1) await f.roomLog.append(DOC, bytes(16, i % 255));
+  const writer = await Client.join(f);
+  for (let ref = 1; ref <= LIVE; ref += 1) writer.append(ref, bytes(16));
+  const joiner = await Client.join(f);
+  await joiner.until(() => joiner.ofType(E2E_FRAME.UPDATE).at(-1)?.seq === BACKLOG + LIVE);
+  assert.deepEqual(joiner.ofType(E2E_FRAME.UPDATE).map((frame) => frame.seq), Array.from({ length: BACKLOG + LIVE }, (_, i) => i + 1));
+  const synced = joiner.frames.findIndex((frame) => frame.type === E2E_FRAME.SYNCED);
+  assert.ok(joiner.frames.slice(0, synced).every((frame) => frame.seq <= joiner.frames[synced].seq), 'replay precedes live entries');
+});
+
+const stallStorage = (ldb) => {
+  const transact = ldb._transact.bind(ldb);
+  let resume;
+  const stalled = new Promise((resolve) => { resume = resolve; });
+  ldb._transact = (fn) => stalled.then(() => transact(fn));
+  return resume;
+};
+
+test('the slow-consumer limit is checked after the fan-out a delayed write produces', async (t) => {
+  const config = generousConfig();
+  const f = await fixture(t, { config });
+  const [writer, peer] = [await Client.join(f), await Client.join(f)];
+  const serverPeer = [...f.relay.wss.clients].at(-1);
+  const append = f.roomLog.append.bind(f.roomLog);
+  let received = 0;
+  f.roomLog.append = (...args) => { received += 1; return append(...args); };
+  const resume = stallStorage(f.ldb);
+  writer.append(1, bytes(8));
+  await waitUntil(() => received === 1);
+  // The peer falls behind only after the frame was received, while its write is still pending.
+  Object.defineProperty(serverPeer, 'bufferedAmount', { get: () => config.MAX_WS_BUFFERED_BYTES + 1 });
+  resume();
+  assert.deepEqual(await within(peer.closed), { code: POLICY_CLOSE_CODE, reason: 'slow consumer' });
+  await writer.until(() => writer.has(E2E_FRAME.ACK));
 });

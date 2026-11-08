@@ -22,7 +22,8 @@ const decrementKey = (map, key) => {
   else map.delete(key);
   return next;
 };
-const safeClose = (conn, code, reason) => {
+/** Closes a socket that may already be closing. */
+export const safeClose = (conn, code, reason) => {
   try { conn.close(code, reason); } catch { /* already closing */ }
 };
 
@@ -146,6 +147,11 @@ export class RelayWsTraffic {
         return true;
       },
     };
+  }
+
+  /** True when `bytes` more can be queued without crossing the slow-consumer limit (an empty buffer always can). */
+  canBuffer(peer, bytes) {
+    return peer.bufferedAmount === 0 || peer.bufferedAmount + bytes <= this.#config.MAX_WS_BUFFERED_BYTES;
   }
 
   closeSlowConsumers(peers) {

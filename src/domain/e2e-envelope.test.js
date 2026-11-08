@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  E2E_FRAME, E2E_REJECT, E2E_CIPHERTEXT_OVERHEAD_BYTES, E2E_EPHEMERAL_MAX_BYTES,
+  E2E_FRAME, E2E_REJECT, E2E_CIPHERTEXT_OVERHEAD_BYTES, E2E_EPHEMERAL_MAX_BYTES, E2E_MAX_FRAME_HEADER_BYTES,
   encodeFrame, decodeClientFrame, decodeServerFrame,
 } from './e2e-envelope.js';
 
@@ -140,4 +140,18 @@ test('REJECT codes are validated on encode and decode', () => {
   }
   assert.equal(decodeServerFrame(Uint8Array.of(16, 9, 0, 0, 0, 1), limits), null);
   assert.equal(decodeServerFrame(Uint8Array.of(16, 0, 0, 0, 0, 1), limits), null);
+});
+
+test('a per-type frame cap bounds that type only, inclusive, below the overall maxBytes', () => {
+  const APPEND_CAP = 32;
+  const capped = { ...limits, maxFrameBytesByType: { [E2E_FRAME.APPEND]: APPEND_CAP } };
+  const append = (frameBytes) => encodeFrame(E2E_FRAME.APPEND, { clientRef: 1, ciphertext: new Uint8Array(frameBytes - 5).fill(1) });
+  assert.equal(decodeClientFrame(append(APPEND_CAP), capped)?.type, E2E_FRAME.APPEND);
+  assert.equal(decodeClientFrame(append(APPEND_CAP + 1), capped), null);
+  const snapshot = encodeFrame(E2E_FRAME.SNAPSHOT, { seq: 1, ciphertext: new Uint8Array(APPEND_CAP * 2).fill(1) });
+  assert.equal(decodeClientFrame(snapshot, capped)?.type, E2E_FRAME.SNAPSHOT, 'other types keep the overall limit');
+});
+
+test('the largest header is the ACK: type + seq + clientRef', () => {
+  assert.equal(E2E_MAX_FRAME_HEADER_BYTES, 1 + 8 + 4);
 });

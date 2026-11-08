@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   E2ERoomLog, E2E_BUSY, E2E_CORRUPT, E2E_FROZEN, E2E_LOCK_MISMATCH, E2E_QUOTA, E2E_ROTATION_STALE, E2E_STALE_SNAPSHOT,
-  MAX_PENDING_OPS_PER_ROOM, MAX_FREEZE_TTL_MS, E2E_BLOB_GRACE_MS, verifySnapshotDigest,
+  MAX_PENDING_OPS_PER_ROOM, MAX_FREEZE_TTL_MS, E2E_BLOB_GRACE_MS, E2E_MAX_LOG_ENTRIES, verifySnapshotDigest,
 } from './e2e-room-log.js';
 import { ROOM_LOCK_META, decodeLockRecord, encodeLockRecord } from './room-lock-record.js';
 import { metaBatchBytes } from './relay-storage.js';
@@ -464,3 +464,62 @@ test('whenIdle resolves at once with nothing queued and is not failed by a rejec
   await log.whenIdle();
   await rejectsWith(refused, E2E_QUOTA);
 }));
+
+test('appends beyond the log entry cap are QUOTA until a snapshot prunes the log', () => withLog(async ({ log }) => {
+  const CAP = 3;
+  assert.equal(E2E_MAX_LOG_ENTRIES, 10_000);
+  for (let i = 1; i <= CAP; i += 1) await log.append(DOC, bytesOf(1));
+  await rejectsWith(log.append(DOC, bytesOf(1)), E2E_QUOTA);
+  await log.snapshot(DOC, 2, bytesOf(1));
+  assert.deepEqual(await log.append(DOC, bytesOf(1)), { seq: CAP + 1 });
+}, { maxLogEntries: 3 }));
+
+const CAPACITY_CODE = 'TEST_CAPACITY';
+/** A shared pending-op counter like the relay's registryPersistence.reserveStore. */
+function sharedReservations(maxOps) {
+  const state = { pending: 0, taken: 0, released: 0 };
+  state.reserveStore = () => {
+    if (state.pending >= maxOps) throw Object.assign(new Error('pending capacity'), { code: CAPACITY_CODE });
+    state.pending += 1;
+    state.taken += 1;
+    let done = false;
+    return () => {
+      if (done) return;
+      done = true;
+      state.pending -= 1;
+      state.released += 1;
+    };
+  };
+  return state;
+}
+
+const stallStorage = (ldb) => {
+  const transact = ldb._transact.bind(ldb);
+  let resume;
+  const stalled = new Promise((resolve) => { resume = resolve; });
+  ldb._transact = (fn) => stalled.then(() => transact(fn));
+  return resume;
+};
+
+const SHARED_MAX_OPS = 3;
+const shared = sharedReservations(SHARED_MAX_OPS);
+test('queued client ops hold shared pending capacity before they run, across rooms, released once each', () => withLog(async ({ log, ldb }) => {
+  const OTHER_DOC = 'room-doc-2';
+  const resume = stallStorage(ldb);
+  const queued = [log.append(DOC, bytesOf(4)), log.append(DOC, bytesOf(4)), log.snapshot(OTHER_DOC, 0, bytesOf(4))];
+  const extra = log.append(OTHER_DOC, bytesOf(4));
+  // While storage is stalled the extra op must be refused at once, not queued.
+  const outcome = await Promise.race([extra.then(() => 'queued and written', (error) => error.code),
+    new Promise((resolve) => { setImmediate(() => resolve('still queued')); })]);
+  const pendingWhileStalled = shared.pending;
+  resume();
+  await extra.catch(() => {});
+  assert.equal(outcome, CAPACITY_CODE);
+  assert.equal(pendingWhileStalled, SHARED_MAX_OPS, 'two queued in one room and one in the other hold every slot');
+  const [first, second, stale] = await Promise.allSettled(queued);
+  assert.deepEqual([first.value, second.value], [{ seq: 1 }, { seq: 2 }]);
+  assert.equal(stale.reason.code, E2E_STALE_SNAPSHOT, 'a rejected op releases its slot too');
+  assert.equal(shared.pending, 0);
+  assert.equal(shared.released, shared.taken);
+  assert.deepEqual(await log.append(OTHER_DOC, bytesOf(4)), { seq: 1 });
+}, { reserveStore: shared.reserveStore }));

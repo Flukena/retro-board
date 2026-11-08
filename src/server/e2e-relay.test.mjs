@@ -117,9 +117,20 @@ class E2EClient {
     this.closed = once(ws, 'close').then(([code, reason]) => ({ code, reason: String(reason) }));
   }
 
-  static async join(relay, room) {
-    const client = new E2EClient(await openPlain(e2eUrl(relay, room), room.cookie));
-    await client.until((frames) => frames.some((frame) => frame?.type === E2E_FRAME.SYNCED));
+  // The listener must exist before 'open': replay frames can arrive in the same read as the 101.
+  static async connect(url, cookie) {
+    const client = new E2EClient(new WebSocket(url, socketOptions(cookie)));
+    await once(client.ws, 'open');
+    return client;
+  }
+
+  static async join(relay, room, url = e2eUrl(relay, room)) {
+    const client = await E2EClient.connect(url, room.cookie);
+    try {
+      await client.until((frames) => frames.some((frame) => frame?.type === E2E_FRAME.SYNCED));
+    } catch (error) {
+      throw new Error(`${error.message}\nrelay output:\n${relay.output()}`);
+    }
     return client;
   }
 
@@ -265,8 +276,7 @@ test('upgrade gates: no cookie 401, normal room on /e2e 404, locked room on the 
   assert.equal(await upgradeStatus(e2eUrl(env.relay, normal), normal.cookie), STATUS.NOT_FOUND);
   assert.equal(await upgradeStatus(`${env.relay.wsUrl}/rooms/${locked.handle}`, locked.cookie), STATUS.NOT_FOUND);
   assert.equal(await upgradeStatus(`${env.relay.wsUrl}/yjs/rooms/${locked.handle}?awarenessId=1`, locked.cookie), STATUS.NOT_FOUND);
-  const prefixed = new E2EClient(await openPlain(`${env.relay.wsUrl}/yjs/rooms/${locked.handle}/e2e`, locked.cookie));
-  await prefixed.until((frames) => frames.some((frame) => frame?.type === E2E_FRAME.SYNCED));
+  const prefixed = await E2EClient.join(env.relay, locked, `${env.relay.wsUrl}/yjs/rooms/${locked.handle}/e2e`);
   await prefixed.close();
 });
 
@@ -297,7 +307,7 @@ test('SIGTERM under writes exits cleanly and a reopen replays every ACKed seq', 
   await writer.until((frames) => ackCount(frames) >= ACKS_BEFORE_SIGTERM);
   const exit = await env.relay.stop('SIGTERM');
   assert.equal(exit.code, 0, env.relay.output());
-  await writer.closed;
+  assert.equal((await writer.closed).code, 1001, 'encrypted sockets close like the main path on shutdown');
   const acked = writer.ofType(E2E_FRAME.ACK);
   const reopened = await lockedRelay(t, {}, { root });
   const reader = await E2EClient.join(reopened.relay, room);
@@ -354,4 +364,24 @@ test('a cookie from an older key epoch fails the upgrade with 401; an unreadable
   await rewriteLock(env.relay.dbDir, room.docName, () => CORRUPT_RECORD);
   const corrupt = await lockedRelay(t, {}, { root });
   assert.equal(await upgradeStatus(e2eUrl(corrupt.relay, room), room.cookie), STATUS.UNAVAILABLE);
+});
+
+test('legacy token URLs get the same lock checks: a locked room is 404, an unreadable lock 503, a normal room still opens', async (t) => {
+  const root = await tempRoot(t);
+  const legacyEnv = { YJS_ALLOW_LEGACY_URL_TOKENS: '1' };
+  const env = await lockedRelay(t, legacyEnv, { root });
+  const locked = await createLockedRoom(env);
+  const normal = await createNormalRoom(env.relay);
+  const legacyUrl = (relay, room, prefix = '') => `${relay.wsUrl}${prefix}/board-${room.code}-${room.token}`;
+  const plain = await openPlain(legacyUrl(env.relay, normal));
+  plain.close();
+  await once(plain, 'close');
+  assert.equal(await upgradeStatus(legacyUrl(env.relay, locked), null), STATUS.NOT_FOUND);
+  assert.equal(await upgradeStatus(legacyUrl(env.relay, locked, '/yjs'), locked.cookie), STATUS.NOT_FOUND);
+  const opens = env.relay.output().match(/\[yjs\] conn open/g) ?? [];
+  assert.equal(opens.length, 1, 'only the normal room opened a y-websocket connection; the locked room never got a Y.Doc');
+  await env.relay.stop();
+  await rewriteLock(env.relay.dbDir, locked.docName, () => CORRUPT_RECORD);
+  const corrupt = await lockedRelay(t, legacyEnv, { root });
+  assert.equal(await upgradeStatus(legacyUrl(corrupt.relay, locked), null), STATUS.UNAVAILABLE);
 });
