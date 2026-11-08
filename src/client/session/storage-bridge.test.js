@@ -199,6 +199,8 @@ test('an unlocked room uses the encrypted provider, tracks delivery, and clears 
     assert.equal(browser.storage.getSyncStatus().hasUnsyncedLocalChanges, true);
     const source = browser.storage.rotationSource();
     assert.deepEqual([source.roomHandle, source.keyEpoch], [ROOM_HANDLE, LOCKED_EPOCH]);
+    assert.equal(source.pendingDelivery, provider.pendingDelivery, 'the rotation can wait for delivery');
+    assert.deepEqual([source.appliedSeq, source.head, source.appliedSnapshotBase], [0, 0, 0], 'offline: nothing read yet');
     const detached = new Y.Doc();
     Y.applyUpdate(detached, source.encodeState());
     assert.equal(detached.getMap('items').get(VALID_ITEM.id).get('type'), VALID_ITEM.type);

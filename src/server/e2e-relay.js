@@ -198,7 +198,7 @@ class E2EConnection {
 
   #takeSnapshotAllowance() {
     const now = Date.now();
-    if (now - this.#lastSnapshotAt < E2E_SNAPSHOT_MIN_INTERVAL_MS) return false;
+    if (now - this.#lastSnapshotAt < this.#deps.snapshotIntervalMs) return false;
     this.#lastSnapshotAt = now;
     return true;
   }
@@ -255,12 +255,15 @@ class E2EConnection {
  * room-sized snapshot; normal rooms keep their smaller limit.
  * Ports: roomLog (E2ERoomLog), traffic (RelayWsTraffic), touch(docName), onStorageFailure(error).
  */
-export function createE2ERelay({ roomLog, traffic, maxRoomBytes, maxAppendBytes, touch, onStorageFailure, logger = console }) {
+export function createE2ERelay({
+  roomLog, traffic, maxRoomBytes, maxAppendBytes, touch, onStorageFailure, logger = console,
+  snapshotIntervalMs = E2E_SNAPSHOT_MIN_INTERVAL_MS,
+}) {
   const maxFrameBytes = maxRoomBytes + E2E_MAX_FRAME_HEADER_BYTES;
   const maxSnapshotFrameBytes = roomLog.maxSnapshotBytes + e2eFrameHeaderBytes(E2E_FRAME.SNAPSHOT);
   const wss = new WebSocketServer({ noServer: true, maxPayload: maxFrameBytes });
   const deps = {
-    roomLog, traffic, touch, onStorageFailure, logger,
+    roomLog, traffic, touch, onStorageFailure, logger, snapshotIntervalMs,
     frameLimits: {
       maxBytes: maxFrameBytes,
       maxEphemeralBytes: E2E_EPHEMERAL_MAX_BYTES,

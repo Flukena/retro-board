@@ -21,11 +21,19 @@ export function attachE2ERoom({ provider, ydoc, eventTarget, getRoomKey, clearUn
     expiry.destroy();
   });
   return {
-    /** For the key rotation (Task 14): the current state, never the live doc. */
+    /**
+     * For the key rotation (Task 14): the current state, never the live doc, plus how far this page has read the
+     * log. The commit must claim `appliedSnapshotBase` (the relay refuses it otherwise) and waits for
+     * `appliedSeq === head` and `pendingDelivery === 0` before capturing.
+     */
     rotationSource: () => ({
       encodeState: () => Y.encodeStateAsUpdate(ydoc),
       roomHandle: provider.roomname,
       keyEpoch: getRoomKey()?.keyEpoch,
+      appliedSeq: provider.appliedSeq,
+      head: provider.head,
+      appliedSnapshotBase: provider.appliedSnapshotBase,
+      pendingDelivery: provider.pendingDelivery,
     }),
   };
 }

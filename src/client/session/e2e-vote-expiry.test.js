@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as Y from 'yjs';
+import { E2E_FRAME } from '../../domain/e2e-envelope.js';
 import { decryptFrame, encryptFrame } from '../room-lock/e2e-crypto.js';
 import { E2E_SYNCED_FIELD } from './e2e-provider.js';
 import { attachE2EVoteExpiry, electedFinalizer } from './e2e-vote-expiry.js';
-import { delivered, e2eRoom, roomKey, sleep, synced, until } from '../../test-support/e2e-room-fixture.mjs';
+import { delivered, dropFrame, e2eRoom, roomKey, sleep, synced, until } from '../../test-support/e2e-room-fixture.mjs';
 
 const GRACE_MS = 300;
 const DEADLINE_IN_MS = 200;
@@ -174,6 +175,48 @@ test('a page decrypting a live timer replacement at the deadline does not finali
   startVote(b, replacedEndsAt, 2);
   await sleep(DEADLINE_IN_MS + MARGIN_MS);
   assert.equal(finalA.count, 0, 'no finalization while the replacement is still decrypting');
+  release();
+  await until(() => timerOf(b) === null, 'the replacement is finalized');
+  assert.equal(b.doc.getMap('items').get('zone').get('lastResultsAt'), replacedEndsAt);
+  assert.equal(finalA.count, 1);
+});
+
+test('a page decrypting a snapshot at a base it already holds does not finalize the timer that snapshot replaces', async (t) => {
+  const APPEND_CAP = 2048;
+  const room = await e2eRoom(t, { maxAppendBytes: APPEND_CAP });
+  const key = await roomKey();
+  let gate = null;
+  const gated = {
+    encryptFrame,
+    async decryptFrame(...args) {
+      await gate;
+      return decryptFrame(...args);
+    },
+  };
+  const a = room.join(key, { clientID: 1, cipher: gated });
+  const b = room.join(key, { clientID: 2, appendFrameBytes: APPEND_CAP });
+  await synced(a, b);
+  await seesSynced(a, [1]);
+  const finalA = countFinalizations(a);
+  expire(a, t);
+  const start = Date.now();
+  startVote(b, start + DEADLINE_IN_MS, 1);
+  await delivered(b);
+  await until(() => timerOf(a)?.startedAt === 1 && a.provider.e2eSynced, 'A holds the first timer');
+  let release;
+  gate = new Promise((resolve) => { release = resolve; });
+  // Only the snapshot reaches A: B's empty probe append would move A's head and hide the gap.
+  a.tap.rule(E2E_FRAME.UPDATE, dropFrame, { once: true });
+  const replacedEndsAt = start + DEADLINE_IN_MS * 3;
+  b.doc.transact(() => {
+    b.doc.getMap('items').get('zone').set('voteTimer', { startedAt: 2, endsAt: replacedEndsAt });
+    b.doc.getText('filler').insert(0, 'f'.repeat(APPEND_CAP * 2));
+  }, 'local');
+  await until(() => a.tap.receivedOfType(E2E_FRAME.SNAPSHOT_OUT).length === 1, 'snapshot received');
+  assert.ok(a.tap.receivedOfType(E2E_FRAME.SNAPSHOT_OUT)[0].seq <= a.provider.appliedSeq, 'a base A already holds');
+  assert.equal(a.provider.e2eSynced, false);
+  await sleep(DEADLINE_IN_MS + MARGIN_MS);
+  assert.equal(finalA.count, 0, 'no finalization while the snapshot is still decrypting');
   release();
   await until(() => timerOf(b) === null, 'the replacement is finalized');
   assert.equal(b.doc.getMap('items').get('zone').get('lastResultsAt'), replacedEndsAt);

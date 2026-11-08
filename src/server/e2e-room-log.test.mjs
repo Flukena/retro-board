@@ -180,7 +180,7 @@ test('release resumes, deletes only that rotation\'s staged blobs, and drops the
 const newLock = () => lockRecord({ keyEpoch: 1, wrapIv: lockRecord().wrapIv });
 
 test('commit with the wrong head, wrong rotationId, or no freeze is stale', () => withLog(async ({ log, ldb }) => {
-  const args = (over) => ({ expectedHead: 1, verify: approve, snapshot: bytesOf(4), lockRecord: newLock(), blobInventory: [], ...over });
+  const args = (over) => ({ expectedHead: 1, knownSnapshotBase: 0, verify: approve, snapshot: bytesOf(4), lockRecord: newLock(), blobInventory: [], ...over });
   await log.append(DOC, bytesOf(3));
   await rejectsWith(log.commitRotation(DOC, { rotationId: 'x', ...args() }), E2E_ROTATION_STALE);
   const { rotationId } = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
@@ -188,6 +188,19 @@ test('commit with the wrong head, wrong rotationId, or no freeze is stale', () =
   await rejectsWith(log.commitRotation(DOC, { rotationId, ...args({ expectedHead: 0 }) }), E2E_ROTATION_STALE);
   await rejectsWith(log.commitRotation(DOC, { rotationId, ...args({ lockRecord: lockRecord() }) }), E2E_ROTATION_STALE);
   assert.equal((await storedLock(ldb)).keyEpoch, 0);
+}));
+
+test('a commit built without the stored snapshot is stale and leaves the snapshot in place', () => withLog(async ({ log, make, ldb }) => {
+  for (let i = 0; i < 3; i += 1) await log.append(DOC, bytesOf(3));
+  await log.snapshot(DOC, 2, bytesOf(5, 1), 0);
+  const { rotationId } = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
+  const commit = (knownSnapshotBase) => log.commitRotation(DOC, {
+    rotationId, expectedHead: 3, knownSnapshotBase, verify: approve, snapshot: bytesOf(4), lockRecord: newLock(), blobInventory: [],
+  });
+  await rejectsWith(commit(0), E2E_ROTATION_STALE);
+  assert.equal((await storedLock(ldb)).keyEpoch, 0);
+  assert.equal((await make().open(DOC)).snapshot.baseSeq, 2);
+  assert.equal((await commit(2)).keyEpoch, 1);
 }));
 
 test('a failed commit batch leaves the old lock and the log intact', () => withLog(async ({ log, make, ldb }) => {
@@ -201,7 +214,7 @@ test('a failed commit batch leaves the old lock and the log intact', () => withL
       ? Promise.reject(new Error('injected batch failure')) : db.batch(ops, options)),
   });
   ldb._transact = (f) => realTransact((db) => f(failingDb(db)));
-  await rejects(log.commitRotation(DOC, { rotationId, expectedHead: 2, verify: approve, snapshot: bytesOf(4), lockRecord: newLock(), blobInventory: [] }));
+  await rejects(log.commitRotation(DOC, { rotationId, knownSnapshotBase: 0, expectedHead: 2, verify: approve, snapshot: bytesOf(4), lockRecord: newLock(), blobInventory: [] }));
   ldb._transact = realTransact;
   const lock = await storedLock(ldb);
   assert.equal(lock.keyEpoch, 0);
@@ -217,7 +230,7 @@ test('commit stores exactly one snapshot plus the new lock, bumps the revision a
   for (let i = 0; i < 3; i += 1) await log.append(DOC, bytesOf(5));
   const { rotationId } = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
   const inventory = [{ id: 'b1', bytes: 9, epoch: 1, stagedFor: null }, { id: 'b0', bytes: 8, epoch: 0, stagedFor: null }];
-  await log.commitRotation(DOC, { rotationId, expectedHead: 3, verify: approve, snapshot: bytesOf(6, 2), lockRecord: newLock(), blobInventory: inventory });
+  await log.commitRotation(DOC, { rotationId, knownSnapshotBase: 0, expectedHead: 3, verify: approve, snapshot: bytesOf(6, 2), lockRecord: newLock(), blobInventory: inventory });
   assert.deepEqual(await e2eKeys(ldb), ['e2e-blobs', 'e2e-head', 'e2e-snapshot']);
   const lock = await storedLock(ldb);
   assert.equal(lock.keyEpoch, 1);
@@ -236,7 +249,7 @@ test('commit stores exactly one snapshot plus the new lock, bumps the revision a
 
 test('a password change queued behind a commit fails re-verification and leaves the new lock', () => withLog(async ({ log, ldb }) => {
   const { rotationId } = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
-  const commit = log.commitRotation(DOC, { rotationId, expectedHead: 0, verify: approve, snapshot: bytesOf(2), lockRecord: newLock(), blobInventory: [] });
+  const commit = log.commitRotation(DOC, { rotationId, knownSnapshotBase: 0, expectedHead: 0, verify: approve, snapshot: bytesOf(2), lockRecord: newLock(), blobInventory: [] });
   const change = log.mutateLock(DOC, { expectedRevision: 0, verify: approve, next: (r) => ({ ...r, salt: lockRecord({ salt: 'x'.repeat(22) }).salt }) });
   await commit;
   await rejectsWith(change, E2E_LOCK_MISMATCH);
@@ -278,7 +291,7 @@ test('a truncated snapshot fails open', () => withLog(async ({ log, ldb, make })
 test('expireOldEpochBlobs removes only retired entries past the grace and returns their ids', () => withLog(async ({ log, make }) => {
   const { rotationId } = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
   await log.commitRotation(DOC, {
-    rotationId, expectedHead: 0, verify: approve, snapshot: bytesOf(1), lockRecord: newLock(),
+    rotationId, knownSnapshotBase: 0, expectedHead: 0, verify: approve, snapshot: bytesOf(1), lockRecord: newLock(),
     blobInventory: [{ id: 'old', bytes: 1, epoch: 0, stagedFor: null }, { id: 'new', bytes: 1, epoch: 1, stagedFor: null }],
   });
   assert.deepEqual(await log.expireOldEpochBlobs(DOC, START_MS + GRACE_MS - 1, GRACE_MS), []);
@@ -348,7 +361,7 @@ test('release with verify: a failed verify keeps the freeze, a passing one relea
 
 test('commit with a failing verify is a lock mismatch and keeps the freeze', () => withLog(async ({ log, ldb }) => {
   const { rotationId } = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
-  await rejectsWith(log.commitRotation(DOC, { rotationId, expectedHead: 0, verify: reject, snapshot: bytesOf(2), lockRecord: newLock(), blobInventory: [] }), E2E_LOCK_MISMATCH);
+  await rejectsWith(log.commitRotation(DOC, { rotationId, knownSnapshotBase: 0, expectedHead: 0, verify: reject, snapshot: bytesOf(2), lockRecord: newLock(), blobInventory: [] }), E2E_LOCK_MISMATCH);
   assert.equal((await storedLock(ldb)).keyEpoch, 0);
   await rejectsWith(log.append(DOC, bytesOf(1)), E2E_FROZEN);
 }));
@@ -402,7 +415,7 @@ test('a staged blob needs an active matching freeze', () => withLog(async ({ log
 test('expireOldEpochBlobs defaults to the 24 h grace', () => withLog(async ({ log }) => {
   const { rotationId } = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
   await log.commitRotation(DOC, {
-    rotationId, expectedHead: 0, verify: approve, snapshot: bytesOf(1), lockRecord: newLock(),
+    rotationId, knownSnapshotBase: 0, expectedHead: 0, verify: approve, snapshot: bytesOf(1), lockRecord: newLock(),
     blobInventory: [{ id: 'old', bytes: 1, epoch: 0, stagedFor: null }],
   });
   assert.equal(E2E_BLOB_GRACE_MS, GRACE_MS);
@@ -579,7 +592,7 @@ test('addBlob with expectedEpoch is refused once the stored key epoch has moved 
 
 test('commit refuses an inventory with blobs staged for another rotation and clears stagedFor on kept entries', () => withLog(async ({ log, ldb, make }) => {
   const { rotationId } = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
-  const args = (blobInventory) => ({ rotationId, expectedHead: 0, verify: approve, snapshot: bytesOf(4), lockRecord: newLock(), blobInventory });
+  const args = (blobInventory) => ({ rotationId, knownSnapshotBase: 0, expectedHead: 0, verify: approve, snapshot: bytesOf(4), lockRecord: newLock(), blobInventory });
   const entry = (id, stagedFor) => ({ id, bytes: 5, epoch: 1, stagedFor });
   await rejectsWith(log.commitRotation(DOC, args([entry('a', 'some-other-rotation')])), E2E_ROTATION_STALE);
   assert.equal((await storedLock(ldb)).keyEpoch, 0, 'nothing was written');
@@ -589,7 +602,7 @@ test('commit refuses an inventory with blobs staged for another rotation and cle
 
 const commitWith = async (log, blobInventory) => {
   const { rotationId } = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
-  await log.commitRotation(DOC, { rotationId, expectedHead: 0, verify: approve, snapshot: bytesOf(4), lockRecord: newLock(), blobInventory });
+  await log.commitRotation(DOC, { rotationId, knownSnapshotBase: 0, expectedHead: 0, verify: approve, snapshot: bytesOf(4), lockRecord: newLock(), blobInventory });
 };
 
 test('a commit that retires old-epoch blobs calls onBlobsRetired; one that retires none does not', async () => {

@@ -128,7 +128,8 @@ export function createRoomLockRoutes(ctx) {
     const blobInventory = await commitInventory(docName, header.rotationId, header.keepBlobs);
     const lockRecord = { ...lock, ...header.lock, keyEpoch: header.keyEpoch };
     const committed = await roomLog.commitRotation(docName, {
-      rotationId: header.rotationId, expectedHead: header.expectedHead, verify: attempt.verify,
+      rotationId: header.rotationId, expectedHead: header.expectedHead, knownSnapshotBase: header.knownSnapshotBase,
+      verify: attempt.verify,
       snapshot, lockRecord, blobInventory,
     }).catch((error) => { throw Object.assign(error, { attempt }); });
     registry.publishLock(docName, committed);

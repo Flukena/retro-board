@@ -270,12 +270,13 @@ export class E2ERoomLog {
     });
   }
 
-  async commitRotation(docName, { rotationId, expectedHead, verify, snapshot, lockRecord, blobInventory }) {
+  async commitRotation(docName, { rotationId, expectedHead, knownSnapshotBase, verify, snapshot, lockRecord, blobInventory }) {
     return this.#enqueue(docName, async (room) => {
       await this.#load(docName, room);
       if (room.frozen?.rotationId !== rotationId || room.head !== expectedHead) {
         throw codedError(E2E_ROTATION_STALE, 'rotation freeze is not current');
       }
+      if (knownSnapshotBase !== room.base) throw codedError(E2E_ROTATION_STALE, 'rotation state was built without the stored snapshot');
       // The revision cannot change while frozen (mutateLock is refused), so the revision checked at
       // freeze time still holds; verify re-checks the password against the current record here.
       const current = await this.#verifiedRecord(docName, undefined, verify);

@@ -3,7 +3,7 @@ import { BLOB_ID_PATTERN, hasExactKeys, isCounter, parseAuthKey, parseLockParams
 export const MAX_COMMIT_HEADER_BYTES = 1024 * 1024;
 export const MAX_KEEP_BLOBS = 10_000;
 export const HEADER_LENGTH_BYTES = 4;
-const COMMIT_KEYS = ['oldAuthKey', 'rotationId', 'expectedHead', 'keyEpoch', 'lock', 'keepBlobs'];
+const COMMIT_KEYS = ['oldAuthKey', 'rotationId', 'expectedHead', 'knownSnapshotBase', 'keyEpoch', 'lock', 'keepBlobs'];
 const HTTP_BAD_REQUEST = 400;
 const HTTP_TOO_LARGE = 413;
 
@@ -23,7 +23,7 @@ export function parseCommitHeader(jsonBytes) {
   if (!header || typeof header !== 'object' || Array.isArray(header) || !hasExactKeys(header, COMMIT_KEYS)) throw refusal(HTTP_BAD_REQUEST);
   const lock = parseLockParams(header.lock);
   const valid = parseAuthKey(header.oldAuthKey) && lock && isBlobId(header.rotationId)
-    && isCounter(header.expectedHead) && isCounter(header.keyEpoch);
+    && isCounter(header.expectedHead) && isCounter(header.knownSnapshotBase) && isCounter(header.keyEpoch);
   if (!valid) throw refusal(HTTP_BAD_REQUEST);
   return { ...header, lock, keepBlobs: parseKeepBlobs(header.keepBlobs) };
 }

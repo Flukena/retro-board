@@ -190,7 +190,7 @@ test('a rotation close keeps pending edits; setKey delivers them under the new e
   type(a, '+frozen');
   await until(() => a.tap.receivedOfType(E2E_FRAME.REJECT).length === 1, 'FROZEN reject');
   const next = await roomKey(1);
-  await room.rotate(rotationId, next, Y.encodeStateAsUpdate(b.doc));
+  await room.rotate(rotationId, next, Y.encodeStateAsUpdate(b.doc), b.provider.appliedSnapshotBase);
   await until(() => rotated.length === 1, 'key rotated event');
   type(a, '+offline');
   a.provider.disconnect();
@@ -327,6 +327,37 @@ const openGate = () => {
   const promise = new Promise((resolve) => { release = resolve; });
   return { promise, release };
 };
+
+test('a snapshot refused as stale after the winner arrived is retried, so the loser\'s large edit is stored', async (t) => {
+  const room = await e2eRoom(t, { maxAppendBytes: OVERSIZED_APPEND_CAP, snapshotIntervalMs: 0 });
+  const key = await roomKey();
+  const sizes = { appendFrameBytes: OVERSIZED_APPEND_CAP, snapshotPolicy: { minIntervalMs: 0 } };
+  const a = room.join(key, sizes);
+  const { gates, cipher } = gatedCipher();
+  const b = room.join(key, { ...sizes, cipher });
+  await synced(a, b);
+  type(b, 'b');
+  await delivered(b);
+  await until(() => textOf(a) === 'b', 'A holds B\'s small edit');
+  const gate = openGate();
+  gates.encrypt = gate.promise;
+  const LOSER_TEXT = 'y'.repeat(OVERSIZED_TEXT.length);
+  type(b, LOSER_TEXT);
+  type(a, OVERSIZED_TEXT, 0);
+  await delivered(a);
+  await until(() => b.provider.appliedSnapshotBase > 0, 'B applied the winner\'s snapshot');
+  gate.release();
+  await until(() => b.tap.receivedOfType(E2E_FRAME.REJECT).some((frame) => frame.code === E2E_REJECT.STALE_SNAPSHOT), 'STALE');
+  const received = b.tap.received.map((frame) => frame?.type);
+  assert.ok(received.indexOf(E2E_FRAME.SNAPSHOT_OUT) < received.indexOf(E2E_FRAME.REJECT), 'the winner arrived first');
+  await delivered(b);
+  assert.equal(b.provider.pendingDelivery, 0);
+  await until(() => textOf(a).includes(LOSER_TEXT), 'A receives the loser\'s large edit');
+  const joiner = room.join(key);
+  await synced(joiner);
+  assert.equal(textOf(joiner), textOf(a));
+  assert.ok(textOf(joiner).includes(LOSER_TEXT) && textOf(joiner).includes(OVERSIZED_TEXT));
+});
 
 test('a live frame still decrypting makes the page unsynced at once', async (t) => {
   const room = await e2eRoom(t);

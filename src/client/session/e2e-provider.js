@@ -87,6 +87,8 @@ export class E2EProvider extends Observable {
   // baseSeq of the newest snapshot this page applied or wrote on this connection; the relay fences on it.
   #appliedSnapshotBase = 0;
   #awaitingPeerSnapshot = false;
+  // Snapshots received but not yet applied: each may hold edits no log entry carries.
+  #unappliedSnapshots = 0;
   #syncedSettleMs;
   #syncedTimer = null;
   #awarenessBusy = false;
@@ -145,9 +147,12 @@ export class E2EProvider extends Observable {
   get appliedSeq() { return this.#coverage.appliedSeq; }
   get head() { return this.#coverage.head; }
   get skippedSeq() { return this.#coverage.skippedSeq; }
-  /** True while connected, replayed, nothing skipped, and every log entry up to the head is held. */
+  /** The base of the stored snapshot this page has applied or written; a rotation commit must claim it. */
+  get appliedSnapshotBase() { return this.#appliedSnapshotBase; }
+  /** True while connected, replayed, nothing skipped, every log entry up to the head held and every snapshot applied. */
   get e2eSynced() {
-    return this.wsconnected && this.#replayDone && this.#coverage.skippedSeq === null && this.#coverage.caughtUp;
+    return this.wsconnected && this.#replayDone && this.#coverage.skippedSeq === null && this.#coverage.caughtUp
+      && this.#unappliedSnapshots === 0;
   }
 
   connect() {
@@ -243,6 +248,7 @@ export class E2EProvider extends Observable {
     this.wsconnecting = false;
     this.#replayDone = false;
     this.#snapshot = null;
+    this.#unappliedSnapshots = 0;
     this.#clearTimers();
     this.#flushSkipCount();
     this.synced = false;
@@ -310,7 +316,9 @@ export class E2EProvider extends Observable {
       return;
     }
     // The head moves when a log frame arrives, not when its decryption ends: until it is applied this page is
-    // behind, so it must not act as fully synced (vote expiry) meanwhile.
+    // behind, so it must not act as fully synced (vote expiry) meanwhile. A snapshot counts even at a base already
+    // covered, because it may carry edits that were never log entries.
+    if (frame.type === E2E_FRAME.SNAPSHOT_OUT) this.#unappliedSnapshots += 1;
     if (frame.type === E2E_FRAME.UPDATE || frame.type === E2E_FRAME.SNAPSHOT_OUT) {
       this.#coverage.noteHead(frame.seq);
       this.#publishE2ESynced();
@@ -362,6 +370,7 @@ export class E2EProvider extends Observable {
     // Always applied: a snapshot may carry a peer's edit that never was a log entry (one too large to append).
     const applied = await this.#applyRemote(ciphertext, this.#aad(AAD_KIND.SNAPSHOT, seq), generation);
     if (applied === null) return;
+    this.#unappliedSnapshots -= 1;
     if (applied) this.#appliedSnapshotBase = seq;
     else this.#skip(seq);
     this.#coverage.coverThrough(seq);
@@ -473,7 +482,7 @@ export class E2EProvider extends Observable {
 
   #snapshotBlocked() {
     return !this.#replayDone || !this.wsconnected || this.#snapshot !== null || this.#awaitingPeerSnapshot
-      || this.#coverage.skippedSeq !== null || !this.#coverage.caughtUp;
+      || this.#unappliedSnapshots > 0 || this.#coverage.skippedSeq !== null || !this.#coverage.caughtUp;
   }
 
   #scheduleSnapshot() {
@@ -516,7 +525,7 @@ export class E2EProvider extends Observable {
     const baseSeq = this.#coverage.appliedSeq;
     const state = Y.encodeStateAsUpdate(this.doc);
     const knownBase = this.#appliedSnapshotBase;
-    const inflight = { baseSeq, covered: this.#pending.refs(), serial: Number.POSITIVE_INFINITY };
+    const inflight = { baseSeq, knownBase, covered: this.#pending.refs(), serial: Number.POSITIVE_INFINITY };
     this.#snapshot = inflight;
     this.#policy.attempted(this.#timers.now());
     this.#queueOutgoing(async (generation) => {
@@ -551,10 +560,12 @@ export class E2EProvider extends Observable {
   // The captured entries stay pending: only proof of an accepted snapshot removes them.
   #snapshotRejected(code) {
     if (this.#snapshot === null) return;
+    const { knownBase } = this.#snapshot;
     this.#snapshot = null;
     if (code === E2E_REJECT.QUOTA) this.#announceRoomFull();
     // Another snapshot is stored or on its way: build the next one on top of it once it has been applied here.
-    else if (code === E2E_REJECT.STALE_SNAPSHOT) this.#awaitingPeerSnapshot = true;
+    // When the winner already arrived (its SNAPSHOT_OUT reaches us before our REJECT), nothing more is coming.
+    else if (code === E2E_REJECT.STALE_SNAPSHOT && this.#appliedSnapshotBase <= knownBase) this.#awaitingPeerSnapshot = true;
     else this.#scheduleSnapshot();
   }
 

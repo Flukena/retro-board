@@ -52,7 +52,7 @@ const ownerPost = (env, room, action, body, ownerCookie) => post(env.relay, `/ap
 
 const commit = (env, room, rotation, ownerCookie, overrides = {}) => {
   const header = Buffer.from(JSON.stringify({
-    oldAuthKey: ROOM_LOCK.authKey, rotationId: rotation.rotationId, expectedHead: rotation.head, keyEpoch: 1, lock: NEXT_KEY.lock, keepBlobs: [], ...overrides,
+    oldAuthKey: ROOM_LOCK.authKey, rotationId: rotation.rotationId, expectedHead: rotation.head, knownSnapshotBase: 0, keyEpoch: 1, lock: NEXT_KEY.lock, keepBlobs: [], ...overrides,
   }));
   const prefix = Buffer.alloc(HEADER_LENGTH_BYTES);
   prefix.writeUInt32BE(header.length);

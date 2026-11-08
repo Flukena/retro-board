@@ -9,7 +9,7 @@ import { decodeClientFrame, decodeServerFrame } from '../domain/e2e-envelope.js'
 import { KEY_ROTATED_CLOSE_CODE, e2eAad } from '../domain/room-lock-contract.js';
 import { encryptFrame } from '../client/room-lock/e2e-crypto.js';
 import { E2EProvider } from '../client/session/e2e-provider.js';
-import { E2ERoomLog } from '../server/e2e-room-log.js';
+import { E2E_ROTATION_STALE, E2ERoomLog } from '../server/e2e-room-log.js';
 import { createE2ERelay } from '../server/e2e-relay.js';
 import { readRelayConfig } from '../server/relay-config.js';
 import { RelayWsTraffic } from '../server/relay-ws-traffic.js';
@@ -106,6 +106,8 @@ export class SocketTap {
   }
 }
 
+/** The relay's refusal of a rotation commit, for client tests that may not import server modules themselves. */
+export { E2E_ROTATION_STALE };
 export const dropFrame = () => null;
 /** Flips one ciphertext bit so AES-GCM authentication fails. */
 export const flipLastBit = (bytes) => {
@@ -115,14 +117,14 @@ export const flipLastBit = (bytes) => {
 };
 
 /** A real E2E relay with the real E2ERoomLog over a temp LevelDB, plus helpers to make providers on it. */
-export async function e2eRoom(t, { maxRoomBytes = 1024 * 1024, maxAppendBytes = 256 * 1024 } = {}) {
+export async function e2eRoom(t, { maxRoomBytes = 1024 * 1024, maxAppendBytes = 256 * 1024, snapshotIntervalMs } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'e2e-provider-'));
   const ldb = new LeveldbPersistence(dir);
   await ldb.setMeta(DOC, ROOM_LOCK_META, encodeLockRecord(lockRecord()));
   const roomLog = new E2ERoomLog({ ldb, maxRoomBytes, reserveStore: () => () => {} });
   const relay = createE2ERelay({
     roomLog, traffic: new RelayWsTraffic(generousConfig(), { log: quietLogger }), maxRoomBytes, maxAppendBytes,
-    touch: () => {}, onStorageFailure: () => {}, logger: quietLogger,
+    touch: () => {}, onStorageFailure: () => {}, logger: quietLogger, snapshotIntervalMs,
   });
   const server = http.createServer();
   server.on('upgrade', (req, socket, head) => {
@@ -156,13 +158,17 @@ export async function e2eRoom(t, { maxRoomBytes = 1024 * 1024, maxAppendBytes = 
     },
     freeze: () => roomLog.freeze(DOC, FREEZE_TTL_MS, { verify: approve }),
     release: (rotationId) => roomLog.release(DOC, rotationId),
-    /** Commits a key rotation whose snapshot is `state` under `nextKey`, then closes every socket with 4001. */
-    async rotate(rotationId, nextKey, state) {
+    /**
+     * Commits a key rotation whose snapshot is `state` under `nextKey`, built by a committer that applied the stored
+     * snapshot at `knownSnapshotBase`, then closes every socket with 4001.
+     */
+    async rotate(rotationId, nextKey, state, knownSnapshotBase) {
       const { head } = await roomLog.open(DOC);
       const aad = e2eAad(E2E_TEST_HANDLE, nextKey.keyEpoch, 'snapshot', head);
       const snapshot = await encryptFrame(nextKey.dek, aad, state);
       await roomLog.commitRotation(DOC, {
-        rotationId, expectedHead: head, verify: approve, snapshot, blobInventory: [],
+        rotationId, expectedHead: head, knownSnapshotBase,
+        verify: approve, snapshot, blobInventory: [],
         lockRecord: lockRecord({ keyEpoch: nextKey.keyEpoch }),
       });
       relay.closeRoom(DOC, KEY_ROTATED_CLOSE_CODE, KEY_ROTATED_REASON);

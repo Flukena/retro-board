@@ -125,7 +125,7 @@ const begin = async (f, expectedRevision = 0) => {
 };
 
 const commitHeader = (rotation, overrides = {}) => ({
-  oldAuthKey: ROOM_LOCK.authKey, rotationId: rotation.rotationId, expectedHead: rotation.head, keyEpoch: 1, lock: NEXT_KEY.lock, keepBlobs: [], ...overrides,
+  oldAuthKey: ROOM_LOCK.authKey, rotationId: rotation.rotationId, expectedHead: rotation.head, knownSnapshotBase: 0, keyEpoch: 1, lock: NEXT_KEY.lock, keepBlobs: [], ...overrides,
 });
 
 const stageBlob = (f, rotation, id = randomUUID(), epoch = 1) => f.roomLog.addBlob(f.room.docName, { id, bytes: 10, epoch, stagedFor: rotation.rotationId }).then(() => id);
@@ -277,6 +277,21 @@ test('commit is 409 for a wrong head, rotationId, epoch or a rotation that was n
   await assert.rejects(f.roomLog.append(f.room.docName, bytesOf(1)), (e) => e.code === E2E_FROZEN);
 });
 
+test('a committer that missed the stored snapshot is 409 and the snapshot, lock and freeze stay', async (t) => {
+  const f = await lockedRoom(t);
+  for (let i = 0; i < 2; i += 1) await f.roomLog.append(f.room.docName, bytesOf(4));
+  await f.roomLog.snapshot(f.room.docName, 2, bytesOf(6), 0);
+  const rotation = await begin(f);
+  const missed = await f.postCommit(f.room, commitHeader(rotation, { knownSnapshotBase: 0 }), SNAPSHOT, f.owner.cookie);
+  assert.equal(missed.status, STATUS.CONFLICT);
+  assert.equal((await f.storedLock(f.room)).keyEpoch, 0);
+  assert.equal((await f.roomLog.open(f.room.docName)).snapshot.baseSeq, 2);
+  assert.deepEqual(f.closed, []);
+  await assert.rejects(f.roomLog.append(f.room.docName, bytesOf(1)), (e) => e.code === E2E_FROZEN);
+  const current = await f.postCommit(f.room, commitHeader(rotation, { knownSnapshotBase: 2 }), SNAPSHOT, f.owner.cookie);
+  assert.equal(current.status, STATUS.NO_CONTENT);
+});
+
 test('keepBlobs must be staged for this rotation: unknown, committed or duplicate ids are refused', async (t) => {
   const f = await lockedRoom(t);
   const committed = randomUUID();
@@ -312,6 +327,9 @@ test('commit body limits: header over 1 MiB, empty snapshot and oversized snapsh
   assert.equal((await f.postCommit(f.room, header, new Uint8Array(f.roomLog.maxSnapshotBytes + 1), f.owner.cookie)).status, STATUS.TOO_LARGE);
   assert.equal((await f.postCommit(f.room, header, SNAPSHOT, f.owner.cookie, { headerLength: 99_999 })).status, STATUS.BAD_REQUEST);
   assert.equal((await f.postCommit(f.room, { ...header, extra: 1 }, SNAPSHOT, f.owner.cookie)).status, STATUS.BAD_REQUEST);
+  const withoutBase = Object.fromEntries(Object.entries(header).filter(([key]) => key !== 'knownSnapshotBase'));
+  assert.equal((await f.postCommit(f.room, withoutBase, SNAPSHOT, f.owner.cookie)).status, STATUS.BAD_REQUEST);
+  assert.equal((await f.postCommit(f.room, { ...header, knownSnapshotBase: -1 }, SNAPSHOT, f.owner.cookie)).status, STATUS.BAD_REQUEST);
   assert.equal((await f.postCommit(f.room, { ...header, lock: { ...NEXT_KEY.lock, wrapIv: 'x' } }, SNAPSHOT, f.owner.cookie)).status, STATUS.BAD_REQUEST);
   assert.equal((await f.storedLock(f.room)).keyEpoch, 0);
 });

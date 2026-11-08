@@ -161,7 +161,7 @@ test('a staged upload for a rotation that never existed is refused with 409', ()
 const commitRotation = async (roomLog, blobInventory) => {
   const { rotationId } = await roomLog.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
   await roomLog.commitRotation(DOC, {
-    rotationId, expectedHead: 0, verify: approve, snapshot: new Uint8Array(4), lockRecord: lockRecord({ keyEpoch: 1 }), blobInventory,
+    rotationId, knownSnapshotBase: 0, expectedHead: 0, verify: approve, snapshot: new Uint8Array(4), lockRecord: lockRecord({ keyEpoch: 1 }), blobInventory,
   });
 };
 
@@ -208,7 +208,7 @@ test('a rotation that retires more blobs while the sweep deletes files keeps the
     if (!path.endsWith(`${first.id}.e2e`)) return;
     const { rotationId } = await roomLog.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 1, verify: approve });
     await roomLog.commitRotation(DOC, {
-      rotationId, expectedHead: 0, verify: approve, snapshot: new Uint8Array(4), lockRecord: lockRecord({ keyEpoch: 2 }),
+      rotationId, knownSnapshotBase: 0, expectedHead: 0, verify: approve, snapshot: new Uint8Array(4), lockRecord: lockRecord({ keyEpoch: 2 }),
       blobInventory: (await roomLog.blobs(DOC)).filter((entry) => entry.id !== first.id),
     });
   };
