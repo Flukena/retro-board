@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import {
   E2E_BLOBS_KEY, E2E_HEAD_KEY, E2E_SNAPSHOT_KEY, E2E_UPDATE_KEY_PREFIX, e2eSeqOfKey, verifySnapshotDigest,
 } from '../src/server/e2e-room-log.js';
+import { BLOB_ID_PATTERN } from '../src/domain/room-lock-contract.js';
 import { ROOM_LOCK_META, decodeLockRecord, hasLockMeta } from '../src/server/room-lock-record.js';
 import { ROOM_HANDLE_META } from '../src/server/relay-room-registry.js';
 import { ROOM_HANDLE_RE } from '../src/server/relay-config.js';
@@ -34,7 +35,7 @@ function checkSnapshotAndLog(metas) {
   if (seqs.length !== expectedCount || seqs.some((seq, index) => seq !== baseSeq + 1 + index)) fail(LOG_GAP);
 }
 
-const isInventoryEntry = (entry) => typeof entry?.id === 'string' && isCount(entry.bytes);
+const isInventoryEntry = (entry) => typeof entry?.id === 'string' && BLOB_ID_PATTERN.test(entry.id) && isCount(entry.bytes);
 
 function readInventory(metas) {
   const inventory = metas.get(E2E_BLOBS_KEY) ?? [];

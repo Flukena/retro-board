@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { mkdtemp, rm, writeFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { E2ERoomLog, E2E_HEAD_KEY, E2E_SNAPSHOT_KEY, E2E_UPDATE_KEY_PREFIX } from '../src/server/e2e-room-log.js';
+import { E2ERoomLog, E2E_BLOBS_KEY, E2E_HEAD_KEY, E2E_SNAPSHOT_KEY, E2E_UPDATE_KEY_PREFIX } from '../src/server/e2e-room-log.js';
 import { ROOM_LOCK_META, encodeLockRecord } from '../src/server/room-lock-record.js';
 import { ROOM_HANDLE_META } from '../src/server/relay-room-registry.js';
 import { e2eBlobFilename } from '../src/server/relay-uploads.js';
@@ -144,4 +144,11 @@ test('the error never names the room, handle or blob', async (t) => {
   await seedRoom(fx);
   await unlink(blobPath(fx.uploads, BLOB_A));
   await assert.rejects(verifyBackupE2ERooms(fx.ldb, fx.uploads), (e) => ![DOC, HANDLE, BLOB_A].some((s) => e.message.includes(s)));
+});
+
+test('an inventory id that is not a blob id fails without touching paths outside uploads', async (t) => {
+  const fx = await openFixture(t);
+  await seedRoom(fx);
+  await durableMetaBatch(fx.ldb, DOC, [put(E2E_BLOBS_KEY, [{ id: '../escape', bytes: BLOB_BYTES, epoch: 0 }])]);
+  await assert.rejects(verifyBackupE2ERooms(fx.ldb, fx.uploads), /encrypted room blob inventory is invalid/);
 });
