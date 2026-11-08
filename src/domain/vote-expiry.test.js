@@ -163,3 +163,18 @@ test('missing awareness is treated as nobody present', () => {
     assert.equal(doc.getMap('items').get('zone').get('voteResults').presentCount, 0);
   } finally { doc.destroy(); }
 });
+
+test('a timer restarted while results are being gathered is not finalized', () => {
+  const doc = timedZoneDoc({ startedAt: 50, endsAt: DEADLINE_MS });
+  try {
+    const zone = doc.getMap('items').get('zone');
+    const restartingAwareness = { meta: new Map(), getStates: () => {
+      zone.set('voteTimer', { startedAt: 90, endsAt: DEADLINE_MS });
+      return new Map();
+    } };
+    finalizeExpiredVotes(doc, Y, restartingAwareness, DEADLINE_MS, () => assert.fail('geometry'),
+      { timerGeneration: { startedAt: 50, endsAt: DEADLINE_MS } });
+    assert.deepEqual(zone.get('voteTimer'), { startedAt: 90, endsAt: DEADLINE_MS });
+    assert.equal(zone.get('voteResults'), undefined);
+  } finally { doc.destroy(); }
+});

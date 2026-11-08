@@ -104,3 +104,40 @@ test('RESUMED is a bare type byte accepted only from the server', () => {
   assert.equal(decodeServerFrame(Uint8Array.of(17, 1), limits), null);
   assert.equal(decodeClientFrame(bytes, limits), null);
 });
+
+test('trailing bytes on payload-free frames are rejected', () => {
+  const frames = [
+    encodeFrame(E2E_FRAME.SYNCED, { seq: 1 }),
+    encodeFrame(E2E_FRAME.ACK, { seq: 1, clientRef: 2 }),
+    encodeFrame(E2E_FRAME.REJECT, { code: E2E_REJECT.RATE, clientRef: 2 }),
+    encodeFrame(E2E_FRAME.RESUMED),
+  ];
+  for (const frame of frames) {
+    assert.notEqual(decodeServerFrame(frame, limits), null);
+    assert.equal(decodeServerFrame(Uint8Array.of(...frame, 0), limits), null);
+  }
+});
+
+test('server frame maxBytes boundary is exact', () => {
+  const header = 1 + 8;
+  const at = encodeFrame(E2E_FRAME.UPDATE, { seq: 1, ciphertext: new Uint8Array(MAX_BYTES - header) });
+  const over = encodeFrame(E2E_FRAME.UPDATE, { seq: 1, ciphertext: new Uint8Array(MAX_BYTES - header + 1) });
+  assert.notEqual(decodeServerFrame(at, limits), null);
+  assert.equal(decodeServerFrame(over, limits), null);
+});
+
+test('decoders throw when maxBytes is not a positive safe integer', () => {
+  const frame = encodeFrame(E2E_FRAME.RESUMED);
+  for (const maxBytes of [undefined, 0, -1, 1.5, NaN, Infinity, '10']) {
+    assert.throws(() => decodeServerFrame(frame, { maxBytes }), TypeError);
+    assert.throws(() => decodeClientFrame(frame, { maxBytes }), TypeError);
+  }
+});
+
+test('REJECT codes are validated on encode and decode', () => {
+  for (const code of [undefined, 0, 6, 255]) {
+    assert.throws(() => encodeFrame(E2E_FRAME.REJECT, { code, clientRef: 1 }), RangeError);
+  }
+  assert.equal(decodeServerFrame(Uint8Array.of(16, 9, 0, 0, 0, 1), limits), null);
+  assert.equal(decodeServerFrame(Uint8Array.of(16, 0, 0, 0, 0, 1), limits), null);
+});

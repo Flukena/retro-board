@@ -16,6 +16,8 @@ const BYTE_MASK = 0xff;
 const CHAR_MASK = 0x3f;
 const INVALID_LENGTH_REMAINDER = 1;
 const CHAR_GROUP = 4;
+const ROOM_HANDLE_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+const BLOB_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const textEncoder = new TextEncoder();
 
 export function encodeBase64Url(bytes) {
@@ -74,11 +76,18 @@ export function parseLockParams(value) {
 
 export const parseAuthKey = (value) => (hasBytes(value, LOCK_BYTES.authKey) ? value : null);
 
+const isCounter = (value) => Number.isSafeInteger(value) && value >= 0;
+
+const bindingIsValid = (kind, binding) => (kind === 'snapshot' ? isCounter(binding) : BLOB_ID_PATTERN.test(binding ?? ''));
+
 export function e2eAad(roomHandle, keyEpoch, kind, binding) {
   const bound = BOUND_KINDS.has(kind);
   if (!bound && !UNBOUND_KINDS.has(kind)) throw new RangeError(`unknown AAD kind ${kind}`);
   const hasBinding = binding !== undefined;
   if (bound !== hasBinding) throw new RangeError(`AAD kind ${kind} ${bound ? 'requires' : 'forbids'} a binding`);
+  if (typeof roomHandle !== 'string' || !ROOM_HANDLE_PATTERN.test(roomHandle)) throw new RangeError('invalid roomHandle');
+  if (!isCounter(keyEpoch)) throw new RangeError('invalid keyEpoch');
+  if (bound && !bindingIsValid(kind, binding)) throw new RangeError(`invalid ${kind} binding`);
   const parts = [AAD_PREFIX, roomHandle, keyEpoch, kind, ...(bound ? [binding] : [])];
   return textEncoder.encode(parts.join(AAD_SEPARATOR));
 }

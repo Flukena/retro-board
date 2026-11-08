@@ -5,6 +5,7 @@ import {
   encodeBase64Url, decodeBase64Url,
 } from './room-lock-contract.js';
 
+const BLOB_ID = '123e4567-e89b-42d3-a456-426614174000';
 const b64 = (length, fill = 1) => encodeBase64Url(new Uint8Array(length).fill(fill));
 const validLock = () => ({
   salt: b64(LOCK_BYTES.salt), kdf: { ...LOCK_KDF }, verifier: b64(LOCK_BYTES.verifier),
@@ -62,7 +63,7 @@ test('AAD has exact bytes for snapshot and blob bindings', () => {
   const handle = 'A'.repeat(32);
   const aad = e2eAad(handle, 3, 'snapshot', 7);
   assert.deepEqual([...aad], [...new TextEncoder().encode(`retroroom/e2e/v1|${handle}|3|snapshot|7`)]);
-  assert.equal(new TextDecoder().decode(e2eAad(handle, 3, 'blob', 'img1')), `retroroom/e2e/v1|${handle}|3|blob|img1`);
+  assert.equal(new TextDecoder().decode(e2eAad(handle, 3, 'blob', BLOB_ID)), `retroroom/e2e/v1|${handle}|3|blob|${BLOB_ID}`);
   assert.equal(new TextDecoder().decode(e2eAad(handle, 3, 'update')), `retroroom/e2e/v1|${handle}|3|update`);
 });
 
@@ -72,4 +73,23 @@ test('AAD binding misuse throws', () => {
   assert.throws(() => e2eAad(handle, 3, 'blob'));
   assert.throws(() => e2eAad(handle, 3, 'update', 5));
   assert.throws(() => e2eAad(handle, 3, 'bogus'));
+});
+
+test('AAD rejects ambiguous or malformed parts', () => {
+  const handle = 'A'.repeat(32);
+  assert.throws(() => e2eAad('a|b', 3, 'update'));
+  assert.throws(() => e2eAad('', 3, 'update'));
+  assert.throws(() => e2eAad(null, 3, 'update'));
+  assert.throws(() => e2eAad('A'.repeat(65), 3, 'update'));
+  for (const epoch of [-1, 1.5, NaN, '3', null]) assert.throws(() => e2eAad(handle, epoch, 'update'));
+  for (const base of [-1, 1.5, '7', NaN]) assert.throws(() => e2eAad(handle, 3, 'snapshot', base));
+  for (const id of ['img|1', 'img1', 7, null]) assert.throws(() => e2eAad(handle, 3, 'blob', id));
+});
+
+test('decodeBase64Url is strict', () => {
+  assert.deepEqual([...decodeBase64Url('AA')], [0]);
+  assert.equal(decodeBase64Url('AB'), null);
+  assert.equal(decodeBase64Url('AAAAA'), null);
+  for (const value of [null, undefined, 42, {}, ['AA']]) assert.equal(decodeBase64Url(value), null);
+  assert.equal(decodeBase64Url('AA=='), null);
 });
