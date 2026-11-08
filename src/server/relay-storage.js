@@ -71,7 +71,7 @@ const levelMetaOperation = (docName, { type, key, value }) => (type === PUT_OPER
 
 // Applies every put/del to `docName`'s meta keys as ONE atomic, fsynced LevelDB
 // batch, for durable records (accounts) where setMeta's unsynced put is not enough.
-// Relies on y-leveldb 0.2.0 internals (package.json pins ^0.2.0; re-check on any
+// Relies on y-leveldb 0.2.0 internals (package.json pins exactly 0.2.0; re-check on any
 // upgrade): the private `_transact` queue (y-leveldb.js ~453), the
 // ['v1', docName, 'meta', key] key layout (~311) and encodeAny values read back
 // by getMeta (~560, ~577). `_transact` resolves null on any error and a
