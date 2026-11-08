@@ -165,6 +165,24 @@ const commitRotation = async (roomLog, blobInventory) => {
   });
 };
 
+test('a blob staged for a rotation and kept by its commit belongs to the new epoch and survives the sweep', () => withBlobs(async ({ blobs, roomLog, uploadsDir, clock }) => {
+  const old = await upload(blobs);
+  const { rotationId } = await roomLog.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
+  const staged = await upload(blobs, { stage: rotationId });
+  assert.equal(staged.status, 201);
+  const stagedEntry = (await roomLog.blobs(DOC)).find((entry) => entry.id === staged.id);
+  assert.equal(stagedEntry.epoch, 1, 'a staged copy is encrypted under the next key epoch');
+  await roomLog.commitRotation(DOC, {
+    rotationId, knownSnapshotBase: 0, expectedHead: 0, verify: approve, snapshot: new Uint8Array(4),
+    lockRecord: lockRecord({ keyEpoch: 1 }), blobInventory: await roomLog.blobs(DOC),
+  });
+  clock.now += E2E_BLOB_GRACE_MS;
+  await blobs.sweepExpired();
+  assert.deepEqual(await e2eFiles(uploadsDir), [e2eBlobFilename(HANDLE, staged.id)], 'only the old-epoch blob expired');
+  assert.deepEqual(await inventoryIds(roomLog), [staged.id]);
+  assert.notEqual(old.id, staged.id);
+}));
+
 test('old-epoch blobs keep their files for the grace, then the sweep deletes file, entry and usage', () => withBlobs(async ({ blobs, roomLog, roomUploadUsage, uploadsDir, clock, state }) => {
   const first = await upload(blobs);
   const second = await upload(blobs);

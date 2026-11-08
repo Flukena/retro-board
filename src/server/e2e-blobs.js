@@ -92,11 +92,13 @@ export function createE2EBlobs({
   };
 
   // The file is already published. Count it, then inventory it; any failure removes file and usage again.
+  // A copy staged for a rotation is encrypted under the next key, so it belongs to the next epoch.
   const inventoryBlob = async ({ docName, handle, id, stage, total, epoch }) => {
     try {
       await store.account(docName, total);
       if (stage) store.rememberStaged(stage, docName, handle, id);
-      await roomLog.addBlob(docName, { id, bytes: total, epoch, stagedFor: stage ?? undefined }, { expectedEpoch: epoch });
+      const entry = { id, bytes: total, epoch: stage ? epoch + 1 : epoch, stagedFor: stage ?? undefined };
+      await roomLog.addBlob(docName, entry, { expectedEpoch: epoch });
       return HTTP.CREATED;
     } catch (error) {
       await store.remove(docName, handle, id).catch((cleanupError) => logger.warn(ROLLBACK_FAILURE_LOG, { err: cleanupError.message }));
