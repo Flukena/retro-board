@@ -22,6 +22,10 @@ test('banner renders outage and unsynced copy in both languages', async () => {
         state: { status: 'connected', hasUnsyncedLocalChanges: false },
       }));
       assert.equal(healthy, '');
+      const saving = renderToStaticMarkup(React.createElement(SyncStatusBanner, {
+        state: { status: 'saving', hasUnsyncedLocalChanges: true },
+      }));
+      assert.equal(saving, '', 'an edit waiting for its acknowledgement does not flash a banner');
     }
     const lost = renderToStaticMarkup(React.createElement(SyncStatusBanner, {
       state: { status: 'session-lost', hasUnsyncedLocalChanges: false },

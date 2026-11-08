@@ -2,14 +2,14 @@ import { WebSocketServer } from 'ws';
 import {
   E2E_EPHEMERAL_MAX_BYTES, E2E_FRAME, E2E_MAX_FRAME_HEADER_BYTES, E2E_REJECT, decodeClientFrame, e2eFrameHeaderBytes, encodeFrame,
 } from '../domain/e2e-envelope.js';
+import { E2E_SNAPSHOT_MIN_INTERVAL_MS } from '../domain/e2e-limits.js';
 import { E2E_BUSY, E2E_CORRUPT, E2E_FROZEN, E2E_QUOTA, E2E_STALE_SNAPSHOT } from './e2e-room-log.js';
 import { closeWebSocket } from './relay-lifecycle.js';
 import { roomLogId } from './relay-log-id.js';
 import { ROOM_CAPACITY_CODE } from './relay-room-registry.js';
 import { POLICY_CLOSE_CODE, closeOnSessionExpiry, safeClose } from './relay-ws-traffic.js';
 
-/** One SNAPSHOT per connection per this interval; more are REJECT RATE. */
-export const E2E_SNAPSHOT_MIN_INTERVAL_MS = 30_000;
+export { E2E_SNAPSHOT_MIN_INTERVAL_MS } from '../domain/e2e-limits.js';
 /** Replay is sent in chunks of at most this many frames or bytes, whichever comes first. */
 export const REPLAY_CHUNK_FRAMES = 256;
 export const REPLAY_CHUNK_BYTES = 1024 * 1024;

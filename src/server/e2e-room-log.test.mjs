@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import {
   E2ERoomLog, E2E_BUSY, E2E_CORRUPT, E2E_FROZEN, E2E_LOCK_MISMATCH, E2E_QUOTA, E2E_ROTATION_STALE, E2E_STALE_SNAPSHOT,
   MAX_PENDING_OPS_PER_ROOM, MAX_FREEZE_TTL_MS, E2E_BLOB_GRACE_MS, E2E_MAX_LOG_ENTRIES, verifySnapshotDigest,
-  E2E_SNAPSHOT_RESERVATION_OVERHEAD_BYTES,
+  E2E_SNAPSHOT_RESERVATION_OVERHEAD_BYTES, measureSnapshotReservationOverheadBytes,
 } from './e2e-room-log.js';
 import { ROOM_LOCK_META, decodeLockRecord, encodeLockRecord } from './room-lock-record.js';
 import { metaBatchBytes } from './relay-storage.js';
@@ -516,6 +516,10 @@ test('the longest room name is the bound the snapshot overhead is computed for',
   const [, code, token] = longest.split('-');
   assert.equal(TOKENIZED_ROOM_RE.test(`board-${code}x-${token}`), false, 'no longer board code is a room');
   assert.equal(TOKENIZED_ROOM_RE.test(`board-${code}-${token}x`), false, 'no longer room token is a room');
+});
+
+test('the shared snapshot overhead the browser uses equals what the relay measures for the longest room', () => {
+  assert.equal(measureSnapshotReservationOverheadBytes(), E2E_SNAPSHOT_RESERVATION_OVERHEAD_BYTES);
 });
 
 test('the largest snapshot fits a shared pending-byte cap of maxRoomBytes; one byte more is QUOTA', () => {

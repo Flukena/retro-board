@@ -1,4 +1,5 @@
 import { IMAGE_MAX_BYTES } from '../domain/security-boundaries.js';
+import { RELAY_DEFAULT_MAX_DOCUMENT_BYTES, RELAY_DEFAULT_MAX_WS_MESSAGE_BYTES } from '../domain/e2e-limits.js';
 
 export const MILLISECONDS_PER_SECOND = 1_000;
 export const MILLISECONDS_PER_MINUTE = 60_000;
@@ -87,7 +88,7 @@ export const readRelayConfig = (env = process.env) => {
   // Stops a malicious or runaway client from saturating yjs / LevelDB.
   const RL_MAX_MSGS = int('YJS_WS_BURST_MESSAGES', 120);
   const RL_REFILL_MSGS_PER_SEC = int('YJS_WS_MESSAGES_PER_SECOND', 60);
-  const RL_MAX_BYTES = int('YJS_MAX_WS_MESSAGE_BYTES', 2_000_000, { min: MIN_PAYLOAD_LIMIT_BYTES, max: MAX_WS_MESSAGE_LIMIT_BYTES });
+  const RL_MAX_BYTES = int('YJS_MAX_WS_MESSAGE_BYTES', RELAY_DEFAULT_MAX_WS_MESSAGE_BYTES, { min: MIN_PAYLOAD_LIMIT_BYTES, max: MAX_WS_MESSAGE_LIMIT_BYTES });
   const RL_REFILL_BYTES_PER_SEC = int('YJS_WS_BYTES_PER_SECOND', 200_000);
   const GLOBAL_RL_MAX_MSGS = int('YJS_GLOBAL_WS_BURST_MESSAGES', 1_000);
   const GLOBAL_RL_REFILL_MSGS_PER_SEC = int('YJS_GLOBAL_WS_MESSAGES_PER_SECOND', 500);
@@ -102,7 +103,7 @@ export const readRelayConfig = (env = process.env) => {
   const MAX_CONNECTIONS_PER_IP = int('YJS_MAX_CONNECTIONS_PER_IP', 32);
   const MAX_CONNECTIONS_PER_ROOM = int('YJS_MAX_CONNECTIONS_PER_ROOM', 64);
   const MAX_ACTIVE_ROOMS = int('YJS_MAX_ACTIVE_ROOMS', 128);
-  const MAX_DOCUMENT_BYTES = int('YJS_MAX_DOCUMENT_BYTES', 32 * 1024 * 1024, {
+  const MAX_DOCUMENT_BYTES = int('YJS_MAX_DOCUMENT_BYTES', RELAY_DEFAULT_MAX_DOCUMENT_BYTES, {
     min: MIN_PAYLOAD_LIMIT_BYTES,
     max: MAX_DOCUMENT_LIMIT_BYTES,
   });

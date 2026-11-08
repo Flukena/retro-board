@@ -48,6 +48,7 @@ export function attachClientSync(provider, doc, browser, { sharedMapNames = BOAR
     event.preventDefault();
     event.returnValue = '';
   };
+  const onDelivery = (pendingCount) => state.delivery(pendingCount);
   const onConnectionError = () => {
     if (isPublicRoomSession()) void refreshActiveRoomSession().catch(onHealth);
   };
@@ -55,6 +56,7 @@ export function attachClientSync(provider, doc, browser, { sharedMapNames = BOAR
   provider.on('status', onStatus);
   provider.on('sync', onSync);
   provider.on('connection-close', onClose);
+  provider.on('delivery', onDelivery);
   doc.on('afterTransaction', onTransaction);
   browser.addEventListener('beforeunload', onUnload);
   const unsubscribe = onRoomSessionHealth(onHealth);
@@ -64,10 +66,12 @@ export function attachClientSync(provider, doc, browser, { sharedMapNames = BOAR
     provider.off('status', onStatus);
     provider.off('sync', onSync);
     provider.off('connection-close', onClose);
+    provider.off('delivery', onDelivery);
     doc.off('afterTransaction', onTransaction);
     browser.removeEventListener('beforeunload', onUnload);
   });
   state.sessionLost(getRoomSessionHealth() === ROOM_SESSION_HEALTH.LOST);
+  state.delivery(provider.pendingDelivery ?? 0);
   onSync(provider.synced);
   return state;
 }

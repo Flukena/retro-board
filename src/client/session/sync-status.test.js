@@ -60,3 +60,17 @@ test('socket recovery does not hide a concurrent HTTP session-refresh failure', 
   state.sessionLost(false);
   assert.deepEqual(state.getSnapshot(), { status: 'connected', hasUnsyncedLocalChanges: false });
 });
+
+test('unacknowledged deliveries show saving and guard unload while connected', () => {
+  const state = new SyncStatus();
+  state.synced(true);
+  state.delivery(2);
+  assert.deepEqual(state.getSnapshot(), { status: 'saving', hasUnsyncedLocalChanges: true });
+  assert.equal(shouldGuardUnload(state.getSnapshot()), true);
+  state.transport('disconnected');
+  assert.equal(state.getSnapshot().status, 'disconnected');
+  assert.equal(shouldGuardUnload(state.getSnapshot()), true);
+  state.synced(true);
+  state.delivery(0);
+  assert.deepEqual(state.getSnapshot(), { status: 'connected', hasUnsyncedLocalChanges: false });
+});

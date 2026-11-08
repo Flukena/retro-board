@@ -1,4 +1,6 @@
-import { hasExactKeys, isCounter, parseAuthKey, parseLockParams } from '../domain/room-lock-contract.js';
+import {
+  KEY_ROTATED_CLOSE_CODE, hasExactKeys, isCounter, parseAuthKey, parseLockParams,
+} from '../domain/room-lock-contract.js';
 import { authenticateAccount } from './auth-session.js';
 import {
   E2E_BUSY, E2E_CORRUPT, E2E_FROZEN, E2E_LOCK_MISMATCH, E2E_QUOTA, E2E_ROTATION_STALE, MAX_FREEZE_TTL_MS,
@@ -8,7 +10,7 @@ import { isBlobId, readCommitBody } from './room-lock-commit-body.js';
 import { RETRY_AFTER_SHORT_SECONDS } from './relay-config.js';
 import { CORRUPT_LOCK } from './room-lock-record.js';
 
-export const KEY_ROTATED_CLOSE_CODE = 4001;
+export { KEY_ROTATED_CLOSE_CODE };
 export const KEY_ROTATED_REASON = 'key rotated';
 export const MAX_PASSWORD_BODY_BYTES = 1024;
 const OCTET_STREAM = 'application/octet-stream';

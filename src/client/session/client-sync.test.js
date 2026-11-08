@@ -129,3 +129,27 @@ test('a public creation limit disconnects safely and marks the rejected local ch
   provider.emit('sync', [true]);
   assert.equal(state.getSnapshot().status, 'action-limit');
 });
+
+test('a transport with acknowledged delivery guards unload while connected until nothing is pending', (context) => {
+  const doc = new Y.Doc();
+  const provider = Object.assign(new Transport(), { pendingDelivery: 1 });
+  const browser = new EventTarget();
+  const state = attachClientSync(provider, doc, browser);
+  const unloadBlocked = () => {
+    const event = new Event('beforeunload', { cancelable: true });
+    browser.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+  provider.wsconnected = true;
+  provider.synced = true;
+  provider.emit('sync', [true]);
+  assert.deepEqual(state.getSnapshot(), { status: 'saving', hasUnsyncedLocalChanges: true });
+  assert.equal(unloadBlocked(), true);
+  provider.emit('delivery', [0]);
+  assert.deepEqual(state.getSnapshot(), { status: 'connected', hasUnsyncedLocalChanges: false });
+  assert.equal(unloadBlocked(), false);
+  doc.destroy();
+  provider.emit('delivery', [3]);
+  assert.equal(state.getSnapshot().status, 'connected', 'destroy detaches the delivery listener');
+  context.after(() => provider.destroy());
+});

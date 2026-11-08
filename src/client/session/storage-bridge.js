@@ -43,7 +43,9 @@ import { PublicCreationGuard, PUBLIC_CREATION_LIMIT_EVENT } from './public-creat
 import { attachPublicCreationBudget } from './public-creation-budget.js';
 import { decodeRemoteBoard } from '../board/remote-board-decoder.js';
 import { LOCAL_ONLY_KEYS, readLocalPreference, writeLocalPreference } from './local-preferences.js';
-import { WebsocketProvider } from 'y-websocket';
+import { createRoomProvider, isEncryptedRoom } from './room-provider.js';
+import { attachE2ERoom } from './e2e-room.js';
+import { getRoomKey } from '../room-lock/lock-session.js';
 import { createMotionPublisher, sendOnlyLocalAwareness } from './awareness-transport.js';
 import { parseRoute } from '../app/router.js';
 import {
@@ -152,10 +154,11 @@ const yItems = ydoc.getMap('items');
 const yMeta = ydoc.getMap('meta');
 
 const publicCreationGuard = route.kind === 'public' ? new PublicCreationGuard() : null;
+const roomKey = getRoomKey();
 let provider = null;
 if (['board', 'public'].includes(route.kind)) {
-  provider = new WebsocketProvider(WS_URL, ROOM, ydoc, {
-    connect: false,
+  provider = createRoomProvider({
+    wsBaseUrl: WS_URL, roomHandle: ROOM, ydoc, roomKey,
     // Bind the relay connection to this one Yjs awareness identity. The ID is
     // not a credential; it lets the server distinguish our own state from
     // y-websocket's legitimate BroadcastChannel/snapshot echoes.
@@ -1385,6 +1388,11 @@ if (provider) {
     onUndoChange(handler) { undoEmitter.addEventListener('change', handler); },
     offUndoChange(handler) { undoEmitter.removeEventListener('change', handler); },
   });
+}
+
+if (provider && isEncryptedRoom(roomKey, ROOM)) {
+  const e2eRoom = attachE2ERoom({ provider, ydoc, eventTarget: window, getRoomKey, clearUndo: () => undoManager?.clear() });
+  window.storage.rotationSource = e2eRoom.rotationSource;
 }
 
 // Use the visible board code in diagnostics. The actual provider room handle

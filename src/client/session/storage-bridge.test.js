@@ -4,6 +4,8 @@ import * as Y from 'yjs';
 import { createServer } from 'vite';
 import { createZoneHeaderActions } from '../board/zone-header-actions.js';
 import { PLAYER_PRESENCE_STALE_MS } from './player-cursors.js';
+import { createRoomLock } from '../room-lock/e2e-crypto.js';
+import { fakeLockedRelay, LOCKED_TEST_CODE, LOCKED_TEST_TOKEN } from '../../test-support/fake-locked-relay.js';
 
 const SESSION_TTL_MS = 60_000;
 const ROOM_HANDLE = 'Abcdefghijklmnopqrstuvwxyz012345';
@@ -13,7 +15,21 @@ class OfflineSocket {
   send() { /* Offline transport deliberately cannot deliver updates. */ }
 }
 
-async function withStorage(check, { publicWall = false } = {}) {
+const LOCK_PASSWORD = 'correct horse battery staple';
+const LOCKED_EPOCH = 1;
+const ROOM_KEY_CHANGED_EVENT = 'retroroom:room-key-changed';
+
+async function unlockLockedRoom(server) {
+  const { lock, authKey } = await createRoomLock(LOCK_PASSWORD);
+  globalThis.fetch = fakeLockedRelay({ lock, authKey, keyEpoch: LOCKED_EPOCH }).fetch;
+  const lockSession = await server.ssrLoadModule('/src/client/room-lock/lock-session.js');
+  await lockSession.unlockRoom({
+    code: LOCKED_TEST_CODE, token: LOCKED_TEST_TOKEN, password: LOCK_PASSWORD, lockHint: { salt: lock.salt, kdf: lock.kdf },
+  });
+  return lockSession;
+}
+
+async function withStorage(check, { publicWall = false, locked = false } = {}) {
   const saved = Object.getOwnPropertyDescriptors(globalThis);
   const cache = new Map();
   const browser = new EventTarget();
@@ -35,6 +51,7 @@ async function withStorage(check, { publicWall = false } = {}) {
     const session = await server.ssrLoadModule('/src/client/session/room-session.js');
     globalThis.setTimeout = (...args) => { refreshTimer = originalTimeout(...args); return refreshTimer; };
     if (publicWall) await session.establishPublicSession();
+    else if (locked) await unlockLockedRoom(server);
     else await session.establishRoomSession('TEST', 'Abcdefgh12345678');
     globalThis.setTimeout = originalTimeout;
     await server.ssrLoadModule('/src/client/session/storage-bridge.js');
@@ -162,6 +179,35 @@ test('viewport stays local on write, cached read, cache miss and cache failure',
     await browser.storage.set('viewport', viewport, false);
     assert.deepEqual(Y.encodeStateAsUpdate(browser.__rbYDoc), before);
   });
+});
+
+test('a normal room keeps the y-websocket provider, its URL and no encrypted-room hooks', async () => {
+  await withStorage(async (browser) => {
+    const provider = browser.__rbProvider;
+    assert.match(provider.url, new RegExp(`/rooms/${ROOM_HANDLE}\\?awarenessId=${browser.__rbYDoc.clientID}$`));
+    assert.equal(provider.pendingDelivery, undefined);
+    assert.equal(browser.storage.rotationSource, undefined);
+  });
+});
+
+test('an unlocked room uses the encrypted provider, tracks delivery, and clears undo on a new key epoch', async () => {
+  await withStorage(async (browser) => {
+    const provider = browser.__rbProvider;
+    assert.match(provider.url, new RegExp(`/rooms/${ROOM_HANDLE}/e2e$`));
+    assert.equal(browser.storage.addItems([VALID_ITEM]), true);
+    assert.ok(provider.pendingDelivery > 0, 'the offline edit waits for an acknowledgement');
+    assert.equal(browser.storage.getSyncStatus().hasUnsyncedLocalChanges, true);
+    const source = browser.storage.rotationSource();
+    assert.deepEqual([source.roomHandle, source.keyEpoch], [ROOM_HANDLE, LOCKED_EPOCH]);
+    const detached = new Y.Doc();
+    Y.applyUpdate(detached, source.encodeState());
+    assert.equal(detached.getMap('items').get(VALID_ITEM.id).get('type'), VALID_ITEM.type);
+    assert.equal(browser.storage.canUndo(), true);
+    browser.dispatchEvent(new CustomEvent(ROOM_KEY_CHANGED_EVENT, { detail: { keyEpoch: LOCKED_EPOCH, epochChanged: false } }));
+    assert.equal(browser.storage.canUndo(), true, 'a password change keeps the history');
+    browser.dispatchEvent(new CustomEvent(ROOM_KEY_CHANGED_EVENT, { detail: { keyEpoch: LOCKED_EPOCH + 1, epochChanged: true } }));
+    assert.equal(browser.storage.canUndo(), false);
+  }, { locked: true });
 });
 
 test('offline local changes expose status and guard unload until a socket sync', async () => {

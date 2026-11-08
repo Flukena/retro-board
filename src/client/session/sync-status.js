@@ -1,5 +1,7 @@
 export const SYNC_STATE = Object.freeze({
   CONNECTED: 'connected', CONNECTING: 'connecting', DISCONNECTED: 'disconnected', SESSION_LOST: 'session-lost', ACTION_LIMIT: 'action-limit',
+  // Connected, but some local edits are not acknowledged by the relay yet (encrypted rooms).
+  SAVING: 'saving',
 });
 
 export class SyncStatus {
@@ -9,6 +11,7 @@ export class SyncStatus {
   #socketExpired = false;
   #actionLimited = false;
   #pending = false;
+  #pendingDelivery = 0;
   #snapshot = Object.freeze({ status: SYNC_STATE.CONNECTING, hasUnsyncedLocalChanges: false });
 
   getSnapshot = () => this.#snapshot;
@@ -17,11 +20,18 @@ export class SyncStatus {
     return () => this.#listeners.delete(listener);
   };
 
+  #status() {
+    if (this.#actionLimited) return SYNC_STATE.ACTION_LIMIT;
+    if (this.#sessionLost || this.#socketExpired) return SYNC_STATE.SESSION_LOST;
+    if (this.#transport === SYNC_STATE.CONNECTED && this.#pendingDelivery > 0) return SYNC_STATE.SAVING;
+    return this.#transport;
+  }
+
   #publish() {
-    const status = this.#actionLimited ? SYNC_STATE.ACTION_LIMIT
-      : (this.#sessionLost || this.#socketExpired) ? SYNC_STATE.SESSION_LOST : this.#transport;
-    if (this.#snapshot.status === status && this.#snapshot.hasUnsyncedLocalChanges === this.#pending) return;
-    this.#snapshot = Object.freeze({ status, hasUnsyncedLocalChanges: this.#pending });
+    const status = this.#status();
+    const unsynced = this.#pending || this.#pendingDelivery > 0;
+    if (this.#snapshot.status === status && this.#snapshot.hasUnsyncedLocalChanges === unsynced) return;
+    this.#snapshot = Object.freeze({ status, hasUnsyncedLocalChanges: unsynced });
     this.#listeners.forEach((listener) => listener());
   }
 
@@ -52,6 +62,12 @@ export class SyncStatus {
   localChange(socketSynced) {
     if (socketSynced && !this.#sessionLost && !this.#socketExpired) return;
     this.#pending = true;
+    this.#publish();
+  }
+
+  /** Local edits the relay has not acknowledged; only providers with acknowledged delivery report it. */
+  delivery(pendingCount) {
+    this.#pendingDelivery = pendingCount;
     this.#publish();
   }
 

@@ -20,7 +20,8 @@ export function SyncStatusBanner({ state }) {
   useLang();
   const [retrying, setRetrying] = useState(false);
   const [retryFailed, setRetryFailed] = useState(false);
-  if (state.status === SYNC_STATE.CONNECTED) return null;
+  // Saving is the normal moment between an encrypted edit and its acknowledgement; only the unload guard shows it.
+  if (state.status === SYNC_STATE.CONNECTED || state.status === SYNC_STATE.SAVING) return null;
   const sessionLost = state.status === SYNC_STATE.SESSION_LOST;
   const canReenter = canRefreshRoomSession();
   const reenter = async () => {
