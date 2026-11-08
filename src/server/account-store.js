@@ -34,6 +34,7 @@ export const emailKey = (email) => `${EMAIL_KEY_PREFIX}${email.toLowerCase()}`;
 const put = (key, value) => ({ type: 'put', key, value });
 const del = (key) => ({ type: 'del', key });
 const isNonEmptyString = (value) => typeof value === 'string' && value.length > 0;
+const byCreation = (left, right) => left.createdAt - right.createdAt;
 
 function googleProfile({ sub, email, name }) {
   if (!isNonEmptyString(sub) || !isNonEmptyString(email)) throw new TypeError(INVALID_PROFILE_MESSAGE);
@@ -56,7 +57,7 @@ function googleProfile({ sub, email, name }) {
  * Durable account records in the relay's LevelDB, as meta keys of one doc:
  * `acct:<id>` -> Account, `sub:<googleSub>` -> id, `email:<lower-cased>` -> ids.
  * Two Google identities can share an email, so the email index lists every
- * account that holds it, oldest first.
+ * account that holds it; lookups return them oldest account first.
  * Mutations run one at a time; each logical change is one fsynced batch.
  * A STORAGE_FAILURE is fatal: it is emitted once as 'storage-failure' and every
  * later mutation rejects ACCOUNT_STORE_UNAVAILABLE. Other rejections (capacity,
@@ -91,7 +92,7 @@ export class AccountStore extends EventEmitter {
   async findAllByEmail(email) {
     const accounts = await Promise.all((await this.#emailIds(email)).map((id) => this.get(id)));
     // A delete can land between the index read and the record reads.
-    return accounts.filter(Boolean);
+    return accounts.filter(Boolean).sort(byCreation);
   }
 
   /** @returns {Promise<Account>} */

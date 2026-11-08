@@ -110,6 +110,17 @@ test('every account sharing an email is found, oldest first', async (t) => {
   assert.deepEqual(await store.findAllByEmail('ada@new.example'), [moved]);
 });
 
+test('an account that moves onto a shared email is still listed by creation time', async (t) => {
+  let now = NOW_MS;
+  const { store } = await openStore(t, { randomId: sequentialIds().randomId, now: () => now });
+  const older = await store.upsertFromGoogle(PROFILE);
+  now = LATER_MS;
+  const newer = await store.upsertFromGoogle({ sub: 'google-sub-2', email: 'grace@example.com' });
+  const moved = await store.upsertFromGoogle({ ...PROFILE, email: 'grace@example.com' });
+  assert.deepEqual((await store.findAllByEmail('grace@example.com')).map(({ id }) => id), [older.id, newer.id]);
+  assert.equal(moved.id, older.id);
+});
+
 test('deleting one account that shares an email keeps the other findable', async (t) => {
   const { store, ldb } = await openStore(t, { randomId: sequentialIds().randomId });
   const original = await store.upsertFromGoogle(PROFILE);
