@@ -7,6 +7,7 @@ import { getRoomKey } from './lock-session.js';
 const BLOB_AAD_KIND = 'blob';
 const BLOB_ROUTE = 'e2e-blobs';
 const BLOB_ID_HEADER = 'x-blob-id';
+const BLOB_STAGE_HEADER = 'x-blob-stage';
 const BLOB_CONTENT_TYPE = 'application/octet-stream';
 const TYPE_LENGTH_BYTES = 1;
 /** Resolved blob epochs are remembered per source; the oldest entry goes first once the map is full. */
@@ -54,13 +55,15 @@ export async function encryptImageForUpload(blob, key = getRoomKey()) {
   return { bytes, id };
 }
 
-/** Encrypts in the browser and posts the ciphertext; resolves to the canonical `/rooms/<h>/e2e-blobs/<id>` source. */
-export async function uploadEncryptedImage(blob, { signal, key = getRoomKey() } = {}) {
+/**
+ * Encrypts in the browser and posts the ciphertext; resolves to the canonical `/rooms/<h>/e2e-blobs/<id>` source.
+ * `stage` (a rotation id) uploads a copy for that key rotation; a failed upload throws with its HTTP `status`.
+ */
+export async function uploadEncryptedImage(blob, { signal, key = getRoomKey(), stage = null } = {}) {
   const { bytes, id } = await encryptImageForUpload(blob, key);
-  const response = await roomFetch(BLOB_ROUTE, {
-    signal, method: 'POST', body: bytes, headers: { 'Content-Type': BLOB_CONTENT_TYPE, [BLOB_ID_HEADER]: id },
-  });
-  if (!response.ok) throw new Error(`image upload failed: ${response.status}`);
+  const headers = { 'Content-Type': BLOB_CONTENT_TYPE, [BLOB_ID_HEADER]: id, ...(stage === null ? {} : { [BLOB_STAGE_HEADER]: stage }) };
+  const response = await roomFetch(BLOB_ROUTE, { signal, method: 'POST', body: bytes, headers });
+  if (!response.ok) throw Object.assign(new Error(`image upload failed: ${response.status}`), { status: response.status });
   const payload = await response.json();
   if (payload?.id !== id || Object.keys(payload).length !== 1) throw new Error('invalid image upload response');
   return e2eImagePath(key.roomHandle, id);

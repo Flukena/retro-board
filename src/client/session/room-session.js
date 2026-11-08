@@ -23,6 +23,7 @@ const MS_PER_SECOND = 1_000;
 const REFRESH_SKEW_FRACTION = 0.2;
 const REFRESH_SKEW_MS = 5 * 60 * 1_000;
 
+const JSON_CONTENT_TYPE = 'application/json';
 const HTTP_FORBIDDEN = 403;
 const HTTP_CONFLICT = 409;
 const HTTP_TOO_MANY_REQUESTS = 429;
@@ -169,7 +170,8 @@ export function getRoomWebSocketBaseUrl() {
   return `ws://${location.hostname}:${getRelayPort()}/rooms`;
 }
 
-const parseRetryAfter = (response) => {
+/** Seconds a 429/503 asks the client to wait, clamped; null when the header is absent or unreadable. */
+export const parseRetryAfter = (response) => {
   const raw = response.headers?.get?.('retry-after');
   if (!raw) return null;
   const seconds = Number(raw);
@@ -205,7 +207,8 @@ const cancelResponseBody = async (response) => {
   try { await response.body?.cancel?.(); } catch { /* best effort */ }
 };
 
-const readSmallJson = async (response) => {
+/** Reads a small JSON response body; anything else fails as UNAVAILABLE. */
+export const readSmallJson = async (response) => {
   const contentType = response.headers?.get?.('content-type') || '';
   if (!/^application\/json(?:\s*;|$)/i.test(contentType)) {
     await cancelResponseBody(response);
@@ -259,23 +262,26 @@ const readSmallJson = async (response) => {
   }
 };
 
+/** POSTs to the relay API with the page's credential, cache, redirect and referrer rules; resolves the Response. */
+export const relayPost = (path, body, { contentType = JSON_CONTENT_TYPE, signal } = {}) => fetch(`${getRelayHttpBaseUrl()}${path}`, {
+  method: 'POST',
+  credentials: 'include',
+  cache: 'no-store',
+  headers: {
+    Accept: JSON_CONTENT_TYPE,
+    'Content-Type': contentType,
+  },
+  body,
+  signal,
+  redirect: 'error',
+  referrerPolicy: 'no-referrer',
+});
+
 const postJson = async (path, body, expectedStatus, invalidStatuses = [], { lockAware = false } = {}) => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch(`${getRelayHttpBaseUrl()}${path}`, {
-      method: 'POST',
-      credentials: 'include',
-      cache: 'no-store',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-      redirect: 'error',
-      referrerPolicy: 'no-referrer',
-    });
+    const response = await relayPost(path, JSON.stringify(body), { signal: controller.signal });
     if (lockAware && response.status === HTTP_CONFLICT) {
       throw new RoomSessionError(ROOM_SESSION_ERROR.LOCKED, {
         httpStatus: response.status, lock: validateLockedResponse(await readSmallJson(response)),

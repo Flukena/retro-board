@@ -104,6 +104,16 @@ describe('e2e-crypto', () => {
     assert.deepEqual(await decryptFrame(dek, AAD, ciphertext), PLAINTEXT);
   });
 
+  it('rewrap works from the lock a page caches (no verifier) and rejects a wrong current password', async () => {
+    const { verifier, ...cached } = created.lock;
+    assert.ok(verifier);
+    const again = await rewrapRoomLock({ currentPassword: PASSWORD, lock: cached, newPassword: NEW_PASSWORD });
+    assert.equal(again.oldAuthKey, created.authKey);
+    assert.ok(parseLockParams(again.lock), 'the new record is complete');
+    await rejectsWith(rewrapRoomLock({ currentPassword: `${PASSWORD}x`, lock: cached, newPassword: NEW_PASSWORD }), 'wrong-password');
+    await assert.rejects(rewrapRoomLock({ currentPassword: PASSWORD, lock: null, newPassword: NEW_PASSWORD }), RangeError);
+  });
+
   it('createNextRoomKey produces an independent DEK and salt', async () => {
     const next = await createNextRoomKey(PASSWORD);
     assert.notEqual(next.lock.salt, created.lock.salt);

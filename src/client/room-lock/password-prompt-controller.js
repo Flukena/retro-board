@@ -5,9 +5,10 @@ const IDLE = Object.freeze({ busy: false, error: null, lockedOutSeconds: 0 });
 
 /**
  * The behaviour behind a password prompt: submit, busy, error mapping and the
- * lock-out countdown that re-enables submit. `timers` is injectable for tests.
+ * lock-out countdown that re-enables submit. `timers` is injectable for tests;
+ * `errorFor` maps a failure to `{ kind, seconds }` (forms with more outcomes pass their own).
  */
-export function createPasswordPromptController(submitPassword, timers = { setTimeout, clearTimeout }) {
+export function createPasswordPromptController(submitPassword, timers = { setTimeout, clearTimeout }, errorFor = promptErrorFor) {
   let state = IDLE;
   let timer = null;
   const listeners = new Set();
@@ -40,7 +41,7 @@ export function createPasswordPromptController(submitPassword, timers = { setTim
         set({ busy: false });
         return true;
       } catch (failure) {
-        const error = promptErrorFor(failure);
+        const error = errorFor(failure);
         set({ busy: false, error, lockedOutSeconds: error.seconds });
         stopTimer();
         if (error.seconds > 0) timer = timers.setTimeout(tick, COUNTDOWN_TICK_MS);

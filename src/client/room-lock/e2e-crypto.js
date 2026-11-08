@@ -1,5 +1,5 @@
 import {
-  LOCK_BYTES, LOCK_KDF, ROOM_PASSWORD_MIN_LENGTH, decodeBase64Url, encodeBase64Url, isLockKdf, parseLockParams,
+  LOCK_BYTES, LOCK_KDF, ROOM_PASSWORD_MIN_LENGTH, decodeBase64Url, encodeBase64Url, isLockKdf, isPlainObject,
 } from '../../domain/room-lock-contract.js';
 
 const { subtle } = globalThis.crypto;
@@ -118,10 +118,10 @@ export const createNextRoomKey = createRoomLock;
 export async function rewrapRoomLock({ currentPassword, lock, newPassword }) {
   assertPasswordLength(newPassword);
   if (newPassword === currentPassword) throw new RangeError('new password must differ from the current password');
-  const params = parseLockParams(lock);
-  if (!params) throw new RangeError('invalid lock');
-  const old = await deriveRoomSecrets(currentPassword, params.salt, params.kdf);
-  const rawDek = await unwrapRawDek(old.kek, params.wrappedDek, params.wrapIv);
+  // The page caches the lock without its verifier; salt, kdf and the wrapped key are all a rewrap reads (each is checked).
+  if (!isPlainObject(lock)) throw new RangeError('invalid lock');
+  const old = await deriveRoomSecrets(currentPassword, lock.salt, lock.kdf);
+  const rawDek = await unwrapRawDek(old.kek, lock.wrappedDek, lock.wrapIv);
   try {
     const next = await buildLock(newPassword, rawDek);
     return { lock: next.lock, authKey: next.authKey, oldAuthKey: old.authKey };

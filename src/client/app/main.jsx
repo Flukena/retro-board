@@ -28,6 +28,7 @@ import {
 } from '../session/room-session.js';
 import RoomPasswordScreen from '../room-lock/RoomPasswordScreen.jsx';
 import ReunlockDialog from '../room-lock/ReunlockDialog.jsx';
+import RoomLockDialogs from '../room-lock/RoomLockDialogs.jsx';
 import { establishBoardSession, getRoomKey, unlockRoom } from '../room-lock/lock-session.js';
 
 const route = parseRoute();
@@ -57,7 +58,7 @@ function BoardBootstrap({ code, token, mode = BOARD_MODE.PRIVATE }) {
       <>
         <SyncBanner />
         <RetroBoard boardCode={code} boardToken={token} mode={mode} pendingTitle={pendingTitle} />
-        {getRoomKey() && <ReunlockDialog />}
+        {getRoomKey() && <><ReunlockDialog /><RoomLockDialogs /></>}
       </>
     );
   }

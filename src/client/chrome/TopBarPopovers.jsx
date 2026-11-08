@@ -12,6 +12,7 @@ import { t } from '../ui/i18n.js';
 import { useDismiss } from '../ui/useDismiss.js';
 import { transferCandidates } from './topbar-model.js';
 import { boardManagementPermissions } from '../../domain/public-board-permissions.js';
+import RoomLockMenu from '../room-lock/RoomLockMenu.jsx';
 
 export function Popover({ children, onClose, className, shortcutsOff }) {
   const layerRef = useRef(null);
@@ -158,6 +159,7 @@ export function MorePopover({
         onClick={closeThen(onTransfer)}
       />
       )}
+      <RoomLockMenu onClose={onClose} />
     </Popover>
   );
 }
