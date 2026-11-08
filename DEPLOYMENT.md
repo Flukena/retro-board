@@ -90,9 +90,8 @@ documentation step.
 the volume. Deleting it, or changing the secret, signs every user out but loses
 no accounts. `scripts/verify-production-backup.sh` decodes every account
 record and checks that the `sub:` and `email:` indexes point at existing
-accounts and that every account has its `sub:` index, without writing to the restored copy.
-Known gap: when two accounts share an email, the latest sign-in owns the `email:` index, so
-the other account cannot be found by email until it signs in again.
+accounts and that every account is in both its `sub:` and its `email:` index, without
+writing to the restored copy.
 
 ## Release gate
 

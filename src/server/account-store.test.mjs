@@ -93,35 +93,40 @@ test('upsert moves the email index when Google email changes', async (t) => {
   const created = await store.upsertFromGoogle(PROFILE);
   const moved = await store.upsertFromGoogle({ ...PROFILE, email: 'ada@new.example', name: 'Ada L' });
   assert.deepEqual(moved, { ...created, email: 'ada@new.example', name: 'Ada L' });
-  assert.equal(await store.findByEmail(PROFILE.email), null);
-  assert.deepEqual(await store.findByEmail('ada@new.example'), moved);
+  assert.deepEqual(await store.findAllByEmail(PROFILE.email), []);
+  assert.deepEqual(await store.findAllByEmail('ada@new.example'), [moved]);
   assert.deepEqual(await accountMetas(ldb), ['acct:id-1', 'email:ada@new.example', `sub:${PROFILE.sub}`]);
 });
 
-test('an email taken over by another sub stays with its latest owner', async (t) => {
+test('every account sharing an email is found, oldest first', async (t) => {
   const { store } = await openStore(t, { randomId: sequentialIds().randomId });
   const original = await store.upsertFromGoogle(PROFILE);
+  const successor = await store.upsertFromGoogle({ sub: 'google-sub-2', email: 'ada@example.com' });
+  assert.deepEqual(await store.findAllByEmail(PROFILE.email), [original, successor]);
+  assert.deepEqual(await store.upsertFromGoogle(PROFILE), original, 'signing in again changes nothing');
+  assert.deepEqual(await store.findAllByEmail(PROFILE.email), [original, successor], 'no duplicate or reorder');
+  const moved = await store.upsertFromGoogle({ ...PROFILE, email: 'ada@new.example' });
+  assert.deepEqual(await store.findAllByEmail(PROFILE.email), [successor]);
+  assert.deepEqual(await store.findAllByEmail('ada@new.example'), [moved]);
+});
+
+test('deleting one account that shares an email keeps the other findable', async (t) => {
+  const { store, ldb } = await openStore(t, { randomId: sequentialIds().randomId });
+  const original = await store.upsertFromGoogle(PROFILE);
   const successor = await store.upsertFromGoogle({ sub: 'google-sub-2', email: PROFILE.email });
-  assert.equal((await store.findByEmail(PROFILE.email)).id, successor.id);
-  await store.upsertFromGoogle({ ...PROFILE, email: 'ada@new.example' });
-  await store.delete(original.id);
-  assert.equal((await store.findByEmail(PROFILE.email)).id, successor.id);
+  assert.equal(await store.delete(successor.id), true);
+  assert.deepEqual(await store.findAllByEmail(PROFILE.email), [original]);
+  assert.equal(await store.delete(original.id), true);
+  assert.deepEqual(await store.findAllByEmail(PROFILE.email), []);
+  assert.deepEqual(await accountMetas(ldb), []);
 });
 
-test('latest sign-in reclaims a shared email index', async (t) => {
-  const { store } = await openStore(t, { randomId: sequentialIds().randomId });
-  const first = await store.upsertFromGoogle(PROFILE);
-  await store.upsertFromGoogle({ sub: 'google-sub-2', email: PROFILE.email, name: PROFILE.name });
-  assert.deepEqual(await store.upsertFromGoogle(PROFILE), first);
-  assert.deepEqual(await store.findByEmail(PROFILE.email), first);
-});
-
-test('findByEmail is case-insensitive', async (t) => {
+test('findAllByEmail is case-insensitive', async (t) => {
   const { store } = await openStore(t);
   const created = await store.upsertFromGoogle(PROFILE);
-  assert.deepEqual(await store.findByEmail('ada@example.com'), created);
-  assert.deepEqual(await store.findByEmail('ADA@EXAMPLE.COM'), created);
-  assert.equal(await store.findByEmail('nobody@example.com'), null);
+  assert.deepEqual(await store.findAllByEmail('ada@example.com'), [created]);
+  assert.deepEqual(await store.findAllByEmail('ADA@EXAMPLE.COM'), [created]);
+  assert.deepEqual(await store.findAllByEmail('nobody@example.com'), []);
 });
 
 test('setPlan rejects unknown plans and stamps planGrantedAt', async (t) => {
@@ -151,7 +156,7 @@ test('delete removes record, sub and email indexes', async (t) => {
   const created = await store.upsertFromGoogle(PROFILE);
   assert.equal(await store.delete(created.id), true);
   assert.equal(await store.get(created.id), null);
-  assert.equal(await store.findByEmail(PROFILE.email), null);
+  assert.deepEqual(await store.findAllByEmail(PROFILE.email), []);
   assert.deepEqual(await accountMetas(ldb), []);
   assert.equal(await store.delete(created.id), false);
   assert.notEqual((await store.upsertFromGoogle(PROFILE)).id, created.id);
@@ -172,19 +177,6 @@ test('logout-all and delete with an older expected generation change nothing', a
   assert.equal(await store.get(created.id), null);
 });
 
-// Recorded ruling: the latest sign-in owns a shared email index, so the other
-// account loses its email lookup until it signs in again.
-test('deleting the latest owner of a shared email leaves the other account without an email index', async (t) => {
-  const { store } = await openStore(t, { randomId: sequentialIds().randomId });
-  const original = await store.upsertFromGoogle(PROFILE);
-  const successor = await store.upsertFromGoogle({ sub: 'google-sub-2', email: PROFILE.email });
-  await store.delete(successor.id);
-  assert.deepEqual(await store.get(original.id), original);
-  assert.equal(await store.findByEmail(PROFILE.email), null);
-  assert.deepEqual(await store.upsertFromGoogle(PROFILE), original);
-  assert.deepEqual(await store.findByEmail(PROFILE.email), original, 'signing in again restores the lookup');
-});
-
 test('accounts never appear in getAllDocNames', async (t) => {
   const { store, ldb } = await openStore(t);
   const created = await store.upsertFromGoogle(PROFILE);
@@ -198,7 +190,7 @@ test('account records survive closing and reopening the database', async (t) => 
   const granted = await storeFor(database.ldb, { now: () => LATER_MS }).setPlan(created.id, 'pro');
   const reopened = storeFor(await database.reopen());
   assert.deepEqual(await reopened.get(created.id), granted);
-  assert.deepEqual(await reopened.findByEmail(PROFILE.email), granted);
+  assert.deepEqual(await reopened.findAllByEmail(PROFILE.email), [granted]);
   assert.equal((await reopened.upsertFromGoogle(PROFILE)).id, created.id);
 });
 

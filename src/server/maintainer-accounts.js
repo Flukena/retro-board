@@ -28,10 +28,13 @@ const replyAccount = (res, account) => (
 
 const failureStatus = (error) => (BAD_REQUEST_CODES.has(error?.code) ? STATUS.BAD_REQUEST : STATUS.UNAVAILABLE);
 
+// Two Google identities can share an email, so a search answers every match.
 async function search(req, res, store) {
   const email = new URL(req.url, 'http://maintainer.invalid').searchParams.get('email');
   if (!email || email.length > MAX_EMAIL_LENGTH) { reply(res, STATUS.NOT_FOUND); return; }
-  replyAccount(res, await store.findByEmail(email));
+  const accounts = await store.findAllByEmail(email);
+  if (accounts.length === 0) reply(res, STATUS.NOT_FOUND);
+  else reply(res, STATUS.OK, { accounts: accounts.map(publicAccount) });
 }
 
 async function changePlan(req, res, store, id) {

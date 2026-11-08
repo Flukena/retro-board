@@ -53,7 +53,7 @@ async function grantPlan(plan) {
   const authorization = `Bearer ${key}`;
   const found = await fetch(`${origin}/api/accounts?email=${encodeURIComponent(FAKE_GOOGLE_PROFILE.email)}`, { headers: { authorization } });
   assert.equal(found.status, 200, 'maintainer finds the signed-in account');
-  const { id } = await found.json();
+  const { accounts: [{ id }] } = await found.json();
   const changed = await fetch(`${origin}/api/accounts/${id}/plan`, {
     method: 'POST', headers: { authorization, origin, 'content-type': 'application/json' }, body: JSON.stringify({ plan }),
   });

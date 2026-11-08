@@ -6,11 +6,14 @@ import { createMaintainerServer } from './maintainer-server.js';
 
 const key = randomBytes(32).toString('base64url');
 const ACCOUNT = { id: 'acc_1', googleSub: 'sub-secret', email: 'Owner@Example.com', name: 'Owner', plan: 'free', planGrantedAt: null, sessionGeneration: 3, createdAt: 1 };
+const SHARED = { id: 'acc_2', googleSub: 'sub-secret-2', email: 'shared@example.com', name: 'Second', plan: 'pro', planGrantedAt: 9, sessionGeneration: 0, createdAt: 2 };
+const OLDER_SHARED = { ...SHARED, id: 'acc_3', googleSub: 'sub-secret-3', name: 'First', plan: 'free', planGrantedAt: null };
 
 function fakeStore() {
   const account = { ...ACCOUNT };
+  const byEmail = (email) => [account, OLDER_SHARED, SHARED].filter((each) => each.email.toLowerCase() === email.toLowerCase());
   return {
-    findByEmail: async (email) => (email.toLowerCase() === account.email.toLowerCase() ? { ...account } : null),
+    findAllByEmail: async (email) => byEmail(email).map((each) => ({ ...each })),
     get: async (id) => (id === account.id ? { ...account } : null),
     setPlan: async (id, plan) => {
       if (id !== account.id) return null;
@@ -65,7 +68,7 @@ test('rejects wrong Host and foreign Origin', async t => {
   const noOrigin = await send('/api/accounts/acc_1/plan', { method: 'POST', headers: { ...auth, 'content-type': 'application/json' }, body: '{"plan":"pro"}' });
   assert.equal(noOrigin.status, 403);
   const check = await send('/api/accounts?email=owner@example.com', { headers: auth });
-  assert.equal(check.json().plan, 'free', 'rejected writes changed nothing');
+  assert.equal(check.json().accounts[0].plan, 'free', 'rejected writes changed nothing');
 });
 
 test('rejects malformed JSON with 400', async t => {
@@ -80,11 +83,21 @@ test('finds by email case-insensitively and exposes only public fields', async t
   const { send, auth } = await fixture(t);
   const found = await send('/api/accounts?email=OWNER%40example.COM', { headers: auth });
   assert.equal(found.status, 200);
-  assert.deepEqual(found.json(), { id: 'acc_1', email: 'Owner@Example.com', name: 'Owner', plan: 'free', planGrantedAt: null });
+  assert.deepEqual(found.json(), { accounts: [{ id: 'acc_1', email: 'Owner@Example.com', name: 'Owner', plan: 'free', planGrantedAt: null }] });
   assert.equal(found.headers['cache-control'], 'no-store');
   assert.equal(found.headers['referrer-policy'], 'no-referrer');
   assert.equal((await send('/api/accounts?email=nobody@example.com', { headers: auth })).status, 404);
   assert.equal((await send('/api/accounts', { headers: auth })).status, 404);
+});
+
+test('lists every account that shares an email, in store order', async t => {
+  const { send, auth } = await fixture(t);
+  const found = await send('/api/accounts?email=shared@example.com', { headers: auth });
+  assert.equal(found.status, 200);
+  assert.deepEqual(found.json(), { accounts: [
+    { id: 'acc_3', email: 'shared@example.com', name: 'First', plan: 'free', planGrantedAt: null },
+    { id: 'acc_2', email: 'shared@example.com', name: 'Second', plan: 'pro', planGrantedAt: 9 },
+  ] });
 });
 
 test('grants and revokes pro', async t => {
@@ -92,7 +105,7 @@ test('grants and revokes pro', async t => {
   const granted = await post('/api/accounts/acc_1/plan', '{"plan":"pro"}');
   assert.equal(granted.status, 200);
   assert.deepEqual(granted.json(), { id: 'acc_1', email: 'Owner@Example.com', name: 'Owner', plan: 'pro', planGrantedAt: 5 });
-  assert.equal((await send('/api/accounts?email=owner@example.com', { headers: auth })).json().plan, 'pro');
+  assert.equal((await send('/api/accounts?email=owner@example.com', { headers: auth })).json().accounts[0].plan, 'pro');
   assert.equal((await post('/api/accounts/acc_1/plan', '{"plan":"free"}')).json().plan, 'free');
   assert.equal((await post('/api/accounts/missing/plan', '{"plan":"pro"}')).status, 404);
 });
@@ -105,7 +118,7 @@ test('rejects unknown plan with 400', async t => {
 
 test('maps store outages to 503 and answers 404 when no store exists', async t => {
   const down = Object.assign(new Error('down'), { code: 'ACCOUNT_STORE_UNAVAILABLE' });
-  const broken = { findByEmail: async () => { throw down; }, setPlan: async () => { throw down; } };
+  const broken = { findAllByEmail: async () => { throw down; }, setPlan: async () => { throw down; } };
   const { send, post, auth } = await fixture(t, broken);
   assert.equal((await send('/api/accounts?email=a@b.c', { headers: auth })).status, 503);
   assert.equal((await post('/api/accounts/acc_1/plan', '{"plan":"pro"}')).status, 503);

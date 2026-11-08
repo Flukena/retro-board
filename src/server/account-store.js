@@ -54,7 +54,9 @@ function googleProfile({ sub, email, name }) {
 
 /**
  * Durable account records in the relay's LevelDB, as meta keys of one doc:
- * `acct:<id>` -> Account, `sub:<googleSub>` -> id, `email:<lower-cased>` -> id.
+ * `acct:<id>` -> Account, `sub:<googleSub>` -> id, `email:<lower-cased>` -> ids.
+ * Two Google identities can share an email, so the email index lists every
+ * account that holds it, oldest first.
  * Mutations run one at a time; each logical change is one fsynced batch.
  * A STORAGE_FAILURE is fatal: it is emitted once as 'storage-failure' and every
  * later mutation rejects ACCOUNT_STORE_UNAVAILABLE. Other rejections (capacity,
@@ -85,10 +87,11 @@ export class AccountStore extends EventEmitter {
   /** @returns {Promise<Account|null>} */
   get(id) { return this.#read(accountKey(id)); }
 
-  /** @returns {Promise<Account|null>} */
-  async findByEmail(email) {
-    const id = await this.#read(emailKey(email));
-    return id === null ? null : this.get(id);
+  /** @returns {Promise<Account[]>} oldest first; [] when none */
+  async findAllByEmail(email) {
+    const accounts = await Promise.all((await this.#emailIds(email)).map((id) => this.get(id)));
+    // A delete can land between the index read and the record reads.
+    return accounts.filter(Boolean);
   }
 
   /** @returns {Promise<Account>} */
@@ -156,10 +159,23 @@ export class AccountStore extends EventEmitter {
     }
   }
 
-  // Index entries are removed only while they still point at this account, so a
-  // newer owner of the same email (identity is sub, not email) keeps its index.
+  // The sub index is removed only while it still points at this account.
   async #releaseIndex(key, id) {
     return (await this.#read(key)) === id ? [del(key)] : [];
+  }
+
+  async #emailIds(email) { return (await this.#read(emailKey(email))) ?? []; }
+
+  async #addEmail(email, id) {
+    const ids = await this.#emailIds(email);
+    return ids.includes(id) ? [] : [put(emailKey(email), [...ids, id])];
+  }
+
+  async #removeEmail(email, id) {
+    const ids = await this.#emailIds(email);
+    if (!ids.includes(id)) return [];
+    const remaining = ids.filter((other) => other !== id);
+    return [remaining.length === 0 ? del(emailKey(email)) : put(emailKey(email), remaining)];
   }
 
   async #upsert(profile) {
@@ -174,17 +190,16 @@ export class AccountStore extends EventEmitter {
       id: this.#randomId(), googleSub: sub, email, name, plan: PLAN.FREE,
       planGrantedAt: null, sessionGeneration: INITIAL_SESSION_GENERATION, createdAt: this.#now(),
     };
-    await this.#write([put(accountKey(account.id), account), put(subKey(sub), account.id), put(emailKey(email), account.id)]);
+    await this.#write([put(accountKey(account.id), account), put(subKey(sub), account.id), ...(await this.#addEmail(email, account.id))]);
     return account;
   }
 
-  // An unchanged profile still reclaims its email index if another sub took it.
   async #refresh(account, { email, name }) {
-    const ownsEmail = (await this.#read(emailKey(email))) === account.id;
-    if (ownsEmail && account.email === email && account.name === name) return account;
+    const addedEmail = await this.#addEmail(email, account.id);
+    if (addedEmail.length === 0 && account.email === email && account.name === name) return account;
     const refreshed = { ...account, email, name };
-    const releasedEmail = emailKey(account.email) === emailKey(email) ? [] : await this.#releaseIndex(emailKey(account.email), account.id);
-    await this.#write([put(accountKey(account.id), refreshed), ...releasedEmail, put(emailKey(email), account.id)]);
+    const movedEmail = emailKey(account.email) === emailKey(email) ? [] : await this.#removeEmail(account.email, account.id);
+    await this.#write([put(accountKey(account.id), refreshed), ...movedEmail, ...addedEmail]);
     return refreshed;
   }
 
@@ -213,7 +228,7 @@ export class AccountStore extends EventEmitter {
     const account = await this.#current(id, expectedGeneration);
     if (!account) return false;
     const releasedSub = await this.#releaseIndex(subKey(account.googleSub), id);
-    const releasedEmail = await this.#releaseIndex(emailKey(account.email), id);
+    const releasedEmail = await this.#removeEmail(account.email, id);
     await this.#write([del(accountKey(id)), ...releasedSub, ...releasedEmail]);
     return true;
   }

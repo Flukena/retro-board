@@ -15,7 +15,7 @@ async function requestAccounts(path, options = {}) {
   return response.json();
 }
 
-const findAccount = (email) => requestAccounts(`/api/accounts?email=${encodeURIComponent(email)}`);
+const findAccounts = (email) => requestAccounts(`/api/accounts?email=${encodeURIComponent(email)}`);
 
 const savePlan = (id, plan) => requestAccounts(`/api/accounts/${encodeURIComponent(id)}/plan`, {
   method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ plan }),
@@ -31,7 +31,8 @@ function AccountCard({ account, busy, onToggle }) {
 }
 
 // Stateless view, so each state renders on its own in tests.
-export function AccountsView({ email = '', account = null, notFound = false, busy = false, error = '', onEmail, onSearch, onToggle }) {
+// Two Google identities can share an email, so a search can list several accounts.
+export function AccountsView({ email = '', accounts = [], notFound = false, busy = false, error = '', onEmail, onSearch, onToggle }) {
   return <section className="maintainer-accounts">
     <h2>{t('maintainer.accounts.title')}</h2>
     <form onSubmit={onSearch}>
@@ -39,14 +40,14 @@ export function AccountsView({ email = '', account = null, notFound = false, bus
       <button type="submit" disabled={busy}>{t(busy ? 'maintainer.loading' : 'maintainer.accounts.search')}</button>
     </form>
     {notFound && <p role="status">{t('maintainer.accounts.notFound')}</p>}
-    {account && <AccountCard account={account} busy={busy} onToggle={onToggle} />}
+    {accounts.map((account) => <AccountCard key={account.id} account={account} busy={busy} onToggle={() => onToggle(account)} />)}
     {error && <p role="alert">{t(error)}</p>}
   </section>;
 }
 
 export function Accounts() {
   const [email, setEmail] = useState('');
-  const [account, setAccount] = useState(null);
+  const [accounts, setAccounts] = useState([]);
   const [notFound, setNotFound] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -60,17 +61,20 @@ export function Accounts() {
   const search = (event) => {
     event.preventDefault();
     void run(async () => {
-      const found = await findAccount(email.trim());
-      setAccount(found);
+      const found = await findAccounts(email.trim());
+      setAccounts(found?.accounts ?? []);
       setNotFound(found === null);
     });
   };
-  const toggle = () => run(async () => {
+  // An account deleted since the search drops out of the list.
+  const toggle = (account) => run(async () => {
     const next = account.plan === PLAN.PRO ? PLAN.FREE : PLAN.PRO;
     const updated = await savePlan(account.id, next);
-    setAccount(updated);
-    setNotFound(updated === null);
+    setAccounts((current) => current.flatMap((each) => {
+      if (each.id !== account.id) return [each];
+      return updated ? [updated] : [];
+    }));
   });
-  return <AccountsView email={email} account={account} notFound={notFound} busy={busy} error={error}
-    onEmail={(event) => setEmail(event.target.value)} onSearch={search} onToggle={() => void toggle()} />;
+  return <AccountsView email={email} accounts={accounts} notFound={notFound} busy={busy} error={error}
+    onEmail={(event) => setEmail(event.target.value)} onSearch={search} onToggle={(account) => void toggle(account)} />;
 }

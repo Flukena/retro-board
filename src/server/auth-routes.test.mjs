@@ -347,7 +347,7 @@ test('a lifecycle change while the account is being written issues no session', 
   assert.equal(response.status, 302);
   assert.equal(authErrorOf(response), UNAVAILABLE);
   assert.equal(response.headers.getSetCookie().some((cookie) => ACCOUNT_COOKIE.test(cookie)), false);
-  assert.ok(await store.findByEmail(PROFILE.email), 'the queued write still finished');
+  assert.equal((await store.findAllByEmail(PROFILE.email)).length, 1, 'the queued write still finished');
 });
 
 test('callbacks beyond the pending-exchange cap go back with unavailable and leave the flow unclaimed', async (t) => {

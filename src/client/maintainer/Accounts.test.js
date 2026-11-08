@@ -23,16 +23,27 @@ test('toggles grant and revoke', async () => {
   await withChromeModule('/src/client/maintainer/Accounts.jsx', ({ AccountsView }, { t, setLang }) => {
     for (const lang of ['th', 'en']) {
       setLang(lang);
-      const free = render(AccountsView, { account: FREE });
+      const free = render(AccountsView, { accounts: [FREE] });
       assert.ok(free.includes(t('maintainer.accounts.grantPro')));
       assert.ok(free.includes(t('maintainer.accounts.plan.free')));
       assert.ok(!free.includes(t('maintainer.accounts.revokePro')));
-      const pro = render(AccountsView, { account: { ...FREE, plan: 'pro' } });
+      const pro = render(AccountsView, { accounts: [{ ...FREE, plan: 'pro' }] });
       assert.ok(pro.includes(t('maintainer.accounts.revokePro')));
       assert.ok(pro.includes(t('maintainer.accounts.plan.pro')));
       assert.ok(!pro.includes(t('maintainer.accounts.grantPro')));
-      assert.ok(render(AccountsView, { account: FREE, error: 'maintainer.accounts.error' }).includes(t('maintainer.accounts.error')));
+      assert.ok(render(AccountsView, { accounts: [FREE], error: 'maintainer.accounts.error' }).includes(t('maintainer.accounts.error')));
     }
+  });
+});
+
+test('lists every account that shares the searched email', async () => {
+  await withChromeModule('/src/client/maintainer/Accounts.jsx', ({ AccountsView }, { t, setLang }) => {
+    setLang('en');
+    const second = { ...FREE, id: 'acc_2', name: 'Second Owner', plan: 'pro' };
+    const html = render(AccountsView, { accounts: [FREE, second] });
+    assert.equal(html.match(/class="maintainer-account"/g).length, 2);
+    assert.ok(html.includes('Owner') && html.includes('Second Owner'));
+    assert.ok(html.includes(t('maintainer.accounts.grantPro')) && html.includes(t('maintainer.accounts.revokePro')));
   });
 });
 

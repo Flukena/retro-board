@@ -50,7 +50,7 @@ test('a pre-accounts backup still verifies', async (t) => {
 test('a dangling email index fails', async (t) => {
   const { ldb, store } = await openFixture(t);
   const { ada } = await seedAccounts(store);
-  await durableMetaBatch(ldb, ACCOUNTS_DOC_NAME, [{ type: 'put', key: 'email:ghost@example.com', value: 'missing-id' }]);
+  await durableMetaBatch(ldb, ACCOUNTS_DOC_NAME, [{ type: 'put', key: 'email:ghost@example.com', value: ['missing-id'] }]);
   await assert.rejects(verifyBackupAccounts(ldb), /email index points to a missing account/);
   assert.ok(await store.get(ada.id));
 });
@@ -62,33 +62,46 @@ test('a dangling sub index fails', async (t) => {
   await assert.rejects(verifyBackupAccounts(ldb), /sub index points to a missing account/);
 });
 
-// Recorded ruling: the latest sign-in owns a shared email index, so an account
-// may lack its email index; sub indexes stay mandatory.
-test('an account missing its email index still verifies', async (t) => {
+test('an account missing its email index fails', async (t) => {
   const { ldb, store } = await openFixture(t);
   await seedAccounts(store);
   await durableMetaBatch(ldb, ACCOUNTS_DOC_NAME, [{ type: 'del', key: 'email:grace@example.com' }]);
-  assert.deepEqual(await verifyBackupAccounts(ldb), { accounts: 2 });
+  await assert.rejects(verifyBackupAccounts(ldb), /account has no email index/);
 });
 
-test('deleting the owner of a shared email still verifies and leaves the other account unfindable by email', async (t) => {
+test('an email index that is not a list of distinct ids fails', async (t) => {
+  for (const value of [undefined, 'single-id', [], [''], ['dup', 'dup']]) {
+    const { ldb, store } = await openFixture(t);
+    const { grace } = await seedAccounts(store);
+    const broken = value === undefined ? grace.id : value;
+    await durableMetaBatch(ldb, ACCOUNTS_DOC_NAME, [{ type: 'put', key: 'email:grace@example.com', value: broken }]);
+    await assert.rejects(verifyBackupAccounts(ldb), /email index is invalid/, JSON.stringify(broken));
+  }
+});
+
+test('an email index listing an account with another email fails', async (t) => {
+  const { ldb, store } = await openFixture(t);
+  const { ada, grace } = await seedAccounts(store);
+  await durableMetaBatch(ldb, ACCOUNTS_DOC_NAME, [{ type: 'put', key: 'email:grace@example.com', value: [grace.id, ada.id] }]);
+  await assert.rejects(verifyBackupAccounts(ldb), /email index points to an account with a different email/);
+});
+
+test('deleting one account that shares an email still verifies and keeps the other findable', async (t) => {
   const { ldb, store } = await openFixture(t);
   const original = await store.upsertFromGoogle({ sub: 'sub-old', email: 'shared@example.com', name: 'Old' });
   const successor = await store.upsertFromGoogle({ sub: 'sub-new', email: 'shared@example.com', name: 'New' });
   await store.delete(successor.id);
   assert.deepEqual(await verifyBackupAccounts(ldb), { accounts: 1 });
-  assert.ok(await store.get(original.id));
-  assert.equal(await store.findByEmail('shared@example.com'), null);
+  assert.deepEqual(await store.findAllByEmail('shared@example.com'), [original]);
 });
 
-test('an email change by the owner of a shared email still verifies', async (t) => {
+test('an email change by one account that shares an email still verifies', async (t) => {
   const { ldb, store } = await openFixture(t);
   const original = await store.upsertFromGoogle({ sub: 'sub-old', email: 'shared@example.com', name: 'Old' });
   await store.upsertFromGoogle({ sub: 'sub-new', email: 'shared@example.com', name: 'New' });
   await store.upsertFromGoogle({ sub: 'sub-new', email: 'moved@example.com', name: 'New' });
   assert.deepEqual(await verifyBackupAccounts(ldb), { accounts: 2 });
-  assert.ok(await store.get(original.id));
-  assert.equal(await store.findByEmail('shared@example.com'), null);
+  assert.deepEqual(await store.findAllByEmail('shared@example.com'), [original]);
 });
 
 test('account ids and generations the session cookie cannot carry fail', async (t) => {
@@ -139,7 +152,7 @@ test('an unknown key in the accounts namespace fails', async (t) => {
   await assert.rejects(verifyBackupAccounts(ldb), /unknown key in accounts namespace/);
 });
 
-test('an email index owned by another sub still verifies when the email matches', async (t) => {
+test('two accounts sharing an email verify', async (t) => {
   const { ldb, store } = await openFixture(t);
   await store.upsertFromGoogle({ sub: 'sub-old', email: 'shared@example.com', name: 'Old' });
   await store.upsertFromGoogle({ sub: 'sub-new', email: 'shared@example.com', name: 'New' });
