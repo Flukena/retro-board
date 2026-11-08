@@ -10,15 +10,16 @@ export function createImageRepairScheduler({
   ydoc, provider, getRoomKey, repair, debounceMs = IMAGE_REPAIR_DEBOUNCE_MS, setTimer = setTimeout, clearTimer = clearTimeout,
 }) {
   let timer = null;
+  let destroyed = false;
   const hasEarlierKey = () => (getRoomKey()?.previousKeys?.size ?? 0) > 0;
   const run = () => {
     timer = null;
-    if (!hasEarlierKey()) return;
+    if (destroyed || !hasEarlierKey()) return;
     if (provider.appliedSeq !== provider.head) { request(); return; }
     Promise.resolve(repair()).then((result) => { if (result?.failed > 0) request(); }, request);
   };
   function request() {
-    if (timer !== null || !hasEarlierKey()) return;
+    if (destroyed || timer !== null || !hasEarlierKey()) return;
     timer = setTimer(run, debounceMs);
   }
   const onUpdate = () => request();
@@ -26,6 +27,7 @@ export function createImageRepairScheduler({
   return {
     request,
     destroy() {
+      destroyed = true;
       ydoc.off('update', onUpdate);
       if (timer !== null) clearTimer(timer);
       timer = null;

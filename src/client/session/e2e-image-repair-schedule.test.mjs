@@ -88,3 +88,18 @@ test('nothing is scheduled without an earlier key', async () => {
   assert.deepEqual(calls, []);
   idle.destroy();
 });
+
+test('a repair that fails after destroy starts no new timer and no second repair', async () => {
+  const calls = [];
+  let fail;
+  const scheduler = createImageRepairScheduler({
+    ydoc: new Y.Doc(), provider: { appliedSeq: 1, head: 1 }, getRoomKey: () => ({ previousKeys: new Map([[0, {}]]) }),
+    repair: () => { calls.push('run'); return new Promise((_, reject) => { fail = reject; }); }, debounceMs: DEBOUNCE_MS,
+  });
+  scheduler.request();
+  await until(() => calls.length === 1, 'first repair started');
+  scheduler.destroy();
+  fail(new Error('network'));
+  await sleep(QUIET_MS);
+  assert.deepEqual(calls, ['run']);
+});
