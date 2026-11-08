@@ -14,6 +14,7 @@ import { useCreateBoard } from './use-create-board.js';
 import CreateBoardError from './CreateBoardError.jsx';
 import LandingGuide from './LandingGuide.jsx';
 import FormatChips from './FormatChips.jsx';
+import CreateLockedRoom from '../room-lock/CreateLockedRoom.jsx';
 import PublicWallPreview from '../public-wall/PublicWallPreview.jsx';
 import PokerFeature from '../poker/PokerFeature.jsx';
 import { AGILE_GUIDE_PATH, PLANNING_POKER_PATH } from '../seo/seo-pages.js';
@@ -126,7 +127,7 @@ export default function Landing() {
               {TRUST_KEYS.map((key) => <li key={key}><Check size={LANDING_ICON_SIZE_PX.TRUST} aria-hidden="true" />{t(key)}</li>)}
             </ul>
             <StartPanel boardName={boardName} onNameChange={setBoardName} creating={creating} error={createError}
-              onCreate={() => createRoomAndOpen({ name: boardName })} onStartFormat={startFormat}
+              onCreate={() => createRoomAndOpen({ name: boardName })} onCreateLocked={createRoomAndOpen} onStartFormat={startFormat}
               joinCode={joinCode} onCodeChange={setJoinCode} onJoin={join} />
             {recents.length > 0 && (
               <a className="rb-landing__scroll-cue" href={`#${RECENTS_SECTION_ID}`} aria-controls={RECENTS_SECTION_ID}
@@ -157,7 +158,7 @@ function LandingFooter() {
   );
 }
 
-function StartPanel({ boardName, onNameChange, onCreate, creating, error, onStartFormat, joinCode, onCodeChange, onJoin }) {
+function StartPanel({ boardName, onNameChange, onCreate, onCreateLocked, creating, error, onStartFormat, joinCode, onCodeChange, onJoin }) {
   return (
     <Surface kind={SURFACE_KIND.CARD} className="rb-landing__card rb-landing__start">
       <h2 className="rb-landing__section-head">{t('landing.create.head')}</h2>
@@ -178,6 +179,7 @@ function StartPanel({ boardName, onNameChange, onCreate, creating, error, onStar
         </Button>
       </div>
       <CreateBoardError error={error} />
+      <CreateLockedRoom boardName={boardName} createBoard={onCreateLocked} creating={creating} />
       <p className="rb-landing__chips-label">{t('landing.start.formats')}</p>
       <FormatChips onStart={onStartFormat} disabled={creating} />
       <JoinRow joinCode={joinCode} onCodeChange={onCodeChange} onJoin={onJoin} />

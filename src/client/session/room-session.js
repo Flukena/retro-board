@@ -294,8 +294,9 @@ const postJson = async (path, body, expectedStatus, invalidStatuses = [], { lock
   }
 };
 
-export async function createRoom() {
-  const value = await postJson('/api/rooms', {}, 201);
+/** A plain room takes an empty body; a locked room sends its public lock record and nothing else. */
+export async function createRoom({ lock = null } = {}) {
+  const value = await postJson('/api/rooms', lock === null ? {} : { lock }, 201);
   return validateCreatedRoomResponse(value);
 }
 

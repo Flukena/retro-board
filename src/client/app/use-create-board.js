@@ -18,13 +18,13 @@ export function useCreateBoard() {
     const timer = setTimeout(() => setCreateError(null), createError.retryAfterSeconds * MILLISECONDS_PER_SECOND);
     return () => clearTimeout(timer);
   }, [createError]);
-  const createBoard = async ({ name = '', starter = null, kind = ROOM_KIND.BOARD } = {}) => {
+  const createBoard = async ({ name = '', starter = null, kind = ROOM_KIND.BOARD, lock = null } = {}) => {
     if (creatingRef.current) return;
     creatingRef.current = true;
     setCreating(true);
     setCreateError(null);
     try {
-      const { code, token } = await createRoom();
+      const { code, token } = await createRoom({ lock });
       markBoardCreated(code, token);
       rememberRecent(code, name, token, kind);
       if (starter) savePendingStarter(code, starter);
