@@ -2,6 +2,8 @@ import React from 'react';
 import { imageFitsPaintLayer } from './image-paint.js';
 import { sizeForPlacement } from '../../domain/board-geometry.js';
 import { safeRuntimeImageSource } from '../transfer/image-upload.js';
+import { isE2EImageSource } from '../../domain/security-boundaries.js';
+import { useE2EImageUrl } from './use-e2e-image-url.js';
 import { appearAnimation } from './appear-animation.js';
 
 const { w: IMAGE_DEFAULT_WIDTH_PX, h: IMAGE_DEFAULT_HEIGHT_PX } = sizeForPlacement({ type: 'image' });
@@ -11,6 +13,9 @@ export const ImageCard = React.memo(function ImageCard({
 }) {
   const it = item;
   const safeSrc = safeRuntimeImageSource(it.src, { publicPreview });
+  const encrypted = isE2EImageSource(safeSrc);
+  const blobUrl = useE2EImageUrl(encrypted ? safeSrc : null);
+  const imageSrc = encrypted ? blobUrl : safeSrc;
   const w = it.w || IMAGE_DEFAULT_WIDTH_PX;
   const h = it.h || IMAGE_DEFAULT_HEIGHT_PX;
   return (
@@ -41,9 +46,9 @@ export const ImageCard = React.memo(function ImageCard({
         contain: remoteSelected ? 'layout style' : 'layout paint style',
       }}
     >
-      {safeSrc && (
+      {imageSrc && (
         <img
-          src={safeSrc}
+          src={imageSrc}
           alt=""
           draggable={false}
           loading={publicPreview ? 'eager' : 'lazy'}

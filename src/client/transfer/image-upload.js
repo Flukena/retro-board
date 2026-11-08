@@ -1,7 +1,9 @@
-import { IMAGE_MAX_BYTES, IMAGE_OUTPUT_MAX_DIMENSION, imageInfoIsWithinLimits, inspectRasterImageBlob, isSafeImageMime, normalizeRuntimeImageSource } from '../../domain/security-boundaries.js';
+import { IMAGE_MAX_BYTES, IMAGE_OUTPUT_MAX_DIMENSION, imageInfoIsWithinLimits, inspectRasterImageBlob, isE2EImageSource, isSafeImageMime, resolveRoomImageSource } from '../../domain/security-boundaries.js';
 import { getActiveRoomSession, getRelayHttpBaseUrl, roomFetch } from '../session/room-session.js';
 import { canonicalPublicImageSource } from '../../domain/public-wall-image-source.js';
 import { restoreBackupImages } from './backup-images.js';
+import { decryptImageResponse } from '../room-lock/e2e-images.js';
+import { getRoomKey } from '../room-lock/lock-session.js';
 
 const BYTES_PER_MIB = 1_048_576;
 export const IMAGE_MAX_MIB_LABEL = (IMAGE_MAX_BYTES / BYTES_PER_MIB).toFixed(0);
@@ -17,7 +19,7 @@ const MIME_PNG = 'image/png';
 const MIME_JPEG = 'image/jpeg';
 const MIME_GIF = 'image/gif';
 const CANVAS_CONTEXT = '2d';
-const ROOM_IMAGE_ROUTE = /^\/(?:(?:yjs|yjs-public)\/)?rooms\/[A-Za-z0-9_-]{32}\/(images\/[^/]+)$/;
+const ROOM_IMAGE_ROUTE = /^\/(?:(?:yjs|yjs-public)\/)?rooms\/[A-Za-z0-9_-]{32}\/((?:images|e2e-blobs)\/[^/]+)$/;
 const UPLOAD_RATE_LIMIT_ERROR = /: 429$/;
 const delayImageRetry = () => new Promise((resolve) => { setTimeout(resolve, IMAGE_RETRY_DELAY_MS); });
 
@@ -52,11 +54,12 @@ const encodeImageCanvas = async (canvas, mime) => {
 export const safeRuntimeImageSource = (value, { publicPreview = false } = {}) => {
   if (publicPreview) return canonicalPublicImageSource(value);
   if (typeof window === 'undefined') return null;
-  return normalizeRuntimeImageSource(value, {
+  const roomHandle = getActiveRoomSession()?.roomHandle;
+  return resolveRoomImageSource(value, {
     pageOrigin: window.location.origin,
     relayBaseUrl: getRelayHttpBaseUrl(),
-    roomHandle: getActiveRoomSession()?.roomHandle,
-  });
+    roomHandle,
+  }, getRoomKey()?.roomHandle ?? null);
 };
 
 export const canvasToBlob = (canvas, type, quality) => (
@@ -111,13 +114,14 @@ export const prepareImageBlob = async (blob) => {
 export const readBackupImage = async (source, { signal } = {}) => {
   const src = safeRuntimeImageSource(source);
   if (!src) throw new Error('image belongs to another room or server');
-  const path = new URL(src).pathname;
+  const encrypted = isE2EImageSource(src);
+  const path = encrypted ? src : new URL(src).pathname;
   const roomImage = path.match(ROOM_IMAGE_ROUTE);
   for (let attempt = 0; attempt < IMAGE_RETRY_ATTEMPTS; attempt += 1) {
     const response = roomImage
       ? await roomFetch(roomImage[1], { signal })
       : await fetch(src, { signal, credentials: 'include', redirect: 'error', referrerPolicy: 'no-referrer' });
-    if (response.ok) return response.blob();
+    if (response.ok) return encrypted ? (await decryptImageResponse(response, src)).blob : response.blob();
     const status = response.status;
     await response.body?.cancel();
     if (status !== RATE_LIMIT_STATUS || attempt === IMAGE_RETRY_ATTEMPTS - 1) throw new Error(`image read failed: ${status}`);

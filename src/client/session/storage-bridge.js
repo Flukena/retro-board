@@ -46,6 +46,9 @@ import { LOCAL_ONLY_KEYS, readLocalPreference, writeLocalPreference } from './lo
 import { createRoomProvider, isEncryptedRoom } from './room-provider.js';
 import { attachE2ERoom } from './e2e-room.js';
 import { getRoomKey } from '../room-lock/lock-session.js';
+import { uploadEncryptedImage } from '../room-lock/e2e-images.js';
+import { repairOldEpochImages } from '../room-lock/e2e-image-repair.js';
+import { listImageSources, rewriteImageSources } from './item-image-sources.js';
 import { createMotionPublisher, sendOnlyLocalAwareness } from './awareness-transport.js';
 import { parseRoute } from '../app/router.js';
 import {
@@ -370,6 +373,8 @@ const writeBoardSnapshot = (newBoard, origin = 'local') => {
 // writeBoardSnapshot did — 'local' = user action (undoable), 'system' = derived
 // / automatic change (skipped by the UndoManager).
 // ---------------------------------------------------------------------------
+// Not a tracked undo origin: a repair rewrites sources without becoming an undo step.
+const IMAGE_REPAIR_ORIGIN = 'image-repair';
 const originOf = (opts) => (opts && opts.silent ? 'system' : 'local');
 
 // Seed a brand-new item as its own Y.Map (mirrors writeBoardSnapshot's
@@ -997,6 +1002,9 @@ if (provider) {
 
     // Uploads an image blob to the server and resolves to its served URL.
     async uploadImage(blob, { signal } = {}) {
+      // An encrypted room never sends image bytes in the clear: encrypt here, the one boundary every upload path shares.
+      const key = getRoomKey();
+      if (isEncryptedRoom(key, activeRoomSession.roomHandle)) return uploadEncryptedImage(blob, { signal, key });
       const res = await roomFetch('upload', {
         signal,
         method: 'POST',
@@ -1017,6 +1025,10 @@ if (provider) {
       if (!url) throw new Error('invalid image upload URL');
       return url;
     },
+
+    // Image sources of the live board, and the one local transaction that image repair rewrites them in.
+    listImageSources() { return listImageSources(yItems); },
+    rewriteImageSources(replacements) { return rewriteImageSources(ydoc, yItems, replacements, IMAGE_REPAIR_ORIGIN); },
 
     // --- Granular board writes (delta-only; see helpers above) ---
     canCreateItems(items) { return Array.isArray(items) && permitPublicCreations(items); },
@@ -1391,7 +1403,10 @@ if (provider) {
 }
 
 if (provider && isEncryptedRoom(roomKey, ROOM)) {
-  const e2eRoom = attachE2ERoom({ provider, ydoc, eventTarget: window, getRoomKey, clearUndo: () => undoManager?.clear() });
+  const e2eRoom = attachE2ERoom({
+    provider, ydoc, eventTarget: window, getRoomKey, clearUndo: () => undoManager?.clear(),
+    repairImages: () => repairOldEpochImages({ storage: window.storage }),
+  });
   window.storage.rotationSource = e2eRoom.rotationSource;
 }
 

@@ -64,7 +64,7 @@ export async function restoreBackupImages(items, { readImage, readImageBlob, pre
           const src = await uploadImage(prepared.blob);
           if (!src || !resolveSource(src)) throw new Error('invalid uploaded image URL');
           sources.set(item.src, { src, natW: prepared.nw, natH: prepared.nh });
-        } else if (source.kind === 'server') {
+        } else if (source.kind === 'server' || source.kind === 'e2e') {
           const src = resolveSource(item.src);
           if (!src) throw new Error('image belongs to another room or server; export again from the original room');
           await checkedImageBlob(src, readImage);

@@ -1,4 +1,5 @@
 import { PUBLIC_RELAY_PREFIX } from './public-wall-contract.js';
+import { BLOB_ID_PATTERN } from './room-lock-contract.js';
 
 // Frontend defense-in-depth helpers for data that crosses a file/Yjs boundary.
 // These checks reduce accidental disclosure and client-side resource abuse;
@@ -37,6 +38,7 @@ const SERVER_IMAGE_PATH_RE = new RegExp(
   `^/(?:(?:yjs/)?(?:images/${IMAGE_FILE_RE_SOURCE}|rooms/[A-Za-z0-9_-]{32}/images/${IMAGE_FILE_RE_SOURCE})|yjs-public/rooms/[A-Za-z0-9_-]{32}/images/${IMAGE_FILE_RE_SOURCE})$`,
   'i',
 );
+const E2E_IMAGE_PATH_RE = /^\/(?:yjs\/)?rooms\/([A-Za-z0-9_-]{32})\/e2e-blobs\/([0-9a-f-]{36})$/;
 const DATA_IMAGE_PREFIX_RE = /^data:(image\/(?:png|jpeg|webp|gif));base64,/i;
 const IMAGE_URL_MAX_LENGTH = 2048;
 const IMAGE_DATA_URL_MAX_LENGTH = Math.ceil(IMAGE_MAX_BYTES / 3) * 4 + 64;
@@ -50,11 +52,24 @@ const base64DecodedLength = (payload) => {
   return (payload.length / 4) * 3 - padding;
 };
 
+// An encrypted-room image: only the path form `/rooms/<handle>/e2e-blobs/<uuid>` (optionally behind `/yjs`) is
+// stored. The path is canonical, so the same blob always has the same source string.
+function classifyE2EImagePath(value) {
+  const match = value.length <= IMAGE_URL_MAX_LENGTH ? E2E_IMAGE_PATH_RE.exec(value) : null;
+  if (!match || !BLOB_ID_PATTERN.test(match[2])) return null;
+  const [, roomHandle, blobId] = match;
+  return { kind: 'e2e', roomHandle, blobId, source: `/rooms/${roomHandle}/e2e-blobs/${blobId}` };
+}
+
+export const isE2EImageSource = (value) => classifyE2EImagePath(typeof value === 'string' ? value : '') !== null;
+
 // Accept only legacy base64 raster data URLs or the exact image URL shape
 // produced by yjs-server. Runtime code additionally restricts absolute URLs to
 // the current page/relay origins before rendering them.
 export function classifyImportedImageSource(value) {
   if (typeof value !== 'string' || value.length === 0) return null;
+  const encrypted = classifyE2EImagePath(value);
+  if (encrypted) return encrypted;
   const prefix = value.match(DATA_IMAGE_PREFIX_RE);
   if (prefix) {
     if (value.length > IMAGE_DATA_URL_MAX_LENGTH) return null;
@@ -105,7 +120,7 @@ function runtimeImageRoomMatches(url, relay, roomHandle) {
 
 export function normalizeRuntimeImageSource(value, { pageOrigin, relayBaseUrl, roomHandle } = {}) {
   const source = classifyImportedImageSource(value);
-  if (!source) return null;
+  if (!source || source.kind === 'e2e') return null;
   if (source.kind === 'data') return source.source;
   let page;
   let relay;
@@ -119,6 +134,19 @@ export function normalizeRuntimeImageSource(value, { pageOrigin, relayBaseUrl, r
   if (!url || (url.origin !== page.origin && url.origin !== relay.origin)) return null;
   if (!SERVER_IMAGE_PATH_RE.test(url.pathname) || url.search || url.hash) return null;
   return runtimeImageRoomMatches(url, relay, roomHandle) ? url.href : null;
+}
+
+/**
+ * Room-aware resolver: an encrypted-room image source is accepted only inside the unlocked room it belongs to
+ * (`encryptedRoomHandle`), and resolves to its canonical path, never a URL the browser may fetch directly.
+ * Every other source follows `normalizeRuntimeImageSource`, which rejects encrypted sources.
+ */
+export function resolveRoomImageSource(value, runtime = {}, encryptedRoomHandle = null) {
+  const source = classifyImportedImageSource(value);
+  if (source?.kind !== 'e2e') return normalizeRuntimeImageSource(value, runtime);
+  const inActiveRoom = typeof encryptedRoomHandle === 'string' && source.roomHandle === encryptedRoomHandle
+    && runtime.roomHandle === encryptedRoomHandle;
+  return inActiveRoom ? source.source : null;
 }
 
 const readU16BE = (bytes, offset) => (bytes[offset] << 8) | bytes[offset + 1];

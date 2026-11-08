@@ -7,12 +7,13 @@ import { attachE2EVoteExpiry } from './e2e-vote-expiry.js';
  * re-sent under it), a new key epoch clears undo/redo so it cannot resurrect old references (Deviation 8),
  * vote timers expire on the clients, and the rotation flow gets the document state without the document.
  */
-export function attachE2ERoom({ provider, ydoc, eventTarget, getRoomKey, clearUndo }) {
+export function attachE2ERoom({ provider, ydoc, eventTarget, getRoomKey, clearUndo, repairImages }) {
   const onKeyChanged = (event) => {
     const key = getRoomKey();
     if (key?.roomHandle !== provider.roomname) return;
     if (event.detail?.epochChanged) clearUndo();
     provider.setKey(key);
+    if (event.detail?.epochChanged) repairImages?.();
   };
   eventTarget.addEventListener(ROOM_KEY_CHANGED_EVENT, onKeyChanged);
   const expiry = attachE2EVoteExpiry({ ydoc, provider });

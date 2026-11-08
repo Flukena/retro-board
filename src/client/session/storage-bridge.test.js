@@ -5,7 +5,7 @@ import { createServer } from 'vite';
 import { createZoneHeaderActions } from '../board/zone-header-actions.js';
 import { PLAYER_PRESENCE_STALE_MS } from './player-cursors.js';
 import { createRoomLock } from '../room-lock/e2e-crypto.js';
-import { fakeLockedRelay, LOCKED_TEST_CODE, LOCKED_TEST_TOKEN } from '../../test-support/fake-locked-relay.js';
+import { fakeLockedRelay, LOCKED_TEST_CODE, LOCKED_TEST_HANDLE, LOCKED_TEST_TOKEN } from '../../test-support/fake-locked-relay.js';
 
 const SESSION_TTL_MS = 60_000;
 const ROOM_HANDLE = 'Abcdefghijklmnopqrstuvwxyz012345';
@@ -524,5 +524,42 @@ test('mood answers sync per person, undo only the own answer, and are replaced b
     assert.deepEqual(storage.snapshotMoods(), answers);
     assert.equal(storage.importBundle({ items: [] }, [], [], null, [{ ...answers[0], score: 9 }]), false);
     assert.deepEqual(storage.snapshotMoods(), answers);
+  });
+});
+
+const IMAGE_MARKER = 'SECRET-PIXELS-MARKER';
+const pngBlob = () => new Blob([Uint8Array.from([0x89, 0x50, 0x4e, 0x47]), IMAGE_MARKER], { type: 'image/png' });
+const BLOB_UPLOAD_SUFFIX = '/e2e-blobs';
+
+test('a locked room encrypts every image upload at the shared boundary and never calls the plaintext route', async () => {
+  await withStorage(async (browser) => {
+    const sent = [];
+    const relaySession = globalThis.fetch;
+    globalThis.fetch = async (url, init = {}) => {
+      if (String(url).endsWith(BLOB_UPLOAD_SUFFIX)) {
+        sent.push({ url: String(url), headers: new Headers(init.headers), body: Buffer.from(init.body) });
+        return new Response(JSON.stringify({ id: sent.at(-1).headers.get('x-blob-id') }), { status: 201 });
+      }
+      if (String(url).endsWith('/upload')) sent.push({ url: String(url), body: Buffer.from('plaintext route used') });
+      return relaySession(url, init);
+    };
+    const src = await browser.storage.uploadImage(pngBlob());
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].url, `http://localhost:1234/rooms/${LOCKED_TEST_HANDLE}${BLOB_UPLOAD_SUFFIX}`);
+    assert.equal(sent[0].body.includes(Buffer.from(IMAGE_MARKER)), false, 'the image bytes are not in the request');
+    assert.equal(src, `/rooms/${LOCKED_TEST_HANDLE}/e2e-blobs/${sent[0].headers.get('x-blob-id')}`);
+  }, { locked: true });
+});
+
+test('image repair rewrites sources locally without creating an undo step', async () => {
+  await withStorage(async (browser) => {
+    const before = `/rooms/${ROOM_HANDLE}/e2e-blobs/3f2b8c1e-4d5a-4e6f-8a9b-0c1d2e3f4a5b`;
+    const after = `/rooms/${ROOM_HANDLE}/e2e-blobs/4f2b8c1e-4d5a-4e6f-8a9b-0c1d2e3f4a5b`;
+    browser.__rbYDoc.transact(() => putItem(browser, { id: 'img', type: 'image', x: 0, y: 0, w: 10, h: 10, src: before }), 'system');
+    assert.equal(browser.storage.canUndo(), false);
+    assert.deepEqual(browser.storage.listImageSources(), [{ id: 'img', src: before }]);
+    assert.equal(browser.storage.rewriteImageSources(new Map([[before, after]])), 1);
+    assert.deepEqual(browser.storage.listImageSources(), [{ id: 'img', src: after }]);
+    assert.equal(browser.storage.canUndo(), false, 'a repair is not an undo step');
   });
 });

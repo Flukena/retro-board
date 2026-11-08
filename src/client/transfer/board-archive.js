@@ -36,7 +36,7 @@ export async function createBoardArchiveArtifact(options, readImage) {
         const source = classifyImportedImageSource(item.src);
         if (!source) fail('invalid image source');
         const blob = await checkedImageBlob(item.src, async src => {
-          if (source.kind === 'server') return readImage(src);
+          if (source.kind !== 'data') return readImage(src);
           const binary = atob(source.payload);
           return new Blob([Uint8Array.from(binary, char => char.charCodeAt(0))], { type: source.mime });
         });

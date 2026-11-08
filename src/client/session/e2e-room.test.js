@@ -91,3 +91,18 @@ test('the rotation source claims the stored snapshot it applied, which is the on
   await assert.rejects(room.rotate(rotationId, next, source.encodeState(), 0), (error) => error.code === E2E_ROTATION_STALE);
   await room.rotate(rotationId, next, source.encodeState(), source.appliedSnapshotBase);
 });
+
+test('only a new key epoch starts image repair', async (t) => {
+  const room = await e2eRoom(t);
+  const key = await roomKey(0);
+  const a = room.join(key);
+  const calls = [];
+  attachE2ERoom({
+    provider: a.provider, ydoc: a.doc, eventTarget: a.events, getRoomKey: () => key, clearUndo: () => {},
+    repairImages: () => calls.push('repair'),
+  });
+  keyChanged(a.events, false);
+  assert.deepEqual(calls, []);
+  keyChanged(a.events, true);
+  assert.deepEqual(calls, ['repair']);
+});

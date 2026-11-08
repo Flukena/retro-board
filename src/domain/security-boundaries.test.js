@@ -7,6 +7,8 @@ import {
   imageInfoIsWithinLimits,
   inspectRasterImageBytes,
   normalizeRuntimeImageSource,
+  resolveRoomImageSource,
+  isE2EImageSource,
   redactBoardExportForViewer,
   shouldReencodeImageMime,
   stickyTextForDom,
@@ -171,4 +173,33 @@ test('PNG animation chunks are rejected without mistaking compressed payload tex
   chunk.write('acTL', chunkDataOffsetBytes);
   const staticPng = Buffer.concat([png.subarray(0, pngHeaderEndBytes), chunk, png.subarray(pngHeaderEndBytes)]);
   assert.equal(imageInfoIsWithinLimits(inspectRasterImageBytes(staticPng, 'image/png')), true);
+});
+
+const E2E_HANDLE = 'a'.repeat(32);
+const E2E_ID = '3f2b8c1e-4d5a-4e6f-8a9b-0c1d2e3f4a5b';
+const E2E_PATH = `/rooms/${E2E_HANDLE}/e2e-blobs/${E2E_ID}`;
+const RUNTIME = { pageOrigin: 'http://localhost:5173', relayBaseUrl: 'http://localhost:1234', roomHandle: E2E_HANDLE };
+
+test('encrypted-room image sources classify as e2e, canonicalise the /yjs prefix and reject malformed ids', () => {
+  assert.deepEqual(classifyImportedImageSource(E2E_PATH), {
+    kind: 'e2e', roomHandle: E2E_HANDLE, blobId: E2E_ID, source: E2E_PATH,
+  });
+  assert.equal(classifyImportedImageSource(`/yjs${E2E_PATH}`).source, E2E_PATH);
+  for (const bad of [
+    `/rooms/${E2E_HANDLE}/e2e-blobs/${E2E_ID.toUpperCase()}`, `/rooms/${E2E_HANDLE}/e2e-blobs/${E2E_ID}?x=1`,
+    `/rooms/${E2E_HANDLE}/e2e-blobs/${'3f2b8c1e-4d5a-1e6f-8a9b-0c1d2e3f4a5b'}`, `/rooms/short/e2e-blobs/${E2E_ID}`,
+    `https://evil.example${E2E_PATH}`, `/rooms/${E2E_HANDLE}/e2e-blobs/${E2E_ID}/x`,
+  ]) assert.equal(classifyImportedImageSource(bad), null, bad);
+  assert.equal(isE2EImageSource(E2E_PATH), true);
+  assert.equal(isE2EImageSource('/images/abcdef12.png'), false);
+});
+
+test('the runtime normalizer never accepts an encrypted source, the room-aware resolver only inside its own unlocked room', () => {
+  assert.equal(normalizeRuntimeImageSource(E2E_PATH, RUNTIME), null);
+  assert.equal(resolveRoomImageSource(E2E_PATH, RUNTIME, null), null, 'a normal room never resolves e2e paths');
+  assert.equal(resolveRoomImageSource(E2E_PATH, RUNTIME, 'b'.repeat(32)), null, 'another room is rejected');
+  assert.equal(resolveRoomImageSource(E2E_PATH, { ...RUNTIME, roomHandle: 'b'.repeat(32) }, E2E_HANDLE), null);
+  assert.equal(resolveRoomImageSource(E2E_PATH, RUNTIME, E2E_HANDLE), E2E_PATH);
+  const plain = `/rooms/${E2E_HANDLE}/images/01234567-abcd.png`;
+  assert.equal(resolveRoomImageSource(plain, RUNTIME, E2E_HANDLE), normalizeRuntimeImageSource(plain, RUNTIME));
 });

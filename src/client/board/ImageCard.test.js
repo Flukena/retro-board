@@ -55,3 +55,12 @@ test('an image too large to animate safely mounts without the appear pop on smal
     assert.doesNotMatch(huge, /animation:/);
   });
 });
+
+test('an encrypted-room source never reaches the DOM as a URL, and a normal room does not resolve it at all', async () => {
+  await withChromeModule('/src/client/board/ImageCard.jsx', ({ ImageCard }) => {
+    const src = `/rooms/${'a'.repeat(32)}/e2e-blobs/3f2b8c1e-4d5a-4e6f-8a9b-0c1d2e3f4a5b`;
+    const html = renderToStaticMarkup(React.createElement(ImageCard, { item: { x: 1, y: 2, src } }));
+    assert.doesNotMatch(html, /<img/);
+    assert.doesNotMatch(html, /e2e-blobs/);
+  });
+});
