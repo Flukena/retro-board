@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
 import { MILLISECONDS_PER_DAY } from './relay-config.js';
-import { isStoredImageFilename } from './relay-uploads.js';
+import { isStoredImageFilename, parseE2EBlobFilename } from './relay-uploads.js';
 import { roomLogId } from './relay-log-id.js';
 import { prunePublicWall } from './public-wall-prune.js';
 import { maintainRoomVotes } from './relay-vote-maintenance.js';
@@ -57,7 +57,8 @@ export async function sweepRetainedUploads(io, config, now, log) {
   let removed = 0;
   const entries = await io.readdir(config.UPLOADS_DIR, { withFileTypes: true });
   for (const entry of entries) {
-    if (!entry.isFile() || !isStoredImageFilename(entry.name)) continue;
+    // Encrypted blobs follow their inventory lifecycle (grace expiry, rotation), never file age.
+    if (!entry.isFile() || !isStoredImageFilename(entry.name) || parseE2EBlobFilename(entry.name)) continue;
     const path = join(config.UPLOADS_DIR, entry.name);
     const stat = await io.stat(path);
     if (stat.mtimeMs >= cutoff) continue;

@@ -147,6 +147,21 @@ test('maintenance retention deletes only stored images strictly older than the c
   assert.deepEqual(removed, [`${UPLOADS_DIR}/${OLD_IMAGE_NAME}`]);
 });
 
+test('maintenance retention never deletes an encrypted blob, however old, while still deleting an old image of the same room', async () => {
+  const cutoff = AT_TIME_MS - MILLISECONDS_PER_DAY;
+  const handle = 'H'.repeat(32);
+  const blob = `${handle}.123e4567-e89b-42d3-a456-426614174000.e2e`;
+  const image = `${handle}.123e4567-e89b-42d3-a456-426614174001.png`;
+  const removed = [];
+  const io = {
+    async readdir() { return [blob, image].map((name) => ({ name, isFile: () => true })); },
+    async stat() { return { mtimeMs: cutoff - 1 }; },
+    async unlink(path) { removed.push(path); },
+  };
+  await sweepRetainedUploads(io, { UPLOADS_DIR, UPLOAD_RETENTION_DAYS: 1 }, AT_TIME_MS, QUIET_LOGGER);
+  assert.deepEqual(removed, [`${UPLOADS_DIR}/${image}`]);
+});
+
 test('maintenance interrupted sweep touches only private temp files older than twice the deadline', async () => {
   const cutoff = AT_TIME_MS - REQUEST_TIMEOUT_MS * 2;
   const { io, inspected, removed } = sweepFixture(cutoff, OLD_TEMP_NAME, FRESH_TEMP_NAME);

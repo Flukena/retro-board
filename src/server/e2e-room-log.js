@@ -81,6 +81,7 @@ export class E2ERoomLog {
   #clearTimer;
   #onResume;
   #deleteStagedBlobs;
+  #onBlobsRetired;
   #onError;
   #maxLogEntries;
   #rooms = new Map();
@@ -88,7 +89,7 @@ export class E2ERoomLog {
   constructor({
     ldb, maxRoomBytes, reserveStore, hasCapacity = () => true, now = Date.now,
     setTimer = setTimeout, clearTimer = clearTimeout,
-    onResume = noop, deleteStagedBlobs = noop, onError = noop, maxLogEntries = E2E_MAX_LOG_ENTRIES,
+    onResume = noop, deleteStagedBlobs = noop, onBlobsRetired = noop, onError = noop, maxLogEntries = E2E_MAX_LOG_ENTRIES,
   }) {
     this.#ldb = ldb;
     this.#maxRoomBytes = maxRoomBytes;
@@ -99,6 +100,7 @@ export class E2ERoomLog {
     this.#clearTimer = clearTimer;
     this.#onResume = onResume;
     this.#deleteStagedBlobs = deleteStagedBlobs;
+    this.#onBlobsRetired = onBlobsRetired;
     this.#onError = onError;
     this.#maxLogEntries = maxLogEntries;
   }
@@ -273,6 +275,9 @@ export class E2ERoomLog {
       const current = await this.#verifiedRecord(docName, undefined, verify);
       if (lockRecord.keyEpoch !== current.keyEpoch + 1) throw codedError(E2E_ROTATION_STALE, 'key epoch must advance by one');
       this.#assertWithinQuota(snapshot.byteLength);
+      if (blobInventory.some((entry) => entry.stagedFor && entry.stagedFor !== rotationId)) {
+        throw codedError(E2E_ROTATION_STALE, 'inventory holds blobs staged for another rotation');
+      }
       const nextRecord = encodeLockRecord({ ...lockRecord, lockRevision: current.lockRevision + 1 });
       const inventory = this.#retireOldEpochs(blobInventory, nextRecord.keyEpoch);
       const ops = [
@@ -288,16 +293,24 @@ export class E2ERoomLog {
       room.snapshotBytes = snapshot.byteLength;
       room.sizes.clear();
       room.blobs = inventory;
+      if (inventory.some((entry) => entry.retiredAt !== undefined)) this.#onBlobsRetired(docName);
       return decodeLockRecord(nextRecord);
     });
   }
 
-  async addBlob(docName, blob) {
+  /**
+   * Adds an inventory entry. A staged blob needs its rotation to be the active freeze; any other blob is refused
+   * while a freeze is active. With `expectedEpoch`, the room's current key epoch must still match (read inside the
+   * chain, so an upload that outlived a rotation is refused with E2E_ROTATION_STALE).
+   */
+  async addBlob(docName, blob, { expectedEpoch } = {}) {
     return this.#enqueue(docName, async (room) => {
       await this.#load(docName, room);
       if (blob.stagedFor && room.frozen?.rotationId !== blob.stagedFor) {
         throw codedError(E2E_ROTATION_STALE, 'staged blob does not match the active rotation');
       }
+      if (!blob.stagedFor) this.#assertNotFrozen(room);
+      if (expectedEpoch !== undefined) await this.#assertEpoch(docName, expectedEpoch);
       if (room.blobs.some((entry) => entry.id === blob.id)) throw codedError(E2E_BLOB_DUPLICATE, 'blob id already inventoried');
       const entry = { id: blob.id, bytes: blob.bytes, epoch: blob.epoch, stagedFor: blob.stagedFor ?? null };
       const inventory = [...room.blobs, entry];
@@ -310,6 +323,28 @@ export class E2ERoomLog {
     return this.#enqueue(docName, async (room) => {
       await this.#load(docName, room);
       return room.blobs.map((entry) => ({ ...entry }));
+    });
+  }
+
+  /** Read-only: ids of old-epoch entries whose grace ended, and how many retired entries are still inside it. */
+  async expiredBlobs(docName, now, graceMs = E2E_BLOB_GRACE_MS) {
+    return this.#enqueue(docName, async (room) => {
+      await this.#load(docName, room);
+      const retired = room.blobs.filter((entry) => entry.retiredAt !== undefined);
+      const expired = retired.filter((entry) => now - entry.retiredAt >= graceMs).map((entry) => entry.id);
+      return { expired, remainingRetired: retired.length - expired.length };
+    });
+  }
+
+  /** Drops inventory entries by id (their files are already gone). Unknown ids are ignored. */
+  async removeBlobs(docName, ids) {
+    return this.#enqueue(docName, async (room) => {
+      await this.#load(docName, room);
+      const doomed = new Set(ids);
+      const inventory = room.blobs.filter((entry) => !doomed.has(entry.id));
+      if (inventory.length === room.blobs.length) return;
+      await this.#write(docName, [put(BLOBS_KEY, inventory)]);
+      room.blobs = inventory;
     });
   }
 
@@ -360,6 +395,11 @@ export class E2ERoomLog {
     if (room.frozen) throw codedError(E2E_FROZEN, 'room is frozen for rotation');
   }
 
+  async #assertEpoch(docName, expectedEpoch) {
+    const record = decodeLockRecord(await this.#ldb.getMeta(docName, ROOM_LOCK_META));
+    if (record?.keyEpoch !== expectedEpoch) throw codedError(E2E_ROTATION_STALE, 'key epoch changed during the upload');
+  }
+
   #assertWithinQuota(totalBytes) {
     if (totalBytes > this.#maxRoomBytes) throw codedError(E2E_QUOTA, 'room size limit exceeded');
   }
@@ -386,7 +426,8 @@ export class E2ERoomLog {
   #retireOldEpochs(inventory, currentEpoch) {
     const retiredAt = this.#now();
     return inventory.map((entry) => {
-      const copy = { id: entry.id, bytes: entry.bytes, epoch: entry.epoch, stagedFor: entry.stagedFor ?? null };
+      // A committed inventory is final: nothing in it is staged any more.
+      const copy = { id: entry.id, bytes: entry.bytes, epoch: entry.epoch, stagedFor: null };
       if (entry.retiredAt !== undefined) copy.retiredAt = entry.retiredAt;
       else if (entry.epoch < currentEpoch) copy.retiredAt = retiredAt;
       return copy;

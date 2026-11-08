@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, mkdir, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import fsPromises, { mkdtemp, mkdir, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
@@ -10,6 +10,8 @@ import { Readable, Writable } from 'node:stream';
 import { E2ERoomLog, E2E_BLOB_GRACE_MS } from './e2e-room-log.js';
 import { E2EBlobStore, E2E_ORPHAN_MIN_AGE_MS } from './e2e-blob-store.js';
 import { createE2EBlobs } from './e2e-blobs.js';
+import { IMAGE_MAX_BYTES } from '../domain/security-boundaries.js';
+import { E2E_CIPHERTEXT_OVERHEAD_BYTES } from '../domain/e2e-envelope.js';
 import { createImageReadBudgets, createRelayUploads, createUploadState, e2eBlobFilename } from './relay-uploads.js';
 import { readRelayConfig } from './relay-config.js';
 import { ROOM_LOCK_META, decodeLockRecord, encodeLockRecord } from './room-lock-record.js';
@@ -36,50 +38,67 @@ class Response extends Writable {
   setHeader(name, value) { this.headers[name] = value; }
 }
 
-async function withBlobs(run) {
+const EMPTY_USAGE = () => ({ bytes: 0, files: 0, active: 0, reservedBytes: 0 });
+
+// Everything that survives a relay restart (files, LevelDB) is built once; `assemble` makes the in-memory side.
+async function withBlobs(run, { maxUploadBytes = 1024 } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'e2e-blob-lifecycle-'));
   const uploadsDir = join(root, 'uploads');
   await mkdir(uploadsDir);
   const ldb = new LeveldbPersistence(join(root, 'db'));
   const clock = { now: START_MS };
-  try {
-    await ldb.setMeta(DOC, ROOM_LOCK_META, encodeLockRecord(lockRecord()));
-    const config = readRelayConfig({ YJS_UPLOADS_DIR: uploadsDir, YJS_MAX_UPLOAD_BYTES: '1024' });
+  const faults = { unlink: () => false };
+  const warnings = [];
+  const logger = { ...quiet, warn: (...args) => warnings.push(args) };
+  const io = {
+    ...fsPromises,
+    unlink: (path) => (faults.unlink(path) ? Promise.reject(Object.assign(new Error('injected unlink failure'), { code: 'EACCES' })) : fsPromises.unlink(path)),
+  };
+  const roomUploadUsage = new Map([[DOC, EMPTY_USAGE()], [OTHER_DOC, EMPTY_USAGE()]]);
+  const locks = new Map();
+  const handles = new Map([[DOC, HANDLE], [OTHER_DOC, OTHER_HANDLE]]);
+  const config = readRelayConfig({ YJS_UPLOADS_DIR: uploadsDir, YJS_MAX_UPLOAD_BYTES: String(maxUploadBytes) });
+  const assemble = () => {
     const state = createUploadState(config);
-    const roomUploadUsage = new Map([[DOC, { bytes: 0, files: 0, active: 0, reservedBytes: 0 }], [OTHER_DOC, { bytes: 0, files: 0, active: 0, reservedBytes: 0 }]]);
     const uploads = createRelayUploads({
       config, state, roomUploadUsage, imageReads: createImageReadBudgets(config), storage: { setMeta: (...args) => ldb.setMeta(...args) },
       allowedOrigins: [ORIGIN], allowInsecureHttp: false,
     });
-    const store = new E2EBlobStore({ uploadsDir, admission: uploads.admission, roomUploadUsage, logger: quiet });
+    const store = new E2EBlobStore({ uploadsDir, admission: uploads.admission, roomUploadUsage, io, logger });
     const roomLog = new E2ERoomLog({
       ldb, maxRoomBytes: 1_000_000, reserveStore: () => () => undefined, now: () => clock.now,
       setTimer: () => ({}), clearTimer: () => undefined, deleteStagedBlobs: (_docName, rotationId) => store.deleteStaged(rotationId),
+      onBlobsRetired: (docName) => store.trackRetired(docName),
     });
-    const locks = new Map([[DOC, decodeLockRecord(encodeLockRecord(lockRecord()))], [OTHER_DOC, decodeLockRecord(encodeLockRecord(lockRecord()))]]);
-    const handles = new Map([[DOC, HANDLE], [OTHER_DOC, OTHER_HANDLE]]);
     const registry = {
       locksByDoc: locks, lockFor: (docName) => locks.get(docName) ?? null, isLocked: (docName) => locks.has(docName),
       roomHandleForDoc: (docName) => handles.get(docName) ?? null,
     };
     const blobs = createE2EBlobs({
       config, allowedOrigins: [ORIGIN], allowInsecureHttp: false, uploads, store, roomLog, registry,
-      onStorageFailure: (error) => { throw error; }, logger: quiet, now: () => clock.now,
+      onStorageFailure: (error) => { throw error; }, logger, now: () => clock.now,
     });
-    await run({ blobs, store, roomLog, roomUploadUsage, uploadsDir, ldb, clock, state, locks });
+    return { blobs, store, roomLog, state };
+  };
+  try {
+    for (const docName of [DOC, OTHER_DOC]) {
+      await ldb.setMeta(docName, ROOM_LOCK_META, encodeLockRecord(lockRecord()));
+      locks.set(docName, decodeLockRecord(encodeLockRecord(lockRecord())));
+    }
+    await run({ ...assemble(), assemble, roomUploadUsage, uploadsDir, ldb, clock, locks, faults, warnings });
   } finally {
     await ldb.destroy();
     await rm(root, { recursive: true, force: true });
   }
 }
 
-const upload = async (blobs, { id = randomUUID(), stage, bytes = BLOB_BYTES, docName = DOC, handle = HANDLE } = {}) => {
+const upload = async (blobs, { id = randomUUID(), stage, bytes = BLOB_BYTES, docName = DOC, handle = HANDLE, stream } = {}) => {
   const body = Buffer.alloc(bytes, 5);
   const headers = {
     origin: ORIGIN, 'content-type': 'application/octet-stream', 'content-length': String(body.length), 'x-blob-id': id,
     ...(stage ? { 'x-blob-stage': stage } : {}),
   };
-  const req = Object.assign(Readable.from([body]), { headers });
+  const req = Object.assign(Readable.from(stream ? stream(body) : [body]), { headers });
   const res = new Response();
   const finished = once(res, 'finish');
   await blobs.handleUpload(req, res, CLIENT_IP, docName, handle);
@@ -144,9 +163,38 @@ test('old-epoch blobs keep their files for the grace, then the sweep deletes fil
   await blobs.sweepExpired();
   assert.deepEqual(await e2eFiles(uploadsDir), []);
   assert.deepEqual(await inventoryIds(roomLog), []);
-  assert.deepEqual(roomUploadUsage.get(DOC), { bytes: 0, files: 0, active: 0, reservedBytes: 0 });
+  assert.deepEqual(roomUploadUsage.get(DOC), EMPTY_USAGE());
   assert.equal(state.bytes, 0);
   assert.deepEqual([first.status, second.status], [201, 201]);
+}));
+
+test('expiry still happens after the room left memory following the rotation', () => withBlobs(async ({ blobs, roomLog, store, uploadsDir, clock }) => {
+  await upload(blobs);
+  await commitRotation(roomLog, await roomLog.blobs(DOC));
+  roomLog.forget(DOC);
+  assert.deepEqual(roomLog.loadedDocNames(), [], 'the last socket closed and the room was evicted');
+  assert.deepEqual(store.retiredRooms(), [DOC]);
+  clock.now += E2E_BLOB_GRACE_MS;
+  await blobs.sweepExpired();
+  assert.deepEqual(await e2eFiles(uploadsDir), []);
+  assert.deepEqual(await inventoryIds(roomLog), []);
+  assert.deepEqual(store.retiredRooms(), [], 'a room with nothing retired left is no longer visited');
+}));
+
+test('a failed file delete keeps the inventory entry and the next sweep retries it; a missing file counts as deleted', () => withBlobs(async ({ blobs, roomLog, uploadsDir, clock, faults }) => {
+  const stuck = await upload(blobs);
+  const gone = await upload(blobs);
+  await commitRotation(roomLog, await roomLog.blobs(DOC));
+  clock.now += E2E_BLOB_GRACE_MS;
+  await rm(join(uploadsDir, e2eBlobFilename(HANDLE, gone.id)));
+  faults.unlink = (path) => path.endsWith(`${stuck.id}.e2e`);
+  await blobs.sweepExpired();
+  assert.deepEqual(await inventoryIds(roomLog), [stuck.id], 'only the entry whose file could not be deleted remains');
+  assert.deepEqual(await e2eFiles(uploadsDir), [e2eBlobFilename(HANDLE, stuck.id)]);
+  faults.unlink = () => false;
+  await blobs.sweepExpired();
+  assert.deepEqual(await inventoryIds(roomLog), []);
+  assert.deepEqual(await e2eFiles(uploadsDir), []);
 }));
 
 test('the expiry sweep keeps blobs uploaded under the new epoch', () => withBlobs(async ({ blobs, roomLog, uploadsDir, clock, locks }) => {
@@ -159,6 +207,75 @@ test('the expiry sweep keeps blobs uploaded under the new epoch', () => withBlob
   await blobs.sweepExpired();
   assert.deepEqual(await e2eFiles(uploadsDir), [e2eBlobFilename(HANDLE, current.id)]);
   assert.deepEqual(await inventoryIds(roomLog), [current.id]);
+}));
+
+test('an upload that outlives a rotation is refused with 409 and leaves no file, entry or usage', () => withBlobs(async ({ blobs, roomLog, roomUploadUsage, uploadsDir }) => {
+  const slow = await upload(blobs, { stream: async function* rotateWhileStreaming(body) {
+    yield body;
+    await commitRotation(roomLog, []);
+  } });
+  assert.equal(slow.status, 409);
+  assert.deepEqual(await readdir(uploadsDir), []);
+  assert.deepEqual(await inventoryIds(roomLog), []);
+  assert.deepEqual(roomUploadUsage.get(DOC), EMPTY_USAGE());
+}));
+
+test('a plain upload is refused with 409 while a rotation freeze is active', () => withBlobs(async ({ blobs, roomLog, roomUploadUsage, uploadsDir }) => {
+  const { rotationId } = await roomLog.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
+  assert.equal((await upload(blobs)).status, 409);
+  assert.deepEqual(await readdir(uploadsDir), []);
+  assert.deepEqual(roomUploadUsage.get(DOC), EMPTY_USAGE());
+  await roomLog.release(DOC, rotationId);
+  assert.equal((await upload(blobs)).status, 201);
+}));
+
+test('the size cap is the image limit plus the envelope, never above the configured upload limit', async () => {
+  const envelope = 256 + E2E_CIPHERTEXT_OVERHEAD_BYTES;
+  await withBlobs(async ({ blobs }) => {
+    assert.equal((await upload(blobs, { bytes: 1024 + envelope + 1 })).status, 413);
+    assert.equal((await upload(blobs, { bytes: 1024 + envelope })).status, 201);
+  });
+  await withBlobs(async ({ blobs }) => {
+    assert.equal((await upload(blobs, { bytes: IMAGE_MAX_BYTES + envelope + 1 })).status, 413, 'a larger configured limit does not raise the cap');
+    assert.equal((await upload(blobs, { bytes: IMAGE_MAX_BYTES + envelope })).status, 201);
+  }, { maxUploadBytes: 2 * IMAGE_MAX_BYTES });
+});
+
+test('a temp file that cannot be removed after publishing does not undo the upload; the startup sweep removes it later', () => withBlobs(async ({ blobs, roomLog, uploadsDir, faults, warnings, clock }) => {
+  faults.unlink = (path) => path.endsWith('.tmp');
+  const result = await upload(blobs);
+  assert.equal(result.status, 201);
+  assert.deepEqual(await inventoryIds(roomLog), [result.id]);
+  assert.equal(warnings.length, 1, 'one warning');
+  const [temp] = (await readdir(uploadsDir)).filter((name) => name.endsWith('.tmp'));
+  assert.match(temp, /^\.upload-e2e-/);
+  faults.unlink = () => false;
+  await setAge(join(uploadsDir, temp), 1000, clock.now);
+  await blobs.reconcileOrphans();
+  assert.ok((await readdir(uploadsDir)).includes(temp), 'a young temp may belong to an upload in flight');
+  await setAge(join(uploadsDir, temp), E2E_ORPHAN_MIN_AGE_MS + 1, clock.now);
+  await blobs.reconcileOrphans();
+  assert.deepEqual((await readdir(uploadsDir)).filter((name) => name.endsWith('.tmp')), []);
+  assert.deepEqual(await e2eFiles(uploadsDir), [e2eBlobFilename(HANDLE, result.id)]);
+}));
+
+test('after a restart, staged blobs of the lost rotation are deleted with their entries, and a failed delete is retried', () => withBlobs(async ({ blobs, roomLog, assemble, uploadsDir, roomUploadUsage, faults }) => {
+  const { rotationId } = await roomLog.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
+  const staged = await upload(blobs, { stage: rotationId });
+  assert.equal(staged.status, 201);
+  const restarted = assemble();
+  assert.equal(restarted.roomLog.loadedDocNames().length, 0);
+
+  faults.unlink = (path) => path.endsWith('.e2e');
+  assert.equal(await restarted.blobs.reconcileOrphans(), 0);
+  assert.deepEqual(await e2eFiles(uploadsDir), [e2eBlobFilename(HANDLE, staged.id)], 'the file survives a failed delete');
+  assert.deepEqual((await restarted.roomLog.blobs(DOC)).map((entry) => entry.id), [staged.id], 'so does its entry');
+
+  faults.unlink = () => false;
+  assert.equal(await restarted.blobs.reconcileOrphans(), 1);
+  assert.deepEqual(await e2eFiles(uploadsDir), []);
+  assert.deepEqual(await restarted.roomLog.blobs(DOC), []);
+  assert.deepEqual(roomUploadUsage.get(DOC), EMPTY_USAGE());
 }));
 
 test('startup sweep deletes only unreferenced .e2e files strictly older than the age limit', () => withBlobs(async ({ blobs, roomLog, uploadsDir, clock }) => {
@@ -208,11 +325,13 @@ test('deleteExcept removes every blob of the room that is not kept and returns t
   assert.notEqual(drop.id, keep.id);
 }));
 
-test('the startup sweep keeps only rooms that hold blobs in memory for the expiry sweep', () => withBlobs(async ({ blobs, roomLog }) => {
-  await blobs.reconcileOrphans();
-  assert.deepEqual(roomLog.loadedDocNames(), [], 'rooms without blobs are not pinned');
-  const kept = await upload(blobs);
-  await blobs.reconcileOrphans();
-  assert.deepEqual(roomLog.loadedDocNames(), [DOC]);
-  assert.deepEqual(await inventoryIds(roomLog), [kept.id]);
+test('the startup sweep leaves no locked room pinned in memory, and remembers rooms with retired blobs', () => withBlobs(async ({ blobs, roomLog, assemble, store, clock }) => {
+  await upload(blobs);
+  await commitRotation(roomLog, await roomLog.blobs(DOC));
+  const restarted = assemble();
+  await restarted.blobs.reconcileOrphans();
+  assert.deepEqual(restarted.roomLog.loadedDocNames(), []);
+  assert.deepEqual(restarted.store.retiredRooms(), [DOC]);
+  assert.deepEqual(store.retiredRooms(), [DOC]);
+  assert.equal(clock.now, START_MS);
 }));

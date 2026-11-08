@@ -100,6 +100,9 @@ test('blob routes answer 404 for a normal room, 401 without a current-epoch cook
 
   assert.equal((await upload(env.relay, room, 'not-a-uuid', cipher(1))).status, STATUS.BAD_REQUEST);
   assert.equal((await upload(env.relay, room, randomUUID().toUpperCase(), cipher(1))).status, STATUS.BAD_REQUEST);
+  for (const notV4 of ['123e4567-e89b-12d3-a456-426614174000', '00000000-0000-0000-0000-000000000000']) {
+    assert.equal((await upload(env.relay, room, notV4, cipher(1))).status, STATUS.BAD_REQUEST, notV4);
+  }
   assert.equal((await upload(env.relay, room, id, cipher(1), { headers: { 'x-blob-stage': 'nope' } })).status, STATUS.BAD_REQUEST);
   assert.equal((await upload(env.relay, room, id, cipher(1, E2E_CIPHERTEXT_OVERHEAD_BYTES - 1))).status, STATUS.BAD_REQUEST);
   assert.equal((await upload(env.relay, room, id, cipher(1), { headers: { 'content-type': 'image/png' } })).status, STATUS.UNSUPPORTED);

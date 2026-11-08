@@ -16,6 +16,7 @@ const run = promisify(execFile);
 
 const NORMAL_DOC = 'yjs/board-plain-aaaaaaaa';
 const LOCKED_DOC = 'yjs/board-locked-bbbbbbbb';
+const MALFORMED_DOCS = [['yjs/board-falsy-cccccccc', false], ['yjs/board-zero-dddddddd', 0], ['yjs/board-empty-eeeeeeee', '']];
 const NORMAL_ITEMS = 1;
 const LOCKED_ITEMS = 3;
 
@@ -25,18 +26,22 @@ const docWithItems = (count) => {
   return Y.encodeStateAsUpdate(doc);
 };
 
-test('decode-scan counts normal rooms and skips documents that carry a room lock', async () => {
+test('decode-scan counts normal rooms and skips documents that carry any room lock meta', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'decode-scan-'));
   try {
     const ldb = new LeveldbPersistence(dir);
     await ldb.storeUpdate(NORMAL_DOC, docWithItems(NORMAL_ITEMS));
     await ldb.storeUpdate(LOCKED_DOC, docWithItems(LOCKED_ITEMS));
     await ldb.setMeta(LOCKED_DOC, ROOM_LOCK_META, encodeLockRecord(lockRecord()));
+    for (const [docName, value] of MALFORMED_DOCS) {
+      await ldb.storeUpdate(docName, docWithItems(LOCKED_ITEMS));
+      await ldb.setMeta(docName, ROOM_LOCK_META, value);
+    }
     await ldb.destroy();
     const { stdout } = await run(process.execPath, ['scripts/decode-scan.mjs', dir]);
     const summary = JSON.parse(stdout);
-    assert.equal(summary.rooms, 2);
-    assert.equal(summary.skippedEncrypted, 1);
+    assert.equal(summary.rooms, 2 + MALFORMED_DOCS.length);
+    assert.equal(summary.skippedEncrypted, 1 + MALFORMED_DOCS.length, 'any present lock meta, even malformed, fails closed');
     assert.equal(summary.items, NORMAL_ITEMS, 'the encrypted room items are never read');
     assert.equal(summary.roomMiB.length, 1);
   } finally {

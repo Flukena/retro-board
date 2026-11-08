@@ -152,9 +152,9 @@ test('freeze rejects a wrong revision, a failed verify and a second freeze', () 
 
 test('release resumes, deletes only that rotation\'s staged blobs, and drops their entries', () => withLog(async ({ log, make, timers, calls }) => {
   await log.addBlob(DOC, { id: 'kept', bytes: 5, epoch: 0, stagedFor: null });
+  await log.addBlob(DOC, { id: 'other', bytes: 6, epoch: 1, stagedFor: null });
   const { rotationId } = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
   await log.addBlob(DOC, { id: 'staged', bytes: 6, epoch: 1, stagedFor: rotationId });
-  await log.addBlob(DOC, { id: 'other', bytes: 6, epoch: 1, stagedFor: null });
   assert.equal(await log.release(DOC, 'not-the-rotation'), false);
   assert.equal(await log.release(DOC, rotationId), true);
   assert.deepEqual(calls.staged, [[DOC, rotationId]]);
@@ -542,4 +542,55 @@ test('loadedDocNames lists the rooms held in memory and drops a forgotten one', 
   assert.deepEqual(log.loadedDocNames(), [DOC]);
   log.forget(DOC);
   assert.deepEqual(log.loadedDocNames(), []);
+}));
+
+test('a blob that is not staged is refused while a freeze is active and accepted after it ends', () => withLog(async ({ log }) => {
+  const { rotationId } = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
+  await rejectsWith(log.addBlob(DOC, { id: 'plain', bytes: 5, epoch: 0, stagedFor: null }), E2E_FROZEN);
+  await log.release(DOC, rotationId);
+  await log.addBlob(DOC, { id: 'plain', bytes: 5, epoch: 0, stagedFor: null });
+  assert.deepEqual((await log.blobs(DOC)).map((b) => b.id), ['plain']);
+}));
+
+test('addBlob with expectedEpoch is refused once the stored key epoch has moved on', () => withLog(async ({ log, ldb }) => {
+  await log.addBlob(DOC, { id: 'current', bytes: 5, epoch: 0, stagedFor: null }, { expectedEpoch: 0 });
+  await ldb.setMeta(DOC, ROOM_LOCK_META, encodeLockRecord(lockRecord({ keyEpoch: 1, lockRevision: 1 })));
+  await rejectsWith(log.addBlob(DOC, { id: 'slow', bytes: 5, epoch: 0, stagedFor: null }, { expectedEpoch: 0 }), E2E_ROTATION_STALE);
+  assert.deepEqual((await log.blobs(DOC)).map((b) => b.id), ['current']);
+  await log.addBlob(DOC, { id: 'fresh', bytes: 5, epoch: 1, stagedFor: null }, { expectedEpoch: 1 });
+}));
+
+test('commit refuses an inventory with blobs staged for another rotation and clears stagedFor on kept entries', () => withLog(async ({ log, ldb, make }) => {
+  const { rotationId } = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
+  const args = (blobInventory) => ({ rotationId, expectedHead: 0, verify: approve, snapshot: bytesOf(4), lockRecord: newLock(), blobInventory });
+  const entry = (id, stagedFor) => ({ id, bytes: 5, epoch: 1, stagedFor });
+  await rejectsWith(log.commitRotation(DOC, args([entry('a', 'some-other-rotation')])), E2E_ROTATION_STALE);
+  assert.equal((await storedLock(ldb)).keyEpoch, 0, 'nothing was written');
+  await log.commitRotation(DOC, args([entry('mine', rotationId), entry('plain', null)]));
+  assert.deepEqual((await make().blobs(DOC)).map((b) => [b.id, b.stagedFor]), [['mine', null], ['plain', null]]);
+}));
+
+const commitWith = async (log, blobInventory) => {
+  const { rotationId } = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
+  await log.commitRotation(DOC, { rotationId, expectedHead: 0, verify: approve, snapshot: bytesOf(4), lockRecord: newLock(), blobInventory });
+};
+
+test('a commit that retires old-epoch blobs calls onBlobsRetired; one that retires none does not', async () => {
+  const retired = [];
+  const options = { onBlobsRetired: (docName) => retired.push(docName) };
+  await withLog((ctx) => commitWith(ctx.log, [{ id: 'new', bytes: 5, epoch: 1, stagedFor: null }]), options);
+  assert.deepEqual(retired, []);
+  await withLog((ctx) => commitWith(ctx.log, [{ id: 'old', bytes: 5, epoch: 0, stagedFor: null }]), options);
+  assert.deepEqual(retired, [DOC]);
+});
+
+test('expiredBlobs is read-only and removeBlobs drops exactly the given entries', () => withLog(async ({ log, make }) => {
+  await log.addBlob(DOC, { id: 'old', bytes: 5, epoch: 0, stagedFor: null });
+  await commitWith(log, await log.blobs(DOC));
+  await log.addBlob(DOC, { id: 'new', bytes: 5, epoch: 1, stagedFor: null });
+  assert.deepEqual(await log.expiredBlobs(DOC, START_MS + GRACE_MS - 1), { expired: [], remainingRetired: 1 });
+  assert.deepEqual(await log.expiredBlobs(DOC, START_MS + GRACE_MS), { expired: ['old'], remainingRetired: 0 });
+  assert.deepEqual((await make().blobs(DOC)).map((b) => b.id).sort(), ['new', 'old'], 'listing changes nothing');
+  await log.removeBlobs(DOC, ['old', 'unknown']);
+  assert.deepEqual((await make().blobs(DOC)).map((b) => b.id), ['new']);
 }));

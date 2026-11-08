@@ -10,16 +10,17 @@ import { roomTargetFromRequest, tokenDocNameFromRequest } from './src/server/rel
 import { RelayWsTraffic, closeOnSessionExpiry } from './src/server/relay-ws-traffic.js';
 import { createE2ERelay } from './src/server/e2e-relay.js';
 import { E2ERoomLog } from './src/server/e2e-room-log.js';
+import { migrateLegacyImages } from './src/server/legacy-image-migration.js';
 import { E2EBlobStore } from './src/server/e2e-blob-store.js';
 import { createE2EBlobs } from './src/server/e2e-blobs.js';
 import { isExactAllowedOrigin, sendUpgradeRejection } from './src/server/relay-http.js';
 import { handleRoomRoute } from './src/server/relay-room-routes.js';
 import { roomLogId } from './src/server/relay-log-id.js';
-import { createUploadState, scanUploadUsage, createRelayUploads, createImageReadBudgets, MIME_EXT, matchesMagicBytes, UPLOAD_STORAGE_FAILURE_EVENT, ROOM_UPLOAD_USAGE_META } from './src/server/relay-uploads.js';
+import { createUploadState, scanUploadUsage, createRelayUploads, createImageReadBudgets, UPLOAD_STORAGE_FAILURE_EVENT, ROOM_UPLOAD_USAGE_META } from './src/server/relay-uploads.js';
 import http from 'http';
 import fs from 'fs';
 import { createRequire } from 'module';
-import { randomBytes, randomUUID } from 'crypto';
+import { randomBytes } from 'crypto';
 import { isIP } from 'net';
 import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'url';
@@ -200,11 +201,7 @@ const {
   SHUTDOWN_TIMEOUT_MS,
   HTTP_SHUTDOWN_GRACE_MS,
   UPLOADS_DIR,
-  MAX_UPLOAD_BYTES,
   MAX_UPLOAD_STORAGE_BYTES,
-  MAX_UPLOAD_FILES,
-  MAX_ROOM_UPLOAD_BYTES,
-  MAX_ROOM_UPLOAD_FILES,
   MAX_BUCKETS,
 } = relayConfig;
 fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -730,90 +727,10 @@ setPersistence({
   provider: ldb,
 });
 
-// One-shot migration: rewrite legacy base64-embedded image `src` fields
-// (from before image uploads existed) to server-hosted files, same env-var-
-// triggered pattern as YJS_WIPE_DOCS above. Runs through this process's own
-// already-open `ldb` — a second LeveldbPersistence against the same DB_DIR
-// while this server holds it open conflicts (`Iterator is not open`).
-// Idempotent: migrated items no longer have a `data:` src, so re-running is
-// a no-op. Irreversible CRDT surgery — back up the yjs_data volume first.
-const DATA_URL_RE = /^data:([^;]+);base64,(.*)$/s;
-const MIGRATE = (process.env.YJS_MIGRATE_DOCS || '')
-  .split(',').map((s) => s.trim()).filter(Boolean);
-for (const name of MIGRATE) {
-  if (roomRegistry.isLocked(name)) {
-    console.warn('[yjs] migration skipped: room is end-to-end encrypted', roomLogId(name));
-    continue;
-  }
-  const createdPaths = [];
-  let updatePersisted = false;
-  try {
-    const roomHandle = roomHandleForDoc(name);
-    const room = roomUploadUsage.get(name);
-    if (!roomHandle || !room) throw new Error('migration target is not a registered tokenized room');
-    const ydoc = await checkedGetYDoc(name);
-    const before = Y.encodeStateAsUpdate(ydoc).byteLength;
-    const pendingUpdates = [];
-    ydoc.on('update', (u) => pendingUpdates.push(u));
-    let rewritten = 0;
-    let rewrittenBytes = 0;
-    ydoc.transact(() => {
-      ydoc.getMap('items').forEach((yItem) => {
-        if (!(yItem instanceof Y.Map) || yItem.get('type') !== 'image') return;
-        const src = yItem.get('src');
-        const m = typeof src === 'string' && src.match(DATA_URL_RE);
-        if (!m) return;
-        const ext = MIME_EXT[m[1]];
-        if (!ext) return;
-        const bytes = Buffer.from(m[2], 'base64');
-        if (bytes.byteLength < 1 || bytes.byteLength > MAX_UPLOAD_BYTES
-            || !matchesMagicBytes(bytes.subarray(0, 12), m[1])
-            || uploadState.bytes + rewrittenBytes + bytes.byteLength > MAX_UPLOAD_STORAGE_BYTES
-            || room.bytes + rewrittenBytes + bytes.byteLength > MAX_ROOM_UPLOAD_BYTES
-            || uploadState.files + rewritten >= MAX_UPLOAD_FILES
-            || room.files + rewritten >= MAX_ROOM_UPLOAD_FILES) return;
-        const imageId = `${randomUUID()}.${ext}`;
-        const filename = `${roomHandle}.${imageId}`;
-        const path = join(UPLOADS_DIR, filename);
-        fs.writeFileSync(path, bytes, { flag: 'wx', mode: 0o600 });
-        createdPaths.push(path);
-        yItem.set('src', `/rooms/${roomHandle}/images/${imageId}`);
-        rewritten += 1;
-        rewrittenBytes += bytes.byteLength;
-      });
-    }, 'migration');
-    for (const u of pendingUpdates) {
-      await checkedStoreUpdate(name, u);
-      updatePersisted = true;
-    }
-    if (rewritten) {
-      room.bytes += rewrittenBytes;
-      room.files += rewritten;
-      await checkedSetMeta(name, ROOM_UPLOAD_USAGE_META, { bytes: room.bytes, files: room.files });
-    }
-    await checkedFlushDocument(name);
-    uploadState.bytes += rewrittenBytes;
-    uploadState.files += rewritten;
-    const after = Y.encodeStateAsUpdate(ydoc).byteLength;
-    console.log('[yjs] migrated doc', roomLogId(name), { rewritten, beforeBytes: before, afterBytes: after });
-  } catch (err) {
-    // Before the CRDT update is durable these files are unreachable and safe
-    // to roll back. Once the update is stored they must remain so a retry can
-    // reconcile metadata without breaking already-persisted image URLs.
-    if (!updatePersisted) {
-      for (const path of createdPaths) {
-        try { fs.unlinkSync(path); }
-        catch (cleanupErr) {
-          if (cleanupErr.code !== 'ENOENT') {
-            console.error('[yjs] migration rollback failed', { docName: roomLogId(name), err: cleanupErr.message });
-          }
-        }
-      }
-    }
-    console.error('[yjs] migration failed', { docName: roomLogId(name), err: err.message });
-    throw err;
-  }
-}
+await migrateLegacyImages((process.env.YJS_MIGRATE_DOCS || '').split(',').map((entry) => entry.trim()).filter(Boolean), {
+  Y, registry: roomRegistry, roomUploadUsage, uploadState, config: relayConfig,
+  persistence: { getYDoc: checkedGetYDoc, storeUpdate: checkedStoreUpdate, setMeta: checkedSetMeta, flushDocument: checkedFlushDocument },
+});
 
 
 // null = normal room; a locked room's cookie is bound to its key epoch; an unreadable lock matches nothing (-1).
@@ -1250,6 +1167,7 @@ roomRegistry.activity.watch(wss, (error) => roomRegistry.reportStorageFailure(er
 const e2eRoomLog = new E2ERoomLog({
   ldb, maxRoomBytes: MAX_DOCUMENT_BYTES, reserveStore: registryPersistence.reserveStore, hasCapacity: registryPersistence.hasCapacity,
   onError: markStorageFailure, deleteStagedBlobs: (_docName, rotationId) => e2eBlobStore.deleteStaged(rotationId),
+  onBlobsRetired: (docName) => e2eBlobStore.trackRetired(docName),
 });
 const e2eRelay = createE2ERelay({
   traffic: wsTraffic, maxRoomBytes: MAX_DOCUMENT_BYTES, maxAppendBytes: RL_MAX_BYTES, onStorageFailure: markStorageFailure, touch: (docName) => roomRegistry.activity.touch(docName),

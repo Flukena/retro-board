@@ -86,6 +86,17 @@ test('AAD rejects ambiguous or malformed parts', () => {
   for (const id of ['img|1', 'img1', 7, null]) assert.throws(() => e2eAad(handle, 3, 'blob', id));
 });
 
+test('blob bindings accept only lowercase UUID v4', () => {
+  const handle = 'A'.repeat(32);
+  assert.ok(e2eAad(handle, 3, 'blob', '123e4567-e89b-42d3-b456-426614174000'));
+  for (const id of [
+    '123e4567-e89b-12d3-a456-426614174000', // version 1
+    '00000000-0000-0000-0000-000000000000', // version 0
+    '123e4567-e89b-42d3-c456-426614174000', // variant bits
+    BLOB_ID.toUpperCase(),
+  ]) assert.throws(() => e2eAad(handle, 3, 'blob', id), id);
+});
+
 test('decodeBase64Url is strict', () => {
   assert.deepEqual([...decodeBase64Url('AA')], [0]);
   assert.equal(decodeBase64Url('AB'), null);

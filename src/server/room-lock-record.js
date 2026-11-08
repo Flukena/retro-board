@@ -5,6 +5,9 @@ export const ROOM_LOCK_META = 'retro-room-lock-v1';
 export const ROOM_LOCK_VERSION = 1;
 const RECORD_FIELDS = ['v', 'salt', 'kdf', 'verifier', 'wrappedDek', 'wrapIv', 'keyEpoch', 'ownerAccountId', 'createdAt', 'lockRevision'];
 
+/** True when a stored lock meta value exists at all: a present but unreadable record still means "locked". */
+export const hasLockMeta = (value) => value !== undefined && value !== null;
+
 /** Strict decoder: returns a frozen record, or null for anything that is not exactly a v1 record. */
 export function decodeLockRecord(value) {
   if (!isPlainObject(value) || !hasExactKeys(value, RECORD_FIELDS) || value.v !== ROOM_LOCK_VERSION) return null;

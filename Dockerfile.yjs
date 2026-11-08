@@ -46,7 +46,7 @@ COPY --chown=node:node \
     ./src/domain/
 
 COPY --chown=node:node \
-    src/server/account-store.js src/server/auth-google.js src/server/auth-routes.js src/server/auth-session.js src/server/e2e-blob-store.js src/server/e2e-blobs.js src/server/e2e-relay.js src/server/e2e-room-log.js src/server/maintainer-accounts.js src/server/maintainer-room-access.js src/server/maintainer-server.js src/server/maintainer-session.js src/server/maintainer-snapshot.js \
+    src/server/account-store.js src/server/auth-google.js src/server/auth-routes.js src/server/auth-session.js src/server/e2e-blob-store.js src/server/e2e-blobs.js src/server/e2e-relay.js src/server/e2e-room-log.js src/server/legacy-image-migration.js src/server/maintainer-accounts.js src/server/maintainer-room-access.js src/server/maintainer-server.js src/server/maintainer-session.js src/server/maintainer-snapshot.js \
     src/server/public-action-limit.js src/server/public-restore-images.js src/server/public-upload-backup.js src/server/public-wall-config.js \
     src/server/public-wall-history.js src/server/public-wall-prune.js src/server/public-wall-restore.js \
     src/server/public-wall-snapshot.js src/server/relay-awareness-fanout.js src/server/relay-config.js src/server/relay-http.js \

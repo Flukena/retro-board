@@ -3,7 +3,7 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { ROOM_HANDLE_RE, ROOM_ID_ALLOCATION_ATTEMPTS, STORE_OPERATION_OVERHEAD_BYTES } from './relay-config.js';
 import { roomLogId } from './relay-log-id.js';
 import { RoomActivity } from './room-activity.js';
-import { CORRUPT_LOCK, ROOM_LOCK_META, decodeLockRecord, encodeLockRecord } from './room-lock-record.js';
+import { CORRUPT_LOCK, ROOM_LOCK_META, decodeLockRecord, encodeLockRecord, hasLockMeta } from './room-lock-record.js';
 
 export const ROOM_REGISTRATION_META = 'retro-room-registration-v1';
 export const ROOM_HANDLE_META = 'retro-room-handle-v1';
@@ -201,7 +201,7 @@ export class RoomRegistry extends EventEmitter {
   // null = unlocked room, CORRUPT_LOCK = committed record that cannot be read (managed but never served).
   async #readLock(docName) {
     const raw = await this.#persistence.getMeta(docName, ROOM_LOCK_META);
-    if (raw === undefined || raw === null) return null;
+    if (!hasLockMeta(raw)) return null;
     const lock = decodeLockRecord(raw);
     if (!lock) {
       this.#log.warn(INVALID_LOCK_LOG, { docName: roomLogId(docName) });

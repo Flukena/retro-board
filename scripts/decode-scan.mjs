@@ -9,7 +9,7 @@
  */
 import { createRequire } from 'node:module';
 import { decodeRemoteBoard } from '../src/client/board/remote-board-decoder.js';
-import { ROOM_LOCK_META } from '../src/server/room-lock-record.js';
+import { ROOM_LOCK_META, hasLockMeta } from '../src/server/room-lock-record.js';
 
 const require = createRequire(import.meta.url);
 const Y = require('yjs');
@@ -67,7 +67,7 @@ const main = async (dir) => {
     for (const name of await db.getAllDocNames()) {
       summary.rooms += 1;
       // An encrypted room's document holds no board data; its content lives as ciphertext the scan cannot read.
-      if (await db.getMeta(name, ROOM_LOCK_META)) { summary.skippedEncrypted += 1; continue; }
+      if (hasLockMeta(await db.getMeta(name, ROOM_LOCK_META))) { summary.skippedEncrypted += 1; continue; }
       scanDoc(await db.getYDoc(name), summary);
     }
   } finally {

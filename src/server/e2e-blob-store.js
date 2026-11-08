@@ -5,6 +5,8 @@ import { e2eBlobFilename, parseE2EBlobFilename } from './relay-uploads.js';
 
 /** An unreferenced `.e2e` file younger than this may be an upload still in flight, so it is kept. */
 export const E2E_ORPHAN_MIN_AGE_MS = 3_600_000;
+const BLOB_TEMP_PREFIX = '.upload-e2e-';
+const BLOB_TEMP_RE = /^\.upload-e2e-[0-9a-f-]+\.tmp$/;
 const ORPHAN_LOG = '[yjs] e2e orphan blob sweep';
 const NOT_FOUND = 'ENOENT';
 const ALREADY_EXISTS = 'EEXIST';
@@ -24,6 +26,7 @@ export class E2EBlobStore {
   #io;
   #logger;
   #staged = new Map();
+  #retiredRooms = new Set();
 
   constructor({ uploadsDir, admission, roomUploadUsage, io = fs.promises, logger = console }) {
     this.#uploadsDir = uploadsDir;
@@ -33,8 +36,15 @@ export class E2EBlobStore {
     this.#logger = logger;
   }
 
-  /** A fresh temp path the interrupted-upload sweep already knows how to clean. */
-  newTempPath() { return join(this.#uploadsDir, `.upload-${randomUUID()}.tmp`); }
+  /** A fresh temp path; the generic interrupted-upload sweep matches it, and the prefix marks it as a blob's. */
+  newTempPath() { return join(this.#uploadsDir, `${BLOB_TEMP_PREFIX}${randomUUID()}.tmp`); }
+
+  /** Remembers a room that has old-epoch blobs inside their grace, so expiry finds it even when the room is not in memory. */
+  trackRetired(docName) { this.#retiredRooms.add(docName); }
+
+  untrackRetired(docName) { this.#retiredRooms.delete(docName); }
+
+  retiredRooms() { return [...this.#retiredRooms]; }
 
   pathOf(handle, id) { return join(this.#uploadsDir, e2eBlobFilename(handle, id)); }
 
@@ -128,16 +138,15 @@ export class E2EBlobStore {
   }
 
   /**
-   * Startup sweep: removes blob files that no locked room's inventory lists and that are older than
-   * E2E_ORPHAN_MIN_AGE_MS. `inventoried` is a Set of `<handle>.<id>`; files of `protectedHandles` (rooms whose
-   * inventory could not be read) are never touched. Usage is not touched here: the caller
-   * reconciles it from the directory afterwards. Returns the number of files removed.
+   * Startup sweep: removes blob files that no locked room's inventory lists and temp files of blob uploads, when
+   * they are older than E2E_ORPHAN_MIN_AGE_MS. `inventoried` is a Set of `<handle>.<id>`; files of
+   * `protectedHandles` (rooms whose inventory could not be read) are never touched. Usage is not touched here: the
+   * caller reconciles it from the directory afterwards. Returns the number of files removed.
    */
   async deleteOrphans(inventoried, now, protectedHandles = new Set()) {
     let removed = 0;
     for (const entry of await this.#io.readdir(this.#uploadsDir, { withFileTypes: true })) {
-      const parsed = entry.isFile() ? parseE2EBlobFilename(entry.name) : null;
-      if (!parsed || protectedHandles.has(parsed.handle) || inventoried.has(inventoryKey(parsed.handle, parsed.id))) continue;
+      if (!entry.isFile() || !this.#isOrphanCandidate(entry.name, inventoried, protectedHandles)) continue;
       const path = join(this.#uploadsDir, entry.name);
       const { mtimeMs } = await this.#io.stat(path);
       if (now - mtimeMs <= E2E_ORPHAN_MIN_AGE_MS) continue;
@@ -146,5 +155,11 @@ export class E2EBlobStore {
     }
     this.#logger.log(ORPHAN_LOG, { removed });
     return removed;
+  }
+
+  #isOrphanCandidate(name, inventoried, protectedHandles) {
+    if (BLOB_TEMP_RE.test(name)) return true;
+    const parsed = parseE2EBlobFilename(name);
+    return parsed !== null && !protectedHandles.has(parsed.handle) && !inventoried.has(inventoryKey(parsed.handle, parsed.id));
   }
 }

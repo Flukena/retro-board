@@ -17,7 +17,9 @@ const CHAR_MASK = 0x3f;
 const INVALID_LENGTH_REMAINDER = 1;
 const CHAR_GROUP = 4;
 const ROOM_HANDLE_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
-export const BLOB_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// Lowercase UUID v4 (version 4, RFC 4122 variant): the form `crypto.randomUUID()` produces. The AAD blob binding and
+// the relay's blob id header share it.
+export const BLOB_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const textEncoder = new TextEncoder();
 
 export function encodeBase64Url(bytes) {
