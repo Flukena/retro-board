@@ -286,7 +286,9 @@ export class E2ERoomLog {
         throw codedError(E2E_ROTATION_STALE, 'inventory holds blobs staged for another rotation');
       }
       const nextRecord = encodeLockRecord({ ...lockRecord, lockRevision: current.lockRevision + 1 });
-      const inventory = this.#retireOldEpochs(blobInventory, nextRecord.keyEpoch);
+      // Copies staged for this rotation are encrypted under the next key: they join its epoch and are never retired.
+      const adopted = blobInventory.map((entry) => (entry.stagedFor === rotationId ? { ...entry, epoch: nextRecord.keyEpoch } : entry));
+      const inventory = this.#retireOldEpochs(adopted, nextRecord.keyEpoch);
       const ops = [
         ...[...room.sizes.keys()].map((seq) => del(updateKey(seq))),
         put(E2E_SNAPSHOT_KEY, snapshotValue(room.head, snapshot)),

@@ -299,6 +299,22 @@ test('expireOldEpochBlobs removes only retired entries past the grace and return
   assert.deepEqual((await make().blobs(DOC)).map((b) => b.id), ['new']);
 }));
 
+test('a commit moves the blobs staged for it to the new epoch, unretired, and retires only the old epoch', () => withLog(async ({ log, make }) => {
+  await log.addBlob(DOC, { id: 'old', bytes: 1, epoch: 0, stagedFor: null });
+  const { rotationId } = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
+  await log.addBlob(DOC, { id: 'staged', bytes: 2, epoch: 0, stagedFor: rotationId });
+  await log.commitRotation(DOC, {
+    rotationId, knownSnapshotBase: 0, expectedHead: 0, verify: approve, snapshot: bytesOf(1), lockRecord: newLock(),
+    blobInventory: await log.blobs(DOC),
+  });
+  const byId = new Map((await make().blobs(DOC)).map((entry) => [entry.id, entry]));
+  assert.equal(byId.get('staged').epoch, 1);
+  assert.equal(byId.get('staged').retiredAt, undefined);
+  assert.equal(byId.get('staged').stagedFor, null);
+  assert.equal(byId.get('old').epoch, 0);
+  assert.equal(byId.get('old').retiredAt, START_MS);
+}));
+
 test('clearDocument removes every e2e key', () => withLog(async ({ log, ldb }) => {
   await log.append(DOC, bytesOf(2));
   await log.append(DOC, bytesOf(2));
