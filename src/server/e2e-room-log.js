@@ -11,6 +11,8 @@ export const E2E_LOCK_MISMATCH = 'E2E_LOCK_MISMATCH';
 export const E2E_CORRUPT = 'E2E_CORRUPT';
 export const E2E_BLOB_DUPLICATE = 'E2E_BLOB_DUPLICATE';
 export const MAX_PENDING_OPS_PER_ROOM = 256;
+export const MAX_FREEZE_TTL_MS = 120_000;
+export const E2E_BLOB_GRACE_MS = 86_400_000;
 
 const HEAD_KEY = 'e2e-head';
 const SNAPSHOT_KEY = 'e2e-snapshot';
@@ -21,6 +23,7 @@ const STORE_OVERHEAD_BYTES = 64;
 const DIGEST_ALGORITHM = 'sha256';
 const DIGEST_ENCODING = 'hex';
 const noop = () => undefined;
+const clampTtl = (ttlMs) => (Number.isFinite(ttlMs) && ttlMs > 0 ? Math.min(ttlMs, MAX_FREEZE_TTL_MS) : MAX_FREEZE_TTL_MS);
 
 const codedError = (code, message) => Object.assign(new Error(message), { code });
 const updateKey = (seq) => UPDATE_KEY_PREFIX + seq.toString().padStart(SEQ_KEY_DIGITS, '0');
@@ -30,11 +33,32 @@ const put = (key, value) => ({ type: 'put', key, value });
 const del = (key) => ({ type: 'del', key });
 const range = (from, to) => Array.from({ length: Math.max(0, to - from + 1) }, (_, i) => from + i);
 const snapshotValue = (baseSeq, bytes) => ({ baseSeq, bytes, sha256: digestOf(bytes) });
+const NUMBER_BYTES = 8;
+
+/** True when a stored snapshot value's bytes still match its recorded digest. */
+export function verifySnapshotDigest(snapshot) {
+  return snapshot?.bytes instanceof Uint8Array && typeof snapshot.sha256 === 'string' && digestOf(snapshot.bytes) === snapshot.sha256;
+}
+
+function valueBytes(value) {
+  if (value instanceof Uint8Array) return value.byteLength;
+  if (typeof value === 'string') return value.length;
+  if (typeof value === 'number') return NUMBER_BYTES;
+  if (Array.isArray(value)) return value.reduce((sum, item) => sum + valueBytes(item), 0);
+  if (value && typeof value === 'object') {
+    return Object.entries(value).reduce((sum, [key, item]) => sum + key.length + valueBytes(item), 0);
+  }
+  return 0;
+}
+
+/** Bytes a batch will write: every key plus every put value. */
+export const estimateOpsBytes = (ops) => ops.reduce((sum, op) => sum + op.key.length + valueBytes(op.value), 0);
 
 function newRoom() {
   return {
     pending: 0, tail: Promise.resolve(), loaded: false, head: 0, base: 0, snapshotBytes: 0,
     sizes: new Map(), blobs: [], frozen: null, listeners: new Set(),
+    pendingStagedCleanup: new Set(), forgetRequested: false,
   };
 }
 
@@ -77,8 +101,15 @@ export class E2ERoomLog {
   /** Drops in-memory state for a retired or evicted room; storage is untouched. */
   forget(docName) {
     const room = this.#rooms.get(docName);
-    if (room?.frozen) this.#clearTimer(room.frozen.timer);
-    this.#rooms.delete(docName);
+    if (!room) return;
+    room.forgetRequested = true;
+    this.#evictIfIdle(docName, room);
+  }
+
+  // Evicting a busy room would let a fresh one run beside its chain, so wait until it is idle.
+  #evictIfIdle(docName, room) {
+    const idle = room.pending === 0 && !room.frozen && room.listeners.size === 0;
+    if (room.forgetRequested && idle && this.#rooms.get(docName) === room) this.#rooms.delete(docName);
   }
 
   async open(docName) {
@@ -89,7 +120,13 @@ export class E2ERoomLog {
     return this.#enqueue(docName, async (room) => {
       const { state } = await this.#readState(docName, room);
       room.listeners.add(onEntry);
-      return { state, unsubscribe: () => { room.listeners.delete(onEntry); } };
+      return {
+        state,
+        unsubscribe: () => {
+          room.listeners.delete(onEntry);
+          this.#evictIfIdle(docName, room);
+        },
+      };
     });
   }
 
@@ -106,7 +143,7 @@ export class E2ERoomLog {
       this.#assertNotFrozen(room);
       this.#assertWithinQuota(roomSize(room) + ciphertext.byteLength);
       const seq = room.head + 1;
-      await this.#write(docName, [put(updateKey(seq), ciphertext), put(HEAD_KEY, seq)], ciphertext.byteLength);
+      await this.#write(docName, [put(updateKey(seq), ciphertext), put(HEAD_KEY, seq)]);
       room.head = seq;
       room.sizes.set(seq, ciphertext.byteLength);
       this.#notify(room, { kind: 'update', seq, bytes: ciphertext });
@@ -125,7 +162,7 @@ export class E2ERoomLog {
       const keptBytes = [...room.sizes].filter(([seq]) => seq > baseSeq).reduce((sum, [, n]) => sum + n, 0);
       this.#assertWithinQuota(ciphertext.byteLength + keptBytes);
       const ops = [put(SNAPSHOT_KEY, snapshotValue(baseSeq, ciphertext)), ...covered.map((seq) => del(updateKey(seq)))];
-      await this.#write(docName, ops, ciphertext.byteLength);
+      await this.#write(docName, ops);
       covered.forEach((seq) => room.sizes.delete(seq));
       room.base = baseSeq;
       room.snapshotBytes = ciphertext.byteLength;
@@ -139,26 +176,54 @@ export class E2ERoomLog {
       if (room.frozen) throw codedError(E2E_FROZEN, 'rotation already in progress');
       const record = await this.#verifiedRecord(docName, expectedRevision, verify);
       const rotationId = randomUUID();
-      const timer = this.#setTimer(() => { this.#releaseFromTimer(docName, rotationId); }, ttlMs);
+      const timer = this.#setTimer(() => { this.#expireFreeze(docName, rotationId); }, clampTtl(ttlMs));
       room.frozen = { rotationId, timer };
       return { head: room.head, rotationId, lockRevision: record.lockRevision };
     });
   }
 
-  async release(docName, rotationId) {
+  /** Ends a freeze. An owner-initiated abort passes `verify`; internal TTL expiry does not. */
+  async release(docName, rotationId, { verify } = {}) {
+    return this.#enqueue(docName, (room) => this.#releaseInChain(docName, room, rotationId, verify));
+  }
+
+  /** Retries cleanup of staged blobs left behind by a released rotation; true when nothing is left. */
+  async retryCleanup(docName) {
     return this.#enqueue(docName, async (room) => {
       await this.#load(docName, room);
-      if (room.frozen?.rotationId !== rotationId) return false;
-      this.#clearTimer(room.frozen.timer);
-      room.frozen = null;
+      return room.pendingStagedCleanup.size === 0;
+    });
+  }
+
+  async #releaseInChain(docName, room, rotationId, verify) {
+    await this.#load(docName, room);
+    if (room.frozen?.rotationId !== rotationId) return false;
+    if (verify) await this.#verifiedRecord(docName, undefined, verify);
+    this.#clearTimer(room.frozen.timer);
+    room.frozen = null;
+    room.pendingStagedCleanup.add(rotationId);
+    this.#notify(room, { kind: 'resumed' });
+    this.#onResume(docName);
+    await this.#cleanupStaged(docName, room);
+    return true;
+  }
+
+  // Cleanup failure never keeps the room frozen: it stays queued and is retried on the next op.
+  async #cleanupStaged(docName, room) {
+    for (const rotationId of [...room.pendingStagedCleanup]) {
       try {
         await this.#dropStagedBlobs(docName, room, rotationId);
-      } finally {
-        this.#notify(room, { kind: 'resumed' });
-        this.#onResume(docName);
+        room.pendingStagedCleanup.delete(rotationId);
+      } catch (error) {
+        this.#onError(error);
       }
-      return true;
-    });
+    }
+  }
+
+  // Internal chain op: expiry must never be refused because the admission queue is full.
+  #expireFreeze(docName, rotationId) {
+    this.#enqueue(docName, (room) => this.#releaseInChain(docName, room, rotationId, undefined), { internal: true })
+      .catch(this.#onError);
   }
 
   async mutateLock(docName, { verify, expectedRevision, next }) {
@@ -167,7 +232,7 @@ export class E2ERoomLog {
       this.#assertNotFrozen(room);
       const current = await this.#verifiedRecord(docName, expectedRevision, verify);
       const updated = encodeLockRecord({ ...(await next(current)), lockRevision: current.lockRevision + 1 });
-      await metaBatch(this.#ldb, docName, [put(ROOM_LOCK_META, updated)], { durable: true });
+      await this.#write(docName, [put(ROOM_LOCK_META, updated)], { durable: true });
       return decodeLockRecord(updated);
     });
   }
@@ -178,6 +243,8 @@ export class E2ERoomLog {
       if (room.frozen?.rotationId !== rotationId || room.head !== expectedHead) {
         throw codedError(E2E_ROTATION_STALE, 'rotation freeze is not current');
       }
+      // The revision cannot change while frozen (mutateLock is refused), so the revision checked at
+      // freeze time still holds; verify re-checks the password against the current record here.
       const current = await this.#verifiedRecord(docName, undefined, verify);
       if (lockRecord.keyEpoch !== current.keyEpoch + 1) throw codedError(E2E_ROTATION_STALE, 'key epoch must advance by one');
       this.#assertWithinQuota(snapshot.byteLength);
@@ -189,7 +256,7 @@ export class E2ERoomLog {
         put(ROOM_LOCK_META, nextRecord),
         put(BLOBS_KEY, inventory),
       ];
-      await this.#write(docName, ops, snapshot.byteLength, { durable: true });
+      await this.#write(docName, ops, { durable: true });
       this.#clearTimer(room.frozen.timer);
       room.frozen = null;
       room.base = room.head;
@@ -203,10 +270,13 @@ export class E2ERoomLog {
   async addBlob(docName, blob) {
     return this.#enqueue(docName, async (room) => {
       await this.#load(docName, room);
+      if (blob.stagedFor && room.frozen?.rotationId !== blob.stagedFor) {
+        throw codedError(E2E_ROTATION_STALE, 'staged blob does not match the active rotation');
+      }
       if (room.blobs.some((entry) => entry.id === blob.id)) throw codedError(E2E_BLOB_DUPLICATE, 'blob id already inventoried');
       const entry = { id: blob.id, bytes: blob.bytes, epoch: blob.epoch, stagedFor: blob.stagedFor ?? null };
       const inventory = [...room.blobs, entry];
-      await this.#write(docName, [put(BLOBS_KEY, inventory)], 0);
+      await this.#write(docName, [put(BLOBS_KEY, inventory)]);
       room.blobs = inventory;
     });
   }
@@ -219,37 +289,36 @@ export class E2ERoomLog {
   }
 
   /** Removes old-epoch entries retired at least `graceMs` ago; returns the removed ids. */
-  async expireOldEpochBlobs(docName, now, graceMs) {
+  async expireOldEpochBlobs(docName, now, graceMs = E2E_BLOB_GRACE_MS) {
     return this.#enqueue(docName, async (room) => {
       await this.#load(docName, room);
       const expired = (entry) => entry.retiredAt !== undefined && now - entry.retiredAt >= graceMs;
       const removed = room.blobs.filter(expired).map((entry) => entry.id);
       if (removed.length === 0) return removed;
       const inventory = room.blobs.filter((entry) => !expired(entry));
-      await this.#write(docName, [put(BLOBS_KEY, inventory)], 0);
+      await this.#write(docName, [put(BLOBS_KEY, inventory)]);
       room.blobs = inventory;
       return removed;
     });
   }
 
-  #enqueue(docName, task) {
+  #enqueue(docName, task, { internal = false } = {}) {
     let room = this.#rooms.get(docName);
     if (!room) {
       room = newRoom();
       this.#rooms.set(docName, room);
     }
-    if (room.pending >= MAX_PENDING_OPS_PER_ROOM) {
+    if (!internal && room.pending >= MAX_PENDING_OPS_PER_ROOM) {
       return Promise.reject(codedError(E2E_BUSY, 'too many queued operations for this room'));
     }
     room.pending += 1;
     const owner = room;
     const run = owner.tail.then(() => task(owner));
     owner.tail = run.then(noop, noop);
-    return run.finally(() => { owner.pending -= 1; });
-  }
-
-  #releaseFromTimer(docName, rotationId) {
-    this.release(docName, rotationId).catch(this.#onError);
+    return run.finally(() => {
+      owner.pending -= 1;
+      this.#evictIfIdle(docName, owner);
+    });
   }
 
   #notify(room, entry) {
@@ -270,9 +339,9 @@ export class E2ERoomLog {
     if (totalBytes > this.#maxRoomBytes) throw codedError(E2E_QUOTA, 'room size limit exceeded');
   }
 
-  async #write(docName, ops, estimatedBytes, { durable = false } = {}) {
+  async #write(docName, ops, { durable = false } = {}) {
     if (!this.#hasCapacity()) throw codedError(E2E_QUOTA, 'database capacity reached');
-    const release = this.#reserveStore(estimatedBytes + STORE_OVERHEAD_BYTES);
+    const release = this.#reserveStore(estimateOpsBytes(ops) + STORE_OVERHEAD_BYTES);
     try {
       await metaBatch(this.#ldb, docName, ops, { durable });
     } finally {
@@ -283,7 +352,7 @@ export class E2ERoomLog {
   async #dropStagedBlobs(docName, room, rotationId) {
     const inventory = room.blobs.filter((entry) => entry.stagedFor !== rotationId);
     if (inventory.length !== room.blobs.length) {
-      await this.#write(docName, [put(BLOBS_KEY, inventory)], 0);
+      await this.#write(docName, [put(BLOBS_KEY, inventory)]);
       room.blobs = inventory;
     }
     await this.#deleteStagedBlobs(docName, rotationId);
@@ -315,13 +384,14 @@ export class E2ERoomLog {
 
   async #load(docName, room) {
     if (!room.loaded) await this.#readState(docName, room);
+    if (room.pendingStagedCleanup.size > 0) await this.#cleanupStaged(docName, room);
   }
 
   /** Reads storage, refreshes the room's cached counters, and returns the verified public state. */
   async #readState(docName, room) {
     const metas = await this.#readMetas(docName);
     const stored = metas.get(SNAPSHOT_KEY);
-    if (stored && digestOf(stored.bytes) !== stored.sha256) throw codedError(E2E_CORRUPT, 'snapshot digest mismatch');
+    if (stored && !verifySnapshotDigest(stored)) throw codedError(E2E_CORRUPT, 'snapshot digest mismatch');
     const updates = [...metas.keys()].filter((key) => key.startsWith(UPDATE_KEY_PREFIX)).sort()
       .map((key) => ({ seq: seqOfKey(key), bytes: metas.get(key) }));
     const blobs = metas.get(BLOBS_KEY) ?? [];

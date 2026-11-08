@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   E2ERoomLog, E2E_BUSY, E2E_CORRUPT, E2E_FROZEN, E2E_LOCK_MISMATCH, E2E_QUOTA, E2E_ROTATION_STALE, E2E_STALE_SNAPSHOT,
-  MAX_PENDING_OPS_PER_ROOM,
+  MAX_PENDING_OPS_PER_ROOM, MAX_FREEZE_TTL_MS, E2E_BLOB_GRACE_MS, estimateOpsBytes, verifySnapshotDigest,
 } from './e2e-room-log.js';
 import { ROOM_LOCK_META, decodeLockRecord, encodeLockRecord } from './room-lock-record.js';
 import { lockRecord, START_MS } from './room-lock-fixtures.mjs';
@@ -149,7 +149,7 @@ test('release resumes, deletes only that rotation\'s staged blobs, and drops the
   await log.addBlob(DOC, { id: 'kept', bytes: 5, epoch: 0, stagedFor: null });
   const { rotationId } = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
   await log.addBlob(DOC, { id: 'staged', bytes: 6, epoch: 1, stagedFor: rotationId });
-  await log.addBlob(DOC, { id: 'other', bytes: 6, epoch: 1, stagedFor: 'someone-else' });
+  await log.addBlob(DOC, { id: 'other', bytes: 6, epoch: 1, stagedFor: null });
   assert.equal(await log.release(DOC, 'not-the-rotation'), false);
   assert.equal(await log.release(DOC, rotationId), true);
   assert.deepEqual(calls.staged, [[DOC, rotationId]]);
@@ -282,4 +282,133 @@ test('forget drops in-memory state and the room reloads from storage', () => wit
   await log.append(DOC, bytesOf(2));
   log.forget(DOC);
   assert.equal((await log.append(DOC, bytesOf(2))).seq, 2);
+}));
+
+test('forget during in-flight appends keeps seqs unique and contiguous', () => withLog(async ({ log }) => {
+  const first = Array.from({ length: 5 }, () => log.append(DOC, bytesOf(1)));
+  log.forget(DOC);
+  const second = Array.from({ length: 5 }, () => log.append(DOC, bytesOf(1)));
+  const seqs = (await Promise.all([...first, ...second])).map((r) => r.seq).sort((a, b) => a - b);
+  assert.deepEqual(seqs, Array.from({ length: 10 }, (_, i) => i + 1));
+}));
+
+test('forget does not evict a frozen room or one with listeners until they end', () => withLog(async ({ log }) => {
+  const { rotationId } = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
+  log.forget(DOC);
+  await rejectsWith(log.append(DOC, bytesOf(1)), E2E_FROZEN);
+  await log.release(DOC, rotationId);
+  assert.equal((await log.append(DOC, bytesOf(1))).seq, 1);
+}));
+
+test('freeze ttl is clamped to the maximum', () => withLog(async ({ log, timers }) => {
+  await log.freeze(DOC, 999_999_999, { expectedRevision: 0, verify: approve });
+  assert.equal(timers[0].ms, MAX_FREEZE_TTL_MS);
+}));
+
+test('TTL expiry bypasses the admission cap and unfreezes after the queue drains', () => withLog(async ({ log, timers, calls }) => {
+  const { rotationId } = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
+  let open;
+  const gate = new Promise((resolve) => { open = resolve; });
+  const blocker = log.release(DOC, rotationId, { verify: () => gate });
+  const queued = Array.from({ length: MAX_PENDING_OPS_PER_ROOM - 1 }, () => log.append(DOC, bytesOf(1)));
+  await rejectsWith(log.append(DOC, bytesOf(1)), E2E_BUSY);
+  timers[0].fn();
+  open(false);
+  await rejectsWith(blocker, E2E_LOCK_MISMATCH);
+  const settled = await Promise.allSettled(queued);
+  assert.ok(settled.every((r) => r.status === 'rejected' && r.reason.code === E2E_FROZEN));
+  assert.equal((await log.append(DOC, bytesOf(1))).seq, 1);
+  assert.deepEqual(calls.resumed, [DOC]);
+}, { maxRoomBytes: 1_000_000 }));
+
+test('release with verify: a failed verify keeps the freeze, a passing one releases it', () => withLog(async ({ log }) => {
+  const { rotationId } = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
+  await rejectsWith(log.release(DOC, rotationId, { verify: reject }), E2E_LOCK_MISMATCH);
+  await rejectsWith(log.append(DOC, bytesOf(1)), E2E_FROZEN);
+  assert.equal(await log.release(DOC, rotationId, { verify: approve }), true);
+}));
+
+test('commit with a failing verify is a lock mismatch and keeps the freeze', () => withLog(async ({ log, ldb }) => {
+  const { rotationId } = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
+  await rejectsWith(log.commitRotation(DOC, { rotationId, expectedHead: 0, verify: reject, snapshot: bytesOf(2), lockRecord: newLock(), blobInventory: [] }), E2E_LOCK_MISMATCH);
+  assert.equal((await storedLock(ldb)).keyEpoch, 0);
+  await rejectsWith(log.append(DOC, bytesOf(1)), E2E_FROZEN);
+}));
+
+let failBlobBatch = false;
+let failDelete = false;
+const blobFaultDb = (db) => Object.assign(Object.create(db), {
+  batch: (ops, options) => (failBlobBatch && ops.some((op) => op.key[3] === 'e2e-blobs')
+    ? Promise.reject(new Error('injected inventory failure')) : db.batch(ops, options)),
+});
+const cleanupDeps = (calls) => ({
+  deleteStagedBlobs: (doc, id) => {
+    if (failDelete) throw new Error('injected delete failure');
+    calls.staged.push([doc, id]);
+  },
+});
+
+for (const [name, setFault, clearFault] of [
+  ['an inventory write failure', () => { failBlobBatch = true; }, () => { failBlobBatch = false; }],
+  ['a staged file delete failure', () => { failDelete = true; }, () => { failDelete = false; }],
+]) {
+  test(`release cleanup survives ${name} and is retried`, async () => {
+    const calls = { staged: [] };
+    await withLog(async ({ log, ldb, make }) => {
+      const realTransact = ldb._transact;
+      ldb._transact = (f) => realTransact((db) => f(blobFaultDb(db)));
+      const { rotationId } = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
+      await log.addBlob(DOC, { id: 'staged', bytes: 6, epoch: 1, stagedFor: rotationId });
+      setFault();
+      assert.equal(await log.release(DOC, rotationId), true);
+      assert.equal((await log.append(DOC, bytesOf(1))).seq, 1, 'appends resume despite the failed cleanup');
+      assert.equal(await log.retryCleanup(DOC), false);
+      clearFault();
+      assert.equal(await log.retryCleanup(DOC), true);
+      assert.deepEqual(calls.staged, [[DOC, rotationId]]);
+      assert.deepEqual(await make().blobs(DOC), []);
+    }, cleanupDeps(calls));
+  });
+}
+
+test('a staged blob needs an active matching freeze', () => withLog(async ({ log }) => {
+  await rejectsWith(log.addBlob(DOC, { id: 'late', bytes: 1, epoch: 1, stagedFor: 'r1' }), E2E_ROTATION_STALE);
+  const { rotationId } = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
+  await rejectsWith(log.addBlob(DOC, { id: 'wrong', bytes: 1, epoch: 1, stagedFor: 'r1' }), E2E_ROTATION_STALE);
+  await log.addBlob(DOC, { id: 'ok', bytes: 1, epoch: 1, stagedFor: rotationId });
+  await log.release(DOC, rotationId);
+  await rejectsWith(log.addBlob(DOC, { id: 'after', bytes: 1, epoch: 1, stagedFor: rotationId }), E2E_ROTATION_STALE);
+  assert.deepEqual(await log.blobs(DOC), []);
+}));
+
+test('expireOldEpochBlobs defaults to the 24 h grace', () => withLog(async ({ log }) => {
+  const { rotationId } = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
+  await log.commitRotation(DOC, {
+    rotationId, expectedHead: 0, verify: approve, snapshot: bytesOf(1), lockRecord: newLock(),
+    blobInventory: [{ id: 'old', bytes: 1, epoch: 0, stagedFor: null }],
+  });
+  assert.equal(E2E_BLOB_GRACE_MS, GRACE_MS);
+  assert.deepEqual(await log.expireOldEpochBlobs(DOC, START_MS + GRACE_MS - 1), []);
+  assert.deepEqual(await log.expireOldEpochBlobs(DOC, START_MS + GRACE_MS), ['old']);
+}));
+
+test('reservations cover the keys and values actually written', () => withLog(async ({ log, calls }) => {
+  await log.append(DOC, bytesOf(100));
+  assert.ok(calls.reserved[0] >= 100 + 'e2e-head'.length + 'e2e-u-0000000000000001'.length);
+  calls.reserved.length = 0;
+  await log.addBlob(DOC, { id: 'blob-id', bytes: 5, epoch: 0, stagedFor: null });
+  assert.ok(calls.reserved[0] > 'blob-id'.length);
+  calls.reserved.length = 0;
+  await log.mutateLock(DOC, { expectedRevision: 0, verify: approve, next: (r) => r });
+  assert.ok(calls.reserved[0] > lockRecord().wrappedDek.length);
+  assert.equal(estimateOpsBytes([{ type: 'del', key: 'abc' }, { type: 'put', key: 'k', value: new Uint8Array(4) }]), 3 + 1 + 4);
+}));
+
+test('verifySnapshotDigest accepts intact snapshots only', () => withLog(async ({ log, ldb }) => {
+  await log.append(DOC, bytesOf(2));
+  await log.snapshot(DOC, 1, bytesOf(6, 3));
+  const stored = await ldb.getMeta(DOC, 'e2e-snapshot');
+  assert.equal(verifySnapshotDigest(stored), true);
+  assert.equal(verifySnapshotDigest({ ...stored, bytes: stored.bytes.slice(1) }), false);
+  assert.equal(verifySnapshotDigest(null), false);
 }));
