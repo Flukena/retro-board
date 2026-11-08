@@ -175,7 +175,12 @@ export class E2ERoomLog {
     }).finally(release);
   }
 
-  async snapshot(docName, baseSeq, ciphertext) {
+  /**
+   * Replaces the snapshot and prunes the log through `baseSeq`. `knownBase` is the baseSeq of the newest snapshot
+   * the writer has applied: it must equal the stored one (0 for none), so a snapshot never drops content that only
+   * an earlier snapshot holds.
+   */
+  async snapshot(docName, baseSeq, ciphertext, knownBase) {
     if (ciphertext.byteLength > this.maxSnapshotBytes) throw codedError(E2E_QUOTA, 'snapshot exceeds the size limit');
     const value = snapshotValue(baseSeq, ciphertext);
     const release = this.#reserveStore(snapshotReservationBytes(docName, value));
@@ -185,6 +190,7 @@ export class E2ERoomLog {
       if (!(baseSeq > room.base && baseSeq <= room.head)) {
         throw codedError(E2E_STALE_SNAPSHOT, 'snapshot does not advance the base');
       }
+      if (knownBase !== room.base) throw codedError(E2E_STALE_SNAPSHOT, 'snapshot was built without the stored snapshot');
       const covered = range(room.base + 1, baseSeq);
       const keptBytes = [...room.sizes].filter(([seq]) => seq > baseSeq).reduce((sum, [, n]) => sum + n, 0);
       this.#assertWithinQuota(ciphertext.byteLength + keptBytes);

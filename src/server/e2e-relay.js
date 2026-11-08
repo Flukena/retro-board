@@ -212,9 +212,9 @@ class E2EConnection {
     });
   }
 
-  #snapshot({ seq, ciphertext }) {
+  #snapshot({ seq, knownBase, ciphertext }) {
     this.#ownSnapshots.add(ciphertext);
-    this.#deps.roomLog.snapshot(this.#docName, seq, ciphertext).catch((error) => {
+    this.#deps.roomLog.snapshot(this.#docName, seq, ciphertext, knownBase).catch((error) => {
       this.#ownSnapshots.delete(ciphertext);
       this.#refuse(error, NO_CLIENT_REF);
     });

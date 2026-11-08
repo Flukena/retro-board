@@ -108,7 +108,7 @@ class E2EClient {
 
   ofType(type) { return this.frames.filter((frame) => frame?.type === type); }
   append(clientRef, ciphertext) { this.ws.send(encodeFrame(E2E_FRAME.APPEND, { clientRef, ciphertext })); }
-  snapshot(seq, ciphertext) { this.ws.send(encodeFrame(E2E_FRAME.SNAPSHOT, { seq, ciphertext })); }
+  snapshot(seq, ciphertext, knownBase = 0) { this.ws.send(encodeFrame(E2E_FRAME.SNAPSHOT, { seq, knownBase, ciphertext })); }
   ephemeral(ciphertext) { this.ws.send(encodeFrame(E2E_FRAME.EPHEMERAL, { ciphertext })); }
 
   async close() {

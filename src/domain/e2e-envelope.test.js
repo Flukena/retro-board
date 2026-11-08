@@ -27,10 +27,13 @@ test('APPEND has exact bytes and round-trips', () => {
 });
 
 test('seq-bearing frames have exact bytes and round-trip', () => {
-  const bytes = encodeFrame(E2E_FRAME.SNAPSHOT, { seq: SEQ, ciphertext: CIPHER });
-  assert.deepEqual([...bytes], [2, 0, 0, 0, 1, 0, 0, 0, 5, 9, 8, 7]);
+  const KNOWN_BASE = 3;
+  const bytes = encodeFrame(E2E_FRAME.SNAPSHOT, { seq: SEQ, knownBase: KNOWN_BASE, ciphertext: CIPHER });
+  assert.deepEqual([...bytes], [2, 0, 0, 0, 1, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 3, 9, 8, 7]);
   const client = decodeClientFrame(bytes, limits);
   assert.equal(client.seq, SEQ);
+  assert.equal(client.knownBase, KNOWN_BASE);
+  assert.throws(() => encodeFrame(E2E_FRAME.SNAPSHOT, { seq: SEQ, ciphertext: CIPHER }), RangeError, 'knownBase is required');
   for (const type of [E2E_FRAME.UPDATE, E2E_FRAME.SNAPSHOT_OUT]) {
     const frame = decodeServerFrame(encodeFrame(type, { seq: SEQ, ciphertext: CIPHER }), limits);
     assert.equal(frame.type, type);
@@ -94,7 +97,7 @@ test('seq above 2^53-1 is rejected on decode and encode', () => {
   assert.equal(decodeServerFrame(tooBig, limits), null);
   const max = Uint8Array.of(12, 0, 0x1f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 5);
   assert.equal(decodeServerFrame(max, limits).seq, Number.MAX_SAFE_INTEGER);
-  assert.throws(() => encodeFrame(E2E_FRAME.SNAPSHOT, { seq: 2 ** 53, ciphertext: CIPHER }));
+  assert.throws(() => encodeFrame(E2E_FRAME.SNAPSHOT, { seq: 2 ** 53, knownBase: 0, ciphertext: CIPHER }));
 });
 
 test('RESUMED is a bare type byte accepted only from the server', () => {
@@ -148,17 +151,17 @@ test('a per-type frame cap bounds that type only, inclusive, below the overall m
   const append = (frameBytes) => encodeFrame(E2E_FRAME.APPEND, { clientRef: 1, ciphertext: new Uint8Array(frameBytes - 5).fill(1) });
   assert.equal(decodeClientFrame(append(APPEND_CAP), capped)?.type, E2E_FRAME.APPEND);
   assert.equal(decodeClientFrame(append(APPEND_CAP + 1), capped), null);
-  const snapshot = encodeFrame(E2E_FRAME.SNAPSHOT, { seq: 1, ciphertext: new Uint8Array(APPEND_CAP * 2).fill(1) });
+  const snapshot = encodeFrame(E2E_FRAME.SNAPSHOT, { seq: 1, knownBase: 0, ciphertext: new Uint8Array(APPEND_CAP * 2).fill(1) });
   assert.equal(decodeClientFrame(snapshot, capped)?.type, E2E_FRAME.SNAPSHOT, 'other types keep the overall limit');
 });
 
-test('the largest header is the ACK: type + seq + clientRef', () => {
-  assert.equal(E2E_MAX_FRAME_HEADER_BYTES, 1 + 8 + 4);
+test('the largest header is the SNAPSHOT: type + baseSeq + knownBase', () => {
+  assert.equal(E2E_MAX_FRAME_HEADER_BYTES, 1 + 8 + 8);
 });
 
 test('a frame type header is the bytes an encoded frame adds before its ciphertext', () => {
   const ciphertext = new Uint8Array(5);
-  assert.equal(e2eFrameHeaderBytes(E2E_FRAME.SNAPSHOT), 1 + 8);
-  assert.equal(encodeFrame(E2E_FRAME.SNAPSHOT, { seq: 1, ciphertext }).length - ciphertext.length, e2eFrameHeaderBytes(E2E_FRAME.SNAPSHOT));
+  assert.equal(e2eFrameHeaderBytes(E2E_FRAME.SNAPSHOT), 1 + 8 + 8);
+  assert.equal(encodeFrame(E2E_FRAME.SNAPSHOT, { seq: 1, knownBase: 0, ciphertext }).length - ciphertext.length, e2eFrameHeaderBytes(E2E_FRAME.SNAPSHOT));
   assert.equal(e2eFrameHeaderBytes(E2E_FRAME.APPEND), 1 + 4);
 });

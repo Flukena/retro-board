@@ -30,6 +30,8 @@ const readUint = (bytes, offset, width) => {
 const REJECT_CODES = new Set(Object.values(E2E_REJECT));
 const FIELD_SPECS = Object.freeze({
   seq: { width: SEQ_BYTES, valid: (v) => Number.isSafeInteger(v) && v >= 0 },
+  // SNAPSHOT: the baseSeq of the latest snapshot the sender has applied (0 for none); the relay fences on it.
+  knownBase: { width: SEQ_BYTES, valid: (v) => Number.isSafeInteger(v) && v >= 0 },
   clientRef: { width: REF_BYTES, valid: (v) => Number.isInteger(v) && v >= 0 && v < UINT32_RANGE },
   code: { width: CODE_BYTES, valid: (v) => REJECT_CODES.has(v) },
 });
@@ -39,7 +41,7 @@ const SERVER = 'server';
 /** One row per frame type: sender, ordered header fields, whether ciphertext follows. */
 const LAYOUTS = Object.freeze({
   [E2E_FRAME.APPEND]: { side: CLIENT, fields: ['clientRef'], cipher: true },
-  [E2E_FRAME.SNAPSHOT]: { side: CLIENT, fields: ['seq'], cipher: true },
+  [E2E_FRAME.SNAPSHOT]: { side: CLIENT, fields: ['seq', 'knownBase'], cipher: true },
   [E2E_FRAME.EPHEMERAL]: { side: CLIENT, fields: [], cipher: true, ephemeral: true },
   [E2E_FRAME.UPDATE]: { side: SERVER, fields: ['seq'], cipher: true },
   [E2E_FRAME.SNAPSHOT_OUT]: { side: SERVER, fields: ['seq'], cipher: true },

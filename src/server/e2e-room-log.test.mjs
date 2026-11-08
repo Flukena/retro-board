@@ -75,23 +75,36 @@ test('concurrent appends get contiguous seqs', () => withLog(async ({ log }) => 
 
 test('snapshot prunes covered updates, keeps later ones, and stale snapshots fail', () => withLog(async ({ log, make }) => {
   for (let i = 0; i < 5; i += 1) await log.append(DOC, bytesOf(10));
-  await log.snapshot(DOC, 3, bytesOf(7, 9));
+  await log.snapshot(DOC, 3, bytesOf(7, 9), 0);
   const state = await make().open(DOC);
   assert.equal(state.snapshot.baseSeq, 3);
   assert.deepEqual([...state.snapshot.bytes], [...bytesOf(7, 9)]);
   assert.deepEqual(state.updates.map((u) => u.seq), [4, 5]);
   assert.equal(await log.sizeOf(DOC), 7 + 20);
-  await rejectsWith(log.snapshot(DOC, 3, bytesOf(1)), E2E_STALE_SNAPSHOT);
-  await rejectsWith(log.snapshot(DOC, 2, bytesOf(1)), E2E_STALE_SNAPSHOT);
-  await rejectsWith(log.snapshot(DOC, 6, bytesOf(1)), E2E_STALE_SNAPSHOT);
+  await rejectsWith(log.snapshot(DOC, 3, bytesOf(1), 3), E2E_STALE_SNAPSHOT);
+  await rejectsWith(log.snapshot(DOC, 2, bytesOf(1), 3), E2E_STALE_SNAPSHOT);
+  await rejectsWith(log.snapshot(DOC, 6, bytesOf(1), 3), E2E_STALE_SNAPSHOT);
   assert.equal((await log.append(DOC, bytesOf(1))).seq, 6);
+}));
+
+test('a snapshot whose writer has not applied the stored snapshot is STALE and leaves it in place', () => withLog(async ({ log, make }) => {
+  for (let i = 0; i < 4; i += 1) await log.append(DOC, bytesOf(10));
+  await log.snapshot(DOC, 2, bytesOf(5, 1), 0);
+  await rejectsWith(log.snapshot(DOC, 4, bytesOf(5, 2), 0), E2E_STALE_SNAPSHOT);
+  await rejectsWith(log.snapshot(DOC, 4, bytesOf(5, 2), 3), E2E_STALE_SNAPSHOT);
+  const kept = await make().open(DOC);
+  assert.equal(kept.snapshot.baseSeq, 2);
+  assert.deepEqual([...kept.snapshot.bytes], [...bytesOf(5, 1)]);
+  assert.deepEqual(kept.updates.map((u) => u.seq), [3, 4]);
+  await log.snapshot(DOC, 4, bytesOf(5, 2), 2);
+  assert.equal((await make().open(DOC)).snapshot.baseSeq, 4);
 }));
 
 test('a quota failure leaves storage untouched and the reservation is released', () => withLog(async ({ log, ldb, calls }) => {
   await log.append(DOC, bytesOf(600));
   const before = await ldb.getMetas(DOC);
   await rejectsWith(log.append(DOC, bytesOf(401)), E2E_QUOTA);
-  await rejectsWith(log.snapshot(DOC, 1, bytesOf(MAX_ROOM_BYTES + 1)), E2E_QUOTA);
+  await rejectsWith(log.snapshot(DOC, 1, bytesOf(MAX_ROOM_BYTES + 1), 0), E2E_QUOTA);
   assert.deepEqual([...(await ldb.getMetas(DOC)).entries()], [...before.entries()]);
   assert.equal(calls.released, 0, 'every taken reservation was released');
   assert.equal((await log.append(DOC, bytesOf(400))).seq, 2);
@@ -121,7 +134,7 @@ test('snapshots reach subscribers', () => withLog(async ({ log }) => {
   const live = [];
   await log.subscribeAfterReplay(DOC, (entry) => live.push(entry));
   await log.append(DOC, bytesOf(2));
-  await log.snapshot(DOC, 1, bytesOf(3));
+  await log.snapshot(DOC, 1, bytesOf(3), 0);
   assert.deepEqual(live.map((e) => e.kind), ['update', 'snapshot']);
   assert.equal(live[1].baseSeq, 1);
 }));
@@ -135,7 +148,7 @@ test('appends during a freeze are FROZEN and the freeze expires on its TTL', () 
   assert.equal(frozen.lockRevision, 0);
   assert.equal(timers[0].ms, FREEZE_TTL_MS);
   await rejectsWith(log.append(DOC, bytesOf(1)), E2E_FROZEN);
-  await rejectsWith(log.snapshot(DOC, 1, bytesOf(1)), E2E_FROZEN);
+  await rejectsWith(log.snapshot(DOC, 1, bytesOf(1), 0), E2E_FROZEN);
   timers[0].fn();
   await log.sizeOf(DOC);
   assert.deepEqual(calls.resumed, [DOC]);
@@ -256,7 +269,7 @@ test('the 257th queued op is BUSY', () => withLog(async ({ log }) => {
 
 test('a truncated snapshot fails open', () => withLog(async ({ log, ldb, make }) => {
   await log.append(DOC, bytesOf(3));
-  await log.snapshot(DOC, 1, bytesOf(8, 4));
+  await log.snapshot(DOC, 1, bytesOf(8, 4), 0);
   const stored = await ldb.getMeta(DOC, 'e2e-snapshot');
   await ldb.setMeta(DOC, 'e2e-snapshot', { ...stored, bytes: stored.bytes.slice(0, 5) });
   await rejectsWith(make().open(DOC), E2E_CORRUPT);
@@ -276,7 +289,7 @@ test('expireOldEpochBlobs removes only retired entries past the grace and return
 test('clearDocument removes every e2e key', () => withLog(async ({ log, ldb }) => {
   await log.append(DOC, bytesOf(2));
   await log.append(DOC, bytesOf(2));
-  await log.snapshot(DOC, 1, bytesOf(2));
+  await log.snapshot(DOC, 1, bytesOf(2), 0);
   await log.addBlob(DOC, { id: 'b', bytes: 1, epoch: 0, stagedFor: null });
   assert.deepEqual(await e2eKeys(ldb), ['e2e-blobs', 'e2e-head', 'e2e-snapshot', 'e2e-u-0000000000000002']);
   await ldb.clearDocument(DOC);
@@ -413,7 +426,7 @@ test('reservations cover the keys and values actually written', () => withLog(as
 
 test('verifySnapshotDigest accepts intact snapshots only', () => withLog(async ({ log, ldb }) => {
   await log.append(DOC, bytesOf(2));
-  await log.snapshot(DOC, 1, bytesOf(6, 3));
+  await log.snapshot(DOC, 1, bytesOf(6, 3), 0);
   const stored = await ldb.getMeta(DOC, 'e2e-snapshot');
   assert.equal(verifySnapshotDigest(stored), true);
   assert.equal(verifySnapshotDigest({ ...stored, bytes: stored.bytes.slice(1) }), false);
@@ -473,7 +486,7 @@ test('appends beyond the log entry cap are QUOTA until a snapshot prunes the log
   assert.equal(E2E_MAX_LOG_ENTRIES, 10_000);
   for (let i = 1; i <= CAP; i += 1) await log.append(DOC, bytesOf(1));
   await rejectsWith(log.append(DOC, bytesOf(1)), E2E_QUOTA);
-  await log.snapshot(DOC, 2, bytesOf(1));
+  await log.snapshot(DOC, 2, bytesOf(1), 0);
   assert.deepEqual(await log.append(DOC, bytesOf(1)), { seq: CAP + 1 });
 }, { maxLogEntries: 3 }));
 
@@ -490,7 +503,7 @@ const shared = sharedReservations({ maxOps: SHARED_MAX_OPS });
 test('queued client ops hold shared pending capacity before they run, across rooms, released once each', () => withLog(async ({ log, ldb }) => {
   const OTHER_DOC = 'room-doc-2';
   const resume = stallStorage(ldb);
-  const queued = [log.append(DOC, bytesOf(4)), log.append(DOC, bytesOf(4)), log.snapshot(OTHER_DOC, 0, bytesOf(4))];
+  const queued = [log.append(DOC, bytesOf(4)), log.append(DOC, bytesOf(4)), log.snapshot(OTHER_DOC, 0, bytesOf(4), 0)];
   const extra = log.append(OTHER_DOC, bytesOf(4));
   // While storage is stalled the extra op must be refused at once, not queued.
   const outcome = await Promise.race([extra.then(() => 'queued and written', (error) => error.code),
@@ -529,12 +542,12 @@ test('the largest snapshot fits a shared pending-byte cap of maxRoomBytes; one b
     await ldb.setMeta(doc, ROOM_LOCK_META, encodeLockRecord(lockRecord()));
     await log.append(doc, bytesOf(1));
     assert.equal(log.maxSnapshotBytes, PENDING_STORE_CAP_BYTES - E2E_SNAPSHOT_RESERVATION_OVERHEAD_BYTES);
-    await log.snapshot(doc, 1, bytesOf(log.maxSnapshotBytes, 7));
+    await log.snapshot(doc, 1, bytesOf(log.maxSnapshotBytes, 7), 0);
     assert.equal((await ldb.getMeta(doc, 'e2e-snapshot')).bytes.byteLength, log.maxSnapshotBytes);
     assert.ok(store.reservedBytes.at(-1) <= PENDING_STORE_CAP_BYTES, 'the reservation stays within the cap');
     const taken = store.taken;
     await log.append(doc, bytesOf(1));
-    await rejectsWith(log.snapshot(doc, 2, bytesOf(log.maxSnapshotBytes + 1, 7)), E2E_QUOTA);
+    await rejectsWith(log.snapshot(doc, 2, bytesOf(log.maxSnapshotBytes + 1, 7), 1), E2E_QUOTA);
     assert.equal(store.taken, taken + 1, 'an oversized snapshot takes no reservation');
     assert.equal((await ldb.getMeta(doc, 'e2e-snapshot')).baseSeq, 1);
   }, { maxRoomBytes: PENDING_STORE_CAP_BYTES, reserveStore: store.reserveStore });

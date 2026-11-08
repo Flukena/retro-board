@@ -153,7 +153,7 @@ test('an append over the room quota is REJECT QUOTA with its clientRef and is no
 test('a snapshot that does not advance the base is REJECT STALE_SNAPSHOT with clientRef 0', async (t) => {
   const f = await fixture(t);
   const writer = await Client.join(f);
-  writer.ws.send(encodeFrame(E2E_FRAME.SNAPSHOT, { seq: 5, ciphertext: bytes(4) }));
+  writer.ws.send(encodeFrame(E2E_FRAME.SNAPSHOT, { seq: 5, knownBase: 0, ciphertext: bytes(4) }));
   await writer.until(() => writer.has(E2E_FRAME.REJECT));
   assert.deepEqual(writer.ofType(E2E_FRAME.REJECT), [{ type: E2E_FRAME.REJECT, code: E2E_REJECT.STALE_SNAPSHOT, clientRef: 0 }]);
 });
@@ -245,7 +245,7 @@ test('APPEND keeps its own frame cap while the largest SNAPSHOT is stored under 
   writer.append(1, bytes(8));
   await writer.until(() => writer.has(E2E_FRAME.ACK));
   const snapshot = bytes(f.roomLog.maxSnapshotBytes, 5);
-  writer.ws.send(encodeFrame(E2E_FRAME.SNAPSHOT, { seq: 1, ciphertext: snapshot }));
+  writer.ws.send(encodeFrame(E2E_FRAME.SNAPSHOT, { seq: 1, knownBase: 0, ciphertext: snapshot }));
   await other.until(() => other.has(E2E_FRAME.SNAPSHOT_OUT));
   assert.equal(other.ofType(E2E_FRAME.SNAPSHOT_OUT)[0].ciphertext.length, snapshot.length);
   assert.ok(snapshot.length > SMALL_APPEND_CAP);
@@ -259,7 +259,7 @@ test('a SNAPSHOT one byte over the largest is closed by the decode cap and not s
   const writer = await Client.join(f);
   writer.append(1, bytes(8));
   await writer.until(() => writer.has(E2E_FRAME.ACK));
-  writer.ws.send(encodeFrame(E2E_FRAME.SNAPSHOT, { seq: 1, ciphertext: bytes(f.roomLog.maxSnapshotBytes + 1, 5) }));
+  writer.ws.send(encodeFrame(E2E_FRAME.SNAPSHOT, { seq: 1, knownBase: 0, ciphertext: bytes(f.roomLog.maxSnapshotBytes + 1, 5) }));
   assert.equal((await within(writer.closed)).code, 1003);
   assert.deepEqual(writer.ofType(E2E_FRAME.REJECT), [{ type: E2E_FRAME.REJECT, code: E2E_REJECT.MALFORMED, clientRef: 0 }]);
   await f.roomLog.whenIdle();
@@ -271,8 +271,8 @@ test('a second SNAPSHOT within the allowance interval is REJECT RATE and is not 
   const writer = await Client.join(f);
   for (let ref = 1; ref <= 2; ref += 1) writer.append(ref, bytes(4));
   await writer.until(() => writer.has(E2E_FRAME.ACK, 2));
-  writer.ws.send(encodeFrame(E2E_FRAME.SNAPSHOT, { seq: 1, ciphertext: bytes(4) }));
-  writer.ws.send(encodeFrame(E2E_FRAME.SNAPSHOT, { seq: 2, ciphertext: bytes(4) }));
+  writer.ws.send(encodeFrame(E2E_FRAME.SNAPSHOT, { seq: 1, knownBase: 0, ciphertext: bytes(4) }));
+  writer.ws.send(encodeFrame(E2E_FRAME.SNAPSHOT, { seq: 2, knownBase: 1, ciphertext: bytes(4) }));
   await writer.until(() => writer.has(E2E_FRAME.REJECT));
   assert.deepEqual(writer.ofType(E2E_FRAME.REJECT), [{ type: E2E_FRAME.REJECT, code: E2E_REJECT.RATE, clientRef: 0 }]);
   await f.roomLog.whenIdle();

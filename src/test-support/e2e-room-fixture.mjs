@@ -149,7 +149,7 @@ export async function e2eRoom(t, { maxRoomBytes = 1024 * 1024, maxAppendBytes = 
       const doc = new Y.Doc();
       if (clientID !== undefined) doc.clientID = clientID;
       const provider = new E2EProvider(wsBaseUrl, E2E_TEST_HANDLE, doc, {
-        key, WebSocketImpl: tap.Impl, eventTarget: events, random: () => 0, ...options,
+        key, WebSocketImpl: tap.Impl, eventTarget: events, random: () => 0, syncedSettleMs: 0, ...options,
       });
       created.push({ provider, doc });
       return { doc, provider, tap, events };

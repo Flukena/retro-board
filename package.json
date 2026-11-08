@@ -24,6 +24,7 @@
     "react-dom": "^18.3.1",
     "ws": "^8.21.3",
     "y-leveldb": "0.2.0",
+    "y-protocols": "1.0.7",
     "y-websocket": "^1.5.4",
     "yjs": "^13.6.30"
   },

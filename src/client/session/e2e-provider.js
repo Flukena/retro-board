@@ -38,6 +38,10 @@ const EMPTY_UPDATE = (() => {
   empty.destroy();
   return update;
 })();
+const WS_OPEN_STATE = 1;
+const NORMAL_CLOSE = Object.freeze({ code: 1000, reason: 'disconnect' });
+/** A page advertises e2eSynced again only after it stayed caught up this long, so presence does not flap per edit. */
+export const E2E_SYNCED_SETTLE_MS = 1_000;
 const SKIPPED_LOG = '[e2e] skipped an unreadable log entry';
 const SKIPPED_SUPPRESSED_LOG = '[e2e] more unreadable log entries skipped';
 const FAILURE_LOG = '[e2e] provider step failed';
@@ -80,7 +84,11 @@ export class E2EProvider extends Observable {
   #snapshot = null;
   #snapshotTimer = null;
   #retryTimers = new Set();
-  #knownBase = 0;
+  // baseSeq of the newest snapshot this page applied or wrote on this connection; the relay fences on it.
+  #appliedSnapshotBase = 0;
+  #awaitingPeerSnapshot = false;
+  #syncedSettleMs;
+  #syncedTimer = null;
   #awarenessBusy = false;
   #awarenessDirty = false;
   #roomFullAnnounced = false;
@@ -91,6 +99,7 @@ export class E2EProvider extends Observable {
     eventTarget = globalThis.window, cipher = { encryptFrame, decryptFrame }, timers = defaultTimers,
     random = Math.random, firstClientRef, snapshotPolicy = {},
     appendFrameBytes = RELAY_DEFAULT_MAX_WS_MESSAGE_BYTES, maxRoomBytes = RELAY_DEFAULT_MAX_DOCUMENT_BYTES,
+    syncedSettleMs = E2E_SYNCED_SETTLE_MS,
   } = {}) {
     super();
     this.url = `${wsBaseUrl.replace(/\/+$/, '')}/${roomHandle}/${SOCKET_PATH_SUFFIX}`;
@@ -108,6 +117,7 @@ export class E2EProvider extends Observable {
     this.#timers = timers;
     this.#random = random;
     this.#appendFrameBytes = appendFrameBytes;
+    this.#syncedSettleMs = syncedSettleMs;
     this.#maxSnapshotBytes = e2eMaxSnapshotCiphertextBytes(maxRoomBytes);
     this.#maxFrameBytes = maxRoomBytes + E2E_MAX_FRAME_HEADER_BYTES;
     this.#pending = new PendingDeliveries({ firstClientRef });
@@ -146,10 +156,30 @@ export class E2EProvider extends Observable {
     this.#open();
   }
 
+  /**
+   * Orderly close. Everything tied to the socket is invalidated at once, so no decryption or encryption still in
+   * flight can touch the doc or send afterwards; peers get an encrypted removal of this page's presence.
+   */
   disconnect() {
     this.shouldConnect = false;
     this.#clearReconnect();
-    this.ws?.close();
+    const ws = this.ws;
+    if (ws === null) return;
+    const goodbye = this.wsconnected ? this.#presenceRemoval() : null;
+    this.#onClose(NORMAL_CLOSE);
+    if (goodbye === null) {
+      ws.close();
+      return;
+    }
+    goodbye.then((frame) => { if (ws.readyState === WS_OPEN_STATE) ws.send(frame); })
+      .catch(reportFailure).finally(() => ws.close());
+  }
+
+  /** The awareness removal y-websocket sends on close; the local state itself is kept for the next connection. */
+  #presenceRemoval() {
+    const removal = encodeAwarenessUpdate(this.awareness, [this.doc.clientID], new Map());
+    const aad = e2eAad(this.roomname, this.#key.keyEpoch, AAD_KIND.EPHEMERAL);
+    return this.#cipher.encryptFrame(this.#key.dek, aad, removal).then((ciphertext) => encodeFrame(E2E_FRAME.EPHEMERAL, { ciphertext }));
   }
 
   /** After re-unlock: future frames use the new key and epoch; pending entries are re-sent under it. */
@@ -190,10 +220,19 @@ export class E2EProvider extends Observable {
     this.wsconnected = true;
     this.#reconnectAttempts = 0;
     this.#replayDone = false;
+    this.#appliedSnapshotBase = 0;
+    this.#awaitingPeerSnapshot = false;
     this.#coverage.restart();
     this.#policy.restart();
     this.emit('status', [{ status: STATUS.CONNECTED }]);
-    this.#sendAwareness();
+    this.#announcePresence();
+  }
+
+  /** A fresh clock, so peers accept this state even after the removal sent when the last socket closed. */
+  #announcePresence() {
+    const state = this.awareness.getLocalState();
+    if (state === null) this.#sendAwareness();
+    else this.awareness.setLocalState(state);
   }
 
   #onClose(event) {
@@ -234,6 +273,8 @@ export class E2EProvider extends Observable {
   #clearTimers() {
     if (this.#snapshotTimer !== null) this.#timers.clearTimeout(this.#snapshotTimer);
     this.#snapshotTimer = null;
+    if (this.#syncedTimer !== null) this.#timers.clearTimeout(this.#syncedTimer);
+    this.#syncedTimer = null;
     this.#retryTimers.forEach((id) => this.#timers.clearTimeout(id));
     this.#retryTimers.clear();
   }
@@ -267,6 +308,12 @@ export class E2EProvider extends Observable {
     if (frame.type === E2E_FRAME.EPHEMERAL_OUT) {
       this.#receiveAwareness(frame.ciphertext, generation);
       return;
+    }
+    // The head moves when a log frame arrives, not when its decryption ends: until it is applied this page is
+    // behind, so it must not act as fully synced (vote expiry) meanwhile.
+    if (frame.type === E2E_FRAME.UPDATE || frame.type === E2E_FRAME.SNAPSHOT_OUT) {
+      this.#coverage.noteHead(frame.seq);
+      this.#publishE2ESynced();
     }
     this.#inbox = this.#inbox.then(() => (generation === this.#generation ? this.#handle(frame, generation) : undefined))
       .catch(reportFailure);
@@ -315,9 +362,10 @@ export class E2EProvider extends Observable {
     // Always applied: a snapshot may carry a peer's edit that never was a log entry (one too large to append).
     const applied = await this.#applyRemote(ciphertext, this.#aad(AAD_KIND.SNAPSHOT, seq), generation);
     if (applied === null) return;
-    if (!applied) this.#skip(seq);
+    if (applied) this.#appliedSnapshotBase = seq;
+    else this.#skip(seq);
     this.#coverage.coverThrough(seq);
-    this.#knownBase = Math.max(this.#knownBase, seq);
+    this.#awaitingPeerSnapshot = false;
     this.#policy.logPruned();
     this.#afterProgress();
   }
@@ -424,7 +472,7 @@ export class E2EProvider extends Observable {
   // ---- snapshots (Deviation 11) --------------------------------------------------------------------
 
   #snapshotBlocked() {
-    return !this.#replayDone || !this.wsconnected || this.#snapshot !== null
+    return !this.#replayDone || !this.wsconnected || this.#snapshot !== null || this.#awaitingPeerSnapshot
       || this.#coverage.skippedSeq !== null || !this.#coverage.caughtUp;
   }
 
@@ -445,7 +493,7 @@ export class E2EProvider extends Observable {
       this.#scheduleSnapshot();
       return;
     }
-    if (this.#coverage.appliedSeq <= this.#knownBase) {
+    if (this.#coverage.appliedSeq <= this.#appliedSnapshotBase) {
       this.#advanceLog();
       return;
     }
@@ -467,6 +515,7 @@ export class E2EProvider extends Observable {
     // The state and its baseSeq are taken in one synchronous step, so the snapshot never claims a seq it lacks.
     const baseSeq = this.#coverage.appliedSeq;
     const state = Y.encodeStateAsUpdate(this.doc);
+    const knownBase = this.#appliedSnapshotBase;
     const inflight = { baseSeq, covered: this.#pending.refs(), serial: Number.POSITIVE_INFINITY };
     this.#snapshot = inflight;
     this.#policy.attempted(this.#timers.now());
@@ -478,7 +527,7 @@ export class E2EProvider extends Observable {
         this.#announceRoomFull();
         return;
       }
-      inflight.serial = this.#send(encodeFrame(E2E_FRAME.SNAPSHOT, { seq: baseSeq, ciphertext }));
+      inflight.serial = this.#send(encodeFrame(E2E_FRAME.SNAPSHOT, { seq: baseSeq, knownBase, ciphertext }));
       this.#sendEntries([this.#pending.add(EMPTY_UPDATE)]);
       this.#emitDelivery();
     });
@@ -491,7 +540,7 @@ export class E2EProvider extends Observable {
   #snapshotAccepted() {
     const { baseSeq, covered } = this.#snapshot;
     this.#snapshot = null;
-    this.#knownBase = Math.max(this.#knownBase, baseSeq);
+    this.#appliedSnapshotBase = baseSeq;
     this.#roomFullAnnounced = false;
     this.#policy.logPruned();
     this.#pending.removeAll(covered);
@@ -499,10 +548,13 @@ export class E2EProvider extends Observable {
     this.#resend((entry) => entry.held);
   }
 
+  // The captured entries stay pending: only proof of an accepted snapshot removes them.
   #snapshotRejected(code) {
     if (this.#snapshot === null) return;
     this.#snapshot = null;
     if (code === E2E_REJECT.QUOTA) this.#announceRoomFull();
+    // Another snapshot is stored or on its way: build the next one on top of it once it has been applied here.
+    else if (code === E2E_REJECT.STALE_SNAPSHOT) this.#awaitingPeerSnapshot = true;
     else this.#scheduleSnapshot();
   }
 
@@ -514,9 +566,23 @@ export class E2EProvider extends Observable {
 
   // ---- awareness -----------------------------------------------------------------------------------
 
+  /** Falling behind is advertised at once; catching up only after it held for the settle time. */
   #publishE2ESynced() {
+    if (!this.e2eSynced) {
+      if (this.#syncedTimer !== null) this.#timers.clearTimeout(this.#syncedTimer);
+      this.#syncedTimer = null;
+      this.#advertiseSynced(false);
+      return;
+    }
+    if (this.#syncedTimer !== null || this.awareness.getLocalState()?.[E2E_SYNCED_FIELD] === true) return;
+    this.#syncedTimer = this.#timers.setTimeout(() => {
+      this.#syncedTimer = null;
+      this.#advertiseSynced(this.e2eSynced);
+    }, this.#syncedSettleMs);
+  }
+
+  #advertiseSynced(value) {
     const state = this.awareness.getLocalState();
-    const value = this.e2eSynced;
     if (state && state[E2E_SYNCED_FIELD] !== value) this.awareness.setLocalStateField(E2E_SYNCED_FIELD, value);
   }
 

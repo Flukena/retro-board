@@ -147,3 +147,35 @@ test('a timer that fires before the clock reaches the deadline re-arms instead o
   clock.scheduled.pop()();
   assert.equal(timerOf(a), null);
 });
+
+test('a page decrypting a live timer replacement at the deadline does not finalize the old timer', async (t) => {
+  const room = await e2eRoom(t);
+  const key = await roomKey();
+  let gate = null;
+  const gated = {
+    encryptFrame,
+    async decryptFrame(...args) {
+      await gate;
+      return decryptFrame(...args);
+    },
+  };
+  const a = room.join(key, { clientID: 1, cipher: gated });
+  const b = room.join(key, { clientID: 2 });
+  await synced(a, b);
+  await seesSynced(a, [1]);
+  const finalA = countFinalizations(a);
+  expire(a, t);
+  const start = Date.now();
+  startVote(b, start + DEADLINE_IN_MS, 1);
+  await until(() => timerOf(a)?.startedAt === 1, 'A holds the first timer');
+  let release;
+  gate = new Promise((resolve) => { release = resolve; });
+  const replacedEndsAt = start + DEADLINE_IN_MS * 3;
+  startVote(b, replacedEndsAt, 2);
+  await sleep(DEADLINE_IN_MS + MARGIN_MS);
+  assert.equal(finalA.count, 0, 'no finalization while the replacement is still decrypting');
+  release();
+  await until(() => timerOf(b) === null, 'the replacement is finalized');
+  assert.equal(b.doc.getMap('items').get('zone').get('lastResultsAt'), replacedEndsAt);
+  assert.equal(finalA.count, 1);
+});

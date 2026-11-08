@@ -52,7 +52,7 @@ async function seedRoom({ ldb, log, uploads }, { stagedBlob = false } = {}) {
   await ldb.setMeta(DOC, ROOM_LOCK_META, encodeLockRecord(lockRecord()));
   await ldb.setMeta(DOC, ROOM_HANDLE_META, HANDLE);
   for (let i = 0; i < 4; i += 1) await log.append(DOC, bytesOf(4, i));
-  await log.snapshot(DOC, 2, bytesOf(6, 9));
+  await log.snapshot(DOC, 2, bytesOf(6, 9), 0);
   await log.addBlob(DOC, { id: BLOB_A, bytes: BLOB_BYTES, epoch: 1 });
   await writeFile(blobPath(uploads, BLOB_A), bytesOf(BLOB_BYTES));
   if (stagedBlob) {

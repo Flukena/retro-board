@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as Y from 'yjs';
-import { E2E_FRAME } from '../../domain/e2e-envelope.js';
+import { E2E_FRAME, E2E_REJECT } from '../../domain/e2e-envelope.js';
 import { KEY_ROTATED_EVENT } from '../room-lock/lock-session.js';
 import { decryptFrame, encryptFrame } from '../room-lock/e2e-crypto.js';
 import { attachClientSync } from './client-sync.js';
@@ -266,4 +266,146 @@ test('clientRefs wrap past 2^32 - 1 to 1 and both edits are acknowledged', async
   type(a, '2');
   await delivered(a);
   assert.deepEqual(a.tap.sentOfType(E2E_FRAME.APPEND).map((frame) => frame.clientRef), [LAST_CLIENT_REF, 1]);
+});
+
+const OVERSIZED_APPEND_CAP = 2048;
+const OVERSIZED_TEXT = 'x'.repeat(4096);
+
+test('a snapshot built without the stored snapshot is refused, so snapshot-only content survives', async (t) => {
+  const room = await e2eRoom(t, { maxAppendBytes: OVERSIZED_APPEND_CAP });
+  const key = await roomKey();
+  const a = room.join(key, { appendFrameBytes: OVERSIZED_APPEND_CAP });
+  const b = room.join(key, { snapshotPolicy: SMALL_SNAPSHOT_POLICY });
+  await synced(a, b);
+  b.tap.rule(E2E_FRAME.SNAPSHOT_OUT, dropFrame);
+  type(a, OVERSIZED_TEXT);
+  await delivered(a);
+  assert.equal(textOf(b), '', 'B never applied the snapshot that holds the large edit');
+  for (let i = 0; i < SMALL_SNAPSHOT_POLICY.afterUpdates; i += 1) type(b, String(i));
+  await until(() => b.tap.receivedOfType(E2E_FRAME.REJECT).some((frame) => frame.code === E2E_REJECT.STALE_SNAPSHOT), 'STALE');
+  const [refused] = b.tap.sentOfType(E2E_FRAME.SNAPSHOT);
+  assert.equal(refused.knownBase, 0);
+  const joiner = room.join(key);
+  await synced(joiner);
+  assert.equal(textOf(joiner).length, OVERSIZED_TEXT.length + SMALL_SNAPSHOT_POLICY.afterUpdates);
+  assert.ok(textOf(joiner).includes(OVERSIZED_TEXT));
+});
+
+test('a page that applied the stored snapshot builds the next one on it', async (t) => {
+  const room = await e2eRoom(t, { maxAppendBytes: OVERSIZED_APPEND_CAP });
+  const key = await roomKey();
+  const a = room.join(key, { appendFrameBytes: OVERSIZED_APPEND_CAP });
+  const b = room.join(key, { snapshotPolicy: SMALL_SNAPSHOT_POLICY });
+  await synced(a, b);
+  type(a, OVERSIZED_TEXT);
+  await delivered(a);
+  await until(() => textOf(b) === OVERSIZED_TEXT, 'B applied the snapshot');
+  const [first] = a.tap.sentOfType(E2E_FRAME.SNAPSHOT);
+  for (let i = 0; i < SMALL_SNAPSHOT_POLICY.afterUpdates; i += 1) type(b, String(i));
+  await until(() => b.tap.sentOfType(E2E_FRAME.SNAPSHOT).length === 1, 'B snapshot');
+  await delivered(b);
+  const [second] = b.tap.sentOfType(E2E_FRAME.SNAPSHOT);
+  assert.equal(second.knownBase, first.seq);
+  assert.equal((await room.roomLog.open(room.docName)).snapshot.baseSeq, second.seq);
+  const joiner = room.join(key);
+  await synced(joiner);
+  assert.equal(textOf(joiner), `${OVERSIZED_TEXT}012`);
+});
+
+const gatedCipher = () => {
+  const gates = { decrypt: null, encrypt: null };
+  return {
+    gates,
+    cipher: {
+      async encryptFrame(...args) { await gates.encrypt; return encryptFrame(...args); },
+      async decryptFrame(...args) { await gates.decrypt; return decryptFrame(...args); },
+    },
+  };
+};
+const openGate = () => {
+  let release;
+  const promise = new Promise((resolve) => { release = resolve; });
+  return { promise, release };
+};
+
+test('a live frame still decrypting makes the page unsynced at once', async (t) => {
+  const room = await e2eRoom(t);
+  const key = await roomKey();
+  const a = room.join(key);
+  const { gates, cipher } = gatedCipher();
+  const b = room.join(key, { cipher });
+  await synced(a, b);
+  await until(() => b.provider.awareness.getLocalState()[E2E_SYNCED_FIELD] === true, 'advertised synced');
+  const gate = openGate();
+  gates.decrypt = gate.promise;
+  type(a, 'slow');
+  await until(() => b.provider.head === b.provider.appliedSeq + 1, 'frame received');
+  assert.equal(b.provider.e2eSynced, false);
+  assert.equal(b.provider.awareness.getLocalState()[E2E_SYNCED_FIELD], false);
+  gate.release();
+  await until(() => b.provider.e2eSynced && textOf(b) === 'slow', 'caught up');
+  await until(() => b.provider.awareness.getLocalState()[E2E_SYNCED_FIELD] === true, 'advertised again');
+});
+
+test('destroy stops a decryption in flight from touching the doc', async (t) => {
+  const room = await e2eRoom(t);
+  const key = await roomKey();
+  const a = room.join(key);
+  const { gates, cipher } = gatedCipher();
+  const b = room.join(key, { cipher });
+  await synced(a, b);
+  const gate = openGate();
+  gates.decrypt = gate.promise;
+  type(a, 'late');
+  await until(() => b.provider.head > b.provider.appliedSeq, 'frame received');
+  const applied = b.provider.appliedSeq;
+  b.provider.destroy();
+  gate.release();
+  await sleep(QUIET_MS);
+  assert.equal(textOf(b), '');
+  assert.equal(b.provider.appliedSeq, applied);
+});
+
+test('destroy stops an encryption in flight from sending', async (t) => {
+  const room = await e2eRoom(t);
+  const key = await roomKey();
+  const { gates, cipher } = gatedCipher();
+  const a = room.join(key, { cipher });
+  await synced(a);
+  const gate = openGate();
+  gates.encrypt = gate.promise;
+  type(a, 'never sent');
+  a.provider.destroy();
+  gate.release();
+  await sleep(QUIET_MS);
+  assert.equal(a.tap.sentOfType(E2E_FRAME.APPEND).length, 0);
+  assert.equal((await room.roomLog.open(room.docName)).head, 0);
+});
+
+test('an orderly disconnect removes this page from peers at once; reconnecting shows it again', async (t) => {
+  const room = await e2eRoom(t);
+  const key = await roomKey();
+  const a = room.join(key);
+  const b = room.join(key);
+  await synced(a, b);
+  a.provider.awareness.setLocalStateField('user', { name: 'Alice' });
+  const seen = () => b.provider.awareness.getStates().get(a.doc.clientID)?.user?.name === 'Alice';
+  await until(seen, 'peer sees A');
+  a.provider.disconnect();
+  await until(() => !b.provider.awareness.getStates().has(a.doc.clientID), 'removed at once');
+  assert.equal(a.provider.awareness.getLocalState().user.name, 'Alice', 'the local state is kept');
+  a.provider.connect();
+  await until(seen, 'peer sees A again');
+});
+
+test('catching up is advertised only after the settle time; falling behind at once', async (t) => {
+  const SETTLE_MS = 200;
+  const room = await e2eRoom(t);
+  const key = await roomKey();
+  const a = room.join(key, { syncedSettleMs: SETTLE_MS });
+  await synced(a);
+  assert.equal(a.provider.e2eSynced, true);
+  assert.notEqual(a.provider.awareness.getLocalState()[E2E_SYNCED_FIELD], true);
+  await sleep(SETTLE_MS + QUIET_MS);
+  assert.equal(a.provider.awareness.getLocalState()[E2E_SYNCED_FIELD], true);
 });
