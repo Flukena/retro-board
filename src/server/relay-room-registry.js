@@ -9,10 +9,18 @@ export const ROOM_REGISTRATION_META = 'retro-room-registration-v1';
 export const ROOM_HANDLE_META = 'retro-room-handle-v1';
 export const ROOM_UPLOAD_USAGE_META = 'retro-room-upload-usage-v1';
 export const REGISTRY_STORAGE_FAILURE_EVENT = 'storageFailure';
-export const TOKENIZED_ROOM_RE = /^board-[A-Za-z0-9_-]{3,32}-[A-Za-z0-9_-]{8,64}$/;
-const BOARD_CODE_RE = /^[A-Za-z0-9_-]{3,32}$/;
-const ROOM_TOKEN_RE = /^[A-Za-z0-9_-]{8,64}$/;
+const ROOM_NAME_CHARS = '[A-Za-z0-9_-]';
+const MIN_BOARD_CODE_CHARS = 3;
+const MAX_BOARD_CODE_CHARS = 32;
+const MIN_ROOM_TOKEN_CHARS = 8;
+const MAX_ROOM_TOKEN_CHARS = 64;
+const BOARD_CODE_PATTERN = `${ROOM_NAME_CHARS}{${MIN_BOARD_CODE_CHARS},${MAX_BOARD_CODE_CHARS}}`;
+const ROOM_TOKEN_PATTERN = `${ROOM_NAME_CHARS}{${MIN_ROOM_TOKEN_CHARS},${MAX_ROOM_TOKEN_CHARS}}`;
+export const TOKENIZED_ROOM_RE = new RegExp(`^board-${BOARD_CODE_PATTERN}-${ROOM_TOKEN_PATTERN}$`);
+const BOARD_CODE_RE = new RegExp(`^${BOARD_CODE_PATTERN}$`);
+const ROOM_TOKEN_RE = new RegExp(`^${ROOM_TOKEN_PATTERN}$`);
 const DOCUMENT_PREFIX = 'yjs/';
+const LONGEST_NAME_FILL = 'x';
 const BOARD_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
 const BOARD_CODE_RANDOM_BYTES = 8;
 const ROOM_CREDENTIAL_RANDOM_BYTES = 24;
@@ -43,6 +51,11 @@ const DELETE_OPERATION = 'del';
 const ROLLBACK_FAILED_LOG = '[yjs] incomplete room rollback failed';
 
 export const canonicalDocName = (code, token) => `${DOCUMENT_PREFIX}board-${code}-${token}`;
+/** The longest docName a room can have; storage-size bounds are computed against it. */
+export const LONGEST_CANONICAL_DOC_NAME = canonicalDocName(
+  LONGEST_NAME_FILL.repeat(MAX_BOARD_CODE_CHARS),
+  LONGEST_NAME_FILL.repeat(MAX_ROOM_TOKEN_CHARS),
+);
 export const databaseCapacityError = () => Object.assign(new Error(DATABASE_CAPACITY_MESSAGE), { code: ROOM_CAPACITY_CODE });
 export const fixedDigestEqual = (left, right) => (
   Buffer.isBuffer(left)

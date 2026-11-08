@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { metaBatch, metaBatchBytes, storageOperationError } from './relay-storage.js';
+import { LONGEST_CANONICAL_DOC_NAME } from './relay-room-registry.js';
 import { ROOM_LOCK_META, decodeLockRecord, encodeLockRecord } from './room-lock-record.js';
 
 export const E2E_QUOTA = 'E2E_QUOTA';
@@ -35,13 +36,21 @@ const put = (key, value) => ({ type: 'put', key, value });
 const del = (key) => ({ type: 'del', key });
 const range = (from, to) => Array.from({ length: Math.max(0, to - from + 1) }, (_, i) => from + i);
 const snapshotValue = (baseSeq, bytes) => ({ baseSeq, bytes, sha256: digestOf(bytes) });
-// Upper bounds for work reserved before it is queued: the widest seq key and head value,
-// and one delete per log entry a snapshot can prune.
+// Upper bounds for payload reserved before it is queued: the widest seq key and head value.
+// Like normal-room compaction, the key-only deletes a snapshot prunes are not charged as payload.
 const appendReservationBytes = (docName, ciphertext) => STORE_OVERHEAD_BYTES
   + metaBatchBytes(docName, [put(updateKey(Number.MAX_SAFE_INTEGER), ciphertext), put(HEAD_KEY, Number.MAX_SAFE_INTEGER)]);
-const snapshotReservationBytes = (docName, value, maxDeletes) => STORE_OVERHEAD_BYTES
-  + metaBatchBytes(docName, [put(SNAPSHOT_KEY, value)])
-  + maxDeletes * metaBatchBytes(docName, [del(updateKey(Number.MAX_SAFE_INTEGER))]);
+const snapshotReservationBytes = (docName, value) => STORE_OVERHEAD_BYTES + metaBatchBytes(docName, [put(SNAPSHOT_KEY, value)]);
+// Smallest ciphertext whose length prefix is as wide as any allowed document's (every size below 2^28).
+const SNAPSHOT_LENGTH_PROBE_BYTES = 2 ** 21;
+const snapshotLengthProbe = new Uint8Array(SNAPSHOT_LENGTH_PROBE_BYTES);
+/** Bytes a snapshot reservation adds on top of its ciphertext, for any room's docName. */
+export const E2E_SNAPSHOT_RESERVATION_OVERHEAD_BYTES = snapshotReservationBytes(
+  LONGEST_CANONICAL_DOC_NAME,
+  snapshotValue(Number.MAX_SAFE_INTEGER, snapshotLengthProbe),
+) - SNAPSHOT_LENGTH_PROBE_BYTES;
+/** Largest snapshot ciphertext whose reservation still fits a pending-store cap of `maxRoomBytes`. */
+export const e2eMaxSnapshotCiphertextBytes = (maxRoomBytes) => maxRoomBytes - E2E_SNAPSHOT_RESERVATION_OVERHEAD_BYTES;
 
 /** True when a stored snapshot value's bytes still match its recorded digest. */
 export function verifySnapshotDigest(snapshot) {
@@ -93,6 +102,9 @@ export class E2ERoomLog {
     this.#onError = onError;
     this.#maxLogEntries = maxLogEntries;
   }
+
+  /** Largest snapshot ciphertext this log accepts; its reservation fits a `maxRoomBytes` pending-store cap. */
+  get maxSnapshotBytes() { return e2eMaxSnapshotCiphertextBytes(this.#maxRoomBytes); }
 
   /** Drops in-memory state for a retired or evicted room; storage is untouched. */
   forget(docName) {
@@ -157,9 +169,9 @@ export class E2ERoomLog {
   }
 
   async snapshot(docName, baseSeq, ciphertext) {
+    if (ciphertext.byteLength > this.maxSnapshotBytes) throw codedError(E2E_QUOTA, 'snapshot exceeds the size limit');
     const value = snapshotValue(baseSeq, ciphertext);
-    const maxDeletes = Number.isSafeInteger(baseSeq) ? Math.min(Math.max(baseSeq, 0), this.#maxLogEntries) : 0;
-    const release = this.#reserveStore(snapshotReservationBytes(docName, value, maxDeletes));
+    const release = this.#reserveStore(snapshotReservationBytes(docName, value));
     return this.#enqueue(docName, async (room) => {
       await this.#load(docName, room);
       this.#assertNotFrozen(room);

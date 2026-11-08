@@ -54,6 +54,8 @@ const headerBytes = (layout) => layout.fields.reduce((sum, name) => sum + FIELD_
 
 /** Bytes before the ciphertext in the widest frame; a transport limit adds this to its payload cap. */
 export const E2E_MAX_FRAME_HEADER_BYTES = Math.max(...Object.values(LAYOUTS).map(headerBytes));
+/** Bytes before the ciphertext in one frame type; a per-type cap adds this to its ciphertext limit. */
+export const e2eFrameHeaderBytes = (type) => headerBytes(LAYOUTS[type]);
 
 export function encodeFrame(type, values = {}) {
   const layout = LAYOUTS[type];

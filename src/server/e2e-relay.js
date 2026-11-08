@@ -1,6 +1,6 @@
 import { WebSocketServer } from 'ws';
 import {
-  E2E_EPHEMERAL_MAX_BYTES, E2E_FRAME, E2E_MAX_FRAME_HEADER_BYTES, E2E_REJECT, decodeClientFrame, encodeFrame,
+  E2E_EPHEMERAL_MAX_BYTES, E2E_FRAME, E2E_MAX_FRAME_HEADER_BYTES, E2E_REJECT, decodeClientFrame, e2eFrameHeaderBytes, encodeFrame,
 } from '../domain/e2e-envelope.js';
 import { E2E_BUSY, E2E_CORRUPT, E2E_FROZEN, E2E_QUOTA, E2E_STALE_SNAPSHOT } from './e2e-room-log.js';
 import { closeWebSocket } from './relay-lifecycle.js';
@@ -256,12 +256,13 @@ class E2EConnection {
  * Ports: roomLog (E2ERoomLog), traffic (RelayWsTraffic), touch(docName), onStorageFailure(error).
  */
 export function createE2ERelay({ roomLog, traffic, maxRoomBytes, maxAppendBytes, touch, onStorageFailure, logger = console }) {
-  const maxSnapshotFrameBytes = maxRoomBytes + E2E_MAX_FRAME_HEADER_BYTES;
-  const wss = new WebSocketServer({ noServer: true, maxPayload: maxSnapshotFrameBytes });
+  const maxFrameBytes = maxRoomBytes + E2E_MAX_FRAME_HEADER_BYTES;
+  const maxSnapshotFrameBytes = roomLog.maxSnapshotBytes + e2eFrameHeaderBytes(E2E_FRAME.SNAPSHOT);
+  const wss = new WebSocketServer({ noServer: true, maxPayload: maxFrameBytes });
   const deps = {
     roomLog, traffic, touch, onStorageFailure, logger,
     frameLimits: {
-      maxBytes: maxSnapshotFrameBytes,
+      maxBytes: maxFrameBytes,
       maxEphemeralBytes: E2E_EPHEMERAL_MAX_BYTES,
       maxFrameBytesByType: { [E2E_FRAME.APPEND]: maxAppendBytes, [E2E_FRAME.SNAPSHOT]: maxSnapshotFrameBytes },
     },

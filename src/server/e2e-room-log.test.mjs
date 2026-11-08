@@ -7,10 +7,13 @@ import { join } from 'node:path';
 import {
   E2ERoomLog, E2E_BUSY, E2E_CORRUPT, E2E_FROZEN, E2E_LOCK_MISMATCH, E2E_QUOTA, E2E_ROTATION_STALE, E2E_STALE_SNAPSHOT,
   MAX_PENDING_OPS_PER_ROOM, MAX_FREEZE_TTL_MS, E2E_BLOB_GRACE_MS, E2E_MAX_LOG_ENTRIES, verifySnapshotDigest,
+  E2E_SNAPSHOT_RESERVATION_OVERHEAD_BYTES,
 } from './e2e-room-log.js';
 import { ROOM_LOCK_META, decodeLockRecord, encodeLockRecord } from './room-lock-record.js';
 import { metaBatchBytes } from './relay-storage.js';
 import { lockRecord, START_MS } from './room-lock-fixtures.mjs';
+import { LONGEST_CANONICAL_DOC_NAME, TOKENIZED_ROOM_RE } from './relay-room-registry.js';
+import { STORE_CAPACITY_CODE, sharedReservations } from '../test-support/store-reservations.mjs';
 
 const require = createRequire(import.meta.url);
 const { LeveldbPersistence, keyEncoding } = require('y-leveldb');
@@ -474,25 +477,6 @@ test('appends beyond the log entry cap are QUOTA until a snapshot prunes the log
   assert.deepEqual(await log.append(DOC, bytesOf(1)), { seq: CAP + 1 });
 }, { maxLogEntries: 3 }));
 
-const CAPACITY_CODE = 'TEST_CAPACITY';
-/** A shared pending-op counter like the relay's registryPersistence.reserveStore. */
-function sharedReservations(maxOps) {
-  const state = { pending: 0, taken: 0, released: 0 };
-  state.reserveStore = () => {
-    if (state.pending >= maxOps) throw Object.assign(new Error('pending capacity'), { code: CAPACITY_CODE });
-    state.pending += 1;
-    state.taken += 1;
-    let done = false;
-    return () => {
-      if (done) return;
-      done = true;
-      state.pending -= 1;
-      state.released += 1;
-    };
-  };
-  return state;
-}
-
 const stallStorage = (ldb) => {
   const transact = ldb._transact.bind(ldb);
   let resume;
@@ -502,7 +486,7 @@ const stallStorage = (ldb) => {
 };
 
 const SHARED_MAX_OPS = 3;
-const shared = sharedReservations(SHARED_MAX_OPS);
+const shared = sharedReservations({ maxOps: SHARED_MAX_OPS });
 test('queued client ops hold shared pending capacity before they run, across rooms, released once each', () => withLog(async ({ log, ldb }) => {
   const OTHER_DOC = 'room-doc-2';
   const resume = stallStorage(ldb);
@@ -514,7 +498,7 @@ test('queued client ops hold shared pending capacity before they run, across roo
   const pendingWhileStalled = shared.pending;
   resume();
   await extra.catch(() => {});
-  assert.equal(outcome, CAPACITY_CODE);
+  assert.equal(outcome, STORE_CAPACITY_CODE);
   assert.equal(pendingWhileStalled, SHARED_MAX_OPS, 'two queued in one room and one in the other hold every slot');
   const [first, second, stale] = await Promise.allSettled(queued);
   assert.deepEqual([first.value, second.value], [{ seq: 1 }, { seq: 2 }]);
@@ -523,3 +507,31 @@ test('queued client ops hold shared pending capacity before they run, across roo
   assert.equal(shared.released, shared.taken);
   assert.deepEqual(await log.append(OTHER_DOC, bytesOf(4)), { seq: 1 });
 }, { reserveStore: shared.reserveStore }));
+
+const PENDING_STORE_CAP_BYTES = 4 * 1024 * 1024;
+const DOCUMENT_PREFIX = 'yjs/';
+test('the longest room name is the bound the snapshot overhead is computed for', () => {
+  const longest = LONGEST_CANONICAL_DOC_NAME.slice(DOCUMENT_PREFIX.length);
+  assert.ok(LONGEST_CANONICAL_DOC_NAME.startsWith(DOCUMENT_PREFIX) && TOKENIZED_ROOM_RE.test(longest));
+  const [, code, token] = longest.split('-');
+  assert.equal(TOKENIZED_ROOM_RE.test(`board-${code}x-${token}`), false, 'no longer board code is a room');
+  assert.equal(TOKENIZED_ROOM_RE.test(`board-${code}-${token}x`), false, 'no longer room token is a room');
+});
+
+test('the largest snapshot fits a shared pending-byte cap of maxRoomBytes; one byte more is QUOTA', () => {
+  const store = sharedReservations({ maxBytes: PENDING_STORE_CAP_BYTES });
+  return withLog(async ({ log, ldb }) => {
+    const doc = LONGEST_CANONICAL_DOC_NAME;
+    await ldb.setMeta(doc, ROOM_LOCK_META, encodeLockRecord(lockRecord()));
+    await log.append(doc, bytesOf(1));
+    assert.equal(log.maxSnapshotBytes, PENDING_STORE_CAP_BYTES - E2E_SNAPSHOT_RESERVATION_OVERHEAD_BYTES);
+    await log.snapshot(doc, 1, bytesOf(log.maxSnapshotBytes, 7));
+    assert.equal((await ldb.getMeta(doc, 'e2e-snapshot')).bytes.byteLength, log.maxSnapshotBytes);
+    assert.ok(store.reservedBytes.at(-1) <= PENDING_STORE_CAP_BYTES, 'the reservation stays within the cap');
+    const taken = store.taken;
+    await log.append(doc, bytesOf(1));
+    await rejectsWith(log.snapshot(doc, 2, bytesOf(log.maxSnapshotBytes + 1, 7)), E2E_QUOTA);
+    assert.equal(store.taken, taken + 1, 'an oversized snapshot takes no reservation');
+    assert.equal((await ldb.getMeta(doc, 'e2e-snapshot')).baseSeq, 1);
+  }, { maxRoomBytes: PENDING_STORE_CAP_BYTES, reserveStore: store.reserveStore });
+});

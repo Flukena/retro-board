@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   E2E_FRAME, E2E_REJECT, E2E_CIPHERTEXT_OVERHEAD_BYTES, E2E_EPHEMERAL_MAX_BYTES, E2E_MAX_FRAME_HEADER_BYTES,
-  encodeFrame, decodeClientFrame, decodeServerFrame,
+  encodeFrame, decodeClientFrame, decodeServerFrame, e2eFrameHeaderBytes,
 } from './e2e-envelope.js';
 
 const MAX_BYTES = 1024;
@@ -154,4 +154,11 @@ test('a per-type frame cap bounds that type only, inclusive, below the overall m
 
 test('the largest header is the ACK: type + seq + clientRef', () => {
   assert.equal(E2E_MAX_FRAME_HEADER_BYTES, 1 + 8 + 4);
+});
+
+test('a frame type header is the bytes an encoded frame adds before its ciphertext', () => {
+  const ciphertext = new Uint8Array(5);
+  assert.equal(e2eFrameHeaderBytes(E2E_FRAME.SNAPSHOT), 1 + 8);
+  assert.equal(encodeFrame(E2E_FRAME.SNAPSHOT, { seq: 1, ciphertext }).length - ciphertext.length, e2eFrameHeaderBytes(E2E_FRAME.SNAPSHOT));
+  assert.equal(e2eFrameHeaderBytes(E2E_FRAME.APPEND), 1 + 4);
 });

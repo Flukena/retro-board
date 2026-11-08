@@ -14,6 +14,7 @@ import { readRelayConfig } from './relay-config.js';
 import { RelayWsTraffic, POLICY_CLOSE_CODE, SESSION_EXPIRED_REASON } from './relay-ws-traffic.js';
 import { ROOM_LOCK_META, encodeLockRecord } from './room-lock-record.js';
 import { lockRecord } from './room-lock-fixtures.mjs';
+import { sharedReservations } from '../test-support/store-reservations.mjs';
 
 const require = createRequire(import.meta.url);
 const { LeveldbPersistence } = require('y-leveldb');
@@ -39,14 +40,17 @@ const generousConfig = (env = {}) => readRelayConfig({
   ...env,
 });
 
-async function fixture(t, { config = generousConfig(), expiresAt = null, prepare = () => {}, maxRoomBytes = MAX_ROOM_BYTES, maxAppendBytes = MAX_FRAME_BYTES } = {}) {
+async function fixture(t, {
+  config = generousConfig(), expiresAt = null, prepare = () => {}, maxRoomBytes = MAX_ROOM_BYTES, maxAppendBytes = MAX_FRAME_BYTES,
+  reserveStore = () => () => {},
+} = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'e2e-relay-protocol-'));
   const ldb = new LeveldbPersistence(dir);
   await ldb.setMeta(DOC, ROOM_LOCK_META, encodeLockRecord(lockRecord()));
   prepare(ldb);
   const failures = [];
   const touched = [];
-  const roomLog = new E2ERoomLog({ ldb, maxRoomBytes, reserveStore: () => () => {}, onError: (error) => failures.push(error) });
+  const roomLog = new E2ERoomLog({ ldb, maxRoomBytes, reserveStore, onError: (error) => failures.push(error) });
   const relay = createE2ERelay({
     roomLog, traffic: new RelayWsTraffic(config, { log: quietLogger }), maxRoomBytes, maxAppendBytes,
     touch: (docName) => touched.push(docName), onStorageFailure: (error) => failures.push(error), logger: quietLogger,
@@ -232,13 +236,15 @@ test('an entry notified while a joiner\'s replay is in flight is delivered after
 });
 
 const SMALL_APPEND_CAP = 1024;
+/** The relay's shared pending-store byte cap, set to the room size as in production defaults. */
+const pendingCapOfRoomBytes = () => sharedReservations({ maxBytes: MAX_ROOM_BYTES }).reserveStore;
 
-test('APPEND keeps its own frame cap while a SNAPSHOT up to the room quota is stored and fanned out', async (t) => {
-  const f = await fixture(t, { maxAppendBytes: SMALL_APPEND_CAP });
+test('APPEND keeps its own frame cap while the largest SNAPSHOT is stored under a maxRoomBytes pending cap', async (t) => {
+  const f = await fixture(t, { maxAppendBytes: SMALL_APPEND_CAP, reserveStore: pendingCapOfRoomBytes() });
   const [writer, other] = [await Client.join(f), await Client.join(f)];
   writer.append(1, bytes(8));
   await writer.until(() => writer.has(E2E_FRAME.ACK));
-  const snapshot = bytes(MAX_ROOM_BYTES - 8, 5);
+  const snapshot = bytes(f.roomLog.maxSnapshotBytes, 5);
   writer.ws.send(encodeFrame(E2E_FRAME.SNAPSHOT, { seq: 1, ciphertext: snapshot }));
   await other.until(() => other.has(E2E_FRAME.SNAPSHOT_OUT));
   assert.equal(other.ofType(E2E_FRAME.SNAPSHOT_OUT)[0].ciphertext.length, snapshot.length);
@@ -246,6 +252,18 @@ test('APPEND keeps its own frame cap while a SNAPSHOT up to the room quota is st
   writer.append(2, bytes(SMALL_APPEND_CAP));
   assert.equal((await writer.closed).code, 1003, 'an APPEND frame over its own cap is malformed');
   assert.deepEqual(writer.ofType(E2E_FRAME.REJECT), [{ type: E2E_FRAME.REJECT, code: E2E_REJECT.MALFORMED, clientRef: 0 }]);
+});
+
+test('a SNAPSHOT one byte over the largest is closed by the decode cap and not stored', async (t) => {
+  const f = await fixture(t, { reserveStore: pendingCapOfRoomBytes() });
+  const writer = await Client.join(f);
+  writer.append(1, bytes(8));
+  await writer.until(() => writer.has(E2E_FRAME.ACK));
+  writer.ws.send(encodeFrame(E2E_FRAME.SNAPSHOT, { seq: 1, ciphertext: bytes(f.roomLog.maxSnapshotBytes + 1, 5) }));
+  assert.equal((await within(writer.closed)).code, 1003);
+  assert.deepEqual(writer.ofType(E2E_FRAME.REJECT), [{ type: E2E_FRAME.REJECT, code: E2E_REJECT.MALFORMED, clientRef: 0 }]);
+  await f.roomLog.whenIdle();
+  assert.equal((await f.roomLog.open(DOC)).snapshot, null);
 });
 
 test('a second SNAPSHOT within the allowance interval is REJECT RATE and is not stored', async (t) => {
