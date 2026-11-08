@@ -17,6 +17,7 @@
  * GOOGLE_OAUTH_ENDPOINT_BASE must be the stub's printed URL exactly: it is also the expected issuer.
  * A (English) signs in, is granted Pro through the maintainer API, cancels, signs out everywhere and
  * deletes the account; B (Thai) stays a guest, creates a board, and both edit it with undo/redo.
+ * Signed-in A's name dialog starts with the Google name; guest B's starts with a Guest-#### name.
  */
 import assert from 'node:assert/strict';
 import { FAKE_GOOGLE_PROFILE } from './fake-google-oidc.mjs';
@@ -34,6 +35,8 @@ const UNDO_SETTLE_TIMEOUT_MS = 2_000;
 const STICKY_A_PX = { x: 480, y: 360 };
 const STICKY_B_PX = { x: 960, y: 360 };
 const NAME_A = 'Ada';
+const GUEST_NAME_PATTERN = /^Guest-\d{4}$/;
+const PREFILL_POLL_MS = 100;
 const NAME_B = 'บี';
 const LABELS = {
   en: { signIn: 'Sign in with Google', menu: 'Account menu', free: 'Free plan', pro: 'Pro plan',
@@ -62,6 +65,21 @@ async function grantPlan(plan) {
 }
 
 const sameOrigin = (baseUrl) => (url) => url.origin === new URL(baseUrl).origin;
+const namePrompt = (page, lang) => page.getByPlaceholder(BASE_LABELS[lang].namePlaceholder, { exact: true });
+
+// The first-visit name dialog offers the Google name once the account check returns.
+async function waitForNameDraft(page, lang, matches) {
+  const prompt = namePrompt(page, lang);
+  await prompt.waitFor();
+  const deadline = Date.now() + SYNC_TIMEOUT_MS;
+  let value = await prompt.inputValue();
+  while (!matches(value) && Date.now() < deadline) {
+    await page.waitForTimeout(PREFILL_POLL_MS);
+    value = await prompt.inputValue();
+  }
+  assert.ok(matches(value), `unexpected name draft: ${value}`);
+  return value;
+}
 const accountTrigger = (page) => page.getByRole('button', { name: LABELS.en.menu, exact: true });
 const signInLink = (page, lang) => page.getByRole('link', { name: LABELS[lang].signIn, exact: true });
 
@@ -183,13 +201,17 @@ async function collaborationSteps({ a, b, report, baseUrl }) {
     await signInLink(b, 'th').waitFor();
     await b.getByRole('button', { name: BASE_LABELS.th.create, exact: true }).click();
     await b.waitForURL(BOARD_URL_PATTERN);
+    const guestDraft = await waitForNameDraft(b, 'th', (value) => GUEST_NAME_PATTERN.test(value));
     await enter(b, 'th', NAME_B);
+    return { guestDraft };
   });
   const stamp = Date.now();
   const textA = `signed-in-A-${stamp}`;
   const textB = `guest-B-${stamp}`;
   await step(report, 'signed-in A and guest B edit the same board both ways', async () => {
     await a.goto(b.url());
+    await waitForNameDraft(a, 'en', (value) => value === FAKE_GOOGLE_PROFILE.name);
+    await shot(a, 'name-prefill-en.png', report);
     await enter(a, 'en', NAME_A);
     await addSharedSticky(a, 'en', textA, STICKY_A_PX);
     await waitForTextOn([a, b], textA);
