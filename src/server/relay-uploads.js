@@ -25,8 +25,17 @@ const EXT_CONTENT_TYPE = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpe
 const IMAGE_ID_RE = /^[a-f0-9-]+\.(png|jpe?g|webp|gif)$/;
 const LEGACY_IMAGE_FILENAME_RE = IMAGE_ID_RE;
 const ROOM_IMAGE_FILENAME_RE = /^[A-Za-z0-9_-]{32}\.[a-f0-9-]+\.(png|jpe?g|webp|gif)$/;
+// Encrypted room blobs: `<handle>.<lowercase uuid>.e2e`, opaque ciphertext with no magic bytes.
+export const E2E_BLOB_EXTENSION = 'e2e';
+const E2E_BLOB_FILENAME_RE = /^([A-Za-z0-9_-]{32})\.([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.e2e$/;
+export const e2eBlobFilename = (roomHandle, blobId) => `${roomHandle}.${blobId}.${E2E_BLOB_EXTENSION}`;
+/** `{ handle, id }` for an encrypted blob file name, or null for any other file. */
+export const parseE2EBlobFilename = (name) => {
+  const match = E2E_BLOB_FILENAME_RE.exec(name);
+  return match ? { handle: match[1], id: match[2] } : null;
+};
 export const isStoredImageFilename = (name) => (
-  LEGACY_IMAGE_FILENAME_RE.test(name) || ROOM_IMAGE_FILENAME_RE.test(name)
+  LEGACY_IMAGE_FILENAME_RE.test(name) || ROOM_IMAGE_FILENAME_RE.test(name) || E2E_BLOB_FILENAME_RE.test(name)
 );
 
 // Cheap magic-byte sniff — Content-Type is client-supplied and spoofable, so
@@ -39,9 +48,9 @@ const RIFF_SIGNATURE_BYTES = 4;
 const WEBP_FORMAT_OFFSET_BYTES = 8;
 export const IMAGE_SNIFF_BYTES = WEBP_SIGNATURE_BYTES;
 const ROOM_HANDLE_CHARACTERS = 32;
-// The owning room's handle of a room image file, or null for any other file.
+// The owning room's handle of a room image or encrypted blob file, or null for any other file.
 export const roomHandleOfImageFile = (name) => (
-  ROOM_IMAGE_FILENAME_RE.test(name) ? name.slice(0, ROOM_HANDLE_CHARACTERS) : null
+  ROOM_IMAGE_FILENAME_RE.test(name) || E2E_BLOB_FILENAME_RE.test(name) ? name.slice(0, ROOM_HANDLE_CHARACTERS) : null
 );
 const PRIVATE_UPLOAD_FILE_MODE = 0o600;
 export const UPLOAD_STORAGE_FAILURE_EVENT = 'storageFailure';
@@ -200,14 +209,14 @@ export const createRelayUploads = ({ config, state, roomUploadUsage, imageReads,
     return { contentType, ext, declaredLength };
   };
 
-  const reserveUpload = (clientIp, docName, declaredLength, res) => {
+  const reserveUpload = (clientIp, docName, declaredLength, res, maxBytes = MAX_UPLOAD_BYTES) => {
     if (state.active >= MAX_ACTIVE_UPLOADS
         || (state.activeByIp.get(clientIp) || 0) >= MAX_ACTIVE_UPLOADS_PER_IP) {
       res.writeHead(429, { 'retry-after': RETRY_AFTER_SHORT_SECONDS });
       res.end();
       return null;
     }
-    const reservedBytes = declaredLength ?? MAX_UPLOAD_BYTES;
+    const reservedBytes = declaredLength ?? maxBytes;
     const room = roomUploadUsage.get(docName);
     if (!room) { res.writeHead(404); res.end(); return null; }
     if (state.files + state.active >= MAX_UPLOAD_FILES
@@ -228,6 +237,31 @@ export const createRelayUploads = ({ config, state, roomUploadUsage, imageReads,
     room.active += 1;
     room.reservedBytes += reservedBytes;
     return { room, reservedBytes };
+  };
+
+  const addFileUsage = (room, bytes) => {
+    state.bytes += bytes;
+    state.files += 1;
+    room.bytes += bytes;
+    room.files += 1;
+  };
+
+  const removeFileUsage = (room, bytes) => {
+    state.bytes = Math.max(0, state.bytes - bytes);
+    state.files = Math.max(0, state.files - 1);
+    if (!room) return;
+    room.bytes = Math.max(0, room.bytes - bytes);
+    room.files = Math.max(0, room.files - 1);
+  };
+
+  // A failed accounting write latches the relay's storage failure, then reaches the caller.
+  const persistRoomUsage = async (docName, room) => {
+    try {
+      await storage.setMeta(docName, ROOM_UPLOAD_USAGE_META, { bytes: room.bytes, files: room.files });
+    } catch (err) {
+      state.events.emit(UPLOAD_STORAGE_FAILURE_EVENT, err);
+      throw err;
+    }
   };
 
   const createTransfer = (ext, roomHandle) => {
@@ -271,15 +305,11 @@ export const createRelayUploads = ({ config, state, roomUploadUsage, imageReads,
     // Reservations cover publication; rename remains atomic within the upload directory.
     await fs.promises.rename(transfer.tempPath, transfer.finalPath);
     transfer.published = true;
-    state.bytes += transfer.total;
-    state.files += 1;
-    room.bytes += transfer.total;
-    room.files += 1;
+    addFileUsage(room, transfer.total);
     transfer.accounted = true;
     try {
-      await storage.setMeta(docName, ROOM_UPLOAD_USAGE_META, { bytes: room.bytes, files: room.files });
-    } catch (err) {
-      state.events.emit(UPLOAD_STORAGE_FAILURE_EVENT, err);
+      await persistRoomUsage(docName, room);
+    } catch {
       throw uploadError('UPLOAD_META', 'upload accounting failed');
     }
     console.log('[yjs] upload stored', { fileId: roomLogId(transfer.filename), bytes: transfer.total });
@@ -303,10 +333,7 @@ export const createRelayUploads = ({ config, state, roomUploadUsage, imageReads,
     const removed = await removePublishedFile(transfer);
     // Failed removal retains conservative accounting until startup reconciliation.
     if (removed && transfer.accounted) {
-      state.bytes = Math.max(0, state.bytes - transfer.total);
-      state.files = Math.max(0, state.files - 1);
-      room.bytes = Math.max(0, room.bytes - transfer.total);
-      room.files = Math.max(0, room.files - 1);
+      removeFileUsage(room, transfer.total);
       transfer.accounted = false;
     }
   };
@@ -391,5 +418,7 @@ export const createRelayUploads = ({ config, state, roomUploadUsage, imageReads,
     streamImage(`${roomHandle}.${imageId}`, clientIp, res, 'private, no-store', roomHandle);
   };
 
-  return { handleUpload, handleGetLegacyImage, handleGetRoomImage };
+  // Quota, rate-limit and accounting steps that encrypted blob uploads share with image uploads.
+  const admission = { takeUploadToken, reserveUpload, releaseUpload, addFileUsage, removeFileUsage, persistRoomUsage };
+  return { handleUpload, handleGetLegacyImage, handleGetRoomImage, streamImage, admission };
 };

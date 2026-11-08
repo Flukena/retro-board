@@ -55,6 +55,8 @@ export default Object.freeze({
   "maintainer.document": "Taille du document (borne supérieure estimée)",
   "maintainer.collections": "Collections résidentes",
   "maintainer.blocked": "Bloquée temporairement",
+  "maintainer.encrypted": "Chiffrée",
+  "maintainer.encryptedHint": "Le contenu est chiffré de bout en bout ; le propriétaire du serveur ne peut pas ouvrir cette salle.",
   "maintainer.resident": "Résidente",
   "maintainer.cold": "Sur disque",
   "maintainer.unknown": "Non chargée",

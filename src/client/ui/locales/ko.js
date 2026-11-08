@@ -55,6 +55,8 @@ export default Object.freeze({
   "maintainer.document": "문서 크기(추정 상한)",
   "maintainer.collections": "메모리에 로드된 컬렉션",
   "maintainer.blocked": "일시 차단됨",
+  "maintainer.encrypted": "암호화됨",
+  "maintainer.encryptedHint": "내용이 종단 간 암호화되어 있어 서버 소유자도 이 방을 열 수 없습니다.",
   "maintainer.resident": "메모리 로드됨",
   "maintainer.cold": "디스크 저장됨",
   "maintainer.unknown": "로드되지 않음",

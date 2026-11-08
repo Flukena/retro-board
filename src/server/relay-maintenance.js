@@ -110,6 +110,7 @@ export class RelayMaintenance extends EventEmitter {
       // Retention stays opt-in; private interrupted files use twice the deadline.
       if (config.UPLOAD_RETENTION_DAYS > 0) await sweepRetainedUploads(io, config, now, log);
       await sweepInterruptedUploads(io, config, now);
+      await context.e2eBlobs.sweepExpired();
       if (context.uploadState.active === 0) await storage.reconcileUploadUsage();
     } catch (error) {
       if (error?.code === STORAGE_FAILURE_CODE) this.emit(MAINTENANCE_STORAGE_FAILURE_EVENT, error);

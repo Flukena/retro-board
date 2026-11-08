@@ -5,23 +5,18 @@ import { once } from 'node:events';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import WebSocket from 'ws';
-import { startFakeGoogleOidc } from '../../scripts/fake-google-oidc.mjs';
-import { approvedCallback, startRelay, tempRoot } from '../test-support/relay-harness.mjs';
+import { tempRoot } from '../test-support/relay-harness.mjs';
+import {
+  ORIGIN, PASSWORD, createLockedRoom as createLockedRoomWith, createNormalRoom, lockedRelay,
+} from '../test-support/locked-room-harness.mjs';
 import { createRoomLock, encryptFrame } from '../client/room-lock/e2e-crypto.js';
 import { e2eAad } from '../domain/room-lock-contract.js';
 import { E2E_FRAME, E2E_REJECT, decodeServerFrame, encodeFrame } from '../domain/e2e-envelope.js';
 import { ROOM_LOCK_META, decodeLockRecord, encodeLockRecord } from './room-lock-record.js';
-import { canonicalDocName } from './relay-room-registry.js';
 
 const require = createRequire(import.meta.url);
 const { LeveldbPersistence } = require('y-leveldb');
 
-const ORIGIN = 'http://localhost:5173';
-const PASSWORD = 'correct horse battery staple';
-const GOOGLE_ENV = Object.freeze({
-  GOOGLE_OAUTH_CLIENT_ID: 'e2e-relay-test-client', GOOGLE_OAUTH_CLIENT_SECRET: 'e2e-relay-test-secret',
-  GOOGLE_OAUTH_REDIRECT_URI: 'http://localhost:1234/api/auth/google/callback',
-});
 const FRAME_LIMITS = Object.freeze({ maxBytes: 64 * 1024 * 1024 });
 const WAIT_MS = 5_000;
 const NORMAL_CLOSE = 1000;
@@ -36,44 +31,7 @@ const encoder = new TextEncoder();
 // One PBKDF2 derivation for the whole file; every locked room in it shares these params.
 const ROOM_LOCK = await createRoomLock(PASSWORD);
 
-const cookiePair = (setCookie) => setCookie.split(';')[0];
-const post = (relay, path, body, cookie) => fetch(`${relay.url}${path}`, {
-  method: 'POST', headers: { origin: ORIGIN, 'content-type': 'application/json', ...(cookie ? { cookie } : {}) }, body: JSON.stringify(body),
-});
-
-async function lockedRelay(t, env = {}, { root = null } = {}) {
-  const stub = await startFakeGoogleOidc();
-  t.after(() => stub.close());
-  const relay = await startRelay(t, {
-    YJS_ALLOW_INSECURE_HTTP: 'true', YJS_ALLOWED_ORIGINS: ORIGIN, GOOGLE_OAUTH_ENDPOINT_BASE: stub.url, ...GOOGLE_ENV, ...env,
-  }, { root });
-  return { relay, stub };
-}
-
-async function signIn({ relay, stub }) {
-  const { flowCookie, url } = await approvedCallback(relay, stub, '', `${ORIGIN}/`);
-  const response = await fetch(url, { headers: { cookie: cookiePair(flowCookie) }, redirect: 'manual' });
-  return cookiePair(response.headers.getSetCookie().find((cookie) => cookie.startsWith('rb_account=')));
-}
-
-async function exchange(relay, room, authKey) {
-  const response = await post(relay, '/api/room-session', authKey ? { ...room, authKey } : room);
-  assert.equal(response.status, STATUS.OK, relay.output());
-  const { roomHandle } = await response.json();
-  return { ...room, handle: roomHandle, docName: canonicalDocName(room.code, room.token), cookie: cookiePair(response.headers.get('set-cookie')) };
-}
-
-async function createLockedRoom(env) {
-  const response = await post(env.relay, '/api/rooms', { lock: ROOM_LOCK.lock }, await signIn(env));
-  assert.equal(response.status, STATUS.CREATED, env.relay.output());
-  return exchange(env.relay, await response.json(), ROOM_LOCK.authKey);
-}
-
-async function createNormalRoom(relay) {
-  const response = await post(relay, '/api/rooms', {});
-  assert.equal(response.status, STATUS.CREATED);
-  return exchange(relay, await response.json(), null);
-}
+const createLockedRoom = (env) => createLockedRoomWith(env, ROOM_LOCK);
 
 const e2eUrl = (relay, room) => `${relay.wsUrl}/rooms/${room.handle}/e2e`;
 const socketOptions = (cookie) => ({ origin: ORIGIN, ...(cookie ? { headers: { cookie } } : {}) });

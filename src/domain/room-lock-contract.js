@@ -17,7 +17,7 @@ const CHAR_MASK = 0x3f;
 const INVALID_LENGTH_REMAINDER = 1;
 const CHAR_GROUP = 4;
 const ROOM_HANDLE_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
-const BLOB_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const BLOB_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const textEncoder = new TextEncoder();
 
 export function encodeBase64Url(bytes) {

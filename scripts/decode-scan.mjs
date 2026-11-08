@@ -9,6 +9,7 @@
  */
 import { createRequire } from 'node:module';
 import { decodeRemoteBoard } from '../src/client/board/remote-board-decoder.js';
+import { ROOM_LOCK_META } from '../src/server/room-lock-record.js';
 
 const require = createRequire(import.meta.url);
 const Y = require('yjs');
@@ -61,10 +62,12 @@ const scanDoc = (doc, summary) => {
 const main = async (dir) => {
   if (!dir) { console.error(USAGE); process.exitCode = 1; return; }
   const db = new LeveldbPersistence(dir);
-  const summary = { rooms: 0, items: 0, hidden: {}, droppedMeta: {}, roomMiB: [] };
+  const summary = { rooms: 0, skippedEncrypted: 0, items: 0, hidden: {}, droppedMeta: {}, roomMiB: [] };
   try {
     for (const name of await db.getAllDocNames()) {
       summary.rooms += 1;
+      // An encrypted room's document holds no board data; its content lives as ciphertext the scan cannot read.
+      if (await db.getMeta(name, ROOM_LOCK_META)) { summary.skippedEncrypted += 1; continue; }
       scanDoc(await db.getYDoc(name), summary);
     }
   } finally {

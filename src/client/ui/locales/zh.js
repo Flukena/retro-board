@@ -55,6 +55,8 @@ export default Object.freeze({
   "maintainer.document": "文档大小（估算上限）",
   "maintainer.collections": "驻留集合",
   "maintainer.blocked": "已临时封禁",
+  "maintainer.encrypted": "已加密",
+  "maintainer.encryptedHint": "内容为端到端加密，服务器所有者无法打开此房间。",
   "maintainer.resident": "驻留内存",
   "maintainer.cold": "在磁盘上",
   "maintainer.unknown": "未加载",

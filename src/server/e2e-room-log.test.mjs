@@ -535,3 +535,11 @@ test('the largest snapshot fits a shared pending-byte cap of maxRoomBytes; one b
     assert.equal((await ldb.getMeta(doc, 'e2e-snapshot')).baseSeq, 1);
   }, { maxRoomBytes: PENDING_STORE_CAP_BYTES, reserveStore: store.reserveStore });
 });
+
+test('loadedDocNames lists the rooms held in memory and drops a forgotten one', () => withLog(async ({ log }) => {
+  assert.deepEqual(log.loadedDocNames(), []);
+  await log.open(DOC);
+  assert.deepEqual(log.loadedDocNames(), [DOC]);
+  log.forget(DOC);
+  assert.deepEqual(log.loadedDocNames(), []);
+}));

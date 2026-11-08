@@ -83,11 +83,13 @@ export const acceptCredentialOrigin = (req, res, allowedOrigins, allowInsecureHt
   return true;
 };
 
-export const sendCredentialPreflight = (req, res, { allowedOrigins, allowInsecureHttp, methods }) => {
+const DEFAULT_PREFLIGHT_HEADERS = 'Content-Type';
+
+export const sendCredentialPreflight = (req, res, { allowedOrigins, allowInsecureHttp, methods, headers = DEFAULT_PREFLIGHT_HEADERS }) => {
   if (!acceptCredentialOrigin(req, res, allowedOrigins, allowInsecureHttp)) return;
   res.writeHead(204, {
     'access-control-allow-methods': methods,
-    'access-control-allow-headers': 'Content-Type',
+    'access-control-allow-headers': headers,
     'access-control-max-age': String(CORS_PREFLIGHT_MAX_AGE_SECONDS),
     'cache-control': 'no-store',
   });

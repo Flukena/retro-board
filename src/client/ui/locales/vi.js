@@ -55,6 +55,8 @@ export default Object.freeze({
   "maintainer.document": "Kích thước tài liệu (giới hạn trên ước tính)",
   "maintainer.collections": "Bộ sưu tập trong bộ nhớ",
   "maintainer.blocked": "Bị chặn tạm thời",
+  "maintainer.encrypted": "Đã mã hóa",
+  "maintainer.encryptedHint": "Nội dung được mã hóa đầu cuối; chủ máy chủ không thể mở phòng này.",
   "maintainer.resident": "Trong bộ nhớ",
   "maintainer.cold": "Trên đĩa",
   "maintainer.unknown": "Chưa tải",

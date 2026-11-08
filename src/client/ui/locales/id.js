@@ -55,6 +55,8 @@ export default Object.freeze({
   "maintainer.document": "Ukuran dokumen (perkiraan batas atas)",
   "maintainer.collections": "Koleksi di memori",
   "maintainer.blocked": "Diblokir sementara",
+  "maintainer.encrypted": "Terenkripsi",
+  "maintainer.encryptedHint": "Konten dienkripsi end-to-end; pemilik server tidak dapat membuka ruangan ini.",
   "maintainer.resident": "Di memori",
   "maintainer.cold": "Di disk",
   "maintainer.unknown": "Belum dimuat",

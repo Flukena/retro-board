@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { once } from 'node:events';
 import { Readable, Writable, PassThrough } from 'node:stream';
 import { readRelayConfig } from './relay-config.js';
-import { createUploadState, scanUploadUsage, createRelayUploads, createImageReadBudgets, matchesMagicBytes, UPLOAD_STORAGE_FAILURE_EVENT } from './relay-uploads.js';
+import { createUploadState, scanUploadUsage, createRelayUploads, createImageReadBudgets, matchesMagicBytes, UPLOAD_STORAGE_FAILURE_EVENT, e2eBlobFilename, isStoredImageFilename, parseE2EBlobFilename, roomHandleOfImageFile } from './relay-uploads.js';
 import { IMAGE_MAX_BYTES, IMAGE_SOURCE_MAX_DIMENSION, GIF_MAX_FRAMES, GIF_MAX_TOTAL_FRAME_PIXELS } from '../domain/security-boundaries.js';
 
 const ORIGIN = 'https://allowed.example';
@@ -341,4 +341,31 @@ test('in-flight byte reservations prevent a concurrent upload from exceeding roo
   assert.equal(state.active, 0);
   assert.equal(room.reservedBytes, 0);
   assert.equal((await sendUpload(uploads)).status, 200);
+});
+
+const BLOB_ID = '123e4567-e89b-12d3-a456-426614174000';
+
+test('stored-file matchers keep the image names and learn the encrypted blob names', () => {
+  const blob = e2eBlobFilename(ROOM_HANDLE, BLOB_ID);
+  assert.equal(blob, `${ROOM_HANDLE}.${BLOB_ID}.e2e`);
+  assert.deepEqual(parseE2EBlobFilename(blob), { handle: ROOM_HANDLE, id: BLOB_ID });
+  for (const name of [blob, `${ROOM_HANDLE}.${BLOB_ID}.png`, `${BLOB_ID}.jpg`, 'abcdef01.webp']) assert.equal(isStoredImageFilename(name), true, name);
+  assert.equal(roomHandleOfImageFile(blob), ROOM_HANDLE);
+  assert.equal(roomHandleOfImageFile(`${ROOM_HANDLE}.${BLOB_ID}.png`), ROOM_HANDLE);
+  assert.equal(roomHandleOfImageFile(`${BLOB_ID}.png`), null, 'legacy images have no room');
+  for (const name of [`${ROOM_HANDLE}.${BLOB_ID}.E2E`, `${ROOM_HANDLE}.${BLOB_ID.toUpperCase()}.e2e`, `short.${BLOB_ID}.e2e`, `${BLOB_ID}.e2e`, `${ROOM_HANDLE}.${BLOB_ID}.e2e.tmp`, `.upload-${BLOB_ID}.tmp`]) {
+    assert.equal(parseE2EBlobFilename(name), null, name);
+    assert.equal(isStoredImageFilename(name), false, name);
+  }
+});
+
+test('the usage scan counts encrypted blob files toward their room and the global totals', async (t) => {
+  const { root, config } = await setup(t);
+  const blobBytes = 40;
+  await writeFile(join(root, e2eBlobFilename(ROOM_HANDLE, BLOB_ID)), Buffer.alloc(blobBytes));
+  await writeFile(join(root, `${ROOM_HANDLE}.abcdef01.png`), PNG);
+  const usage = scanUploadUsage(config);
+  assert.equal(usage.files, 2);
+  assert.equal(usage.bytes, blobBytes + PNG.length);
+  assert.deepEqual(usage.roomsByHandle.get(ROOM_HANDLE), { bytes: blobBytes + PNG.length, files: 2 });
 });

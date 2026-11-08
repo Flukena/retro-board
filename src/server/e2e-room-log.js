@@ -120,6 +120,11 @@ export class E2ERoomLog {
     if (room.forgetRequested && idle && this.#rooms.get(docName) === room) this.#rooms.delete(docName);
   }
 
+  /** Rooms whose state is held in memory: every room opened since startup that was not forgotten. */
+  loadedDocNames() {
+    return [...this.#rooms].filter(([, room]) => room.loaded).map(([docName]) => docName);
+  }
+
   /** Settles once every operation queued so far, in every room, has finished (used by shutdown drain). */
   async whenIdle() {
     await Promise.all([...this.#rooms.values()].map((room) => room.tail));

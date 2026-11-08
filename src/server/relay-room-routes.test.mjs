@@ -111,3 +111,52 @@ test('preflight for the lock routes is credentialed for allowed origins only', (
   }
   assert.equal(handleRoomRoute(req('OPTIONS', { origin: ORIGIN }), response(), `/api/rooms/${HANDLE}/lock/other`, context()), false);
 });
+
+const LOCKED_LOOKUP = (docName) => (docName === DOC_NAME ? { keyEpoch: 0 } : null);
+const BLOB_ID = '123e4567-e89b-12d3-a456-426614174000';
+const blobsStub = () => {
+  const calls = [];
+  return { calls, handleUpload: (...args) => calls.push(['upload', ...args]), handleGet: (...args) => calls.push(['get', ...args]) };
+};
+
+test('a locked room refuses the plaintext upload route with 403 and never calls uploads.handleUpload', () => {
+  const ctx = context({ authenticate: () => ({ docName: DOC_NAME }), lockFor: LOCKED_LOOKUP });
+  const res = response();
+  assert.equal(handleRoomRoute(req('POST', { origin: ORIGIN }), res, `/rooms/${HANDLE}/upload`, ctx), true);
+  assert.equal(res.status, 403);
+  assert.equal(ctx.uploads.calls.length, 0);
+});
+
+test('blob upload: 404 for a normal room, 503 for an unreadable lock, 401 without a session, otherwise the handler', () => {
+  const answer = (overrides) => {
+    const ctx = context({ e2eBlobs: blobsStub(), ...overrides });
+    const res = response();
+    assert.equal(handleRoomRoute(req('POST', { origin: ORIGIN }), res, `/rooms/${HANDLE}/e2e-blobs`, ctx), true);
+    return { res, ctx };
+  };
+  const session = () => ({ docName: DOC_NAME });
+  assert.equal(answer({ authenticate: session, lockFor: () => null }).res.status, 404);
+  assert.equal(answer({ authenticate: session, lockFor: () => ({ corrupt: true }) }).res.status, 503);
+  assert.equal(answer({ authenticate: () => null, lockFor: LOCKED_LOOKUP }).res.status, 401);
+  assert.equal(answer({ authenticate: session, lockFor: LOCKED_LOOKUP, unavailable: true }).res.status, 503);
+  const ok = answer({ authenticate: session, lockFor: LOCKED_LOOKUP });
+  assert.deepEqual(ok.ctx.e2eBlobs.calls.map(([kind, , , ip, docName, handle]) => [kind, ip, docName, handle]), [['upload', '203.0.113.9', DOC_NAME, HANDLE]]);
+});
+
+test('blob download hands a locked room session to the handler and gates the same way as upload', () => {
+  const ctx = context({ e2eBlobs: blobsStub(), authenticate: () => ({ docName: DOC_NAME }), lockFor: LOCKED_LOOKUP });
+  const res = response();
+  assert.equal(handleRoomRoute(req('GET', { origin: ORIGIN }), res, `/rooms/${HANDLE}/e2e-blobs/${BLOB_ID}`, ctx), true);
+  assert.deepEqual(ctx.e2eBlobs.calls, [['get', '203.0.113.9', res, HANDLE, BLOB_ID]]);
+  const normal = context({ e2eBlobs: blobsStub(), authenticate: () => ({ docName: DOC_NAME }), lockFor: () => null });
+  const normalRes = response();
+  handleRoomRoute(req('GET', { origin: ORIGIN }), normalRes, `/rooms/${HANDLE}/e2e-blobs/${BLOB_ID}`, normal);
+  assert.equal(normalRes.status, 404);
+  assert.equal(normal.e2eBlobs.calls.length, 0);
+});
+
+test('blob routes ignore queries, and a blob id that is not a uuid shape is not a route', () => {
+  const ctx = context({ e2eBlobs: blobsStub(), authenticate: () => ({ docName: DOC_NAME }), lockFor: LOCKED_LOOKUP });
+  assert.equal(handleRoomRoute(req('POST', { origin: ORIGIN }), response(), `/rooms/${HANDLE}/e2e-blobs`, { ...ctx, hasQueryOrFragment: true }), false);
+  assert.equal(handleRoomRoute(req('GET', { origin: ORIGIN }), response(), `/rooms/${HANDLE}/e2e-blobs/not-a-uuid`, ctx), false);
+});

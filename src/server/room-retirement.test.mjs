@@ -61,6 +61,17 @@ test('retires only rooms idle past sixty days, with their images and per-room st
   assert.equal(f.reconciled, 1);
 });
 
+test('retirement also deletes the room\'s encrypted blob files and leaves other rooms\' blobs', async () => {
+  const blobOf = (label) => `${handleOf(label)}.123e4567-e89b-12d3-a456-426614174000.e2e`;
+  const f = fixture([
+    { label: 'old', createdAt: daysAgo(OLD_DAYS) },
+    { label: 'recent', createdAt: daysAgo(RECENT_DAYS) },
+  ], { files: [blobOf('old'), imageOf('old'), blobOf('recent')] });
+  const result = await retireIdleRooms(f.context);
+  assert.deepEqual(result, { retired: 1, unknownAge: 0, files: 2 });
+  assert.deepEqual([...f.remaining], [blobOf('recent')]);
+});
+
 test('a room opened after the candidates were chosen is kept', async () => {
   const f = fixture([{ label: 'first', createdAt: daysAgo(OLD_DAYS) }, { label: 'second', createdAt: daysAgo(OLD_DAYS) }]);
   const retire = f.context.registry.retireRoom.bind(f.context.registry);

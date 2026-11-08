@@ -12,7 +12,9 @@ function collectionCounts(doc) {
 // Never hydrate cold rooms or include capabilities, document keys, or user data.
 export function maintainerRooms({ registry, docs, connections, blockedRooms, roomUsage, now = Date.now() }) {
   return [...registry.registeredRoomsByHandle].map(([handle, docName]) => {
-    const doc = docs.get(docName);
+    // An encrypted room's content is ciphertext the relay cannot read: list it, never inspect it.
+    const encrypted = registry.isLocked(docName);
+    const doc = encrypted ? undefined : docs.get(docName);
     const usage = registry.roomUploadUsage.get(docName);
     return {
       handle,
@@ -27,6 +29,7 @@ export function maintainerRooms({ registry, docs, connections, blockedRooms, roo
       uploadBytes: usage?.bytes ?? 0,
       uploadFiles: usage?.files ?? 0,
       collections: doc ? collectionCounts(doc) : null,
+      encrypted,
     };
   });
 }

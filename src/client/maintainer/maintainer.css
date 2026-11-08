@@ -14,6 +14,7 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--
 .maintainer table { border-collapse: collapse; width: 100%; min-width: 1100px; text-align: left; }
 .maintainer th, .maintainer td { padding: 16px; border-bottom: 1px solid var(--border); vertical-align: top; }
 .maintainer code { font-size: .85rem; }
+.maintainer-badge { display: inline-block; margin-inline-start: 8px; padding: 2px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-panel); color: var(--text-muted); font-size: .85rem; }
 .maintainer [role="alert"] { color: var(--text); border: 1px solid var(--border); padding: 16px; }
 
 .maintainer-filters { display: flex; flex-wrap: wrap; gap: 16px; }

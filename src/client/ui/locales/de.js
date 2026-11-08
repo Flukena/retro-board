@@ -55,6 +55,8 @@ export default Object.freeze({
   "maintainer.document": "Dokumentgröße (geschätzte Obergrenze)",
   "maintainer.collections": "Geladene Sammlungen",
   "maintainer.blocked": "Vorübergehend gesperrt",
+  "maintainer.encrypted": "Verschlüsselt",
+  "maintainer.encryptedHint": "Inhalt ist Ende-zu-Ende-verschlüsselt; der Serverbetreiber kann diesen Raum nicht öffnen.",
   "maintainer.resident": "Im Speicher",
   "maintainer.cold": "Auf der Festplatte",
   "maintainer.unknown": "Nicht geladen",

@@ -10,6 +10,8 @@ import { roomTargetFromRequest, tokenDocNameFromRequest } from './src/server/rel
 import { RelayWsTraffic, closeOnSessionExpiry } from './src/server/relay-ws-traffic.js';
 import { createE2ERelay } from './src/server/e2e-relay.js';
 import { E2ERoomLog } from './src/server/e2e-room-log.js';
+import { E2EBlobStore } from './src/server/e2e-blob-store.js';
+import { createE2EBlobs } from './src/server/e2e-blobs.js';
 import { isExactAllowedOrigin, sendUpgradeRejection } from './src/server/relay-http.js';
 import { handleRoomRoute } from './src/server/relay-room-routes.js';
 import { roomLogId } from './src/server/relay-log-id.js';
@@ -739,6 +741,10 @@ const DATA_URL_RE = /^data:([^;]+);base64,(.*)$/s;
 const MIGRATE = (process.env.YJS_MIGRATE_DOCS || '')
   .split(',').map((s) => s.trim()).filter(Boolean);
 for (const name of MIGRATE) {
+  if (roomRegistry.isLocked(name)) {
+    console.warn('[yjs] migration skipped: room is end-to-end encrypted', roomLogId(name));
+    continue;
+  }
   const createdPaths = [];
   let updatePersisted = false;
   try {
@@ -812,8 +818,9 @@ for (const name of MIGRATE) {
 
 // null = normal room; a locked room's cookie is bound to its key epoch; an unreadable lock matches nothing (-1).
 const CORRUPT_LOCK_EPOCH = -1;
+const lockForDoc = (docName) => roomRegistry.lockFor(docName);
 const roomKeyEpoch = (docName) => {
-  const lock = roomRegistry.lockFor(docName);
+  const lock = lockForDoc(docName);
   if (!lock) return null;
   return lock === CORRUPT_LOCK ? CORRUPT_LOCK_EPOCH : lock.keyEpoch;
 };
@@ -954,6 +961,7 @@ const uploads = createRelayUploads({
   allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, strictRasterValidation: PUBLIC_WALL,
 });
 uploadState.events.on(UPLOAD_STORAGE_FAILURE_EVENT, markStorageFailure);
+const e2eBlobStore = new E2EBlobStore({ uploadsDir: UPLOADS_DIR, admission: uploads.admission, roomUploadUsage });
 
 const relayProtocol = new RelayProtocol({
   maxStateVectorBytes: MAX_STATE_VECTOR_BYTES, maxUpdateBytes: MAX_UPDATE_BYTES,
@@ -1145,6 +1153,7 @@ const runMaintenance = () => maintenance.run({
   compaction: { schedule: scheduleRoomCompaction },
   votes: { finalize: finalizeExpiredVotes },
   storage: { measureDatabase: registryPersistence.measureDatabase, reconcileUploadUsage },
+  e2eBlobs,
 });
 const maintenanceTimer = setInterval(() => { roomLockVerifier.sweep(); runMaintenance(); }, MAINTENANCE_INTERVAL_MS);
 maintenanceTimer.unref();
@@ -1207,7 +1216,7 @@ const server = http.createServer({ maxHeaderSize: MAX_HEADER_BYTES }, (req, res)
   if (handleRoomRoute(req, res, routePath, {
     hasQueryOrFragment, allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP,
     unavailable: shuttingDown || Boolean(storageFailure), rooms: registeredRoomsByHandle,
-    authenticate: authenticatedDocFromRequest, uploads, clientIp,
+    authenticate: authenticatedDocFromRequest, uploads, clientIp, lockFor: lockForDoc, e2eBlobs,
   })) return;
   if (req.method === 'GET' && routePath === '/') {
     res.writeHead(200, { 'content-type': 'text/plain' });
@@ -1238,9 +1247,17 @@ server.on('clientError', (err, socket) => {
 // have been admitted anyway.
 const wss = new WebSocketServer({ noServer: true, maxPayload: RL_MAX_BYTES });
 roomRegistry.activity.watch(wss, (error) => roomRegistry.reportStorageFailure(error));
+const e2eRoomLog = new E2ERoomLog({
+  ldb, maxRoomBytes: MAX_DOCUMENT_BYTES, reserveStore: registryPersistence.reserveStore, hasCapacity: registryPersistence.hasCapacity,
+  onError: markStorageFailure, deleteStagedBlobs: (_docName, rotationId) => e2eBlobStore.deleteStaged(rotationId),
+});
 const e2eRelay = createE2ERelay({
   traffic: wsTraffic, maxRoomBytes: MAX_DOCUMENT_BYTES, maxAppendBytes: RL_MAX_BYTES, onStorageFailure: markStorageFailure, touch: (docName) => roomRegistry.activity.touch(docName),
-  roomLog: new E2ERoomLog({ ldb, maxRoomBytes: MAX_DOCUMENT_BYTES, reserveStore: registryPersistence.reserveStore, hasCapacity: registryPersistence.hasCapacity, onError: markStorageFailure }),
+  roomLog: e2eRoomLog,
+});
+const e2eBlobs = createE2EBlobs({
+  config: relayConfig, allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, uploads, store: e2eBlobStore,
+  roomLog: e2eRoomLog, registry: roomRegistry, onStorageFailure: markStorageFailure,
 });
 roomRegistry.activity.watch(e2eRelay.wss, (error) => roomRegistry.reportStorageFailure(error));
 wss.on('connection', (conn, req) => {
@@ -1522,6 +1539,7 @@ process.on('SIGTERM', () => { shutdown('SIGTERM'); });
 process.on('SIGINT', () => { shutdown('SIGINT'); });
 process.on(UNHANDLED_REJECTION_EVENT, (err) => { lifecycle.fatal(UNHANDLED_REJECTION_EVENT, err); });
 process.on(UNCAUGHT_EXCEPTION_EVENT, (err) => { lifecycle.fatal(UNCAUGHT_EXCEPTION_EVENT, err); });
+if (await e2eBlobs.reconcileOrphans() > 0) await reconcileUploadUsage();
 server.listen(PORT, HOST, () => {
   const address = server.address();
   const boundPort = typeof address === 'object' && address ? address.port : PORT;

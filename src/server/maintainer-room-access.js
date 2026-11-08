@@ -7,7 +7,7 @@ export function createMaintainerRoomLinks({ registry, boardOrigin, publicWall = 
   return handle => {
     if (!registry || !boardOrigin || !ROOM_HANDLE_RE.test(handle)) return null;
     const docName = registry.registeredRoomsByHandle.get(handle);
-    if (!docName) return null;
+    if (!docName || registry.isLocked(docName)) return null;
     if (publicWall) return new URL(PUBLIC_PATH, boardOrigin).href;
     const match = PRIVATE_DOCUMENT_RE.exec(docName);
     if (!match) return null;

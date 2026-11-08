@@ -20,6 +20,7 @@ const BAD_VOTE_STEP_LABEL = 'vote:bad';
 const HEALTHY_VOTE_STEP_LABEL = 'vote:healthy';
 const DISK_STEP_LABEL = 'disk';
 const TEMP_SWEEP_STEP_LABEL = 'temps';
+const E2E_EXPIRY_STEP_LABEL = 'e2e-expiry';
 const RECONCILE_STEP_LABEL = 'reconcile';
 const FLUSH_STEP_LABEL = 'flush';
 const STORAGE_FAILURE_CODE = 'STORAGE_FAILURE';
@@ -57,6 +58,7 @@ function maintenanceFixture(options = {}) {
     fs: { promises: options.io || { async readdir() { trace.push(TEMP_SWEEP_STEP_LABEL); return []; } } },
     async reconcileUploadUsage() { trace.push(RECONCILE_STEP_LABEL); if (options.hold) await options.hold; },
     rejectionCounters: { flush() { trace.push(FLUSH_STEP_LABEL); } },
+    e2eBlobs: { async sweepExpired() { trace.push(E2E_EXPIRY_STEP_LABEL); } },
   };
   const runner = new RelayMaintenance();
   runner.on(MAINTENANCE_STORAGE_FAILURE_EVENT, (error) => failures.push(error));
@@ -76,7 +78,7 @@ function maintenanceFixture(options = {}) {
 test('maintenance preserves order and isolates a vote failure before storage and upload work', async () => {
   const { maintenance, trace } = maintenanceFixture();
   await maintenance.run();
-  assert.deepEqual(trace, [COMPACTION_STEP_LABEL, BAD_VOTE_STEP_LABEL, HEALTHY_VOTE_STEP_LABEL, DISK_STEP_LABEL, TEMP_SWEEP_STEP_LABEL, RECONCILE_STEP_LABEL, FLUSH_STEP_LABEL]);
+  assert.deepEqual(trace, [COMPACTION_STEP_LABEL, BAD_VOTE_STEP_LABEL, HEALTHY_VOTE_STEP_LABEL, DISK_STEP_LABEL, TEMP_SWEEP_STEP_LABEL, E2E_EXPIRY_STEP_LABEL, RECONCILE_STEP_LABEL, FLUSH_STEP_LABEL]);
   assert.equal(maintenance.running, false);
 });
 
@@ -120,7 +122,7 @@ test('maintenance disk quota latches storage but continues upload maintenance', 
   await maintenance.run();
   assert.equal(failures.length, 1);
   assert.equal(failures[0].message, 'configured database quota exceeded');
-  assert.deepEqual(trace.slice(-3), [TEMP_SWEEP_STEP_LABEL, RECONCILE_STEP_LABEL, FLUSH_STEP_LABEL]);
+  assert.deepEqual(trace.slice(-4), [TEMP_SWEEP_STEP_LABEL, E2E_EXPIRY_STEP_LABEL, RECONCILE_STEP_LABEL, FLUSH_STEP_LABEL]);
 });
 
 function sweepFixture(cutoff, oldName, freshName) {

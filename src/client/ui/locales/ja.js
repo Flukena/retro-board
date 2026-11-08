@@ -55,6 +55,8 @@ export default Object.freeze({
   "maintainer.document": "ドキュメントサイズ(推定上限)",
   "maintainer.collections": "常駐コレクション",
   "maintainer.blocked": "一時的にブロック中",
+  "maintainer.encrypted": "暗号化",
+  "maintainer.encryptedHint": "内容はエンドツーエンドで暗号化されており、サーバー管理者はこのルームを開けません。",
   "maintainer.resident": "常駐",
   "maintainer.cold": "ディスク上",
   "maintainer.unknown": "未読み込み",

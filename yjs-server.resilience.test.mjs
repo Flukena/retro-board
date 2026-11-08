@@ -74,6 +74,7 @@ test('one bad room does not skip later rooms or storage and upload maintenance',
   const finalized = [];
   let scans = 0;
   let reconciles = 0;
+  let blobSweeps = 0;
   await new RelayMaintenance().run({
     log: QUIET_LOGGER,
     docs: new Map([['bad', {}], ['healthy', {}]]), uploadBuckets: new Map(), rateBuckets: {},
@@ -89,10 +90,12 @@ test('one bad room does not skip later rooms or storage and upload maintenance',
       finalized.push(name);
     } },
     rejectionCounters: { flush() {} },
+    e2eBlobs: { sweepExpired: async () => { blobSweeps += 1; } },
   });
   assert.deepEqual(finalized, ['healthy']);
   assert.equal(scans, 1);
   assert.equal(reconciles, 1);
+  assert.equal(blobSweeps, 1);
 });
 
 test('upgrade rejections count status without exposing socket data', () => {

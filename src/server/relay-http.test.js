@@ -124,6 +124,8 @@ const entrypointHttp = (overrides = {}) => {
     takeSessionExchangeToken: () => true, roomHandleForDoc: () => ROOM_HANDLE,
     createSessionCookie: () => 'scoped-cookie',
     http: { createServer(_options, callback) { dispatch = callback; return {}; } },
+    lockForDoc: () => null,
+    e2eBlobs: { handleUpload() { assert.fail('unexpected blob upload dispatch'); }, handleGet() { assert.fail('unexpected blob read dispatch'); } },
     uploads: { handleUpload() { assert.fail('unexpected upload dispatch'); },
       handleGetRoomImage() { assert.fail('unexpected image dispatch'); },
       handleGetLegacyImage() { assert.fail('unexpected legacy dispatch'); } },
