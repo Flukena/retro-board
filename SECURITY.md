@@ -232,6 +232,68 @@ is non-empty and the relay is not the Public Wall relay.
   Deleting an account removes its record and indexes; rooms it created stay
   under the normal retention rules and have no manager afterwards.
 
+## Password-protected (encrypted) boards
+
+A signed-in account may create a locked board that needs the link and a
+password. Its content, presence and images are encrypted in the browser with
+AES-GCM; the relay and the operator cannot read them. Normal boards, Poker and
+the Public Wall are unchanged.
+
+- **Keys.** The password is stretched in the page (PBKDF2-SHA-256, 600,000
+  iterations, 16-byte salt) and split with HKDF into a key-encryption key and
+  an `authKey`. A random 256-bit room key encrypts the board and is stored only
+  wrapped by the key-encryption key. The password, derived keys and room key
+  never reach storage, logs or URLs. `authKey` is sent over TLS in the body of
+  session requests only. Reload asks for the password again.
+- **What the relay stores and sees.** The lock record `retro-room-lock-v1`
+  (salt, KDF parameters, verifier = SHA-256 of `authKey`, wrapped room key and
+  IV, `keyEpoch`, `lockRevision`, owner account id, `createdAt`), an ordered
+  log of ciphertext frames plus one client-written snapshot, encrypted image
+  blobs (`<handle>.<uuid>.e2e` under uploads), and the plaintext registration
+  seed that makes the room discoverable. It also sees ciphertext sizes,
+  timing, blob sizes and connection metadata. It never sees the password, any
+  key or any content. The relay never builds a `Y.Doc` for a locked room.
+- **Online guessing.** A wrong `authKey` returns 403 and is counted: at most 5
+  failures per 15 minutes per IP and room, and 50 per 15 minutes per room
+  (rolling window; over the limit gives 429 with `retry-after`).
+- **Offline guessing.** Anyone holding a backup or database copy plus the room
+  link has the salt and verifier and can guess passwords offline, limited only
+  by PBKDF2 cost. This is why the minimum is 10 characters. Treat backups of
+  locked rooms as sensitive. Forgotten passwords cannot be recovered by anyone,
+  including the operator.
+- **Session binding.** The room cookie of a locked room is signed over
+  `docName|e<keyEpoch>`. "Remove everyone" (key rotation) raises the epoch, so
+  every old cookie gets 401 and open sockets close with 4001. A password change
+  does not revoke sessions; only rotation does. Pages renewing with the old
+  `authKey` get 403 and show the in-page unlock dialog without losing edits.
+  Lock changes are serialised per room and carry `expectedRevision`, so a
+  request authorised against an older lock fails with 409.
+- **Rotation.** `rotate/begin` freezes appends for at most 120 s. `rotate/commit`
+  writes snapshot, log prune, blob inventory and the new lock in one durable
+  batch. A cancelled or expired freeze resumes all sockets; if the owner
+  cancels while begin is still in flight, the room can stay frozen up to 120 s.
+- **Limits of the scheme.**
+  - A malicious or compromised relay can drop, delay or reorder frames.
+  - It can replay ciphertext within an epoch, and serve an older snapshot or
+    blob of the same epoch.
+  - An authorized member can write a bad snapshot that prunes the log.
+  - Revoked members keep the plaintext and keys they already had.
+  - Security depends on the JavaScript the operator delivers; a malicious
+    deployment could steal passwords.
+- **Known residuals.**
+  - Timed-vote expiry runs on clients: an elected finalizer acts at the
+    deadline and others after a 10 s grace. Votes finish only while someone has
+    the board open, and two clients with different partial views can both
+    finalize.
+  - After rotation, old images stay readable with the old key for a 24 h
+    grace; an image nobody repaired by then becomes a broken-image placeholder,
+    and undo after that shows it too.
+  - Previous room keys stay in page memory until reload.
+  - Encrypted presence can linger up to about 30 s for peers after an unclean
+    close.
+  - A locked room whose lock record is corrupt is kept but refuses sessions
+    (503) until fixed by hand.
+
 ## Public wall
 
 Public Wall is one intentionally public room for anonymous, mutually untrusted

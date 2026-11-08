@@ -612,7 +612,7 @@ export default Object.freeze({
   "legal.privacy.retention.title": "保留多久",
   "legal.privacy.retention.body": "房间内容会保留到运营者删除该房间为止，目前没有按时间自动删除的机制。\n备份用于恢复，已删除的内容可能在一段时间内仍存在于备份中。\n删除带图片的卡片后，图片文件可能不会立即从服务器上移除。\n服务器日志会按大小轮转并清除。",
   "legal.privacy.security.title": "安全",
-  "legal.privacy.security.body": "房间通过难以猜测的私密链接访问，使用 HTTPS 和已签名的 HttpOnly Cookie。没有任何系统是绝对安全的，而且任何拿到链接的人都能打开房间，因此请勿在看板上放置敏感个人数据、密码或商业机密。",
+  "legal.privacy.security.body": "房间通过难以猜测的私密链接访问，使用 HTTPS 和已签名的 HttpOnly Cookie。没有任何系统是绝对安全的，而且任何拿到链接的人都能打开房间，因此请勿在看板上放置敏感个人数据、密码或商业机密。 受密码保护的看板会在发送给我们之前先在你的浏览器中加密，因此运营方无法读取其内容。我们仍可看到大小和时间等技术信息，如果忘记密码，任何人都无法恢复数据。",
   "legal.privacy.rights.title": "你的权利",
   "legal.privacy.rights.body": "你可以要求访问、获取副本、更正、删除或限制处理你的个人数据，或反对其被使用，也可以向泰国个人数据保护委员会投诉。\n如果你未登录，我们可能会要求你提供房间链接或内容详情，以便找到与你相关的数据。\n你也可以通过房间内的菜单自行导出看板。",
   "legal.privacy.changes.title": "本政策的变更",

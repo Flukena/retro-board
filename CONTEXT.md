@@ -42,6 +42,29 @@ A signed, expiring HttpOnly cookie scoped to one registered room handle and
 document. It does not expose the private room capability. Public and private
 entry exchange credentials differently but share the same cookie validation.
 
+## Encrypted room
+
+A locked board (`/b/` with a lock record). Its state lives in the browser as a
+Yjs document; the relay holds only an ordered ciphertext log plus one
+client-written snapshot as room meta keys `e2e-head`, `e2e-snapshot`
+(`{ baseSeq, bytes }`), `e2e-u-<seq>` and `e2e-blobs`, and the lock record
+`retro-room-lock-v1`; the registry keeps only the plaintext seed. Invariants:
+
+- Geometry and schema validation stay client-side: the relay cannot see
+  content, so an update that fails decryption or apply is skipped and blocks
+  that client from writing snapshots.
+- Every seq is applied in order; a snapshot is `{ baseSeq, state }` and carries
+  `knownSnapshotBase`, which the relay checks against the stored snapshot
+  (snapshot fencing), so a stale writer is rejected instead of pruning newer log.
+- The log holds at most 10,000 entries and snapshot plus log is capped at the
+  document byte limit; clients snapshot before either is reached.
+- `keyEpoch` and `lockRevision` change only through the owner routes; a
+  rotation raises the epoch and invalidates all room cookies.
+- Timed-vote expiry runs on an elected client (`src/domain/vote-expiry.js`),
+  not on the relay; see SECURITY.md for the residual.
+- Image `src` is `/rooms/<handle>/e2e-blobs/<uuid>`; blobs are opaque and
+  belong to one epoch.
+
 ## Poker room
 
 A registered relay room opened at `/p/<code>#<token>` instead of `/b/`. The

@@ -38,7 +38,7 @@ test('landing footer links to both legal pages and the sitemap lists them', asyn
 
 test('privacy policy has an accounts section in th and en', async () => {
   assert.ok(legalSections(LEGAL_PAGE.PRIVACY).some((section) => section.id === 'accounts'));
-  assert.equal(LEGAL_EFFECTIVE_DATE_ISO, '2026-11-06');
+  assert.equal(LEGAL_EFFECTIVE_DATE_ISO, '2026-11-08');
   await withChromeModule('/src/client/legal/LegalPage.jsx', ({ default: LegalPage }, { setLang, t }) => {
     for (const lang of ['th', 'en']) {
       setLang(lang);

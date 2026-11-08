@@ -93,6 +93,25 @@ record and checks that the `sub:` and `email:` indexes point at existing
 accounts and that every account is in both its `sub:` and its `email:` index, without
 writing to the restored copy.
 
+## Encrypted rooms
+
+- **Socket path.** Locked boards use `/yjs/rooms/<handle>/e2e` (and
+  `/yjs/rooms/<handle>/e2e-blobs[/<id>]`). The tunnel already routes
+  `^/yjs(/.*)?$` to `yjs:1234` and nginx is not on that path, so no tunnel or
+  nginx change is needed.
+- **Backups.** `scripts/verify-production-backup.sh` also runs
+  `scripts/verify-backup-e2e.mjs`: lock record, snapshot digest, contiguous log,
+  blob inventory and `.e2e` file sizes must agree. Staged and orphan blob
+  counts are informational. Backups contain the verifier of every locked room;
+  see SECURITY.md on offline guessing.
+- **Blob files.** Encrypted images are `<handle>.<uuid>.e2e` under uploads.
+  After a rotation, old-epoch blobs are deleted after a 24 h grace; blob
+  uploads that no inventory lists, and stale blob temp files, are swept at
+  startup after 1 h.
+- **Limits.** `YJS_MAX_PENDING_STORE_BYTES` must stay at least
+  `YJS_MAX_DOCUMENT_BYTES` (both 32 MiB by default). If it is lower, the largest
+  encrypted snapshots are refused with a rate rejection.
+
 ## Release gate
 
 Run these checks from a clean release checkout:
