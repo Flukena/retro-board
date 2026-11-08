@@ -1,8 +1,7 @@
-# Google sign-in rollout (pending owner approval)
+# Google sign-in rollout
 
-Status: prepared on branch `feat/google-sign-in`, nothing deployed. Every step
-marked PENDING OWNER changes production and needs explicit approval
-(`AGENTS.md` "Needs owner approval").
+Status: **deployed 2026-11-08** at `e2d1ab7` with owner approval (see section 7).
+Only the owner's real Google sign-in checks (section 4, steps 2-6) remain.
 
 ## What ships
 
@@ -196,12 +195,42 @@ quiet time.
    as expected, not proven. No cleanup is needed. If data looks wrong,
    restore the C1 backup (owner approval required).
 
-## 6. Owner-approval items still open
+## 6. Owner-approval items (resolved 2026-11-08)
 
-- Pin `y-leveldb` to an exact version: account storage relies on its private
-  `_transact`, and `^0.2.0` could drift.
-- Declare `lib0` (and `buffer` use) in `package.json`; currently hoisted from
-  `y-leveldb` and used directly.
-- Review the privacy text in the 9 machine-translated locales (everything except
-  `th` and `en`).
-- Decide the general-egress trade-off in section 1.
+- `y-leveldb` pinned to exactly `0.2.0`; `lib0` declared as `^0.2.117` so npm
+  keeps one copy shared with yjs and y-leveldb (`6bee25b`).
+- Privacy and account strings in the 9 machine-translated locales reviewed:
+  register and terminology fixed, no meaning errors found (`348ff7a`).
+- Shared emails: the `email:` index now lists every account id, so the
+  maintainer finds all accounts for an email (`eb2e26d`, `9da41d1`).
+- General egress for `yjs` accepted by the owner.
+
+## 7. Deployment record (2026-11-08)
+
+Files in `/Volumes/ssd-fluke/BaseData/retro-board/google-signin-20261108/`.
+
+1. Release gate on a clean `git archive` of `e2d1ab7` (`release/gate.log`):
+   1647 tests pass, 0 fail, build and maintainer build pass, `npm audit` 0.
+2. Images `miro-release-yjs:signin-e2d1ab7` and `miro-release-web:signin-e2d1ab7`
+   built with `--pull --no-cache`; `scan-production-images.sh` with
+   `COMPOSE_FILE=release/scan-images.yml` (no `.env` load) passed.
+3. Backup `backups/retro-board-20261108T064438Z.tar.gpg` verified: 194
+   documents, 0 accounts.
+4. `feat/retro-outcomes` fast-forwarded to `feat/google-sign-in` in the main
+   checkout (the Compose working directory).
+5. Deploy, with the release images pinned in `deploy.yml` (also re-pins the
+   unchanged `yjs-public` and `cloudflared` tags):
+   `docker compose -f docker-compose.prod.yml -f ~/.config/retro-board/maintainer/compose.yml -f deploy.yml up -d --no-deps --no-build yjs web`.
+   Only `miro-yjs-1` and `miro-web-1` were recreated (`containers-before.txt`,
+   `containers-after.txt`). Never add `--remove-orphans`: it would delete
+   `miro-maintainer-gateway-1`.
+6. Smoke (`smoke.log`): signed-out `/yjs/api/account` 401 `no-store`; sign-in
+   start 302 to Google with the exact redirect URI and a `Secure; HttpOnly;
+   Path=/yjs/api/auth` flow cookie; `yjs` on `app_internal` + `relay_egress`
+   and reaches `oauth2.googleapis.com`; `yjs-public` on `app_internal` only with
+   no Google variables and `/yjs-public/api/account` 404. Two guest browsers on
+   production (`live-browser/`): edits sync both ways, undo/redo syncs, and the
+   landing page shows Sign in with Google in en and th.
+7. Rollback: put `image: miro-release-yjs:idle-rooms-4769554` and
+   `image: miro-release-web:agile-link-94808c8` in `deploy.yml`, then run the
+   same command, and follow section 5 for the network and variables.
