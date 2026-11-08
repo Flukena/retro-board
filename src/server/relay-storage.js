@@ -69,16 +69,20 @@ const levelMetaOperation = (docName, { type, key, value }) => (type === PUT_OPER
   ? { type, key: metaKey(docName, key), value: Buffer.from(encodeAny(value)) }
   : { type, key: metaKey(docName, key) });
 
-// Applies every put/del to `docName`'s meta keys as ONE atomic, fsynced LevelDB
-// batch, for durable records (accounts) where setMeta's unsynced put is not enough.
+// Applies every put/del to `docName`'s meta keys as ONE atomic LevelDB batch.
+// `durable` fsyncs it; the default unsynced batch matches storeUpdate for hot appends.
 // Relies on y-leveldb 0.2.0 internals (package.json pins exactly 0.2.0; re-check on any
 // upgrade): the private `_transact` queue (y-leveldb.js ~453), the
 // ['v1', docName, 'meta', key] key layout (~311) and encodeAny values read back
 // by getMeta (~560, ~577). `_transact` resolves null on any error and a
 // successful batch resolves undefined, so only null means failure. The error
 // message is fixed: keys can carry email addresses.
-export async function durableMetaBatch(ldb, docName, ops) {
+export async function metaBatch(ldb, docName, ops, { durable = false } = {}) {
   const operations = ops.map((operation) => levelMetaOperation(docName, operation));
-  const result = await ldb._transact((db) => db.batch(operations, DURABLE_WRITE_OPTIONS));
+  const options = durable ? DURABLE_WRITE_OPTIONS : undefined;
+  const result = await ldb._transact((db) => db.batch(operations, options));
   if (result === null) throw storageOperationError(DURABLE_META_BATCH_FAILURE);
 }
+
+// Durable (fsynced) variant for records where setMeta's unsynced put is not enough (accounts).
+export const durableMetaBatch = (ldb, docName, ops) => metaBatch(ldb, docName, ops, { durable: true });
