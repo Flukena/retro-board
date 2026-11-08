@@ -6,13 +6,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   E2ERoomLog, E2E_BUSY, E2E_CORRUPT, E2E_FROZEN, E2E_LOCK_MISMATCH, E2E_QUOTA, E2E_ROTATION_STALE, E2E_STALE_SNAPSHOT,
-  MAX_PENDING_OPS_PER_ROOM, MAX_FREEZE_TTL_MS, E2E_BLOB_GRACE_MS, estimateOpsBytes, verifySnapshotDigest,
+  MAX_PENDING_OPS_PER_ROOM, MAX_FREEZE_TTL_MS, E2E_BLOB_GRACE_MS, verifySnapshotDigest,
 } from './e2e-room-log.js';
 import { ROOM_LOCK_META, decodeLockRecord, encodeLockRecord } from './room-lock-record.js';
+import { metaBatchBytes } from './relay-storage.js';
 import { lockRecord, START_MS } from './room-lock-fixtures.mjs';
 
 const require = createRequire(import.meta.url);
-const { LeveldbPersistence } = require('y-leveldb');
+const { LeveldbPersistence, keyEncoding } = require('y-leveldb');
+const { encodeAny } = require('lib0/buffer');
 
 const DOC = 'room-doc-1';
 const MAX_ROOM_BYTES = 1000;
@@ -401,7 +403,9 @@ test('reservations cover the keys and values actually written', () => withLog(as
   calls.reserved.length = 0;
   await log.mutateLock(DOC, { expectedRevision: 0, verify: approve, next: (r) => r });
   assert.ok(calls.reserved[0] > lockRecord().wrappedDek.length);
-  assert.equal(estimateOpsBytes([{ type: 'del', key: 'abc' }, { type: 'put', key: 'k', value: new Uint8Array(4) }]), 3 + 1 + 4);
+  const del = metaBatchBytes(DOC, [{ type: 'del', key: 'abc' }]);
+  const put = metaBatchBytes(DOC, [{ type: 'put', key: 'abc', value: new Uint8Array(4) }]);
+  assert.equal(put - del, encodeAny(new Uint8Array(4)).byteLength);
 }));
 
 test('verifySnapshotDigest accepts intact snapshots only', () => withLog(async ({ log, ldb }) => {
@@ -412,3 +416,31 @@ test('verifySnapshotDigest accepts intact snapshots only', () => withLog(async (
   assert.equal(verifySnapshotDigest({ ...stored, bytes: stored.bytes.slice(1) }), false);
   assert.equal(verifySnapshotDigest(null), false);
 }));
+
+test('the reservation bounds the actual encoded inventory batch for 1,000 entries', () => withLog(async ({ log, calls }) => {
+  const entries = [];
+  for (let i = 0; i < 1000; i += 1) {
+    entries.push({ id: `blob-${i}`, bytes: 100 + i, epoch: 0, stagedFor: null });
+    await log.addBlob(DOC, entries[i]);
+  }
+  const actual = keyEncoding.encode(['v1', DOC, 'meta', 'e2e-blobs']).byteLength + encodeAny(entries).byteLength;
+  assert.ok(calls.reserved.at(-1) >= actual, `reserved ${calls.reserved.at(-1)} < actual ${actual}`);
+}));
+
+test('forget keeps a room with pending cleanup until the retry removes the staged entries', async () => {
+  const calls = { staged: [] };
+  failDelete = false;
+  await withLog(async ({ log, ldb, make }) => {
+    const realTransact = ldb._transact;
+    ldb._transact = (f) => realTransact((db) => f(blobFaultDb(db)));
+    const { rotationId } = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
+    await log.addBlob(DOC, { id: 'staged', bytes: 6, epoch: 1, stagedFor: rotationId });
+    failBlobBatch = true;
+    await log.release(DOC, rotationId);
+    log.forget(DOC);
+    failBlobBatch = false;
+    assert.equal(await log.retryCleanup(DOC), true);
+    assert.deepEqual(calls.staged, [[DOC, rotationId]]);
+    assert.deepEqual(await make().blobs(DOC), []);
+  }, cleanupDeps(calls));
+});

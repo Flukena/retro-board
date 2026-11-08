@@ -4,6 +4,7 @@ import { roomLogId } from './relay-log-id.js';
 const require = createRequire(import.meta.url);
 // Same lib0 copy y-leveldb's CommonJS build uses, so values decode in getMeta.
 const { encodeAny } = require('lib0/buffer');
+const { keyEncoding } = require('y-leveldb');
 
 export const STORAGE_FAILURE_CODE = 'STORAGE_FAILURE';
 const META_KEY_VERSION = 'v1';
@@ -68,6 +69,11 @@ const metaKey = (docName, key) => [META_KEY_VERSION, docName, META_KEY_KIND, key
 const levelMetaOperation = (docName, { type, key, value }) => (type === PUT_OPERATION
   ? { type, key: metaKey(docName, key), value: Buffer.from(encodeAny(value)) }
   : { type, key: metaKey(docName, key) });
+
+// Exact bytes `ops` occupy once encoded as y-leveldb keys and encodeAny values (same path as metaBatch).
+export const metaBatchBytes = (docName, ops) => ops
+  .map((operation) => levelMetaOperation(docName, operation))
+  .reduce((sum, { key, value }) => sum + keyEncoding.encode(key).byteLength + (value?.byteLength ?? 0), 0);
 
 // Applies every put/del to `docName`'s meta keys as ONE atomic LevelDB batch.
 // `durable` fsyncs it; the default unsynced batch matches storeUpdate for hot appends.

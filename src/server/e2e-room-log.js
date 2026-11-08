@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { metaBatch, storageOperationError } from './relay-storage.js';
+import { metaBatch, metaBatchBytes, storageOperationError } from './relay-storage.js';
 import { ROOM_LOCK_META, decodeLockRecord, encodeLockRecord } from './room-lock-record.js';
 
 export const E2E_QUOTA = 'E2E_QUOTA';
@@ -33,26 +33,11 @@ const put = (key, value) => ({ type: 'put', key, value });
 const del = (key) => ({ type: 'del', key });
 const range = (from, to) => Array.from({ length: Math.max(0, to - from + 1) }, (_, i) => from + i);
 const snapshotValue = (baseSeq, bytes) => ({ baseSeq, bytes, sha256: digestOf(bytes) });
-const NUMBER_BYTES = 8;
 
 /** True when a stored snapshot value's bytes still match its recorded digest. */
 export function verifySnapshotDigest(snapshot) {
   return snapshot?.bytes instanceof Uint8Array && typeof snapshot.sha256 === 'string' && digestOf(snapshot.bytes) === snapshot.sha256;
 }
-
-function valueBytes(value) {
-  if (value instanceof Uint8Array) return value.byteLength;
-  if (typeof value === 'string') return value.length;
-  if (typeof value === 'number') return NUMBER_BYTES;
-  if (Array.isArray(value)) return value.reduce((sum, item) => sum + valueBytes(item), 0);
-  if (value && typeof value === 'object') {
-    return Object.entries(value).reduce((sum, [key, item]) => sum + key.length + valueBytes(item), 0);
-  }
-  return 0;
-}
-
-/** Bytes a batch will write: every key plus every put value. */
-export const estimateOpsBytes = (ops) => ops.reduce((sum, op) => sum + op.key.length + valueBytes(op.value), 0);
 
 function newRoom() {
   return {
@@ -108,7 +93,7 @@ export class E2ERoomLog {
 
   // Evicting a busy room would let a fresh one run beside its chain, so wait until it is idle.
   #evictIfIdle(docName, room) {
-    const idle = room.pending === 0 && !room.frozen && room.listeners.size === 0;
+    const idle = room.pending === 0 && !room.frozen && room.listeners.size === 0 && room.pendingStagedCleanup.size === 0;
     if (room.forgetRequested && idle && this.#rooms.get(docName) === room) this.#rooms.delete(docName);
   }
 
@@ -341,7 +326,7 @@ export class E2ERoomLog {
 
   async #write(docName, ops, { durable = false } = {}) {
     if (!this.#hasCapacity()) throw codedError(E2E_QUOTA, 'database capacity reached');
-    const release = this.#reserveStore(estimateOpsBytes(ops) + STORE_OVERHEAD_BYTES);
+    const release = this.#reserveStore(metaBatchBytes(docName, ops) + STORE_OVERHEAD_BYTES);
     try {
       await metaBatch(this.#ldb, docName, ops, { durable });
     } finally {
