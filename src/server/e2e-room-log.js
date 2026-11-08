@@ -2,9 +2,11 @@ import { createHash, randomUUID } from 'node:crypto';
 import { metaBatch, metaBatchBytes, storageOperationError } from './relay-storage.js';
 import { LONGEST_CANONICAL_DOC_NAME } from './relay-room-registry.js';
 import { ROOM_LOCK_META, decodeLockRecord, encodeLockRecord } from './room-lock-record.js';
-import { E2E_MAX_LOG_ENTRIES, e2eMaxSnapshotCiphertextBytes } from '../domain/e2e-limits.js';
+import {
+  E2E_MAX_LOG_ENTRIES, E2E_SNAPSHOT_RESERVATION_OVERHEAD_BYTES, e2eMaxSnapshotCiphertextBytes,
+} from '../domain/e2e-limits.js';
 
-export { E2E_MAX_LOG_ENTRIES, E2E_SNAPSHOT_RESERVATION_OVERHEAD_BYTES, e2eMaxSnapshotCiphertextBytes } from '../domain/e2e-limits.js';
+export { E2E_MAX_LOG_ENTRIES, E2E_SNAPSHOT_RESERVATION_OVERHEAD_BYTES, e2eMaxSnapshotCiphertextBytes };
 
 export const E2E_QUOTA = 'E2E_QUOTA';
 export const E2E_FROZEN = 'E2E_FROZEN';

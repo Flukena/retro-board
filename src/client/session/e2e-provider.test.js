@@ -173,6 +173,7 @@ test('a snapshot from a page that only types is stored with a baseSeq it holds',
   const joiner = room.join(key);
   await synced(joiner);
   assert.equal(textOf(joiner), '012');
+  assert.equal(joiner.provider.skippedSeq, null, 'snapshot and probe replay without a skip');
 });
 
 test('a rotation close keeps pending edits; setKey delivers them under the new epoch', async (t) => {
@@ -235,9 +236,11 @@ test('an update larger than the APPEND cap is delivered by snapshot, never as an
   assert.ok(a.tap.sentOfType(E2E_FRAME.APPEND).every((frame) => frame.ciphertext.length < APPEND_CAP));
   assert.equal(a.tap.sentOfType(E2E_FRAME.SNAPSHOT).length, 1);
   assert.equal(a.provider.wsconnected, true, 'the relay never closed the socket');
+  assert.equal(b.provider.skippedSeq, null, 'the empty probe append applies cleanly on peers');
   const joiner = room.join(key);
   await synced(joiner);
   assert.equal(textOf(joiner), big);
+  assert.equal(joiner.provider.skippedSeq, null);
 });
 
 test('a snapshot over the room size is not sent and the page is told the room is full', async (t) => {

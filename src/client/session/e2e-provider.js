@@ -32,8 +32,14 @@ export const E2E_MAX_BACKOFF_MS = 2_500;
 const APPEND_OVERHEAD_BYTES = e2eFrameHeaderBytes(E2E_FRAME.APPEND) + E2E_CIPHERTEXT_OVERHEAD_BYTES;
 // An update with no structs and an empty delete set: appending it changes no document. It proves ordering
 // after a snapshot (its ACK means the relay finished the snapshot first) and moves the log head when needed.
-const EMPTY_UPDATE = Y.encodeStateAsUpdate(new Y.Doc());
+const EMPTY_UPDATE = (() => {
+  const empty = new Y.Doc();
+  const update = Y.encodeStateAsUpdate(empty);
+  empty.destroy();
+  return update;
+})();
 const SKIPPED_LOG = '[e2e] skipped an unreadable log entry';
+const SKIPPED_SUPPRESSED_LOG = '[e2e] more unreadable log entries skipped';
 const FAILURE_LOG = '[e2e] provider step failed';
 
 const backoffMs = (attempt) => Math.min(RECONNECT_BASE_MS * 2 ** attempt, E2E_MAX_BACKOFF_MS);
@@ -78,6 +84,7 @@ export class E2EProvider extends Observable {
   #awarenessBusy = false;
   #awarenessDirty = false;
   #roomFullAnnounced = false;
+  #suppressedSkips = 0;
 
   constructor(wsBaseUrl, roomHandle, doc, {
     key, WebSocketImpl = globalThis.WebSocket, connect = true, awareness = new Awareness(doc),
@@ -198,6 +205,7 @@ export class E2EProvider extends Observable {
     this.#replayDone = false;
     this.#snapshot = null;
     this.#clearTimers();
+    this.#flushSkipCount();
     this.synced = false;
     this.emit('connection-close', [event, this]);
     const others = [...this.awareness.getStates().keys()].filter((id) => id !== this.doc.clientID);
@@ -314,11 +322,22 @@ export class E2EProvider extends Observable {
     this.#afterProgress();
   }
 
+  // Logs the first skip; later ones are counted and logged once when the connection closes.
   #skip(seq) {
     const first = this.#coverage.skippedSeq === null;
     this.#coverage.skip(seq);
+    if (!first) {
+      this.#suppressedSkips += 1;
+      return;
+    }
     console.warn(SKIPPED_LOG, { seq });
-    if (first) this.#dispatch(E2E_SKIPPED_EVENT, { seq });
+    this.#dispatch(E2E_SKIPPED_EVENT, { seq });
+  }
+
+  #flushSkipCount() {
+    if (this.#suppressedSkips === 0) return;
+    console.warn(SKIPPED_SUPPRESSED_LOG, { count: this.#suppressedSkips });
+    this.#suppressedSkips = 0;
   }
 
   #onSynced({ seq }) {

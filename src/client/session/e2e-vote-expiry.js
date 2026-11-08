@@ -54,7 +54,18 @@ export function attachE2EVoteExpiry({
   let signature = '';
   const currentSignature = () => `${electedFinalizer(awareness) === ydoc.clientID}|${provider.e2eSynced}`;
 
-  const act = (generation) => {
+  function arm() {
+    if (timer !== null) timers.clearTimeout(timer);
+    timer = null;
+    signature = currentSignature();
+    const generation = earliestTimer(yItems, attempted);
+    if (generation === null) return;
+    const elected = electedFinalizer(awareness) === ydoc.clientID;
+    const actAt = generation.endsAt + (elected ? 0 : graceMs);
+    timer = timers.setTimeout(() => act(generation), Math.max(0, actAt - timers.now()));
+  }
+
+  function act(generation) {
     timer = null;
     if (!provider.e2eSynced) return; // Re-armed when this page holds the whole log again.
     // Timers may fire a little before the wall clock reaches the deadline; finalizing then would find nothing due.
@@ -65,17 +76,6 @@ export function attachE2EVoteExpiry({
     attempted.add(generationKey(generation));
     finalizeExpiredVotes(ydoc, Y, awareness, timers.now(), onInvalidGeometry, { timerGeneration: generation });
     arm();
-  };
-
-  function arm() {
-    if (timer !== null) timers.clearTimeout(timer);
-    timer = null;
-    signature = currentSignature();
-    const generation = earliestTimer(yItems, attempted);
-    if (generation === null) return;
-    const elected = electedFinalizer(awareness) === ydoc.clientID;
-    const actAt = generation.endsAt + (elected ? 0 : graceMs);
-    timer = timers.setTimeout(() => act(generation), Math.max(0, actAt - timers.now()));
   }
 
   const onAwareness = () => { if (currentSignature() !== signature) arm(); };
