@@ -34,6 +34,8 @@ test('failures map to the message the dialog shows, with the lock-out seconds', 
     [new RotationError(ROTATION_FAILURE.STORAGE_FULL), LOCK_FORM_ERROR.STORAGE_FULL, 'roomLock.rotate.storageFull'],
     [new RotationError(ROTATION_FAILURE.DRAIN_TIMEOUT), LOCK_FORM_ERROR.TIMEOUT, 'roomLock.rotate.timeout'],
     [new RotationError(ROTATION_FAILURE.CATCH_UP_TIMEOUT), LOCK_FORM_ERROR.TIMEOUT, 'roomLock.rotate.timeout'],
+    [new RotationError(ROTATION_FAILURE.INCOMPLETE), LOCK_FORM_ERROR.INCOMPLETE, 'roomLock.rotate.incomplete'],
+    [new RotationError(ROTATION_FAILURE.CANCELLED), LOCK_FORM_ERROR.UNAVAILABLE, 'roomLock.manage.unavailable'],
     [new TypeError('boom'), LOCK_FORM_ERROR.UNAVAILABLE, 'roomLock.manage.unavailable'],
   ];
   for (const [error, kind, messageKey] of cases) {

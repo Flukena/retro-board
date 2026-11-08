@@ -14,6 +14,7 @@ export const LOCK_FORM_ERROR = Object.freeze({
   BOARD_CHANGED: 'board-changed',
   STORAGE_FULL: 'storage-full',
   TIMEOUT: 'timeout',
+  INCOMPLETE: 'incomplete',
   UNAVAILABLE: PROMPT_ERROR.UNAVAILABLE,
 });
 
@@ -37,6 +38,7 @@ const ROTATION_KINDS = new Map([
   [ROTATION_FAILURE.STORAGE_FULL, LOCK_FORM_ERROR.STORAGE_FULL],
   [ROTATION_FAILURE.DRAIN_TIMEOUT, LOCK_FORM_ERROR.TIMEOUT],
   [ROTATION_FAILURE.CATCH_UP_TIMEOUT, LOCK_FORM_ERROR.TIMEOUT],
+  [ROTATION_FAILURE.INCOMPLETE, LOCK_FORM_ERROR.INCOMPLETE],
 ]);
 
 const ACTION_KINDS = new Map([
@@ -64,6 +66,7 @@ const MESSAGE_KEYS = new Map([
   [LOCK_FORM_ERROR.BOARD_CHANGED, 'roomLock.rotate.boardChanged'],
   [LOCK_FORM_ERROR.STORAGE_FULL, 'roomLock.rotate.storageFull'],
   [LOCK_FORM_ERROR.TIMEOUT, 'roomLock.rotate.timeout'],
+  [LOCK_FORM_ERROR.INCOMPLETE, 'roomLock.rotate.incomplete'],
   [LOCK_FORM_ERROR.UNAVAILABLE, 'roomLock.manage.unavailable'],
 ]);
 

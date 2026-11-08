@@ -27,6 +27,9 @@ test('the real client roomFetch uploads and downloads a blob with a header-carri
   const fetched = await roomFetch(`e2e-blobs/${id}`);
   assert.equal(fetched.status, 200);
   assert.ok(Buffer.from(await fetched.arrayBuffer()).equals(BLOB));
-  const missing = await roomFetch(`e2e-blobs/${randomUUID()}`).catch((error) => error);
-  assert.equal(missing.name, 'RoomSessionError', 'a 404 is treated as a rejected session, as for images');
+  const missing = await roomFetch(`e2e-blobs/${randomUUID()}`);
+  assert.equal(missing.status, 404, 'a missing blob is the caller\'s answer, not a lost session');
+  await missing.body?.cancel();
+  const plain = await roomFetch('images/missing.png').catch((error) => error);
+  assert.equal(plain.name, 'RoomSessionError', 'any other 404 still means the room session was rejected');
 });

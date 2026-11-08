@@ -1,7 +1,8 @@
 import { isE2EImageSource } from '../../domain/security-boundaries.js';
 import { getRoomKey } from './lock-session.js';
-import { RoomKeyError } from './e2e-crypto.js';
-import { isKnownCurrentEpoch, readE2EImage, uploadEncryptedImage } from './e2e-images.js';
+import {
+  isKnownCurrentEpoch, isPermanentlyBrokenImage, readE2EImage, uploadEncryptedImage,
+} from './e2e-images.js';
 
 const ownImageSources = (storage, key) => [...new Set(storage.listImageSources().map(({ src }) => src))]
   .filter((src) => isE2EImageSource(src) && src.startsWith(`/rooms/${key.roomHandle}/`) && !isKnownCurrentEpoch(src, key));
@@ -10,7 +11,7 @@ const ownImageSources = (storage, key) => [...new Set(storage.listImageSources()
  * After a key rotation: every image only an earlier key opens is re-encrypted under the current key with a new
  * id, uploaded, and all its items are rewritten in one local transaction (an item whose source changed meanwhile
  * is left alone). Earlier keys are never dropped: late replay and undo can still bring old references back, and
- * the key must stay until the page reloads. An image no held key opens is counted as broken; a transport failure is counted as failed so the scheduler tries again.
+ * the key must stay until the page reloads. An image that is gone or that no held key opens is counted as broken; a transport failure is counted as failed so the scheduler tries again.
  */
 export async function repairOldEpochImagesOnce({ storage, key = getRoomKey() }) {
   if (!key?.previousKeys?.size) return { repaired: 0, broken: 0, failed: 0 };
@@ -22,7 +23,7 @@ export async function repairOldEpochImagesOnce({ storage, key = getRoomKey() }) 
       const image = await readE2EImage(src, { key });
       if (image.epoch !== key.keyEpoch) rewrites.set(src, await uploadEncryptedImage(image.blob, { key }));
     } catch (error) {
-      if (error instanceof RoomKeyError) broken += 1;
+      if (isPermanentlyBrokenImage(error)) broken += 1;
       else failed += 1;
     }
   }

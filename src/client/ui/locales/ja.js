@@ -1097,6 +1097,7 @@ export default Object.freeze({
   "roomLock.rotate.storageFull": "画像を再暗号化するためのルームの保存容量が足りません",
   "roomLock.rotate.boardChanged": "再暗号化中にボードが変更されました。何も変更されていません。もう一度お試しください。",
   "roomLock.rotate.timeout": "一部の編集がまだサーバーに届いていません。何も変更されていません。接続を確認してもう一度お試しください。",
+  "roomLock.rotate.incomplete": "このページはボードの一部を読み込めませんでした。何も変更されていません。ボードを再読み込みしてもう一度お試しください。",
   "roomLock.manage.lockChanged": "ボードのパスワードが別の場所で変更されました。ボードを再読み込みしてもう一度お試しください。",
   "roomLock.manage.unavailable": "うまくいきませんでした。接続を確認してもう一度お試しください。",
   "roomLock.notice.skipped": "一部の変更を復号できず、スキップしました。ボードを再読み込みしてもう一度お試しください。",

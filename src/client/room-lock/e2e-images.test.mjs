@@ -159,12 +159,22 @@ test('repair moves an old-epoch image to a new id under the new key and rewrites
   assert.equal(key.previousKeys.has(OLD_EPOCH), true, 'earlier keys stay for the whole page lifetime');
 });
 
-test('repair counts a transport failure as failed and an undecryptable image as broken', async (t) => {
+test('repair counts a transport failure as failed, and a missing blob or an undecryptable image as broken', async (t) => {
   const { key, oldKey } = await twoEpochRoom(t);
   const oldSrc = await uploadEncryptedImage(imageBlob(), { key: oldKey });
   const missing = `/rooms/${key.roomHandle}/e2e-blobs/${globalThis.crypto.randomUUID()}`;
   const result = await repairOldEpochImagesOnce({ storage: boardWith([oldSrc, missing], key.roomHandle).storage, key });
-  assert.deepEqual(result, { repaired: 1, broken: 0, failed: 1 });
+  assert.deepEqual(result, { repaired: 1, broken: 1, failed: 0 }, 'a swept blob is never retried');
+  const unreachable = await uploadEncryptedImage(imageBlob(), { key: oldKey });
+  const pageFetch = globalThis.fetch;
+  globalThis.fetch = (url, init) => (String(url).endsWith(unreachable.split('/').pop()) ? Promise.reject(new TypeError('network down')) : pageFetch(url, init));
+  let offline;
+  try {
+    offline = await repairOldEpochImagesOnce({ storage: boardWith([unreachable], key.roomHandle).storage, key });
+  } finally {
+    globalThis.fetch = pageFetch;
+  }
+  assert.deepEqual(offline, { repaired: 0, broken: 0, failed: 1 }, 'a transport failure is retried later');
   const stranger = await createNextRoomKey('yet another password');
   const foreign = await uploadEncryptedImage(imageBlob(), { key: { ...key, dek: stranger.dek } });
   const broken = await repairOldEpochImagesOnce({ storage: boardWith([foreign], key.roomHandle).storage, key });

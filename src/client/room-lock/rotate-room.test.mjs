@@ -1,14 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as Y from 'yjs';
-import { InboundGate, ownerBoard } from '../../test-support/owner-board-harness.mjs';
+import http from 'node:http';
+import { once } from 'node:events';
+import WebSocket from 'ws';
+import { InboundGate, ownerBoard, peerSession } from '../../test-support/owner-board-harness.mjs';
+import { installBrowserStandIn } from '../../test-support/browser-stand-in.mjs';
+import { E2E_FRAME, decodeServerFrame, encodeFrame } from '../../domain/e2e-envelope.js';
 import { delivered, synced, textOf, until } from '../../test-support/e2e-room-fixture.mjs';
 import { ORIGIN, PASSWORD } from '../../test-support/locked-room-harness.mjs';
-import { createRoomLock } from './e2e-crypto.js';
+import { createNextRoomKey, createRoomLock } from './e2e-crypto.js';
 import { getRoomKey, reunlock } from './lock-session.js';
 import { readE2EImage, uploadEncryptedImage } from './e2e-images.js';
-import { createRoomLockApi } from './room-lock-api.js';
-import { ROTATION_FAILURE, rotateRoom } from './rotate-room.js';
+import { LOCK_ACTION_ERROR, createRoomLockApi } from './room-lock-api.js';
+import { ROTATION_FAILURE, ROTATION_WAIT_TIMEOUT_MS, rotateRoom } from './rotate-room.js';
 
 const ROOM_LOCK = await createRoomLock(PASSWORD);
 const NEW_PASSWORD = 'a brand new passphrase';
@@ -194,7 +199,7 @@ const offlineKey = () => ({
 const stuckSource = (overrides) => ({
   rotationSource: () => ({
     encodeState: () => Y.encodeStateAsUpdate(new Y.Doc()), roomHandle: offlineKey().roomHandle, keyEpoch: 0,
-    appliedSeq: 0, head: 0, appliedSnapshotBase: 0, pendingDelivery: 0, ...overrides,
+    appliedSeq: 0, head: 0, appliedSnapshotBase: 0, pendingDelivery: 0, skippedSeq: null, synced: true, ...overrides,
   }),
 });
 
@@ -222,4 +227,151 @@ test('the new password must differ from the current one', async () => {
     currentPassword: PASSWORD, newPassword: PASSWORD, key: offlineKey(), storage: stuckSource(), api, clock: fakeClock(),
   }), RangeError);
   assert.deepEqual(api.calls, []);
+});
+
+const FRAME_LIMITS = Object.freeze({ maxBytes: 1024 * 1024 });
+const UNREADABLE_CIPHERTEXT_BYTES = 64;
+const CONFLICT = 409;
+const SHORT_TIMEOUT_MS = 200;
+
+/** Appends ciphertext no key opens, as a member with a broken client would; resolves once the relay acknowledged it. */
+async function appendUnreadable(board) {
+  const { cookie } = await peerSession(board.env.relay, board.room, PASSWORD);
+  const ws = new WebSocket(`${board.env.relay.wsUrl}/rooms/${getRoomKey().roomHandle}/e2e`, { origin: ORIGIN, headers: { cookie } });
+  const acked = new Promise((resolve) => {
+    ws.on('message', (data) => { if (decodeServerFrame(new Uint8Array(data), FRAME_LIMITS)?.type === E2E_FRAME.ACK) resolve(); });
+  });
+  await once(ws, 'open');
+  ws.send(encodeFrame(E2E_FRAME.APPEND, { clientRef: 1, ciphertext: new Uint8Array(UNREADABLE_CIPHERTEXT_BYTES).fill(3) }));
+  await acked;
+  ws.close();
+}
+
+test('an acknowledged entry the owner page cannot apply aborts the rotation instead of dropping it from the snapshot', async (t) => {
+  const { board, gate, owner, peer, api, rotate } = await boardWithPeer(t);
+  gate.hold();
+  await appendUnreadable(board);
+  const begin = async (args, options) => {
+    const rotation = await api.beginRotation(args, options);
+    gate.release();
+    return rotation;
+  };
+  let committed = false;
+  const commitRotation = async (...args) => { committed = true; return api.commitRotation(...args); };
+  await rejectsWithKind(rotate({ api: { ...api, beginRotation: begin, commitRotation } }), ROTATION_FAILURE.INCOMPLETE);
+  assert.equal(committed, false);
+  assert.notEqual(owner.storage.rotationSource().skippedSeq, null);
+  type(peer, 'released');
+  await delivered(peer);
+  assert.equal(getRoomKey().keyEpoch, 0);
+  await rejectsWithKind(rotate(), ROTATION_FAILURE.INCOMPLETE);
+});
+
+test('the owner typing during the freeze keeps the edit (re-sent under the new key); a plain image upload then gets 409', async (t) => {
+  const { board, owner, peer, api, rotate } = await boardWithPeer(t);
+  type(owner, 'before ');
+  await delivered(owner);
+  let uploadStatus = null;
+  const begin = async (args, options) => {
+    const rotation = await api.beginRotation(args, options);
+    type(owner, 'during ');
+    uploadStatus = await uploadEncryptedImage(new Blob([IMAGE], { type: 'image/png' }), { key: getRoomKey() }).catch((error) => error.status);
+    return rotation;
+  };
+  await rotate({ api: { ...api, beginRotation: begin } });
+  assert.equal(uploadStatus, CONFLICT, 'the board shows its upload-failed notice for this');
+  await reunlockEveryone({ owner, peer });
+  await delivered(owner);
+  const late = await board.openPeerPage(NEW_PASSWORD);
+  await synced(late);
+  await until(() => textOf(late) === 'before during ', 'the frozen local edit reached the new epoch');
+});
+
+test('an image whose blob is gone and one no held key opens keep their sources; the rest rotate', async (t) => {
+  const { board, owner, peer, rotate } = await boardWithPeer(t);
+  const handle = getRoomKey().roomHandle;
+  const good = await uploadEncryptedImage(new Blob([IMAGE], { type: 'image/png' }), { key: getRoomKey() });
+  const foreign = await createNextRoomKey('a key nobody here holds');
+  const unreadable = await uploadEncryptedImage(new Blob([IMAGE], { type: 'image/png' }), { key: { roomHandle: handle, keyEpoch: 0, dek: foreign.dek } });
+  const gone = `/rooms/${handle}/e2e-blobs/${globalThis.crypto.randomUUID()}`;
+  addImage(owner, 'good', good);
+  addImage(owner, 'unreadable', unreadable);
+  addImage(owner, 'gone', gone);
+  await delivered(owner);
+  await rotate();
+  await reunlockEveryone({ owner, peer });
+  const late = await board.openPeerPage(NEW_PASSWORD);
+  await synced(late);
+  assert.notEqual(srcOf(late, 'good'), good);
+  assert.equal(srcOf(late, 'unreadable'), unreadable);
+  assert.equal(srcOf(late, 'gone'), gone);
+});
+
+test('cancelling after begin aborts the freeze and never commits', async () => {
+  const rotationId = globalThis.crypto.randomUUID();
+  const api = recordingApi({ head: 5, rotationId, lockRevision: 0 });
+  const cancel = new AbortController();
+  const beginRotation = api.beginRotation;
+  api.beginRotation = async (...args) => {
+    const rotation = await beginRotation(...args);
+    cancel.abort();
+    return rotation;
+  };
+  const clock = fakeClock();
+  await rejectsWithKind(rotateRoom({
+    currentPassword: PASSWORD, newPassword: NEW_PASSWORD, key: offlineKey(), storage: stuckSource({ appliedSeq: 4, head: 5 }), api,
+    clock, signal: cancel.signal,
+  }), ROTATION_FAILURE.CANCELLED);
+  assert.deepEqual(api.calls.map(([name]) => name), ['begin', 'abort']);
+  assert.ok(clock.now() < ROTATION_WAIT_TIMEOUT_MS, 'the cancel ends the wait at once, not at its timeout');
+});
+
+test('a page hide after begin sends a keepalive abort and stops the run before any commit', async () => {
+  const rotationId = globalThis.crypto.randomUUID();
+  const api = recordingApi({ head: 5, rotationId, lockRevision: 0 });
+  let hide = null;
+  const onTerminate = (handler) => { hide = handler; return () => { hide = null; }; };
+  const beginRotation = api.beginRotation;
+  api.beginRotation = async (...args) => {
+    const rotation = await beginRotation(...args);
+    setTimeout(() => hide());
+    return rotation;
+  };
+  await rejectsWithKind(rotateRoom({
+    currentPassword: PASSWORD, newPassword: NEW_PASSWORD, key: offlineKey(), storage: stuckSource({ appliedSeq: 4, head: 5 }), api, onTerminate,
+  }), ROTATION_FAILURE.CANCELLED);
+  const aborts = api.calls.filter(([name]) => name === 'abort');
+  assert.deepEqual(aborts[0].slice(1), [{ oldAuthKey: aborts[0][1].oldAuthKey, rotationId }, { keepalive: true }]);
+  assert.equal(api.calls.some(([name]) => name === 'commit'), false);
+  assert.equal(hide, null, 'the page-hide hook is removed when the run ends');
+});
+
+test('an image read that stalls past its deadline aborts the rotation', async () => {
+  const rotationId = globalThis.crypto.randomUUID();
+  const api = recordingApi({ head: 0, rotationId, lockRevision: 0 });
+  const doc = new Y.Doc();
+  const item = new Y.Map();
+  item.set('type', 'image');
+  item.set('src', `/rooms/${offlineKey().roomHandle}/e2e-blobs/${globalThis.crypto.randomUUID()}`);
+  doc.getMap('items').set('img', item);
+  const stalled = { read: (_src, { signal }) => new Promise((_resolve, reject) => { signal.addEventListener('abort', () => reject(signal.reason)); }), upload: null };
+  await rejectsWithKind(rotateRoom({
+    currentPassword: PASSWORD, newPassword: NEW_PASSWORD, key: offlineKey(), api, images: stalled, imageTimeoutMs: SHORT_TIMEOUT_MS,
+    storage: stuckSource({ encodeState: () => Y.encodeStateAsUpdate(doc) }),
+  }), ROTATION_FAILURE.UNAVAILABLE);
+  assert.deepEqual(api.calls.map(([name]) => name), ['begin', 'abort']);
+});
+
+test('a lock response whose body stalls fails at the request deadline', async (t) => {
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.write('{"head":');
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  installBrowserStandIn(t, `http://127.0.0.1:${server.address().port}`);
+  const api = createRoomLockApi(offlineKey().roomHandle, { timeoutMs: SHORT_TIMEOUT_MS });
+  await assert.rejects(api.beginRotation({ oldAuthKey: ROOM_LOCK.authKey, expectedRevision: 0 }),
+    (error) => error.name === 'RoomLockActionError' && error.kind === LOCK_ACTION_ERROR.UNAVAILABLE);
 });

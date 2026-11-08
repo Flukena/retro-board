@@ -88,8 +88,8 @@ const DIALOGS = Object.freeze({
     submit: 'roomLock.change.submit',
     busy: 'roomLock.change.busy',
     notice: ROOM_LOCK_NOTICE.PASSWORD_CHANGED,
-    run: (form, key) => changeRoomPassword({
-      currentPassword: form.current, newPassword: form.password, key, api: createRoomLockApi(key.roomHandle),
+    run: (form, key, signal) => changeRoomPassword({
+      currentPassword: form.current, newPassword: form.password, key, api: createRoomLockApi(key.roomHandle), signal,
     }),
   }),
   [ROOM_LOCK_DIALOG.ROTATE]: Object.freeze({
@@ -99,8 +99,8 @@ const DIALOGS = Object.freeze({
     busy: 'roomLock.rotate.busy',
     notice: null,
     // Success closes every socket with 4001; the re-unlock dialog then asks this page for the new password too.
-    run: (form, key) => rotateRoom({
-      currentPassword: form.current, newPassword: form.password, key, storage: globalThis.window.storage, api: createRoomLockApi(key.roomHandle),
+    run: (form, key, signal) => rotateRoom({
+      currentPassword: form.current, newPassword: form.password, key, storage: globalThis.window.storage, api: createRoomLockApi(key.roomHandle), signal,
     }),
   }),
 });
@@ -110,10 +110,16 @@ function OwnerDialog({ spec, onClose }) {
   const [form, setForm] = useState(EMPTY_NEW_PASSWORD_FORM);
   const specRef = useRef(spec);
   specRef.current = spec;
-  const controller = useMemo(() => createPasswordPromptController(
-    (value) => specRef.current.run(value, getRoomKey()), undefined, lockFormErrorFor,
-  ), []);
-  useEffect(() => controller.dispose, [controller]);
+  const running = useRef(null);
+  const controller = useMemo(() => createPasswordPromptController((value) => {
+    running.current = new AbortController();
+    return specRef.current.run(value, getRoomKey(), running.current.signal);
+  }, undefined, lockFormErrorFor), []);
+  // Unmounting cancels a running action; a rotation that already froze the room then aborts and never commits.
+  useEffect(() => () => {
+    controller.dispose();
+    running.current?.abort();
+  }, [controller]);
   const { busy, error, lockedOutSeconds } = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   const onSubmit = async (event) => {
     event.preventDefault();

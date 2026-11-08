@@ -3,19 +3,24 @@ import { e2eAad } from '../../domain/room-lock-contract.js';
 import { classifyImportedImageSource } from '../../domain/security-boundaries.js';
 import { listImageSources, rewriteImageSources } from '../session/item-image-sources.js';
 import { RoomKeyError, createNextRoomKey, deriveRoomSecrets, encryptFrame } from './e2e-crypto.js';
-import { readE2EImage, uploadEncryptedImage } from './e2e-images.js';
+import { isPermanentlyBrokenImage, readE2EImage, uploadEncryptedImage } from './e2e-images.js';
 import { LOCK_ACTION_ERROR, RoomLockActionError, lockActionErrorForStatus } from './room-lock-api.js';
 
 /** How long the drain and the catch-up to the frozen head may take before the rotation gives up. */
 export const ROTATION_WAIT_TIMEOUT_MS = 60_000;
+/** Deadline of one image read or staged upload, body included. */
+export const ROTATION_IMAGE_TIMEOUT_MS = 30_000;
 const ROTATION_POLL_INTERVAL_MS = 100;
 const ROTATION_ORIGIN = 'key-rotation';
 const ITEMS_MAP = 'items';
 const SNAPSHOT_KIND = 'snapshot';
+const PAGE_HIDE_EVENT = 'pagehide';
 
 export const ROTATION_FAILURE = Object.freeze({
   DRAIN_TIMEOUT: 'drain-timeout',
   CATCH_UP_TIMEOUT: 'catch-up-timeout',
+  INCOMPLETE: 'incomplete',
+  CANCELLED: 'cancelled',
   STORAGE_FULL: 'storage-full',
   BOARD_CHANGED: 'board-changed',
   LOCK_CHANGED: 'lock-changed',
@@ -39,6 +44,12 @@ const SYSTEM_CLOCK = Object.freeze({
 });
 const DEFAULT_IMAGES = Object.freeze({ read: readE2EImage, upload: uploadEncryptedImage });
 
+/** Calls `handler` when the page is being hidden for good (navigation, tab close); returns the unsubscribe. */
+const onPageHide = (handler) => {
+  globalThis.window?.addEventListener?.(PAGE_HIDE_EVENT, handler);
+  return () => globalThis.window?.removeEventListener?.(PAGE_HIDE_EVENT, handler);
+};
+
 // A 409 before the freeze means the lock moved on (revision or another rotation); after it, the board did.
 const PASS_THROUGH = new Map([
   [LOCK_ACTION_ERROR.WRONG_PASSWORD, ROTATION_FAILURE.WRONG_PASSWORD],
@@ -46,7 +57,8 @@ const PASS_THROUGH = new Map([
   [LOCK_ACTION_ERROR.STORAGE_FULL, ROTATION_FAILURE.STORAGE_FULL],
 ]);
 
-function rotationErrorFor(error, conflictKind) {
+function rotationErrorFor(error, conflictKind, signal) {
+  if (signal.aborted) return new RotationError(ROTATION_FAILURE.CANCELLED);
   if (error instanceof RotationError) return error;
   if (error instanceof RoomKeyError && error.code === 'wrong-password') return new RotationError(ROTATION_FAILURE.WRONG_PASSWORD);
   if (!(error instanceof RoomLockActionError)) return new RotationError(ROTATION_FAILURE.UNAVAILABLE);
@@ -54,13 +66,29 @@ function rotationErrorFor(error, conflictKind) {
   return new RotationError(PASS_THROUGH.get(error.kind) ?? ROTATION_FAILURE.UNAVAILABLE, { retryAfterSeconds: error.retryAfterSeconds });
 }
 
-async function waitUntil(predicate, { clock, timeoutMs }, failure) {
+const throwIfCancelled = (signal) => {
+  if (signal.aborted) throw new RotationError(ROTATION_FAILURE.CANCELLED);
+};
+
+async function waitUntil(predicate, { clock, timeoutMs, signal }, failure) {
   const deadline = clock.now() + timeoutMs;
   while (!predicate()) {
+    throwIfCancelled(signal);
     if (clock.now() >= deadline) throw new RotationError(failure);
     await clock.sleep(ROTATION_POLL_INTERVAL_MS);
   }
 }
+
+/** A page that skipped an entry it could not decrypt or apply would drop it from the new snapshot: never commit. */
+const assertCompleteCoverage = (source) => {
+  if (source.skippedSeq !== null) throw new RotationError(ROTATION_FAILURE.INCOMPLETE);
+};
+
+/** Read through the frozen head with every entry and snapshot applied (and nothing skipped). */
+const hasReadFrozenHead = (source, head) => {
+  assertCompleteCoverage(source);
+  return source.appliedSeq >= head && source.synced;
+};
 
 /** The proof of the current password and the brand-new key; both before anything is frozen. */
 async function prepareKeys({ currentPassword, newPassword, key }) {
@@ -75,36 +103,45 @@ const ownBlobId = (src, roomHandle) => {
   return source?.kind === 'e2e' && source.roomHandle === roomHandle && source.source === src ? source.blobId : null;
 };
 
-/**
- * Re-encrypts every image of the detached doc under the next key as a copy staged for this rotation, and points
- * the detached doc (never the live one) at the copies. An image that no held key opens is already broken for
- * everyone; it keeps its source. Resolves the staged ids.
- */
-async function reencryptImages(doc, { key, nextKey, rotationId, images }) {
+/** One image re-encrypted under the next key as a staged copy; null when it is permanently broken (keeps its src). */
+async function reencryptImage(src, { key, nextKey, rotationId, images, run }) {
+  const signal = AbortSignal.any([run.signal, AbortSignal.timeout(run.imageTimeoutMs)]);
+  let image;
+  try {
+    image = await images.read(src, { key, signal });
+  } catch (error) {
+    if (isPermanentlyBrokenImage(error)) return null;
+    throw error;
+  }
+  try {
+    return await images.upload(image.blob, { key: nextKey, stage: rotationId, signal });
+  } catch (error) {
+    throw Number.isInteger(error?.status) ? lockActionErrorForStatus(error.status) : error;
+  }
+}
+
+/** Re-encrypts the detached doc's images and points the detached doc (never the live one) at the copies. */
+async function reencryptImages(doc, options) {
+  const { key } = options;
   const items = doc.getMap(ITEMS_MAP);
   const sources = [...new Set(listImageSources(items).map(({ src }) => src))].filter((src) => ownBlobId(src, key.roomHandle));
   const replacements = new Map();
   for (const src of sources) {
-    const image = await images.read(src, { key }).catch((error) => {
-      if (error instanceof RoomKeyError) return null;
-      throw error;
-    });
-    if (image === null) continue;
-    const copy = await images.upload(image.blob, { key: nextKey, stage: rotationId }).catch((error) => {
-      throw Number.isInteger(error?.status) ? lockActionErrorForStatus(error.status) : error;
-    });
-    replacements.set(src, copy);
+    const copy = await reencryptImage(src, options);
+    if (copy !== null) replacements.set(src, copy);
   }
   if (replacements.size > 0) rewriteImageSources(doc, items, replacements, ROTATION_ORIGIN, key.roomHandle);
   return [...replacements.values()].map((src) => ownBlobId(src, key.roomHandle));
 }
 
 /** Builds the commit from a detached copy of the state this page holds once it has read up to the frozen head. */
-async function buildCommit(source, { key, keys, rotation, images }) {
+async function buildCommit(source, { key, keys, rotation, images, run }) {
   const detached = new Y.Doc();
   try {
     Y.applyUpdate(detached, source.encodeState());
-    const keepBlobs = await reencryptImages(detached, { key, nextKey: keys.nextKey, rotationId: rotation.rotationId, images });
+    const keepBlobs = await reencryptImages(detached, {
+      key, nextKey: keys.nextKey, rotationId: rotation.rotationId, images, run,
+    });
     const aad = e2eAad(key.roomHandle, keys.nextKey.keyEpoch, SNAPSHOT_KIND, rotation.head);
     const snapshot = await encryptFrame(keys.next.dek, aad, Y.encodeStateAsUpdate(detached));
     const header = {
@@ -122,44 +159,63 @@ async function buildCommit(source, { key, keys, rotation, images }) {
   }
 }
 
-async function commitFrozen({ storage, api, key, keys, rotation, images, wait }) {
-  await waitUntil(() => {
-    const source = storage.rotationSource();
-    return source.appliedSeq >= rotation.head && source.pendingDelivery === 0;
-  }, wait, ROTATION_FAILURE.CATCH_UP_TIMEOUT);
+// Local edits made after begin are refused FROZEN and stay pending; they are re-sent under the new key after the
+// re-unlock, so the catch-up does not wait for this page's delivery (it already drained before begin).
+async function commitFrozen({ storage, api, key, keys, rotation, images, run }) {
+  await waitUntil(() => hasReadFrozenHead(storage.rotationSource(), rotation.head), run, ROTATION_FAILURE.CATCH_UP_TIMEOUT);
   const source = storage.rotationSource();
   if (source.roomHandle !== key.roomHandle || source.keyEpoch !== key.keyEpoch) throw new RotationError(ROTATION_FAILURE.LOCK_CHANGED);
-  const { header, snapshot } = await buildCommit(source, { key, keys, rotation, images });
-  await api.commitRotation(header, snapshot);
+  const { header, snapshot } = await buildCommit(source, { key, keys, rotation, images, run });
+  throwIfCancelled(run.signal);
+  await api.commitRotation(header, snapshot, { signal: run.signal });
+}
+
+async function beginFrozen({ api, key, keys, storage, run }) {
+  await waitUntil(() => {
+    const source = storage.rotationSource();
+    assertCompleteCoverage(source);
+    return source.pendingDelivery === 0;
+  }, run, ROTATION_FAILURE.DRAIN_TIMEOUT);
+  try {
+    throwIfCancelled(run.signal);
+    return await api.beginRotation({ oldAuthKey: keys.oldAuthKey, expectedRevision: key.lockRevision }, { signal: run.signal });
+  } catch (error) {
+    throw rotationErrorFor(error, ROTATION_FAILURE.LOCK_CHANGED, run.signal);
+  }
 }
 
 /**
  * "Remove everyone": replaces the room key and password (Deviation 5, [S1]). Drain this page's edits, freeze the
- * log, wait for every append accepted before the freeze, then commit a snapshot of a DETACHED doc and its images
- * re-encrypted under a new key. Any failure after the freeze aborts it; the live board is never written.
- * On success the relay closes every socket with 4001 and each page, this one included, re-unlocks with the new
- * password (the old key stays as a previous key for image repair).
+ * log, wait until this page has applied every entry up to the frozen head (none skipped), then commit a snapshot
+ * of a DETACHED doc and its images re-encrypted under a new key. Any failure or cancel (`signal`, page hide) after
+ * the freeze aborts it and never commits; the live board is never written. On success the relay closes every
+ * socket with 4001 and each page, this one included, re-unlocks with the new password (the old key stays as a
+ * previous key for image repair).
  *
  * `key` is the unlocked room key (getRoomKey()), `storage` gives rotationSource(), `api` is createRoomLockApi().
  * Resolves `{ keyEpoch }`; rejects with a RotationError.
  */
 export async function rotateRoom({
-  currentPassword, newPassword, key, storage, api, images = DEFAULT_IMAGES, clock = SYSTEM_CLOCK, timeoutMs = ROTATION_WAIT_TIMEOUT_MS,
+  currentPassword, newPassword, key, storage, api, signal = new AbortController().signal, images = DEFAULT_IMAGES,
+  clock = SYSTEM_CLOCK, timeoutMs = ROTATION_WAIT_TIMEOUT_MS, imageTimeoutMs = ROTATION_IMAGE_TIMEOUT_MS, onTerminate = onPageHide,
 }) {
-  const wait = { clock, timeoutMs };
+  const hidden = new AbortController();
+  const run = { clock, timeoutMs, imageTimeoutMs, signal: AbortSignal.any([signal, hidden.signal]) };
   const keys = await prepareKeys({ currentPassword, newPassword, key });
-  await waitUntil(() => storage.rotationSource().pendingDelivery === 0, wait, ROTATION_FAILURE.DRAIN_TIMEOUT);
-  let rotation;
+  const rotation = await beginFrozen({ api, key, keys, storage, run });
+  const abort = (options) => api.abortRotation({ oldAuthKey: keys.oldAuthKey, rotationId: rotation.rotationId }, options).catch(() => {});
+  // The page is going away: release the freeze with a request that outlives it, and never commit afterwards.
+  const stopWatching = onTerminate(() => {
+    hidden.abort();
+    abort({ keepalive: true });
+  });
   try {
-    rotation = await api.beginRotation({ oldAuthKey: keys.oldAuthKey, expectedRevision: key.lockRevision });
+    await commitFrozen({ storage, api, key, keys, rotation, images, run });
   } catch (error) {
-    throw rotationErrorFor(error, ROTATION_FAILURE.LOCK_CHANGED);
-  }
-  try {
-    await commitFrozen({ storage, api, key, keys, rotation, images, wait });
-  } catch (error) {
-    await api.abortRotation({ oldAuthKey: keys.oldAuthKey, rotationId: rotation.rotationId }).catch(() => {});
-    throw rotationErrorFor(error, ROTATION_FAILURE.BOARD_CHANGED);
+    await abort();
+    throw rotationErrorFor(error, ROTATION_FAILURE.BOARD_CHANGED, run.signal);
+  } finally {
+    stopWatching();
   }
   return { keyEpoch: keys.nextKey.keyEpoch };
 }

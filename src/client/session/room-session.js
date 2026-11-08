@@ -263,7 +263,7 @@ export const readSmallJson = async (response) => {
 };
 
 /** POSTs to the relay API with the page's credential, cache, redirect and referrer rules; resolves the Response. */
-export const relayPost = (path, body, { contentType = JSON_CONTENT_TYPE, signal } = {}) => fetch(`${getRelayHttpBaseUrl()}${path}`, {
+export const relayPost = (path, body, { contentType = JSON_CONTENT_TYPE, signal, keepalive = false } = {}) => fetch(`${getRelayHttpBaseUrl()}${path}`, {
   method: 'POST',
   credentials: 'include',
   cache: 'no-store',
@@ -273,6 +273,7 @@ export const relayPost = (path, body, { contentType = JSON_CONTENT_TYPE, signal 
   },
   body,
   signal,
+  keepalive,
   redirect: 'error',
   referrerPolicy: 'no-referrer',
 });
@@ -469,6 +470,12 @@ export async function refreshActiveRoomSession() {
   }
 }
 
+// A blob route answers 401 for a session it does not accept; its 404 means only that this blob does not exist.
+const E2E_BLOB_PATH_RE = /^\/e2e-blobs\/[^/]+$/;
+const HTTP_NOT_FOUND = 404;
+const isMissingBlob = (suffix, response) => response.status === HTTP_NOT_FOUND && E2E_BLOB_PATH_RE.test(suffix);
+
+/** Fetches a room-scoped relay path; a 404 for one encrypted blob is returned to the caller, not taken as a lost session. */
 export async function roomFetch(path, init = {}) {
   const suffix = normalizeRoomFetchPath(path);
   let session = activeSession;
@@ -492,7 +499,7 @@ export async function roomFetch(path, init = {}) {
   } catch {
     fail(ROOM_SESSION_ERROR.UNAVAILABLE);
   }
-  if (!ROOM_SESSION_REJECTED_STATUSES.includes(response.status)) return response;
+  if (!ROOM_SESSION_REJECTED_STATUSES.includes(response.status) || isMissingBlob(suffix, response)) return response;
 
   await cancelResponseBody(response);
   session = await refreshActiveRoomSession();
@@ -502,7 +509,7 @@ export async function roomFetch(path, init = {}) {
   } catch {
     fail(ROOM_SESSION_ERROR.UNAVAILABLE);
   }
-  if (ROOM_SESSION_REJECTED_STATUSES.includes(retried.status)) {
+  if (ROOM_SESSION_REJECTED_STATUSES.includes(retried.status) && !isMissingBlob(suffix, retried)) {
     await cancelResponseBody(retried);
     fail(ROOM_SESSION_ERROR.INVALID);
   }

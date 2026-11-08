@@ -1097,6 +1097,7 @@ export default Object.freeze({
   "roomLock.rotate.storageFull": "Không đủ dung lượng lưu trữ của phòng để mã hóa lại hình ảnh",
   "roomLock.rotate.boardChanged": "Bảng đã thay đổi trong khi mã hóa lại. Không có gì bị thay đổi; hãy thử lại.",
   "roomLock.rotate.timeout": "Một số chỉnh sửa chưa tới máy chủ. Không có gì bị thay đổi; kiểm tra kết nối rồi thử lại.",
+  "roomLock.rotate.incomplete": "Trang này không đọc được một phần của bảng. Không có gì bị thay đổi; tải lại bảng rồi thử lại.",
   "roomLock.manage.lockChanged": "Mật khẩu bảng đã được đổi ở nơi khác. Tải lại bảng rồi thử lại.",
   "roomLock.manage.unavailable": "Không thành công. Kiểm tra kết nối rồi thử lại.",
   "roomLock.notice.skipped": "Một số thay đổi không giải mã được và đã bị bỏ qua. Tải lại bảng để thử lại.",

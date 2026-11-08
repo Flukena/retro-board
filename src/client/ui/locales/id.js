@@ -1097,6 +1097,7 @@ export default Object.freeze({
   "roomLock.rotate.storageFull": "Penyimpanan ruang tidak cukup untuk mengenkripsi ulang gambar",
   "roomLock.rotate.boardChanged": "Papan berubah saat dienkripsi ulang. Tidak ada yang diubah; coba lagi.",
   "roomLock.rotate.timeout": "Beberapa suntingan belum sampai ke server. Tidak ada yang diubah; periksa koneksi lalu coba lagi.",
+  "roomLock.rotate.incomplete": "Halaman ini tidak dapat membaca sebagian papan. Tidak ada yang diubah; muat ulang papan lalu coba lagi.",
   "roomLock.manage.lockChanged": "Kata sandi papan diubah di tempat lain. Muat ulang papan lalu coba lagi.",
   "roomLock.manage.unavailable": "Itu tidak berhasil. Periksa koneksi lalu coba lagi.",
   "roomLock.notice.skipped": "Beberapa perubahan tidak dapat didekripsi dan dilewati. Muat ulang papan untuk mencoba lagi.",

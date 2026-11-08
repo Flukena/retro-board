@@ -7,8 +7,8 @@ import { updateLockAfterPasswordChange } from './lock-session.js';
  * `key` is getRoomKey(), `api` is createRoomLockApi(). Rejects with a RoomKeyError for a wrong current password
  * (nothing is sent), or a RoomLockActionError.
  */
-export async function changeRoomPassword({ currentPassword, newPassword, key, api }) {
+export async function changeRoomPassword({ currentPassword, newPassword, key, api, signal }) {
   const { lock, authKey, oldAuthKey } = await rewrapRoomLock({ currentPassword, lock: key.lock, newPassword });
-  const { lockRevision } = await api.changePassword({ oldAuthKey, expectedRevision: key.lockRevision, lock });
+  const { lockRevision } = await api.changePassword({ oldAuthKey, expectedRevision: key.lockRevision, lock }, { signal });
   updateLockAfterPasswordChange({ lock, authKey, lockRevision });
 }

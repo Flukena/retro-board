@@ -1097,6 +1097,7 @@ export default Object.freeze({
   "roomLock.rotate.storageFull": "Não há armazenamento suficiente na sala para criptografar as imagens de novo",
   "roomLock.rotate.boardChanged": "O quadro mudou durante a nova criptografia. Nada foi alterado; tente novamente.",
   "roomLock.rotate.timeout": "Algumas edições ainda não chegaram ao servidor. Nada foi alterado; verifique a conexão e tente novamente.",
+  "roomLock.rotate.incomplete": "Esta página não conseguiu ler parte do quadro. Nada foi alterado; recarregue o quadro e tente novamente.",
   "roomLock.manage.lockChanged": "A senha do quadro foi alterada em outro lugar. Recarregue o quadro e tente novamente.",
   "roomLock.manage.unavailable": "Não funcionou. Verifique a conexão e tente novamente.",
   "roomLock.notice.skipped": "Algumas alterações não puderam ser descriptografadas e foram ignoradas. Recarregue o quadro para tentar novamente.",

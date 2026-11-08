@@ -19,6 +19,22 @@ const textDecoder = new TextDecoder('ascii');
 const epochBySource = new Map();
 
 const brokenImage = () => new RoomKeyError(BROKEN_IMAGE);
+const HTTP_NOT_FOUND = 404;
+
+/** The relay holds no blob under this id (never uploaded, or swept after its grace). */
+export class BlobNotFoundError extends Error {
+  constructor() {
+    super('encrypted image not found');
+    this.name = 'BlobNotFoundError';
+  }
+}
+
+/**
+ * True when an image can never be opened from here: the blob is gone, or no key this page holds opens it.
+ * Such an image keeps its source (it renders as broken, Deviation 8): rotation and repair skip it instead of
+ * failing, and a page that still holds an older key can repair it later. Auth and transport failures are not this.
+ */
+export const isPermanentlyBrokenImage = (error) => error instanceof BlobNotFoundError || error instanceof RoomKeyError;
 
 const requireKey = (key) => {
   if (!key?.dek || typeof key.roomHandle !== 'string') throw new RangeError('room is locked');
@@ -117,6 +133,10 @@ export async function readE2EImage(src, { signal, key = getRoomKey() } = {}) {
   const source = classifyImportedImageSource(src);
   if (source?.kind !== 'e2e') throw brokenImage();
   const response = await roomFetch(`${BLOB_ROUTE}/${source.blobId}`, { signal });
+  if (response.status === HTTP_NOT_FOUND) {
+    await response.body?.cancel();
+    throw new BlobNotFoundError();
+  }
   if (!response.ok) throw new Error(`image read failed: ${response.status}`);
   return decryptImageResponse(response, source.source, key);
 }

@@ -1,6 +1,6 @@
 .rb-room-lock__form { display: grid; gap: var(--space-2); text-align: start; }
-.rb-room-lock__label { font-size: 13px; font-weight: 700; }
-.rb-room-lock__input { width: 100%; padding: var(--space-2) var(--space-3); box-sizing: border-box; font-size: 15px; }
-.rb-room-lock__note { margin: 0; color: var(--text-muted); font-size: 13px; line-height: 1.6; }
-.rb-room-lock__error { margin: 0; color: var(--danger); font-size: 13px; }
-.rb-room-lock__check { display: flex; gap: var(--space-2); align-items: flex-start; font-size: 13px; }
+.rb-room-lock__label { font-size: var(--room-lock-text-font-size); font-weight: var(--room-lock-label-font-weight); }
+.rb-room-lock__input { width: 100%; padding: var(--space-2) var(--space-3); box-sizing: border-box; font-size: var(--modal-input-font-size); }
+.rb-room-lock__note { margin: 0; color: var(--text-muted); font-size: var(--room-lock-text-font-size); line-height: var(--room-lock-note-line-height); }
+.rb-room-lock__error { margin: 0; color: var(--danger); font-size: var(--room-lock-text-font-size); }
+.rb-room-lock__check { display: flex; gap: var(--space-2); align-items: flex-start; font-size: var(--room-lock-text-font-size); }

@@ -54,25 +54,28 @@ export function encodeCommitBody(header, snapshot) {
   return body;
 }
 
-async function send(path, { body, contentType, expectedStatus }) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+/** Aborts on the caller's signal or when the request's whole deadline (headers and body) passes. */
+const deadlineSignal = (signal, timeoutMs) => (signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs));
+
+const noBody = async () => undefined;
+
+/** One request whose deadline also covers reading the body with `read`; every failure is a RoomLockActionError. */
+async function send(path, { body, contentType, expectedStatus, signal, keepalive, timeoutMs, read = noBody }) {
+  const deadline = deadlineSignal(signal, timeoutMs);
   let response;
   try {
-    response = await relayPost(path, body, { contentType, signal: controller.signal });
+    response = await relayPost(path, body, { contentType, signal: deadline, keepalive });
   } catch {
     throw new RoomLockActionError(LOCK_ACTION_ERROR.UNAVAILABLE);
-  } finally {
-    clearTimeout(timeout);
   }
   if (response.status !== expectedStatus) {
     await response.body?.cancel?.().catch(() => {});
     throw lockActionErrorForStatus(response.status, parseRetryAfter(response));
   }
-  return response;
+  return read(response);
 }
 
-async function readJson(response, isValid) {
+const jsonReader = (isValid) => async (response) => {
   let value;
   try {
     value = await readSmallJson(response);
@@ -81,36 +84,38 @@ async function readJson(response, isValid) {
   }
   if (!isPlainObject(value) || !isValid(value)) throw new RoomLockActionError(LOCK_ACTION_ERROR.UNAVAILABLE);
   return value;
-}
-
-const postJson = (path, body, expectedStatus) => send(path, { body: JSON.stringify(body), expectedStatus });
+};
 
 /**
  * The owner-only lock routes of one room (`/api/rooms/<handle>/lock/...`). They need the account cookie and
  * prove the current password with `oldAuthKey`; every failure is a RoomLockActionError.
  */
-export function createRoomLockApi(roomHandle) {
+export function createRoomLockApi(roomHandle, { timeoutMs = REQUEST_TIMEOUT_MS } = {}) {
   const route = (action) => `/api/rooms/${roomHandle}/lock/${action}`;
+  const postJson = (action, body, expectedStatus, options) => send(route(action), {
+    body: JSON.stringify(body), expectedStatus, timeoutMs, ...options,
+  });
   return {
     /** Resolves `{ lockRevision }`. */
-    async changePassword({ oldAuthKey, expectedRevision, lock }) {
-      const response = await postJson(route('password'), { oldAuthKey, expectedRevision, lock }, HTTP.OK);
-      const { lockRevision } = await readJson(response, (value) => isCounter(value.lockRevision));
+    async changePassword({ oldAuthKey, expectedRevision, lock }, { signal } = {}) {
+      const read = jsonReader((value) => isCounter(value.lockRevision));
+      const { lockRevision } = await postJson('password', { oldAuthKey, expectedRevision, lock }, HTTP.OK, { signal, read });
       return { lockRevision };
     },
     /** Freezes appends; resolves `{ head, rotationId, lockRevision }`. */
-    async beginRotation({ oldAuthKey, expectedRevision }) {
-      const response = await postJson(route('rotate/begin'), { oldAuthKey, expectedRevision }, HTTP.OK);
-      const value = await readJson(response, (v) => isCounter(v.head) && isBlobId(v.rotationId) && isCounter(v.lockRevision));
+    async beginRotation({ oldAuthKey, expectedRevision }, { signal } = {}) {
+      const read = jsonReader((v) => isCounter(v.head) && isBlobId(v.rotationId) && isCounter(v.lockRevision));
+      const value = await postJson('rotate/begin', { oldAuthKey, expectedRevision }, HTTP.OK, { signal, read });
       return { head: value.head, rotationId: value.rotationId, lockRevision: value.lockRevision };
     },
-    async commitRotation(header, snapshot) {
+    async commitRotation(header, snapshot, { signal } = {}) {
       await send(route('rotate/commit'), {
-        body: encodeCommitBody(header, snapshot), contentType: BINARY_TYPE, expectedStatus: HTTP.NO_CONTENT,
+        body: encodeCommitBody(header, snapshot), contentType: BINARY_TYPE, expectedStatus: HTTP.NO_CONTENT, signal, timeoutMs,
       });
     },
-    async abortRotation({ oldAuthKey, rotationId }) {
-      await postJson(route('rotate/abort'), { oldAuthKey, rotationId }, HTTP.NO_CONTENT);
+    /** `keepalive` lets the abort leave a page that is being hidden or unloaded. */
+    async abortRotation({ oldAuthKey, rotationId }, { keepalive = false } = {}) {
+      await postJson('rotate/abort', { oldAuthKey, rotationId }, HTTP.NO_CONTENT, { keepalive });
     },
   };
 }
