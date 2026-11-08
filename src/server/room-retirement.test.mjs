@@ -79,3 +79,14 @@ test('the Public Wall relay never retires anything', async () => {
   assert.deepEqual(await retireIdleRooms(f.context), { retired: 0, unknownAge: 0, files: 0 });
   assert.deepEqual(f.retiredDocs, []);
 });
+
+test('every retired room, and only those, is handed to forgetRoom so encrypted-room memory goes too', async () => {
+  const f = fixture([
+    { label: 'old', createdAt: daysAgo(OLD_DAYS) },
+    { label: 'recent', createdAt: daysAgo(RECENT_DAYS) },
+    { label: 'live', createdAt: daysAgo(OLD_DAYS), connections: 1 },
+  ]);
+  const forgotten = [];
+  await retireIdleRooms({ ...f.context, forgetRoom: (docName) => forgotten.push(docName) });
+  assert.deepEqual(forgotten, [docOf('old')]);
+});

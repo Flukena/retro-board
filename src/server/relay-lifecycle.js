@@ -72,7 +72,7 @@ const terminateSocket = (conn) => {
   try { conn.terminate(); }
   catch { /* The socket is already closed. */ }
 };
-const closeSocket = (conn) => new Promise((resolveSocket) => {
+export const closeWebSocket = (conn) => new Promise((resolveSocket) => {
   if (conn.readyState === WS_CLOSED_STATE) { resolveSocket(); return; }
   const forceTimer = setTimeout(() => terminateSocket(conn), WS_SHUTDOWN_GRACE_MS);
   forceTimer.unref();
@@ -92,7 +92,7 @@ export const drainRelay = async ({ server, clients, httpGraceMs, isBusy, compact
   const forceHttpTimer = setTimeout(() => server.closeAllConnections(), httpGraceMs);
   forceHttpTimer.unref();
   try {
-    await Promise.all([httpClosed, ...[...clients].map(closeSocket)]);
+    await Promise.all([httpClosed, ...[...clients].map(closeWebSocket)]);
     while (isBusy()) {
       await new Promise((resolveWait) => setTimeout(resolveWait, DRAIN_POLL_INTERVAL_MS));
     }

@@ -29,10 +29,11 @@ async function removeRoomImages(io, uploadsDir, handles) {
 /**
  * Retires every room idle past the retention window. Never touches the Public
  * Wall relay, connected or loaded rooms, or rooms with no recorded time.
- * Ports: registry.retireRoom, io (fs.promises), reconcileUploadUsage().
+ * Ports: registry.retireRoom, io (fs.promises), reconcileUploadUsage(), forgetRoom(docName)
+ * for per-room state held outside the registry (the encrypted-room relay).
  */
 export async function retireIdleRooms(context) {
-  const { registry, docs, connections, blockedRooms, roomPersistenceChurn, publicWall, uploadsDir, io, reconcileUploadUsage, log, now = Date.now() } = context;
+  const { registry, docs, connections, blockedRooms, roomPersistenceChurn, publicWall, uploadsDir, io, reconcileUploadUsage, log, forgetRoom = () => {}, now = Date.now() } = context;
   if (publicWall) return { retired: 0, unknownAge: 0, files: 0 };
   const { idle, unknownAge } = idleRoomCandidates(roomRows(context), now);
   const handles = new Set();
@@ -42,6 +43,7 @@ export async function retireIdleRooms(context) {
     const retiring = registry.retireRoom(docName);
     blockedRooms.delete(docName);
     roomPersistenceChurn.delete(docName);
+    forgetRoom(docName);
     const handle = await retiring;
     if (handle) handles.add(handle);
   }

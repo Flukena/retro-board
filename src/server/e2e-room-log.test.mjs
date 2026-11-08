@@ -444,3 +444,23 @@ test('forget keeps a room with pending cleanup until the retry removes the stage
     assert.deepEqual(await make().blobs(DOC), []);
   }, cleanupDeps(calls));
 });
+
+test('whenIdle settles only after every queued append in every room is written', () => withLog(async ({ log, make }) => {
+  const OTHER_DOC = 'room-doc-2';
+  const APPENDS = 5;
+  for (let i = 0; i < APPENDS; i += 1) {
+    void log.append(DOC, bytesOf(1, i));
+    void log.append(OTHER_DOC, bytesOf(1, i));
+  }
+  await log.whenIdle();
+  const reader = make();
+  assert.equal((await reader.open(DOC)).head, APPENDS);
+  assert.equal((await reader.open(OTHER_DOC)).head, APPENDS);
+}));
+
+test('whenIdle resolves at once with nothing queued and is not failed by a rejected op', () => withLog(async ({ log }) => {
+  await log.whenIdle();
+  const refused = log.append(DOC, bytesOf(MAX_ROOM_BYTES + 1));
+  await log.whenIdle();
+  await rejectsWith(refused, E2E_QUOTA);
+}));

@@ -1,7 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { runInNewContext } from 'node:vm';
 import { evictOldestBucket, refillTokens, refillTrafficBucket, takeTrafficTokens, takeTrafficBudget, trafficBucketFor, tokenWaitSeconds } from './relay-rate-bucket.js';
 
 const LIMITS = { maxMessages: 4, messagesPerSecond: 2, maxBytes: 100, bytesPerSecond: 20 };
@@ -88,45 +86,6 @@ test('existing buckets are reused at capacity and new buckets evict before inser
   assert.deepEqual([...map.keys()], ['new']);
   assert.equal(created.messages, LIMITS.maxMessages);
   assert.equal(created.bytes, LIMITS.maxBytes);
-});
-
-const SERVER_SOURCE = readFileSync(new URL('../../yjs-server.mjs', import.meta.url), 'utf8');
-const section = (start, end) => {
-  const offset = SERVER_SOURCE.indexOf(start);
-  assert.ok(offset >= 0, `missing relay seam ${start}`);
-  const endOffset = SERVER_SOURCE.indexOf(end, offset);
-  assert.ok(endOffset > offset, `missing relay seam ${end}`);
-  return SERVER_SOURCE.slice(offset, endOffset);
-};
-
-test('actual inbound entrypoint charges connection then global then room without refunds', () => {
-  const localTokens = section('  const takeTokens =', '\n  // y-websocket funnels');
-  const admission = section("  conn.on('message', (data) => {", '    let inspection;');
-  for (const failsAtGlobal of [true, false]) {
-    const connection = { msgs: 2, bytes: 100, last: AT_TIME_MS };
-    const global = bucket(failsAtGlobal ? 0 : 2, 100);
-    const room = bucket(failsAtGlobal ? 2 : 0, 100);
-    const closed = [];
-    runInNewContext(`${localTokens}\n${admission}\n});`, {
-      bucket: connection, limited: false,
-      Date: { now: () => AT_TIME_MS },
-      RL_MAX_MSGS: 4, RL_MAX_BYTES: 100, RL_REFILL_MSGS_PER_SEC: 2, RL_REFILL_BYTES_PER_SEC: 20,
-      MILLISECONDS_PER_SECOND: 1_000, refillTokens, takeTrafficTokens,
-      roomTrafficBuckets: new Map([['doc', room]]), docName: 'doc',
-      globalTrafficBucket: global,
-      globalTrafficLimits: { ...LIMITS, messagesPerSecond: 0, bytesPerSecond: 0 },
-      roomTrafficLimits: { ...LIMITS, messagesPerSecond: 0, bytesPerSecond: 0 },
-      pendingStoreOps: 0, pendingStoreBytes: 0, MAX_PENDING_STORE_OPS: 100, MAX_PENDING_STORE_BYTES: 100,
-      rejectionCounters: { observeBacklog() {} },
-      console: { warn() {} }, roomLogId: () => 'keyed-id', req: { headers: {} },
-      conn: { on(_event, callback) { callback({ byteLength: 10 }); }, close(...args) { closed.push(args); } },
-    });
-    assert.equal(connection.msgs, 1);
-    assert.equal(connection.bytes, 90);
-    assert.equal(global.messages, failsAtGlobal ? 0 : 1);
-    assert.equal(room.lastSeen === 0, failsAtGlobal);
-    assert.deepEqual(closed, [[1008, 'rate-limit']]);
-  }
 });
 
 test('creation wait reflects fractional refill and is zero when a token is available', () => {

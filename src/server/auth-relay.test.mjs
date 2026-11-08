@@ -1,15 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { startFakeGoogleOidc } from '../../scripts/fake-google-oidc.mjs';
+import { approvedCallback, startRelay as startHarnessRelay } from '../test-support/relay-harness.mjs';
 
-const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
-const START_TIMEOUT_MS = 5_000;
-const KILL_TIMEOUT_MS = 3_000;
 const HTTP_SHUTDOWN_GRACE_MS = 100;
 const TOKEN_HOLD_MS = 600;
 // Long enough that the client is still connected when the held token answer arrives.
@@ -45,41 +38,7 @@ const exitWithin = (relay, timeoutMs) => Promise.race([
   new Promise((resolve) => { setTimeout(() => resolve({ code: null }), timeoutMs).unref(); }),
 ]);
 
-async function startRelay(t, env, { preload = null } = {}) {
-  const root = await mkdtemp(join(tmpdir(), 'auth-relay-'));
-  const args = preload ? ['--import', `data:text/javascript,${encodeURIComponent(preload)}`, 'yjs-server.mjs'] : ['yjs-server.mjs'];
-  const child = spawn(process.execPath, args, {
-    cwd: REPO_ROOT,
-    env: {
-      ...process.env, YJS_PORT: '0', YJS_HOST: '127.0.0.1', YJS_DB_DIR: join(root, 'db'), YJS_UPLOADS_DIR: join(root, 'uploads'),
-      YJS_WIPE_DOCS: '', YJS_MIGRATE_DOCS: '', YJS_ALLOW_LEGACY_ROOMS: '0', YJS_ALLOW_LEGACY_URL_TOKENS: '0', ...GOOGLE_ENV, ...env,
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  let output = '';
-  child.stdout.on('data', (chunk) => { output += chunk; });
-  child.stderr.on('data', (chunk) => { output += chunk; });
-  const exited = new Promise((resolve) => child.once('exit', (code) => resolve({ code, at: Date.now() })));
-  t.after(async () => {
-    if (child.exitCode === null) {
-      const killTimer = setTimeout(() => child.kill('SIGKILL'), KILL_TIMEOUT_MS);
-      child.kill('SIGTERM');
-      await exited;
-      clearTimeout(killTimer);
-    }
-    await rm(root, { recursive: true, force: true });
-  });
-  const port = await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`relay start timed out\n${output}`)), START_TIMEOUT_MS);
-    const inspect = () => {
-      const match = output.match(/listening on ws:\/\/127\.0\.0\.1:(\d+)/);
-      if (match) { clearTimeout(timer); resolve(Number(match[1])); }
-    };
-    child.stdout.on('data', inspect);
-    exited.then(({ code }) => { clearTimeout(timer); reject(new Error(`relay exited ${code}\n${output}`)); });
-  });
-  return { url: `http://127.0.0.1:${port}`, child, exited, output: () => output };
-}
+const startRelay = (t, env, options) => startHarnessRelay(t, { ...GOOGLE_ENV, ...env }, options);
 
 async function startStub(t, options) {
   const stub = await startFakeGoogleOidc(options);
@@ -89,16 +48,6 @@ async function startStub(t, options) {
 
 const cookiePair = (setCookie) => setCookie.split(';')[0];
 const get = (url, headers = {}) => fetch(url, { headers, redirect: 'manual' });
-
-/** Start → stub consent → the callback URL and flow cookie the browser would carry back. */
-async function approvedCallback(relay, stub, prefix, returnTo) {
-  const start = await get(`${relay.url}${prefix}/api/auth/google/start?return=${encodeURIComponent(returnTo)}`);
-  assert.equal(start.status, 302, relay.output());
-  const flowCookie = start.headers.getSetCookie()[0];
-  const consent = await get(`${stub.url}/auth${new URL(start.headers.get('location')).search}&decision=approve`);
-  assert.equal(consent.status, 302);
-  return { flowCookie, url: `${relay.url}${prefix}/api/auth/google/callback${new URL(consent.headers.get('location')).search}` };
-}
 
 test('prefixed callback sets Path=/yjs/api; Secure when insecure HTTP is off', async (t) => {
   const stub = await startStub(t, { issuer: GOOGLE_ISSUER });

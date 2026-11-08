@@ -238,7 +238,7 @@ test('public entrypoint dispatches isolated snapshot and writer admission withou
   const publicWall = new RelayPublicWall({ docName: 'public-document', roomHandle: ROOM_HANDLE });
   const connections = new Map();
   const { dispatch } = entrypointHttp({ PUBLIC_WALL: true, PUBLIC_RELAY_PREFIX, publicWall,
-    docs: new Map([['public-document', doc]]), wsConnectionsByRoom: connections });
+    docs: new Map([['public-document', doc]]), wsTraffic: { connectionsByRoom: connections } });
   const snapshot = routeResponse();
   dispatch(routeRequest('GET', '/yjs-public/api/snapshot'), snapshot);
   assert.equal(snapshot.status, 200);
@@ -263,19 +263,6 @@ test('public entrypoint dispatches isolated snapshot and writer admission withou
   dispatch(routeRequest('POST', `/yjs-public/rooms/${UNKNOWN_HANDLE}/upload`), foreignUpload);
   assert.equal(foreignUpload.status, 404);
   doc.destroy();
-});
-
-test('room target parser accepts public opaque handles and rejects capability-bearing or malformed targets', () => {
-  const source = sourceSection('const roomTargetFromRequest =', '\nconst normalizeIp');
-  const parsePublic = runInNewContext(`${source}\nroomTargetFromRequest;`, { PUBLIC_WALL: true, Number });
-  const parsePrivate = runInNewContext(`${source}\nroomTargetFromRequest;`, { PUBLIC_WALL: false, Number });
-  assert.equal(parsePublic({ url: `/yjs-public/rooms/${ROOM_HANDLE}?awarenessId=42` }).handle, ROOM_HANDLE);
-  assert.equal(parsePublic({ url: `/yjs-public/rooms/${ROOM_HANDLE}?awarenessId=42&quota=1` }).supportsQuota, true);
-  assert.equal(parsePrivate({ url: `/yjs/rooms/${ROOM_HANDLE}?awarenessId=42&quota=1` }), null);
-  assert.equal(parsePrivate({ url: `/yjs-public/rooms/${ROOM_HANDLE}` }), null);
-  for (const suffix of ['#secret', '?token=secret', '?awarenessId=-1', '?awarenessId=42&token=secret']) {
-    assert.equal(parsePublic({ url: `/yjs-public/rooms/${ROOM_HANDLE}${suffix}` }), null);
-  }
 });
 
 test('authenticated image reads expose credentialed CORS only to an exact allowed origin', () => {

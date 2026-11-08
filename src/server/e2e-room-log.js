@@ -97,6 +97,11 @@ export class E2ERoomLog {
     if (room.forgetRequested && idle && this.#rooms.get(docName) === room) this.#rooms.delete(docName);
   }
 
+  /** Settles once every operation queued so far, in every room, has finished (used by shutdown drain). */
+  async whenIdle() {
+    await Promise.all([...this.#rooms.values()].map((room) => room.tail));
+  }
+
   async open(docName) {
     return this.#enqueue(docName, async (room) => (await this.#readState(docName, room)).state);
   }
