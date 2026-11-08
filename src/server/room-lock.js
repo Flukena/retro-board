@@ -3,14 +3,13 @@ import { MILLISECONDS_PER_MINUTE, MILLISECONDS_PER_SECOND } from './relay-config
 import { fixedDigestEqual } from './relay-room-registry.js';
 import { decodeBase64Url } from '../domain/room-lock-contract.js';
 
-export { ROOM_LOCK_META, decodeLockRecord, encodeLockRecord } from './room-lock-record.js';
+export { CORRUPT_LOCK, ROOM_LOCK_META, decodeLockRecord, encodeLockRecord } from './room-lock-record.js';
 
 const WINDOW_MINUTES = 15;
 export const WRONG_PASSWORD_WINDOW_MS = WINDOW_MINUTES * MILLISECONDS_PER_MINUTE;
 export const WRONG_PASSWORDS_PER_IP_ROOM = 5;
 export const WRONG_PASSWORDS_PER_ROOM = 50;
 export const DEFAULT_VERIFIER_MAX_KEYS = 10_000;
-const WINDOW_SECONDS = WRONG_PASSWORD_WINDOW_MS / MILLISECONDS_PER_SECOND;
 const MIN_RETRY_SECONDS = 1;
 const KEY_SEPARATOR = '\0';
 const MISSING_RECORD_MESSAGE = 'RoomLockVerifier.check requires a lock record';
@@ -68,23 +67,27 @@ export class RoomLockVerifier {
 
   #retrySeconds(map, key, cap, now) {
     const stamps = map.get(key);
-    if (!stamps) return this.#isFull(map, now) ? WINDOW_SECONDS : null;
-    const live = this.#live(stamps, now);
-    if (live.length === 0) {
-      map.delete(key);
-      return this.#isFull(map, now) ? WINDOW_SECONDS : null;
-    }
+    const live = stamps ? this.#live(stamps, now) : [];
+    if (stamps && live.length === 0) map.delete(key);
+    if (live.length === 0) return this.#secondsUntil(this.#slotFreeAt(map, now), now);
     stamps.splice(0, stamps.length, ...live);
-    if (live.length < cap) return null;
-    const waitMs = live[0] + WRONG_PASSWORD_WINDOW_MS - now;
-    return Math.max(MIN_RETRY_SECONDS, Math.ceil(waitMs / MILLISECONDS_PER_SECOND));
+    return live.length < cap ? null : this.#secondsUntil(live[0] + WRONG_PASSWORD_WINDOW_MS, now);
   }
 
-  // A new key never evicts a live one: a full map of live keys refuses it.
-  #isFull(map, now) {
-    if (map.size < this.#maxKeys) return false;
+  #secondsUntil(at, now) {
+    if (at === null) return null;
+    return Math.max(MIN_RETRY_SECONDS, Math.ceil((at - now) / MILLISECONDS_PER_SECOND));
+  }
+
+  // A new key never evicts a live one: while the map is full of live keys it is refused
+  // until the earliest key empties. Returns null when a slot is free.
+  #slotFreeAt(map, now) {
+    if (map.size < this.#maxKeys) return null;
     this.sweep(now);
-    return map.size >= this.#maxKeys;
+    if (map.size < this.#maxKeys) return null;
+    let earliest = Infinity;
+    for (const stamps of map.values()) earliest = Math.min(earliest, stamps.at(-1) + WRONG_PASSWORD_WINDOW_MS);
+    return earliest;
   }
 
   #matches(record, authKeyB64) {

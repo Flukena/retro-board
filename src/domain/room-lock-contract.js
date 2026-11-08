@@ -55,8 +55,8 @@ export function decodeBase64Url(text) {
   return buffer === 0 ? Uint8Array.from(out) : null;
 }
 
-const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
-const hasExactKeys = (value, keys) => {
+export const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+export const hasExactKeys = (value, keys) => {
   const actual = Object.keys(value);
   return actual.length === keys.length && keys.every((key) => Object.hasOwn(value, key));
 };
@@ -76,7 +76,7 @@ export function parseLockParams(value) {
 
 export const parseAuthKey = (value) => (hasBytes(value, LOCK_BYTES.authKey) ? value : null);
 
-const isCounter = (value) => Number.isSafeInteger(value) && value >= 0;
+export const isCounter = (value) => Number.isSafeInteger(value) && value >= 0;
 
 const bindingIsValid = (kind, binding) => (kind === 'snapshot' ? isCounter(binding) : BLOB_ID_PATTERN.test(binding ?? ''));
 

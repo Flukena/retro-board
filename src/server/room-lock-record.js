@@ -1,16 +1,9 @@
 import { isAccountId } from '../domain/account-identity.js';
-import { parseLockParams } from '../domain/room-lock-contract.js';
+import { hasExactKeys, isCounter, isPlainObject, parseLockParams } from '../domain/room-lock-contract.js';
 
 export const ROOM_LOCK_META = 'retro-room-lock-v1';
 export const ROOM_LOCK_VERSION = 1;
 const RECORD_FIELDS = ['v', 'salt', 'kdf', 'verifier', 'wrappedDek', 'wrapIv', 'keyEpoch', 'ownerAccountId', 'createdAt', 'lockRevision'];
-
-const isCounter = (value) => Number.isSafeInteger(value) && value >= 0;
-const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
-const hasExactKeys = (value, keys) => {
-  const actual = Object.keys(value);
-  return actual.length === keys.length && keys.every((key) => Object.hasOwn(value, key));
-};
 
 /** Strict decoder: returns a frozen record, or null for anything that is not exactly a v1 record. */
 export function decodeLockRecord(value) {
@@ -36,3 +29,6 @@ export function encodeLockRecord(record) {
   if (!decoded) throw new TypeError('invalid room lock record');
   return { ...decoded, kdf: { ...decoded.kdf } };
 }
+
+/** Held in the lock map for a committed room whose stored record is unreadable: still locked, never served. */
+export const CORRUPT_LOCK = Object.freeze({ corrupt: true });

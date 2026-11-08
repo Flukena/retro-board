@@ -3,7 +3,7 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { ROOM_HANDLE_RE, ROOM_ID_ALLOCATION_ATTEMPTS, STORE_OPERATION_OVERHEAD_BYTES } from './relay-config.js';
 import { roomLogId } from './relay-log-id.js';
 import { RoomActivity } from './room-activity.js';
-import { ROOM_LOCK_META, decodeLockRecord, encodeLockRecord } from './room-lock-record.js';
+import { CORRUPT_LOCK, ROOM_LOCK_META, decodeLockRecord, encodeLockRecord } from './room-lock-record.js';
 
 export const ROOM_REGISTRATION_META = 'retro-room-registration-v1';
 export const ROOM_HANDLE_META = 'retro-room-handle-v1';
@@ -35,10 +35,11 @@ const SERVICE_UNAVAILABLE_MESSAGE = 'service unavailable';
 const ROOM_CAPACITY_MESSAGE = 'room capacity reached';
 const QUARANTINE_LOG = '[yjs] quarantined incomplete room';
 const USAGE_RECONCILED_LOG = '[yjs] reconciled room upload usage';
-const INVALID_LOCK_LOG = '[yjs] quarantined room with invalid lock record';
+const INVALID_LOCK_LOG = '[yjs] room has an unreadable lock record';
 const INVALID_LOCK_ARGUMENT_MESSAGE = 'invalid room lock record';
 const LOCK_STORAGE_UNSUPPORTED_MESSAGE = 'persistence has no durableMetaBatch for locked rooms';
 const PUT_OPERATION = 'put';
+const DELETE_OPERATION = 'del';
 const ROLLBACK_FAILED_LOG = '[yjs] incomplete room rollback failed';
 
 export const canonicalDocName = (code, token) => `${DOCUMENT_PREFIX}board-${code}-${token}`;
@@ -151,13 +152,13 @@ export class RoomRegistry extends EventEmitter {
     // Only the final commit marker makes a partially created document reachable.
     if ((await this.#persistence.getMeta(docName, ROOM_REGISTRATION_META)) !== REGISTRATION_VERSION) {
       this.#log.warn(QUARANTINE_LOG, { docName: roomLogId(docName) });
+      await this.#dropOrphanLock(docName);
       return;
     }
     if (this.registeredDocs.size >= this.#maxRooms) {
       throw new Error(EXISTING_ROOM_LIMIT_MESSAGE);
     }
     const lock = await this.#readLock(docName);
-    if (lock === undefined) return;
     let handle = await this.#persistence.getMeta(docName, ROOM_HANDLE_META);
     if (!ROOM_HANDLE_RE.test(handle || '')) {
       handle = this.newUniqueRoomHandle();
@@ -177,14 +178,21 @@ export class RoomRegistry extends EventEmitter {
     this.roomUploadUsage.set(docName, activeUsage(usage));
   }
 
-  // null = unlocked room, undefined = unreadable lock (room stays unreachable).
+  // An interrupted locked creation: the lock landed but the marker did not.
+  async #dropOrphanLock(docName) {
+    const raw = await this.#persistence.getMeta(docName, ROOM_LOCK_META);
+    if (raw === undefined || raw === null || typeof this.#persistence.durableMetaBatch !== 'function') return;
+    await this.#persistence.durableMetaBatch(docName, [{ type: DELETE_OPERATION, key: ROOM_LOCK_META }]);
+  }
+
+  // null = unlocked room, CORRUPT_LOCK = committed record that cannot be read (managed but never served).
   async #readLock(docName) {
     const raw = await this.#persistence.getMeta(docName, ROOM_LOCK_META);
     if (raw === undefined || raw === null) return null;
     const lock = decodeLockRecord(raw);
     if (!lock) {
       this.#log.warn(INVALID_LOCK_LOG, { docName: roomLogId(docName) });
-      return undefined;
+      return CORRUPT_LOCK;
     }
     return lock;
   }

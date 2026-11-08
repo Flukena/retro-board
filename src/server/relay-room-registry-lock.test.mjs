@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { checkedStorage, durableMetaBatch } from './relay-storage.js';
 import { RoomRegistry } from './relay-room-registry.js';
-import { ROOM_LOCK_META, decodeLockRecord } from './room-lock.js';
+import { CORRUPT_LOCK, ROOM_LOCK_META, decodeLockRecord } from './room-lock.js';
 import { lockRecord } from './room-lock-fixtures.mjs';
 
 const require = createRequire(import.meta.url);
@@ -21,6 +21,7 @@ const NO_USAGE = { complete: true, roomsByHandle: new Map() };
 
 async function openFixture(dir, wrap = (persistence) => persistence) {
   const ldb = new LeveldbPersistence(dir);
+  opened.add(ldb);
   const storage = checkedStorage(ldb, Y);
   const events = [];
   const persistence = wrap({
@@ -38,9 +39,15 @@ async function openFixture(dir, wrap = (persistence) => persistence) {
   return { ldb, registry, events, storage };
 }
 
+// Every DB opened through openFixture is destroyed in finally, even when the body throws.
+const opened = new Set();
 const withDir = async (body) => {
   const dir = await mkdtemp(join(tmpdir(), 'room-lock-'));
-  try { await body(dir); } finally { await rm(dir, { recursive: true, force: true }); }
+  try { await body(dir); } finally {
+    for (const ldb of opened) await ldb.destroy();
+    opened.clear();
+    await rm(dir, { recursive: true, force: true });
+  }
 };
 
 test('a locked room keeps its lock across a reopen and normal rooms have no lock key', async () => {
@@ -55,6 +62,7 @@ test('a locked room keeps its lock across a reopen and normal rooms have no lock
     assert.equal(first.registry.lockFor(normalDoc), null);
     assert.equal(await first.storage.getMeta(normalDoc, ROOM_LOCK_META), undefined);
     await first.ldb.destroy();
+    opened.delete(first.ldb);
 
     const second = await openFixture(dir);
     assert.deepEqual(second.registry.lockFor(lockedDoc), decodeLockRecord(lockRecord()));
@@ -124,5 +132,48 @@ test('createRoom rejects an invalid lock before reserving anything; publishLock 
     assert.equal(decodeLockRecord(await fixture.storage.getMeta(docName, ROOM_LOCK_META)).keyEpoch, 0);
     assert.throws(() => fixture.registry.publishLock(docName, { ...rotated, extra: 1 }), TypeError);
     await fixture.ldb.destroy();
+  });
+});
+
+const LOCK_DOC = 'yjs/board-Crashed1-abcdefgh12345678';
+
+test('hydration deletes the lock key of an interrupted creation and leaves the room unreachable', async () => {
+  await withDir(async (dir) => {
+    const first = await openFixture(dir);
+    await first.registry.createRoom();
+    // Simulate a crash after the lock write but before the marker: seed doc + lock only.
+    await first.storage.storeUpdate(LOCK_DOC, first.registry.seedUpdate());
+    await durableMetaBatch(first.ldb, LOCK_DOC, [{ type: 'put', key: ROOM_LOCK_META, value: lockRecord() }]);
+    assert.ok(await first.storage.getMeta(LOCK_DOC, ROOM_LOCK_META));
+    await first.ldb.destroy();
+    opened.delete(first.ldb);
+
+    const second = await openFixture(dir);
+    assert.equal(second.registry.registeredDocs.has(LOCK_DOC), false);
+    assert.equal(second.registry.isLocked(LOCK_DOC), false);
+    assert.equal(await second.storage.getMeta(LOCK_DOC, ROOM_LOCK_META), undefined);
+    assert.equal(second.registry.registeredDocs.size, 1);
+  });
+});
+
+test('a corrupt committed lock keeps the room managed, locked and retirable with its data intact', async () => {
+  await withDir(async (dir) => {
+    const first = await openFixture(dir);
+    const room = await first.registry.createRoom({ lock: lockRecord() });
+    const docName = first.registry.registeredDocForCapability(room.code, room.token);
+    await durableMetaBatch(first.ldb, docName, [{ type: 'put', key: ROOM_LOCK_META, value: { v: 9 } }]);
+    await first.ldb.destroy();
+    opened.delete(first.ldb);
+
+    const second = await openFixture(dir);
+    assert.equal(second.registry.registeredDocs.has(docName), true);
+    assert.equal(second.registry.isLocked(docName), true);
+    assert.equal(second.registry.lockFor(docName), CORRUPT_LOCK);
+    assert.deepEqual(second.registry.lockFor(docName), { corrupt: true });
+    assert.ok(second.registry.roomUploadUsage.has(docName));
+    assert.deepEqual(await second.storage.getMeta(docName, ROOM_LOCK_META), { v: 9 });
+    assert.ok(await second.storage.getMeta(docName, 'retro-room-handle-v1'));
+    assert.ok(await second.registry.retireRoom(docName));
+    assert.equal(second.registry.lockFor(docName), null);
   });
 });

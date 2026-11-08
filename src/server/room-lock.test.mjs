@@ -87,11 +87,22 @@ test('a full map refuses new keys, keeps tracked allowances, and the sweep frees
   verifier.check('10.0.0.1', DOC, record, WRONG_KEY);
   clock.now += SECOND_MS;
   verifier.check('10.0.0.2', DOC, record, WRONG_KEY);
-  assert.deepEqual(verifier.check('10.0.0.3', DOC, record, RIGHT_KEY), { limited: WRONG_PASSWORD_WINDOW_MS / SECOND_MS });
+  assert.deepEqual(verifier.check('10.0.0.3', DOC, record, RIGHT_KEY), { limited: 15 * 60 - 1 });
   // Tracked keys keep their allowance: 4 more failures for 10.0.0.1 are still counted, not reset.
   for (let i = 0; i < PER_IP_LIMIT - 1; i += 1) assert.equal(verifier.check('10.0.0.1', DOC, record, WRONG_KEY), 'wrong');
   assert.equal(typeof verifier.check('10.0.0.1', DOC, record, RIGHT_KEY), 'object');
   clock.now = START_MS + WRONG_PASSWORD_WINDOW_MS + SECOND_MS;
   verifier.sweep();
   assert.equal(verifier.check('10.0.0.3', DOC, record, RIGHT_KEY), 'ok');
+});
+
+test('a full map tells a new key the real time until a slot frees', () => {
+  const { clock, verifier, record } = clockFixture({ maxKeys: 1 });
+  verifier.check('10.0.0.1', DOC, record, WRONG_KEY);
+  clock.now = START_MS + WRONG_PASSWORD_WINDOW_MS - MINUTE_MS + SECOND_MS;
+  assert.deepEqual(verifier.check('10.0.0.2', OTHER_DOC, record, RIGHT_KEY), { limited: 59 });
+  clock.now = START_MS + WRONG_PASSWORD_WINDOW_MS - SECOND_MS;
+  assert.deepEqual(verifier.check('10.0.0.2', OTHER_DOC, record, RIGHT_KEY), { limited: 1 });
+  clock.now = START_MS + WRONG_PASSWORD_WINDOW_MS;
+  assert.equal(verifier.check('10.0.0.2', OTHER_DOC, record, RIGHT_KEY), 'ok');
 });
