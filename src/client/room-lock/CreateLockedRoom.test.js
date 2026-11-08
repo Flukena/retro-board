@@ -57,3 +57,29 @@ test('guests and the loading state see nothing new on the landing page', async (
     assert.equal(html.includes(t('roomLock.create.toggle')), false);
   });
 });
+
+test('an entitled user sees the toggle, and opening it reveals the form wired by id', async () => {
+  await withChromeModule('/src/client/room-lock/CreateLockedRoom.jsx', ({ CreateLockedRoomOption }, { setLang, t }) => {
+    for (const language of ['th', 'en']) {
+      setLang(language);
+      const props = { formId: 'lock-form', form: form(), onChange: noop, onSubmit: noop, onToggle: noop, busy: false, disabled: false };
+      const closed = renderToStaticMarkup(React.createElement(CreateLockedRoomOption, { ...props, open: false }));
+      assert.ok(closed.includes(t('roomLock.create.toggle')));
+      assert.match(closed, /type="button"/);
+      assert.match(closed, /aria-expanded="false"/);
+      assert.doesNotMatch(closed, /<form/);
+      const open = renderToStaticMarkup(React.createElement(CreateLockedRoomOption, { ...props, open: true }));
+      assert.match(open, /aria-expanded="true"/);
+      assert.match(open, /aria-controls="lock-form"/);
+      assert.match(open, /<form id="lock-form"/);
+    }
+  });
+});
+
+test('a derivation failure is announced with the existing create-failure message', async () => {
+  await withChromeModule('/src/client/room-lock/CreateLockedRoom.jsx', ({ CreateLockedRoomForm }, { setLang, t }) => {
+    setLang('en');
+    assert.ok(render(CreateLockedRoomForm, { failed: true }).includes(t('landing.create.error.unavailable')));
+    assert.equal(render(CreateLockedRoomForm, { failed: false }).includes(t('landing.create.error.unavailable')), false);
+  });
+});

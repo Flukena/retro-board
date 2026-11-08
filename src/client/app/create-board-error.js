@@ -9,9 +9,10 @@ const LOCK_ERROR_BY_STATUS = Object.freeze({
   [HTTP_FORBIDDEN]: CREATE_LOCK_ERROR.PLAN_REQUIRED,
 });
 
-export function createBoardError(error) {
+/** `locked` is true only when the failed request carried a lock; plain creation keeps the generic mapping. */
+export function createBoardError(error, { locked = false } = {}) {
   const rateLimited = error instanceof RoomSessionError && error.code === ROOM_SESSION_ERROR.RATE_LIMITED;
-  const lockCode = error instanceof RoomSessionError ? LOCK_ERROR_BY_STATUS[error.httpStatus] : undefined;
+  const lockCode = locked && error instanceof RoomSessionError ? LOCK_ERROR_BY_STATUS[error.httpStatus] : undefined;
   return {
     code: lockCode ?? (rateLimited ? ROOM_SESSION_ERROR.RATE_LIMITED : ROOM_SESSION_ERROR.UNAVAILABLE),
     retryAfterSeconds: rateLimited ? (error.retryAfterSeconds || CREATE_RETRY_FALLBACK_SECONDS) : null,

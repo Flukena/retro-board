@@ -6,7 +6,7 @@ export const FORM_ERROR = Object.freeze({
   TOO_SHORT: 'tooShort', MISMATCH: 'mismatch', UNACKNOWLEDGED: 'unacknowledged',
 });
 
-const IDLE = Object.freeze({ busy: false });
+const IDLE = Object.freeze({ busy: false, failed: false });
 const codePointLength = (text) => [...text].length;
 
 /** The option exists only for a signed-in account whose plan allows locked rooms. */
@@ -42,16 +42,19 @@ export function createLockedRoomController() {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    /** Resolves true when creation was attempted; failures surface through `createBoard`. */
+    /** Resolves true when creation was attempted (its failures surface through `createBoard`); false on invalid input or a derivation failure (`failed`). */
     async submit(form, { name, createBoard }) {
       if (state.busy || validateLockedRoomForm(form).length > 0) return false;
-      set({ busy: true });
+      set({ busy: true, failed: false });
       try {
         const { lock } = await createRoomLock(form.password);
         await createBoard({ name, lock });
-        return true;
-      } finally {
         set({ busy: false });
+        return true;
+      } catch {
+        // Key derivation failed (no WebCrypto, KDF error): nothing was sent.
+        set({ busy: false, failed: true });
+        return false;
       }
     },
   };

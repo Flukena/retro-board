@@ -5,6 +5,7 @@ import { ACCOUNT_STATUS } from '../account/account-api.js';
 import { ROOM_SESSION_ERROR, RoomSessionError, clearRoomSession, createRoom } from '../session/room-session.js';
 import { createBoardError, CREATE_LOCK_ERROR } from '../app/create-board-error.js';
 import { parseLockParams } from '../../domain/room-lock-contract.js';
+import { runCreateBoard } from '../app/create-board-flow.js';
 import {
   FORM_ERROR, canOfferLockedRoom, createLockedRoomController, validateLockedRoomForm,
 } from './create-locked-room-controller.js';
@@ -102,11 +103,62 @@ test('busy is shown while deriving and a second submit is ignored', async (conte
   assert.equal(requests.length, 1);
 });
 
-test('401 and 403 map to sign-in and plan messages, anything else to the generic failure', async () => {
-  const status = (httpStatus) => createBoardError(new RoomSessionError(ROOM_SESSION_ERROR.UNAVAILABLE, { httpStatus }));
+test('locked creation maps 401 and 403 to sign-in and plan messages, anything else to the generic failure', () => {
+  const status = (httpStatus) => createBoardError(new RoomSessionError(ROOM_SESSION_ERROR.UNAVAILABLE, { httpStatus }), { locked: true });
   assert.equal(status(HTTP_UNAUTHORIZED).code, CREATE_LOCK_ERROR.SIGN_IN_REQUIRED);
   assert.equal(status(HTTP_FORBIDDEN).code, CREATE_LOCK_ERROR.PLAN_REQUIRED);
   assert.equal(status(500).code, ROOM_SESSION_ERROR.UNAVAILABLE);
+});
+
+test('plain creation keeps the old message for 401 and 403 (a bad Origin is not a plan problem)', () => {
+  for (const httpStatus of [HTTP_UNAUTHORIZED, HTTP_FORBIDDEN]) {
+    const failure = new RoomSessionError(ROOM_SESSION_ERROR.UNAVAILABLE, { httpStatus });
+    assert.equal(createBoardError(failure).code, ROOM_SESSION_ERROR.UNAVAILABLE);
+    assert.equal(createBoardError(failure, { locked: false }).code, ROOM_SESSION_ERROR.UNAVAILABLE);
+  }
+});
+
+test('the create flow forwards the lock to the relay call and maps errors by whether it was locked', async () => {
+  const lock = { salt: 's' };
+  const seen = [];
+  const steps = {
+    createRoom: async (request) => { seen.push(request); throw new RoomSessionError(ROOM_SESSION_ERROR.UNAVAILABLE, { httpStatus: HTTP_FORBIDDEN }); },
+    markBoardCreated: () => assert.fail('nothing is opened after a failure'),
+    rememberRecent: () => assert.fail('nothing is remembered after a failure'),
+    savePendingStarter: () => assert.fail('no starter after a failure'),
+    gotoBoard: () => assert.fail('no navigation after a failure'),
+  };
+  assert.equal((await runCreateBoard({ lock }, steps)).code, CREATE_LOCK_ERROR.PLAN_REQUIRED);
+  assert.equal((await runCreateBoard({}, steps)).code, ROOM_SESSION_ERROR.UNAVAILABLE);
+  assert.deepEqual(seen, [{ lock }, { lock: null }]);
+});
+
+test('the create flow remembers and opens the room after success', async () => {
+  const calls = [];
+  const steps = {
+    createRoom: async () => CREATED,
+    markBoardCreated: (...args) => calls.push(['mark', ...args]),
+    rememberRecent: (...args) => calls.push(['recent', ...args]),
+    savePendingStarter: (...args) => calls.push(['starter', ...args]),
+    gotoBoard: (...args) => calls.push(['goto', ...args]),
+  };
+  assert.equal(await runCreateBoard({ name: 'N', lock: { salt: 's' } }, steps), null);
+  assert.deepEqual(calls.map(([step]) => step), ['mark', 'recent', 'goto']);
+});
+
+test('a key-derivation failure shows the failure state, clears busy and sends nothing', async (context) => {
+  const { requests, controller } = setup(context);
+  let opened = 0;
+  const createBoard = async () => { opened += 1; };
+  const tooLong = valid({ password: 'x'.repeat(10), confirmation: 'x'.repeat(10) });
+  context.mock.method(globalThis.crypto.subtle, 'importKey', async () => { throw new Error('no kdf'); });
+  assert.equal(await controller.submit(tooLong, { name: '', createBoard }), false);
+  assert.deepEqual(controller.getSnapshot(), { busy: false, failed: true });
+  assert.equal(requests.length, 0);
+  assert.equal(opened, 0);
+  context.mock.restoreAll();
+  assert.equal(await controller.submit(valid(), { name: '', createBoard }), true);
+  assert.equal(controller.getSnapshot().failed, false);
 });
 
 test('a failed creation clears busy and lets the user retry', async (context) => {

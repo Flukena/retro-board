@@ -561,3 +561,12 @@
   .rb-landing__hero-layout { padding-top: var(--space-4); }
   .rb-landing__start .rb-landing__description { display: none; }
 }
+
+/* ---- Password-protected board option ---- */
+.rb-landing__lock { margin-top: var(--space-3); }
+.rb-landing__lock-form { display: grid; gap: var(--space-2); margin-top: var(--space-3); text-align: start; }
+.rb-landing__lock-label { font-size: var(--landing-small-font-size); font-weight: var(--landing-heading-font-weight); }
+.rb-landing__lock-note { margin: 0; color: var(--text-muted); font-size: var(--landing-small-font-size); }
+.rb-landing__lock-error { margin: 0; color: var(--danger); font-size: var(--landing-small-font-size); }
+.rb-landing__lock-notice { margin: 0; padding-inline-start: var(--space-4); color: var(--text-muted); font-size: var(--landing-small-font-size); }
+.rb-landing__lock-check { display: flex; gap: var(--space-2); align-items: flex-start; font-size: var(--landing-small-font-size); }

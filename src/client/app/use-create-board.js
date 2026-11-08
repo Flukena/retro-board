@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { ROOM_KIND, gotoBoard, markBoardCreated, rememberRecent } from './router.js';
-import { ROOM_SESSION_ERROR, createRoom } from '../session/room-session.js';
-import { createBoardError } from './create-board-error.js';
-import { savePendingStarter } from '../templates/pending-starter.js';
+import { ROOM_SESSION_ERROR } from '../session/room-session.js';
+import { runCreateBoard } from './create-board-flow.js';
 
 const MILLISECONDS_PER_SECOND = 1_000;
 
@@ -18,19 +16,13 @@ export function useCreateBoard() {
     const timer = setTimeout(() => setCreateError(null), createError.retryAfterSeconds * MILLISECONDS_PER_SECOND);
     return () => clearTimeout(timer);
   }, [createError]);
-  const createBoard = async ({ name = '', starter = null, kind = ROOM_KIND.BOARD, lock = null } = {}) => {
+  const createBoard = async (request = {}) => {
     if (creatingRef.current) return;
     creatingRef.current = true;
     setCreating(true);
     setCreateError(null);
     try {
-      const { code, token } = await createRoom({ lock });
-      markBoardCreated(code, token);
-      rememberRecent(code, name, token, kind);
-      if (starter) savePendingStarter(code, starter);
-      gotoBoard(code, token, kind);
-    } catch (error) {
-      setCreateError(createBoardError(error));
+      setCreateError(await runCreateBoard(request));
     } finally {
       creatingRef.current = false;
       setCreating(false);
