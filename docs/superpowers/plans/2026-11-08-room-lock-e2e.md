@@ -16,6 +16,8 @@
 
 **Revision 2 (2026-11-08):** this revision folds in the Codex plan review (16 findings). Each change is marked `[R<n>]` where it lands.
 
+**Revision 3:** this revision folds in the Codex re-review. Each change is marked `[S<n>]`.
+
 ## Global Constraints
 
 - `RetroBoard.jsx` is capped at **3993** lines and `yjs-server.mjs` at **1814** (`src/rule-ratchets.test.js`). Ceilings only go down: each new line of wiring is paid for by moving existing logic out into a module in the same task.
@@ -30,7 +32,7 @@
   - AAD = `retroroom/e2e/v1|<roomHandle>|<keyEpoch>|<kind>[|<binding>]`. Kinds: `update`, `ephemeral`; `snapshot` binds its `baseSeq`; `blob` binds its blob id `[R14]`.
 - Password: at least **10** characters, a confirmation field, and a required checkbox reading "If you forget the password nobody can recover the data, including the server owner". Rotation also requires the new password to differ from the current one `[R14]`.
 - Wrong-password limit is a **strict rolling window** `[R13]`: at most 5 failures in any 15 minutes per (IP, room), and at most 50 per room. A request over the limit gets 429 with `retry-after` = seconds until the oldest counted failure leaves the window. Only failures count.
-- Only the lock params (salt, kdf, verifier, wrappedDek, wrapIv, keyEpoch, ownerAccountId) and ciphertext ever leave page memory. Password, master, KEK, authKey and DEK never go to storage, logs or URLs.
+- Only the lock params (salt, kdf, verifier, wrappedDek, wrapIv, keyEpoch, ownerAccountId) and ciphertext ever leave page memory. The one exception is `authKey`, which is sent over TLS in authentication request bodies only `[S-low]`. Password, master, KEK, authKey and DEK never go to storage, logs or URLs.
 - Locked rooms are boards only. Poker (`/p/`) and the Public Wall are unchanged, and normal rooms behave byte-for-byte as before.
 - **Locked rooms never send plaintext image bytes** `[R1]`. Every upload path (paste, file, drop, drawing, import) already goes through `storage.uploadImage` (`storage-bridge.js:996`), so encryption happens there. The relay also refuses the plaintext `/upload` route for locked rooms.
 - Tests follow AGENTS.md "Tests": never mock the unit under test, each test must fail when its code is reverted, and relay tests use a real LevelDB in a temp dir.
@@ -47,17 +49,21 @@
    - `authKey` on a normal room → 400.
    - Renewal re-sends `authKey`. The 409 tells a capability holder the room is locked, which is acceptable.
 4. **The room cookie is bound to the key epoch for locked rooms.** The signed payload stays `docName` for normal rooms and becomes `docName|e<keyEpoch>` for locked ones. A rotation therefore invalidates every old cookie at once.
-5. **Rotation is a two-step barrier with a binary commit** `[R2][R3]`.
-   - `rotate/begin` freezes appends for at most 120 s and returns `{ head, rotationId }`.
+5. **Rotation is a two-step barrier with a binary commit** `[R2][R3]`. Every lock mutation (password change, rotate begin/commit/abort) runs in the room's single op chain `[S4]`. Inside that chain the relay re-verifies `oldAuthKey` against the **current** record and checks `expectedRevision`, the `lockRevision` counter stored in the record and bumped by every mutation. A request authorized against an older lock therefore fails with 409. A password change is refused with 409 while a rotation freeze is active.
+   - `rotate/begin` freezes appends for at most 120 s and returns `{ head, rotationId, lockRevision }`. When the freeze ends without a commit (abort or TTL), the relay sends `RESUMED` to every socket. Clients then re-send pending appends that were rejected as FROZEN `[S1]`.
    - `rotate/commit` sends a binary body, because the JSON cap (16 KiB, `relay-config.js:51`) cannot carry a snapshot: `[u32 BE header length][UTF-8 JSON header][snapshot ciphertext]`. Header ≤ 1 MiB; snapshot ≤ `MAX_DOCUMENT_BYTES`.
    - The commit writes snapshot, log prune, blob inventory and the new lock record in **one** durable LevelDB batch, and only then publishes them in memory.
 6. **The relay never validated geometry/schema** (`relay-protocol.js:48-61`), so spec §6.2/§6.7 moves nothing. The client's existing decoders guard rendering. An update that fails decryption or `Y.applyUpdate` is skipped with a warning, and a skipped seq blocks this client from writing snapshots (see 11).
 7. **Timed-vote expiry in E2E rooms runs on clients** `[R15]`. No client path exists today: only the admin's Stop button finalizes (`RetroBoard.jsx:3050-3055`).
    - `finalizeRelayVotes` depends only on domain modules plus an injected `Y`. It moves to `src/domain/vote-expiry.js` with awareness as a parameter.
    - In an E2E room, only a client that is fully synced (contiguous applied seq == head) acts.
-   - The **elected finalizer** is the synced present client with the lowest awareness clientID. It finalizes at the deadline. Others wait a 10 s grace, then finalize only if the same timer generation (`voteTimer.endsAt` + `startedAt`) is still live.
+   - A client advertises `e2eSynced: true` in its awareness state only while its contiguous applied seq equals the last known head `[S-15]`. The **elected finalizer** is the client with the lowest awareness clientID among those advertising it. It finalizes at the deadline. Others wait a 10 s grace, then finalize only if the same timer generation (`voteTimer.endsAt` + `startedAt`) is still live.
    - Application rechecks that generation inside the transaction. Two clients with different partial views can still both finalize; the CRDT keeps the last writer per key. This residual is documented in SECURITY.md/CONTEXT.md.
-8. **Images in E2E rooms** `[R1][R10]`.
+8. **Images in E2E rooms** `[R1][R10][S3][S5]`.
+   - The client generates the blob id (a UUID) and sends it in the header `x-blob-id`; `roomFetch` paths carry no query. The relay publishes the file with `fs.link(temp, final)`, so a duplicate id fails with 409 instead of overwriting, then unlinks the temp.
+   - The inventory entry is `{ id, bytes, epoch, stagedFor }`. `stagedFor` is a rotationId for copies uploaded during a rotation. An abort or freeze expiry deletes that rotation's staged blobs and their entries.
+   - Rotation does **not** delete old-epoch blobs at once. They stay as old-key ciphertext for a 24 h grace, readable only with a current-epoch cookie. After re-unlock, a client that still holds the previous DEK runs **image repair**: any image item whose src points to an old-epoch blob is fetched, decrypted with the old key, re-encrypted with the new key under a new id, uploaded, and its src rewritten in a local transaction. The relay deletes old-epoch blobs after the grace. An image nobody repaired by then becomes a broken-image placeholder (documented).
+   - After re-unlock following a rotation, the page clears its undo/redo stacks so they cannot resurrect old references.
    - The stored `src` is `/rooms/<handle>/e2e-blobs/<uuid>`. `classifyImportedImageSource` gains kind `e2e`, checked before the data-URL branch.
    - A new room-aware resolver, `resolveRoomImageSource(src, session)`, accepts `e2e` only for the active locked room. `normalizeRuntimeImageSource` keeps rejecting it everywhere else.
    - `ImageCard` resolves `e2e` sources by fetch → decrypt → `blob:` URL; CSP `img-src blob:` already allows it.
@@ -67,13 +73,14 @@
    - The registry keeps the plaintext seed update. It holds only `__roomRegistered` and is needed for discovery (`y-leveldb.js:242-245`).
    - Appends are one unsynced batch, like `storeUpdate`. Snapshot+prune is one atomic batch. Rotate commit is one durable batch.
 10. **Owner routes need the account session.** The `AccountSessions` instance becomes a named value in `yjs-server.mjs`, shared by the auth routes and the new room routes. The lines are paid for by moving `handleCreateRoom`/`handleRoomSession` (`yjs-server.mjs:993-1058`) into `src/server/room-session-routes.js`.
-11. **Snapshot policy** `[R6]`.
+11. **Snapshot policy** `[R6][S2]`.
     - The provider applies incoming frames strictly in seq order through one queue, and tracks `appliedSeq` = the highest seq with every seq ≤ it applied.
+    - An ACK{seq} for this client's own append marks that seq as covered, because its content is already in the local doc. ACKs and UPDATEs feed the same ordered coverage tracker, and a duplicate resend's ACK covers its new seq too.
     - Once any seq fails to decrypt or apply, this client never snapshots again in this session.
     - A snapshot is `{ baseSeq: appliedSeq, state }`, captured synchronously in the same task.
     - It is sent after 500 updates or 1 MiB of log since the last snapshot, after a uniform 0-5 s jitter and a re-check.
     - The room total (snapshot + log) is capped at `MAX_DOCUMENT_BYTES`. An append over the cap gets `REJECT QUOTA` and makes an eligible client snapshot first.
-12. **Password change does not revoke sessions** (spec §5.4); only rotation does. Every page renewing with an old authKey gets 403, which opens the in-page re-unlock dialog without losing pending edits `[R11]`.
+12. **Password change does not revoke sessions** (spec §5.4); only rotation does. Every page renewing with an old authKey gets 403, which opens the in-page re-unlock dialog without losing pending edits `[R11]`. Re-unlock first re-runs the exchange without `authKey` to get the **current** salt/kdf from the 409, then derives `[S-11]`. After its own password change, the initiating page replaces both `authKey` and its cached `lock`.
 13. **PBKDF2 runs via async WebCrypto in the page** (CSP `worker-src 'none'`). The dialog shows a busy state while it derives.
 14. **Creating a locked room navigates with a full page load** (`router.js:98`) `[R12]`. In-memory secrets cannot survive that, so the creator types the password once more on the board's password screen. Secrets are never persisted to avoid this.
 15. **Threat-model limits, disclosed rather than solved** `[R14]`:
@@ -195,7 +202,7 @@ src/client/session/
   - `check(ip, docName, record, authKeyB64)` → `'ok' | 'wrong' | { limited: retryAfterSeconds }`.
   - Strict rolling window `[R13]`: a timestamp array per `(ip, docName)` (≤ 5 kept) and per docName (≤ 50 kept), pruned to the last 15 min. The limit is checked before comparing.
   - Comparison: constant-time `fixedDigestEqual(sha256(authKey), verifier)`.
-  - Map size is bounded by `maxKeys`, evicting the oldest key. The maps are registered with the maintenance sweep.
+  - Bounded maps `[S-13]`: the sweep removes keys whose timestamps have all expired. When a map is full of live keys, a **new** key is answered `limited` (fail closed) and never evicts a live one. Default `maxKeys` = 10,000.
 
 - [ ] **Step 1: failing tests.**
   - A locked room survives reopen.
@@ -203,7 +210,7 @@ src/client/session/
   - Normal rooms have no lock key.
   - Verifier: ok/wrong; the 6th failure at t+14:59 is limited and the right key is refused too; at t+15:00 after the first failure one attempt is allowed again; `retry-after` is exact.
   - Another IP is still allowed until the room-wide 50.
-  - Eviction keeps the map at `maxKeys`.
+  - A full map refuses new keys and keeps the existing live ones (no reset of a tracked allowance); the sweep frees expired keys.
 - [ ] **Steps 2-5.** Commit `feat(relay): durable room lock records and wrong-password limits`.
 
 ### Task 4: Create and session routes with locks (relay)
@@ -242,12 +249,16 @@ src/client/session/
 - `open(docName)` → `{ head, snapshot, updates, blobs }`, in seq order.
 - `subscribeAfterReplay(docName, onEntry)` `[R6]`: reads the state and registers the live listener inside the same chain step, so a joiner can't miss an append that lands between replay and subscribe.
 - `append(docName, ciphertext)` → `{ seq }`. Throws `E2E_QUOTA` when the room total would exceed `maxRoomBytes`, or `E2E_FROZEN` during a rotation freeze. Takes a `reserveStore` reservation for the write `[R8]`.
+- Bounded admission `[S-8]`: at most 256 queued ops per room (above that → `E2E_BUSY`, sent to the socket as REJECT RATE). Snapshot, rotation commit and blob inventory writes also take `reserveStore` reservations and respect `hasCapacity()`.
+- The snapshot meta value is `{ baseSeq, bytes, sha256 }`. `open` and backup verify recompute the digest, so a truncated snapshot is detected `[S-9]`.
 - `snapshot(docName, baseSeq, ciphertext)` → requires `currentBase < baseSeq ≤ head`, else `E2E_STALE_SNAPSHOT`. One atomic batch.
-- `freeze(docName, ttlMs)` → `{ head, rotationId }`. The freeze is released by commit, by `release(rotationId)`, or when the TTL expires.
+- `freeze(docName, ttlMs, { expectedRevision })` → `{ head, rotationId, lockRevision }`. The freeze is released by commit, by `release(rotationId)`, or when the TTL expires. Release calls an `onResume(docName)` hook (the relay sends RESUMED) and deletes the blobs staged for that rotation.
+- `mutateLock(docName, { verify, next })`: the serialized password-change path. It re-verifies inside the chain and bumps `lockRevision` `[S4]`.
 - `commitRotation(docName, { rotationId, expectedHead, snapshot, lockRecord, blobInventory })` `[R2][R3]`:
   - Requires an active matching freeze and `head === expectedHead`; otherwise `E2E_ROTATION_STALE`.
   - Writes in **one durable batch**: delete all updates, put the snapshot (`baseSeq = head`), put the lock record and the inventory. Releases the freeze.
-- `addBlob(docName, { id, bytes })` / `blobs(docName)`: inventory updates for Task 7.
+- `addBlob(docName, { id, bytes, epoch, stagedFor })` / `blobs(docName)` / `expireOldEpochBlobs(docName, now)`: inventory updates for Task 7. Old-epoch entries are removed after the 24 h grace.
+- Startup reconciliation `[S-9]`: an `.e2e` file with no inventory entry that is older than 1 h (left by a crash between file write and inventory write, or after a delete) is removed and counted in a log line. File-first, inventory-second ordering means an inventory entry never lacks its file.
 - `sizeOf(docName)`.
 
 - [ ] **Step 1: failing tests** on a real temp LevelDB.
@@ -259,6 +270,10 @@ src/client/session/
   - A commit with the wrong head or rotationId → stale.
   - Inject a batch failure into the commit: reopen shows the old lock and log intact.
   - After commit, exactly one snapshot plus the new lock record are stored.
+  - A password change queued behind a commit fails its re-verification (409) and leaves the new lock intact.
+  - The 257th queued op → BUSY.
+  - Release sends RESUMED through the hook and deletes the staged blobs.
+  - A truncated snapshot fails `open`.
 - [ ] **Steps 2-5.** Commit `feat(relay): encrypted room log with atomic snapshots and rotation`.
 
 ### Task 6: E2E socket relay
@@ -281,7 +296,8 @@ Shared admission and accounting `[R8]`:
 
 Protocol:
 - Join via `subscribeAfterReplay`: SNAPSHOT_OUT?, UPDATEs, SYNCED{head}.
-- `APPEND` → ACK{seq, clientRef} to the sender, UPDATE to the others. Quota/frozen → `REJECT` with the clientRef.
+- `APPEND` → ACK{seq, clientRef} to the sender, UPDATE to the others. Quota/frozen/busy → `REJECT` with the clientRef.
+- Freeze release (abort/TTL) → RESUMED to every socket of the room `[S1]`.
 - `SNAPSHOT` → stored + SNAPSHOT_OUT to the others.
 - `EPHEMERAL` → forwarded only.
 - Malformed → REJECT + close 1003.
@@ -314,12 +330,17 @@ Protocol:
   - `Dockerfile.yjs`.
 
 **Interfaces:**
-- `POST /rooms/<h>/e2e-blobs`: room cookie with the current epoch; locked rooms only; body ≤ `IMAGE_MAX_BYTES + 256 + E2E_CIPHERTEXT_OVERHEAD_BYTES`; same quotas and buckets. Writes `<handle>.<uuid>.e2e` (0600, temp + rename), **then** `log.addBlob` `[R9]` → 201 `{ id }`.
+- `POST /rooms/<h>/e2e-blobs` with headers `x-blob-id: <uuid v4>` and optional `x-blob-stage: <rotationId>` (accepted only while that rotation is active) `[S5]`.
+  - Room cookie with the current epoch; locked rooms only; body ≤ `IMAGE_MAX_BYTES + 256 + E2E_CIPHERTEXT_OVERHEAD_BYTES`; same quotas and buckets.
+  - Writes a temp file (0600), then `fs.link` to `<handle>.<uuid>.e2e`: an existing id → 409, no overwrite. Unlinks the temp, **then** `log.addBlob` `[R9]` → 201 `{ id }`.
+  - CORS preflight allows these two headers.
 - `GET /rooms/<h>/e2e-blobs/<uuid>`: room cookie → octet-stream, `cache-control: private, no-store`.
 - `deleteE2EBlobsExcept(handle, keepIds)`: used by the rotation commit after the durable batch.
 
 - [ ] **Step 1: failing tests.**
   - Round-trip; normal room → 404; no cookie or old epoch → 401; too large → 413.
+  - A duplicate id → 409 and the original bytes are unchanged; two concurrent uploads with the same id → exactly one 201.
+  - Upload through the real client `roomFetch` path in the relay test helper (header-carried id).
   - `/upload` on a locked room → 403.
   - The inventory lists the blob; usage counts it; the restart scan reconciles it; retirement deletes it.
   - Fetch-style CORS preflight from an allowed origin succeeds; a foreign origin → 403.
@@ -332,11 +353,11 @@ Protocol:
 **Files:** Create `src/server/room-lock-routes.js` (+ `.test.mjs`). Modify `yjs-server.mjs` (wire; net ≤ 0), preflight paths, `Dockerfile.yjs`.
 
 Every route requires an account cookie whose account id equals `ownerAccountId` (else 403), a locked room (else 404), and an `oldAuthKey` that passes the verifier with the same limits.
-- `POST /api/rooms/<h>/lock/password`, JSON `{ oldAuthKey, lock }` (≤ 1 KiB). One durable write of the new record with the **same** epoch → 204. Open sessions continue.
-- `POST /api/rooms/<h>/lock/rotate/begin`, JSON `{ oldAuthKey }` → 200 `{ head, rotationId, expiresInMs: 120000 }`. A second begin while one is active → 409.
+- `POST /api/rooms/<h>/lock/password`, JSON `{ oldAuthKey, expectedRevision, lock }` (≤ 1 KiB). Runs through `log.mutateLock` with re-verification and a revision check inside the chain, and is refused with 409 during a freeze. One durable write of the new record with the **same** epoch and `lockRevision + 1` → 204 `{ lockRevision }`. Open sessions continue.
+- `POST /api/rooms/<h>/lock/rotate/begin`, JSON `{ oldAuthKey, expectedRevision }` → 200 `{ head, rotationId, lockRevision, expiresInMs: 120000 }`. A second begin while one is active → 409.
 - `POST /api/rooms/<h>/lock/rotate/commit`, binary per Deviation 5.
   - Header `{ oldAuthKey, rotationId, expectedHead, keyEpoch, lock, keepBlobs: [uuid…] }`. `keyEpoch` must be the current epoch + 1; `keepBlobs` holds ≤ 10,000 unique ids, each in the inventory.
-  - The commit runs `log.commitRotation` (one durable batch), then `registry.publishLock`, `e2eRelay.closeRoom(4001, 'key rotated')`, `deleteE2EBlobsExcept` → 204.
+  - The commit runs `log.commitRotation` (one durable batch, re-verifying the key and the revision inside the chain; old-epoch inventory entries keep their epoch for the grace), then `registry.publishLock` and `e2eRelay.closeRoom(4001, 'key rotated')` → 204. Old-epoch blobs are deleted by `expireOldEpochBlobs` after 24 h, not at commit `[S3]`.
   - Stale → 409 (the client retries from begin). Storage failure → 503 with the old state intact.
 - `POST /api/rooms/<h>/lock/rotate/abort`, `{ oldAuthKey, rotationId }` → 204 and the freeze is released.
 
@@ -348,7 +369,9 @@ Every route requires an account cookie whose account id equals `ownerAccountId` 
     - commit with a wrong head or rotationId → 409.
     - a successful commit closes sockets with 4001; an old cookie → 401; the old authKey → 403; the new one → 200 with epoch+1.
     - the log equals the new snapshot.
-    - unkept blobs are deleted.
+    - old-epoch blobs are still readable with a new-epoch cookie, then deleted after the grace (fake clock);
+    - abort or TTL deletes the staged blobs and sends RESUMED;
+    - a password change racing a rotation commit: whichever runs second gets 409, and the stored lock always matches the stored ciphertext's epoch.
   - Crash injection between batch and publish: a reopen shows the new state consistently.
   - A freeze expires after 120 s.
   - Oversized header/body → 413.
@@ -362,7 +385,7 @@ Every route requires an account cookie whose account id equals `ownerAccountId` 
 - the lock record decodes;
 - `head ≥ snapshot.baseSeq`;
 - update seqs are contiguous from `baseSeq + 1` to `head`;
-- a snapshot is present whenever `baseSeq > 0`;
+- a snapshot is present whenever `baseSeq > 0`, and its `sha256` matches its bytes `[S-9]`;
 - every inventory id has a file `<handle>.<id>.e2e` of exactly `bytes` length;
 - there are no `.e2e` files outside the inventory, except staged orphans, which are reported as a count rather than an error.
 
@@ -370,7 +393,7 @@ Messages are fixed strings and never print keys.
 
 - [ ] Tests:
   - A valid room passes; a pre-E2E backup passes with 0.
-  - A seq gap, a missing snapshot, a deleted blob file, a truncated blob and a bad lock record each fail.
+  - A seq gap, a missing snapshot, a snapshot with a wrong digest, a deleted blob file, a truncated blob and a bad lock record each fail.
   - Commit `feat(backup): verify encrypted room logs and blob inventory`.
 
 ### Task 10: Client session — locked exchange, password screen, re-unlock
@@ -387,7 +410,8 @@ Messages are fixed strings and never print keys.
 - `lock-session.js`:
   - `unlockRoom({ code, token, password, lockHint })` → stores `{ roomHandle, keyEpoch, dek, isOwner, lock }` in memory.
   - `getRoomKey()`, `clearRoomKey()`.
-  - `reunlock(password)` re-runs the exchange for the current room, updates the key and epoch, and dispatches `retroroom:room-key-changed`.
+  - `reunlock(password)` posts `{code, token}` first to read the current salt/kdf from the 409, derives, posts with the authKey, then updates key, epoch and cached lock. It keeps the **previous** DEK in memory as `previousKey` until image repair finishes (Task 12), and dispatches `retroroom:room-key-changed`.
+  - `updateLockAfterPasswordChange({ lock, authKey, lockRevision })` `[S-11]`.
 - `ReunlockDialog` opens on `REAUTH_REQUIRED` or `retroroom:key-rotated`, over the board, without reloading.
 
 - [ ] **Step 1: failing tests.**
@@ -417,7 +441,8 @@ Messages are fixed strings and never print keys.
   - Each local update (origin ≠ provider) becomes a pending entry `{ clientRef, update }`, encrypted when sent.
   - The entry is removed only on the ACK with the same `clientRef`.
   - On every (re)connect after SYNCED, all pending entries are re-sent in order. Yjs updates are idempotent, so duplicates are harmless.
-  - REJECT FROZEN/QUOTA keeps the entry and retries after the freeze ends or after a snapshot.
+  - REJECT FROZEN keeps the entry and re-sends it on `RESUMED` or reconnect. REJECT QUOTA keeps it and re-sends after this client's snapshot is accepted. REJECT RATE re-sends with a capped backoff (≤ 2500 ms) `[S1][S-7]`.
+  - ACK{seq} marks `seq` as covered in the coverage tracker `[S2]`.
   - `'delivery'` emits the pending count.
 - `client-sync`: with a provider that has `pendingDelivery`, unload is guarded while it is > 0, even while connected, and the sync status shows "saving".
 - Receive `[R6]`:
@@ -426,7 +451,8 @@ Messages are fixed strings and never print keys.
   - A failure records `skippedSeq`, disables snapshots for this session and dispatches `retroroom:e2e-skipped`.
 - Snapshot per Deviation 11. The state is captured right after `appliedSeq` advances, and AAD binds the `baseSeq`.
 - Awareness: local changes only → EPHEMERAL; incoming → `applyAwarenessUpdate(…, provider)`.
-- Close 4001 → keep the doc and pending entries, emit `retroroom:key-rotated`. After re-unlock, `setKey` and reconnect.
+- Close 4001 → keep the doc and pending entries, emit `retroroom:key-rotated`. After re-unlock: `setKey`, reconnect, re-send pending under the new epoch, and clear the undo/redo stacks through a storage-bridge hook `[S3]`.
+- Awareness carries `e2eSynced` per Deviation 7.
 - `e2e-vote-expiry.js` `[R15]`: arms a timer for the earliest `voteTimer.endsAt`. It acts only when synced with contiguous applied seq == head:
   - the elected finalizer (lowest present awareness clientID) at the deadline;
   - others after a 10 s grace, only if the generation is still live.
@@ -440,7 +466,9 @@ Messages are fixed strings and never print keys.
   - A dropped ACK triggers a resend on reconnect, and the doc is correct with no duplicate effects.
   - Disconnect right after an edit: the unload guard is on, and after reconnect the edit arrives.
   - A snapshot never has `baseSeq` above `appliedSeq`.
-  - A 4001 then `setKey` delivers the pending edits under the new epoch.
+  - A 4001 then `setKey` delivers the pending edits under the new epoch, and the undo stack is empty afterwards.
+  - The author's own ACKed edits advance `appliedSeq`: a single client that only types can snapshot.
+  - FROZEN → RESUMED → resend delivers.
   - Vote expiry: delayed replay does not finalize; the elected client finalizes once; a replaced timer is not finalized; the second client's grace path is idempotent.
 - [ ] **Steps 2-5.** Commit `feat(session): encrypted room provider with acknowledged delivery`.
 
@@ -457,7 +485,8 @@ Messages are fixed strings and never print keys.
   - Tests for each.
 
 **Interfaces:**
-- `encryptImageForUpload(blob)` → `{ bytes, id }`. The plaintext is `[u8 typeLen][type][bytes]`, and AAD binds the id, which is generated client-side as a UUID and sent as `?id=`. The server checks that `id` is a fresh UUID.
+- `encryptImageForUpload(blob)` → `{ bytes, id }`. The plaintext is `[u8 typeLen][type][bytes]`. AAD binds the id, a client-generated UUID sent in the header `x-blob-id` `[S5]`.
+- `repairOldEpochImages({ doc, previousKey, currentKey, inventory })` `[S3]`: after a rotation re-unlock, re-encrypts and re-uploads each image whose blob has an older epoch, rewrites its src in a local transaction, then drops `previousKey`.
 - `resolveE2EImage(src)` → a `blob:` URL, cached and revoked on the last unmount.
 - `readE2EImageBytes(src)` → `Blob`.
 
@@ -468,6 +497,7 @@ Messages are fixed strings and never print keys.
   - JSON and ZIP export → import into another locked room round-trips the images.
   - A normal room never fetches e2e paths.
   - A blob whose id was swapped fails decryption.
+  - Image repair moves an old-epoch image to a new id under the new key, and the item's src is rewritten.
 - [ ] **Steps 2-5.** Commit `feat(room-lock): encrypted images, import and export`.
 
 ### Task 13: Create a locked room (landing)
@@ -492,14 +522,17 @@ Messages are fixed strings and never print keys.
 - Shown only when `getRoomKey()?.isOwner`.
 - **Change password:** current password + new password + confirmation → `rewrapRoomLock` → POST password → `replaceRoomAuthKey(newAuthKey)` → toast.
 - **Remove everyone** `[R3][R4]`. A confirmation dialog explains that everyone must enter the new password and that a new password is required. Then `rotate-room.js`:
-  1. `rotate/begin`. Wait until this page's `pendingDelivery` is 0 and `appliedSeq === head`; time out at 60 s → abort.
+  1. **Drain first, then freeze** `[S1]`:
+     - The rotation dialog is modal and blocks local edits.
+     - Wait until this page's `pendingDelivery` is 0. Then `rotate/begin` with the cached `lockRevision`.
+     - Wait until `appliedSeq` reaches the returned `head` (other clients' appends accepted before the freeze). Time out at 60 s → abort.
   2. Build a **detached** `Y.Doc` from `storage.rotationSource().encodeState()`. The live doc is not touched.
-  3. For each image item with an e2e src: decrypt with the old DEK, encrypt with the new DEK under a fresh id, upload (staged; counted in the room quota). Rewrite `src` **in the detached doc only**.
+  3. For each image item with an e2e src: decrypt with the old DEK, encrypt with the new DEK under a fresh id, and upload with `x-blob-stage: <rotationId>` (counted in the room quota; deleted by the relay on abort or expiry). Rewrite `src` **in the detached doc only**.
      - If the room quota cannot hold the staged copies, abort with the message "Not enough room storage to re-encrypt images", leaving the old state intact.
   4. Encrypt the detached doc's state with the new DEK (AAD baseSeq = head, epoch + 1).
   5. `rotate/commit` with `keepBlobs` = the new ids.
   6. On 204: `clearRoomKey()`, then this page goes through the re-unlock flow with the new password like everyone else.
-  7. On any failure: `rotate/abort`. The live board was never changed; staged blobs stay as reported orphans until the next rotation.
+  7. On any failure: `rotate/abort`. The live board was never changed, and the relay deletes the staged blobs `[S-orphans]`.
 
 - [ ] Tests:
   - Menu hidden for non-owners.
