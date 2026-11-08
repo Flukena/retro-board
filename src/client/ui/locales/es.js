@@ -1054,5 +1054,16 @@ export default Object.freeze({
   "pokerPage.decks": "Fibonacci (0–21), Fibonacci modificada (0, ½, 1–100), tallas de camiseta (XS–XXL) y potencias de 2. Todas las barajas incluyen ? para \"no estoy seguro\" y ☕ para \"necesito un descanso\".",
   "pokerPage.section.why": "Por qué ocultar las cartas",
   "pokerPage.why": "Cuando la gente ve un número primero, tiende a seguirlo. Voltear todas a la vez recoge la opinión real de cada persona y muestra de inmediato qué historias entiende el equipo de forma distinta.",
-  "pokerPage.retroLink": "Tablero de retro"
+  "pokerPage.retroLink": "Tablero de retro",
+  "roomLock.prompt.title": "Este tablero está protegido con contraseña",
+  "roomLock.prompt.body": "Introduce la contraseña para abrirlo. Si se olvida, no se puede recuperar, ni siquiera el propietario del servidor.",
+  "roomLock.password.label": "Contraseña",
+  "roomLock.prompt.submit": "Desbloquear tablero",
+  "roomLock.prompt.busy": "Desbloqueando…",
+  "roomLock.prompt.wrong": "La contraseña no es correcta. Inténtalo de nuevo.",
+  "roomLock.prompt.lockedOut": "Demasiados intentos fallidos. Inténtalo de nuevo en {seconds} s.",
+  "roomLock.prompt.unavailable": "No se pudo desbloquear el tablero. Revisa tu conexión e inténtalo de nuevo.",
+  "roomLock.reunlock.title": "Introduce la contraseña otra vez",
+  "roomLock.reunlock.body": "La contraseña o la clave de este tablero ha cambiado. Introduce la contraseña actual para continuar. Tus cambios sin enviar se conservan.",
+  "roomLock.reunlock.submit": "Continuar",
 });

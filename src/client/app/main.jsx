@@ -25,8 +25,10 @@ import {
 import {
   ROOM_SESSION_ERROR,
   RoomSessionError,
-  establishRoomSession,
 } from '../session/room-session.js';
+import RoomPasswordScreen from '../room-lock/RoomPasswordScreen.jsx';
+import ReunlockDialog from '../room-lock/ReunlockDialog.jsx';
+import { establishBoardSession, getRoomKey, unlockRoom } from '../room-lock/lock-session.js';
 
 const route = parseRoute();
 // A language-prefixed page (/th/...) is shown in that language from the first paint.
@@ -37,7 +39,7 @@ function BoardBootstrap({ code, token, mode = BOARD_MODE.PRIVATE }) {
     if (mode === BOARD_MODE.PUBLIC) await establishPublicRoomSession();
     else {
       if (!token) throw new RoomSessionError(ROOM_SESSION_ERROR.INVALID);
-      await establishRoomSession(code, token);
+      await establishBoardSession(code, token);
     }
     // The storage module creates its WebsocketProvider as a side effect.
     // Import it only after the server has issued the board-scoped cookie.
@@ -51,7 +53,21 @@ function BoardBootstrap({ code, token, mode = BOARD_MODE.PRIVATE }) {
 
   if (state.status === ROOM_BOOTSTRAP_STATUS.READY) {
     const pendingTitle = isBoardCreatedByMe(code, token) ? recentBoardName(code, token) : null;
-    return <><SyncBanner /><RetroBoard boardCode={code} boardToken={token} mode={mode} pendingTitle={pendingTitle} /></>;
+    return (
+      <>
+        <SyncBanner />
+        <RetroBoard boardCode={code} boardToken={token} mode={mode} pendingTitle={pendingTitle} />
+        {getRoomKey() && <ReunlockDialog />}
+      </>
+    );
+  }
+  if (state.status === ROOM_SESSION_ERROR.LOCKED) {
+    // The board boots only after the password opens it; retry then runs the rest of the bootstrap.
+    const unlock = async (password) => {
+      await unlockRoom({ code, token, password, lockHint: state.lock });
+      state.retry();
+    };
+    return <RoomPasswordScreen onUnlock={unlock} />;
   }
   return (
     <RoomBootstrapScreen

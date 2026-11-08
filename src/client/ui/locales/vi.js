@@ -1054,5 +1054,16 @@ export default Object.freeze({
   "pokerPage.decks": "Fibonacci (0–21), Fibonacci cải tiến (0, ½, 1–100), cỡ áo T-shirt (XS–XXL) và lũy thừa của 2. Mọi bộ bài đều có ? cho \"chưa chắc\" và ☕ cho \"cần nghỉ giải lao\".",
   "pokerPage.section.why": "Vì sao nên ẩn thẻ",
   "pokerPage.why": "Khi thấy một con số trước, mọi người có xu hướng làm theo. Lật cùng lúc giúp ghi nhận ý kiến thật của từng người và cho thấy ngay những story mà nhóm hiểu khác nhau.",
-  "pokerPage.retroLink": "Bảng retro"
+  "pokerPage.retroLink": "Bảng retro",
+  "roomLock.prompt.title": "Bảng này được bảo vệ bằng mật khẩu",
+  "roomLock.prompt.body": "Nhập mật khẩu để mở. Nếu quên mật khẩu thì không thể khôi phục, kể cả chủ máy chủ.",
+  "roomLock.password.label": "Mật khẩu",
+  "roomLock.prompt.submit": "Mở khóa bảng",
+  "roomLock.prompt.busy": "Đang mở khóa…",
+  "roomLock.prompt.wrong": "Mật khẩu không đúng. Hãy thử lại.",
+  "roomLock.prompt.lockedOut": "Sai quá nhiều lần. Hãy thử lại sau {seconds} giây.",
+  "roomLock.prompt.unavailable": "Không thể mở khóa bảng. Hãy kiểm tra kết nối rồi thử lại.",
+  "roomLock.reunlock.title": "Nhập lại mật khẩu",
+  "roomLock.reunlock.body": "Mật khẩu hoặc khóa của bảng này đã thay đổi. Nhập mật khẩu hiện tại để tiếp tục. Các chỉnh sửa chưa gửi vẫn được giữ lại.",
+  "roomLock.reunlock.submit": "Tiếp tục",
 });

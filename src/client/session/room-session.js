@@ -1,4 +1,7 @@
 import { PUBLIC_RELAY_PREFIX, PUBLIC_PATH, PUBLIC_SESSION_ROUTE, PUBLIC_ROOM_SESSION_SUFFIX } from '../../domain/public-wall-contract.js';
+import {
+  LOCK_BYTES, decodeBase64Url, isCounter, isLockKdf, isPlainObject, parseAuthKey,
+} from '../../domain/room-lock-contract.js';
 
 // Exchanges the long-lived fragment capability for a short-lived, HttpOnly
 // room cookie. The fragment token stays module-private and is never copied to
@@ -20,22 +23,34 @@ const MS_PER_SECOND = 1_000;
 const REFRESH_SKEW_FRACTION = 0.2;
 const REFRESH_SKEW_MS = 5 * 60 * 1_000;
 
-export const ROOM_SESSION_HEALTH = Object.freeze({ ACTIVE: 'active', LOST: 'session-lost', REPLACED: 'room-replaced' });
+const HTTP_FORBIDDEN = 403;
+const HTTP_CONFLICT = 409;
+const HTTP_TOO_MANY_REQUESTS = 429;
+
+export const ROOM_SESSION_HEALTH = Object.freeze({
+  ACTIVE: 'active', LOST: 'session-lost', REPLACED: 'room-replaced', REAUTH_REQUIRED: 'reauth-required',
+});
 
 export const ROOM_SESSION_ERROR = Object.freeze({
   INVALID: 'invalid',
   RATE_LIMITED: 'rate_limited',
   UNAVAILABLE: 'unavailable',
+  LOCKED: 'locked',
+  WRONG_PASSWORD: 'wrong_password',
+  LOCKED_OUT: 'locked_out',
 });
 
 const ERROR_MESSAGES = {
   [ROOM_SESSION_ERROR.INVALID]: 'Room access was rejected.',
   [ROOM_SESSION_ERROR.RATE_LIMITED]: 'Room access is temporarily rate limited.',
   [ROOM_SESSION_ERROR.UNAVAILABLE]: 'Room service is temporarily unavailable.',
+  [ROOM_SESSION_ERROR.LOCKED]: 'Room needs its password.',
+  [ROOM_SESSION_ERROR.WRONG_PASSWORD]: 'Room password was rejected.',
+  [ROOM_SESSION_ERROR.LOCKED_OUT]: 'Too many wrong passwords. Try again later.',
 };
 
 export class RoomSessionError extends Error {
-  constructor(code, { retryAfterSeconds = null, httpStatus = null } = {}) {
+  constructor(code, { retryAfterSeconds = null, httpStatus = null, lock = null } = {}) {
     super(ERROR_MESSAGES[code] || ERROR_MESSAGES[ROOM_SESSION_ERROR.UNAVAILABLE]);
     this.name = 'RoomSessionError';
     this.httpStatus = Number.isInteger(httpStatus) ? httpStatus : null;
@@ -43,6 +58,7 @@ export class RoomSessionError extends Error {
     this.retryAfterSeconds = Number.isSafeInteger(retryAfterSeconds)
       ? retryAfterSeconds
       : null;
+    this.lock = lock;
   }
 }
 
@@ -75,6 +91,30 @@ export function validateRoomSessionResponse(value, now = Date.now()) {
     fail(ROOM_SESSION_ERROR.UNAVAILABLE);
   }
   return Object.freeze({ roomHandle: value.roomHandle, expiresAt: value.expiresAt });
+}
+
+const hasBase64UrlBytes = (value, length) => typeof value === 'string' && decodeBase64Url(value)?.length === length;
+
+/** The salt and KDF a locked room's 409 asks the client to derive with. */
+export function validateLockedResponse(value) {
+  if (!isPlainObject(value) || value.locked !== true || !hasBase64UrlBytes(value.salt, LOCK_BYTES.salt) || !isLockKdf(value.kdf)) {
+    fail(ROOM_SESSION_ERROR.UNAVAILABLE);
+  }
+  return Object.freeze({ salt: value.salt, kdf: Object.freeze({ ...value.kdf }) });
+}
+
+/** The wrapped room key a correct authKey earns, narrowed to the fields the client uses. */
+export function validateLockGrant(value) {
+  if (!isPlainObject(value)
+    || !hasBase64UrlBytes(value.wrappedDek, LOCK_BYTES.wrappedDek)
+    || !hasBase64UrlBytes(value.wrapIv, LOCK_BYTES.wrapIv)
+    || !isCounter(value.keyEpoch)
+    || typeof value.isOwner !== 'boolean') {
+    fail(ROOM_SESSION_ERROR.UNAVAILABLE);
+  }
+  return Object.freeze({
+    wrappedDek: value.wrappedDek, wrapIv: value.wrapIv, keyEpoch: value.keyEpoch, isOwner: value.isOwner,
+  });
 }
 
 export function normalizeRoomFetchPath(value) {
@@ -139,7 +179,15 @@ const parseRetryAfter = (response) => {
   return Math.min(RETRY_AFTER_MAX_SECONDS, Math.max(RETRY_AFTER_MIN_SECONDS, Math.ceil((at - Date.now()) / MS_PER_SECOND)));
 };
 
-const errorForResponse = (response, { invalidStatuses = [] } = {}) => {
+const errorForResponse = (response, { invalidStatuses = [], withAuthKey = false } = {}) => {
+  if (withAuthKey && response.status === HTTP_FORBIDDEN) {
+    return new RoomSessionError(ROOM_SESSION_ERROR.WRONG_PASSWORD, { httpStatus: response.status });
+  }
+  if (withAuthKey && response.status === HTTP_TOO_MANY_REQUESTS) {
+    return new RoomSessionError(ROOM_SESSION_ERROR.LOCKED_OUT, {
+      retryAfterSeconds: parseRetryAfter(response), httpStatus: response.status,
+    });
+  }
   if (response.status === 429) {
     return new RoomSessionError(ROOM_SESSION_ERROR.RATE_LIMITED, {
       retryAfterSeconds: parseRetryAfter(response), httpStatus: response.status,
@@ -209,7 +257,7 @@ const readSmallJson = async (response) => {
   }
 };
 
-const postJson = async (path, body, expectedStatus, invalidStatuses = []) => {
+const postJson = async (path, body, expectedStatus, invalidStatuses = [], { lockAware = false } = {}) => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
@@ -226,9 +274,14 @@ const postJson = async (path, body, expectedStatus, invalidStatuses = []) => {
       redirect: 'error',
       referrerPolicy: 'no-referrer',
     });
+    if (lockAware && response.status === HTTP_CONFLICT) {
+      throw new RoomSessionError(ROOM_SESSION_ERROR.LOCKED, {
+        httpStatus: response.status, lock: validateLockedResponse(await readSmallJson(response)),
+      });
+    }
     if (response.status !== expectedStatus) {
       await cancelResponseBody(response);
-      throw errorForResponse(response, { invalidStatuses });
+      throw errorForResponse(response, { invalidStatuses, withAuthKey: lockAware && typeof body.authKey === 'string' });
     }
     return await readSmallJson(response);
   } catch (error) {
@@ -246,6 +299,7 @@ export async function createRoom() {
 
 let activeSession = null;
 let activeCredentials = null;
+let activeAuthKey = null;
 let refreshTimer = null;
 let sessionRequest = null;
 let requestGeneration = 0;
@@ -257,6 +311,17 @@ export const onRoomSessionHealth = (listener) => {
   sessionHealthListeners.add(listener);
   return () => sessionHealthListeners.delete(listener);
 };
+export const isReauthRequiredError = (error) => (
+  error instanceof RoomSessionError
+  && (error.code === ROOM_SESSION_ERROR.WRONG_PASSWORD || error.code === ROOM_SESSION_ERROR.LOCKED)
+);
+
+/** Swaps the authKey renewals send, after a password change on this page. */
+export function replaceRoomAuthKey(authKey) {
+  if (activeAuthKey === null || parseAuthKey(authKey) === null) fail(ROOM_SESSION_ERROR.INVALID);
+  activeAuthKey = authKey;
+}
+
 const setSessionHealth = (health) => {
   sessionHealth = health;
   sessionHealthListeners.forEach((listener) => listener());
@@ -281,8 +346,13 @@ const clearRefreshTimer = () => {
 
 const scheduleRefreshRetry = (session, error) => {
   if (activeSession !== session) return;
-  setSessionHealth(ROOM_SESSION_HEALTH.LOST);
   clearRefreshTimer();
+  if (isReauthRequiredError(error)) {
+    // A rejected password never succeeds by retrying; the re-unlock dialog takes over.
+    setSessionHealth(ROOM_SESSION_HEALTH.REAUTH_REQUIRED);
+    return;
+  }
+  setSessionHealth(ROOM_SESSION_HEALTH.LOST);
   const retryAfterMs = (error?.retryAfterSeconds || 0) * MS_PER_SECOND;
   const delayMs = Math.max(retryDelayMs, retryAfterMs);
   retryDelayMs = Math.min(SESSION_RETRY_MAX_MS, retryDelayMs * SESSION_RETRY_GROWTH_FACTOR);
@@ -303,12 +373,12 @@ const scheduleRefresh = (session) => {
 
 const publicSessionPath = handle => handle ? `/rooms/${handle}${PUBLIC_ROOM_SESSION_SUFFIX}` : PUBLIC_SESSION_ROUTE;
 
-const exchangeSession = async (code, token, { expectedHandle = null, replacedHandle = null } = {}) => {
+const exchangeSession = async (code, token, { expectedHandle = null, replacedHandle = null, authKey = null } = {}) => {
   const publicWall = code === null && token === null;
   if (!publicWall && (!BOARD_CODE_RE.test(code || '') || !BOARD_TOKEN_RE.test(token || ''))) {
     fail(ROOM_SESSION_ERROR.INVALID);
   }
-  if (sessionRequest && sameCredentials(sessionRequest, code, token)) {
+  if (sessionRequest && sameCredentials(sessionRequest, code, token) && sessionRequest.authKey === authKey) {
     const session = await sessionRequest.promise;
     if (expectedHandle && session.roomHandle !== expectedHandle) {
       fail(ROOM_SESSION_ERROR.UNAVAILABLE);
@@ -320,25 +390,28 @@ const exchangeSession = async (code, token, { expectedHandle = null, replacedHan
   const promise = (async () => {
     const value = await postJson(
       publicWall ? publicSessionPath(expectedHandle) : '/api/room-session',
-      publicWall ? {} : { code, token },
+      publicWall ? {} : { code, token, ...(authKey === null ? {} : { authKey }) },
       200,
       [400, 404],
+      { lockAware: !publicWall },
     );
     const session = validateRoomSessionResponse(value);
+    const lock = authKey === null ? null : validateLockGrant(value.lock);
     if (expectedHandle && session.roomHandle !== expectedHandle) {
       fail(ROOM_SESSION_ERROR.UNAVAILABLE);
     }
     if (generation !== requestGeneration) fail(ROOM_SESSION_ERROR.UNAVAILABLE);
     activeCredentials = Object.freeze({ code, token });
+    activeAuthKey = authKey;
     activeSession = session;
     retryDelayMs = SESSION_RETRY_MIN_MS;
     scheduleRefresh(session);
     setSessionHealth(replacedHandle && replacedHandle !== session.roomHandle
       ? ROOM_SESSION_HEALTH.REPLACED : ROOM_SESSION_HEALTH.ACTIVE);
-    return publicSession(session);
+    return lock ? Object.freeze({ ...publicSession(session), lock }) : publicSession(session);
   })();
 
-  sessionRequest = { code, token, promise };
+  sessionRequest = { code, token, authKey, promise };
   try {
     return await promise;
   } finally {
@@ -346,17 +419,20 @@ const exchangeSession = async (code, token, { expectedHandle = null, replacedHan
   }
 };
 
-export async function establishRoomSession(code, token) {
+// `authKey` is the second step of a locked room's exchange; the first step omits it.
+export async function establishRoomSession(code, token, { authKey = null } = {}) {
   if (!BOARD_CODE_RE.test(code || '') || !BOARD_TOKEN_RE.test(token || '')) fail(ROOM_SESSION_ERROR.INVALID);
+  if (authKey !== null && parseAuthKey(authKey) === null) fail(ROOM_SESSION_ERROR.INVALID);
   if (activeCredentials && !sameCredentials(activeCredentials, code, token)) {
     clearRefreshTimer();
     activeCredentials = null;
+    activeAuthKey = null;
     activeSession = null;
   }
   const expectedHandle = sameCredentials(activeCredentials, code, token)
     ? activeSession?.roomHandle || null
     : null;
-  return exchangeSession(code, token, { expectedHandle });
+  return exchangeSession(code, token, { expectedHandle, authKey });
 }
 
 export const canRefreshRoomSession = () => activeCredentials !== null;
@@ -368,9 +444,10 @@ export async function refreshActiveRoomSession() {
   try {
     return await exchangeSession(activeCredentials.code, activeCredentials.token, {
       expectedHandle: activeSession?.roomHandle || null,
+      authKey: activeAuthKey,
     });
   } catch (error) {
-    setSessionHealth(ROOM_SESSION_HEALTH.LOST);
+    setSessionHealth(isReauthRequiredError(error) ? ROOM_SESSION_HEALTH.REAUTH_REQUIRED : ROOM_SESSION_HEALTH.LOST);
     if (isPublicRoomSession() && ROOM_SESSION_REJECTED_STATUSES.includes(error.httpStatus)) {
       return exchangeSession(null, null, { replacedHandle: activeSession?.roomHandle || null });
     }
@@ -426,6 +503,7 @@ export function establishPublicSession() {
 export function clearRoomSession() {
   clearRefreshTimer();
   activeCredentials = null;
+  activeAuthKey = null;
   activeSession = null;
   requestGeneration++;
 }

@@ -1054,5 +1054,16 @@ export default Object.freeze({
   "pokerPage.decks": "Fibonacci (0–21), Modified Fibonacci (0, ½, 1–100), ukuran kaos (XS–XXL), dan pangkat 2. Setiap deck punya ? untuk \"tidak yakin\" dan ☕ untuk \"perlu istirahat\".",
   "pokerPage.section.why": "Mengapa kartu disembunyikan",
   "pokerPage.why": "Saat orang melihat angka lebih dulu, mereka cenderung mengikutinya. Membuka bersamaan menangkap pendapat asli semua orang dan langsung menunjukkan story mana yang dipahami berbeda oleh tim.",
-  "pokerPage.retroLink": "Papan retro"
+  "pokerPage.retroLink": "Papan retro",
+  "roomLock.prompt.title": "Papan ini dilindungi kata sandi",
+  "roomLock.prompt.body": "Masukkan kata sandi untuk membukanya. Jika kata sandi lupa, tidak dapat dipulihkan, bahkan oleh pemilik server.",
+  "roomLock.password.label": "Kata sandi",
+  "roomLock.prompt.submit": "Buka kunci papan",
+  "roomLock.prompt.busy": "Membuka kunci…",
+  "roomLock.prompt.wrong": "Kata sandi salah. Coba lagi.",
+  "roomLock.prompt.lockedOut": "Terlalu banyak percobaan salah. Coba lagi dalam {seconds} dtk.",
+  "roomLock.prompt.unavailable": "Papan tidak dapat dibuka. Periksa koneksi Anda lalu coba lagi.",
+  "roomLock.reunlock.title": "Masukkan kata sandi lagi",
+  "roomLock.reunlock.body": "Kata sandi atau kunci papan ini berubah. Masukkan kata sandi saat ini untuk melanjutkan. Perubahan Anda yang belum terkirim tetap tersimpan.",
+  "roomLock.reunlock.submit": "Lanjutkan",
 });

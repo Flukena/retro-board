@@ -12,3 +12,9 @@ test('a rate-limited session keeps its error code and retry delay', () => {
 test('an unexpected failure is reported as the room being unavailable', () => {
   assert.deepEqual(roomBootstrapFailure(new Error('network down')), { status: ROOM_SESSION_ERROR.UNAVAILABLE, retryAfterSeconds: null });
 });
+
+test('a locked room keeps its salt and KDF on the failure, for the password screen', () => {
+  const lock = { salt: 'salt', kdf: { name: 'PBKDF2' } };
+  const failure = roomBootstrapFailure(new RoomSessionError(ROOM_SESSION_ERROR.LOCKED, { lock }));
+  assert.deepEqual(failure, { status: ROOM_SESSION_ERROR.LOCKED, retryAfterSeconds: null, lock });
+});

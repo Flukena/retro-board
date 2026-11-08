@@ -1054,5 +1054,16 @@ export default Object.freeze({
   "pokerPage.decks": "Fibonacci (0–21), Fibonacci modificado (0, ½, 1–100), tamanhos de camiseta (XS–XXL) e potências de 2. Todo baralho tem ? para \"não sei\" e ☕ para \"preciso de uma pausa\".",
   "pokerPage.section.why": "Por que ocultar as cartas",
   "pokerPage.why": "Quando as pessoas veem um número primeiro, tendem a segui-lo. Virar as cartas juntos captura a opinião real de cada um e mostra de imediato quais histórias a equipe entende de formas diferentes.",
-  "pokerPage.retroLink": "Quadro de retro"
+  "pokerPage.retroLink": "Quadro de retro",
+  "roomLock.prompt.title": "Este quadro é protegido por senha",
+  "roomLock.prompt.body": "Digite a senha para abri-lo. Se a senha for esquecida, não pode ser recuperada, nem mesmo pelo dono do servidor.",
+  "roomLock.password.label": "Senha",
+  "roomLock.prompt.submit": "Desbloquear quadro",
+  "roomLock.prompt.busy": "Desbloqueando…",
+  "roomLock.prompt.wrong": "A senha não está correta. Tente novamente.",
+  "roomLock.prompt.lockedOut": "Muitas tentativas erradas. Tente novamente em {seconds} s.",
+  "roomLock.prompt.unavailable": "Não foi possível desbloquear o quadro. Verifique sua conexão e tente novamente.",
+  "roomLock.reunlock.title": "Digite a senha novamente",
+  "roomLock.reunlock.body": "A senha ou a chave deste quadro mudou. Digite a senha atual para continuar. Suas edições não enviadas foram mantidas.",
+  "roomLock.reunlock.submit": "Continuar",
 });

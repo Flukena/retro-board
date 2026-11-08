@@ -1054,5 +1054,16 @@ export default Object.freeze({
   "pokerPage.decks": "Fibonacci(0–21), 수정된 Fibonacci(0, ½, 1–100), 티셔츠 사이즈(XS–XXL), 2의 거듭제곱. 모든 덱에 \"잘 모르겠음\"을 뜻하는 ?와 \"휴식 필요\"를 뜻하는 ☕가 있습니다.",
   "pokerPage.section.why": "카드를 숨기는 이유",
   "pokerPage.why": "사람들은 숫자를 먼저 보면 그 숫자를 따라가기 쉽습니다. 함께 뒤집으면 모두의 진짜 의견을 얻을 수 있고, 어떤 스토리를 팀이 서로 다르게 이해하는지 바로 알 수 있습니다.",
-  "pokerPage.retroLink": "회고 보드"
+  "pokerPage.retroLink": "회고 보드",
+  "roomLock.prompt.title": "이 보드는 비밀번호로 보호되어 있습니다",
+  "roomLock.prompt.body": "열려면 비밀번호를 입력하세요. 비밀번호를 잊으면 복구할 수 없으며, 서버 소유자도 복구할 수 없습니다.",
+  "roomLock.password.label": "비밀번호",
+  "roomLock.prompt.submit": "보드 잠금 해제",
+  "roomLock.prompt.busy": "잠금 해제 중…",
+  "roomLock.prompt.wrong": "비밀번호가 올바르지 않습니다. 다시 시도하세요.",
+  "roomLock.prompt.lockedOut": "잘못된 시도가 너무 많습니다. {seconds}초 후에 다시 시도하세요.",
+  "roomLock.prompt.unavailable": "보드의 잠금을 해제하지 못했습니다. 연결을 확인하고 다시 시도하세요.",
+  "roomLock.reunlock.title": "비밀번호를 다시 입력하세요",
+  "roomLock.reunlock.body": "이 보드의 비밀번호 또는 키가 변경되었습니다. 계속하려면 현재 비밀번호를 입력하세요. 보내지 않은 수정 내용은 유지됩니다.",
+  "roomLock.reunlock.submit": "계속",
 });

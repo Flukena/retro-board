@@ -3,9 +3,12 @@ import { ROOM_SESSION_ERROR, RoomSessionError } from '../session/room-session.js
 
 export const ROOM_BOOTSTRAP_STATUS = Object.freeze({ CHECKING: 'checking', READY: 'ready' });
 
-export const roomBootstrapFailure = (error) => (error instanceof RoomSessionError
-  ? { status: error.code, retryAfterSeconds: error.retryAfterSeconds }
-  : { status: ROOM_SESSION_ERROR.UNAVAILABLE, retryAfterSeconds: null });
+export const roomBootstrapFailure = (error) => {
+  if (!(error instanceof RoomSessionError)) return { status: ROOM_SESSION_ERROR.UNAVAILABLE, retryAfterSeconds: null };
+  const failure = { status: error.code, retryAfterSeconds: error.retryAfterSeconds };
+  // A locked room's salt and KDF, so the password screen can derive the keys.
+  return error.lock ? { ...failure, lock: error.lock } : failure;
+};
 
 // Runs `start` (session exchange plus any room-specific loading) for one room
 // and reports checking / ready / a ROOM_SESSION_ERROR code. `roomKey` restarts

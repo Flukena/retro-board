@@ -1054,5 +1054,16 @@ export default Object.freeze({
   "pokerPage.decks": "Fibonacci(0〜21)、Modified Fibonacci(0、½、1〜100)、Tシャツサイズ(XS〜XXL)、2の累乗。どのデッキにも、「わからない」の ? と「休憩したい」の ☕ があります。",
   "pokerPage.section.why": "カードを伏せる理由",
   "pokerPage.why": "先に数字を見てしまうと、人はそれに引っ張られがちです。一斉にめくることで全員の本当の意見が集まり、チームの理解が食い違っているストーリーがすぐにわかります。",
-  "pokerPage.retroLink": "ふりかえりボード"
+  "pokerPage.retroLink": "ふりかえりボード",
+  "roomLock.prompt.title": "このボードはパスワードで保護されています",
+  "roomLock.prompt.body": "開くにはパスワードを入力してください。パスワードを忘れると復元できません。サーバーの管理者でも復元できません。",
+  "roomLock.password.label": "パスワード",
+  "roomLock.prompt.submit": "ボードのロックを解除",
+  "roomLock.prompt.busy": "ロック解除中…",
+  "roomLock.prompt.wrong": "パスワードが正しくありません。もう一度お試しください。",
+  "roomLock.prompt.lockedOut": "間違いが多すぎます。{seconds} 秒後にもう一度お試しください。",
+  "roomLock.prompt.unavailable": "ボードのロックを解除できませんでした。接続を確認してもう一度お試しください。",
+  "roomLock.reunlock.title": "パスワードをもう一度入力",
+  "roomLock.reunlock.body": "このボードのパスワードまたは鍵が変更されました。続けるには現在のパスワードを入力してください。未送信の編集は保持されます。",
+  "roomLock.reunlock.submit": "続ける",
 });

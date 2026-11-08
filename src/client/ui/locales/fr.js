@@ -1054,5 +1054,16 @@ export default Object.freeze({
   "pokerPage.decks": "Fibonacci (0–21), Fibonacci modifié (0, ½, 1–100), tailles de T-shirt (XS–XXL) et puissances de 2. Chaque jeu comprend ? pour « pas sûr » et ☕ pour « besoin d’une pause ».",
   "pokerPage.section.why": "Pourquoi cacher les cartes",
   "pokerPage.why": "Quand on voit d’abord un chiffre, on a tendance à le suivre. Retourner les cartes ensemble capte l’avis réel de chacun et montre aussitôt quelles stories l’équipe comprend différemment.",
-  "pokerPage.retroLink": "Tableau de rétro"
+  "pokerPage.retroLink": "Tableau de rétro",
+  "roomLock.prompt.title": "Ce tableau est protégé par un mot de passe",
+  "roomLock.prompt.body": "Saisis le mot de passe pour l'ouvrir. Un mot de passe oublié ne peut pas être récupéré, même par le propriétaire du serveur.",
+  "roomLock.password.label": "Mot de passe",
+  "roomLock.prompt.submit": "Déverrouiller le tableau",
+  "roomLock.prompt.busy": "Déverrouillage…",
+  "roomLock.prompt.wrong": "Ce mot de passe n'est pas correct. Réessaie.",
+  "roomLock.prompt.lockedOut": "Trop de tentatives échouées. Réessaie dans {seconds} s.",
+  "roomLock.prompt.unavailable": "Impossible de déverrouiller le tableau. Vérifie ta connexion et réessaie.",
+  "roomLock.reunlock.title": "Saisis à nouveau le mot de passe",
+  "roomLock.reunlock.body": "Le mot de passe ou la clé de ce tableau a changé. Saisis le mot de passe actuel pour continuer. Tes modifications non envoyées sont conservées.",
+  "roomLock.reunlock.submit": "Continuer",
 });

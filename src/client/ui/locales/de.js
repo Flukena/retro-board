@@ -1054,5 +1054,16 @@ export default Object.freeze({
   "pokerPage.decks": "Fibonacci (0–21), Modifiziertes Fibonacci (0, ½, 1–100), T-Shirt-Größen (XS–XXL) und Zweierpotenzen. Jedes Deck hat ? für „unsicher“ und ☕ für „Pause nötig“.",
   "pokerPage.section.why": "Warum die Karten verdeckt bleiben",
   "pokerPage.why": "Wer zuerst eine Zahl sieht, orientiert sich meist daran. Gemeinsames Aufdecken erfasst die echte Meinung aller und zeigt sofort, welche Stories das Team unterschiedlich versteht.",
-  "pokerPage.retroLink": "Retro-Board"
+  "pokerPage.retroLink": "Retro-Board",
+  "roomLock.prompt.title": "Dieses Board ist passwortgeschützt",
+  "roomLock.prompt.body": "Gib das Passwort ein, um es zu öffnen. Ein vergessenes Passwort lässt sich nicht wiederherstellen, auch nicht durch den Serverbetreiber.",
+  "roomLock.password.label": "Passwort",
+  "roomLock.prompt.submit": "Board entsperren",
+  "roomLock.prompt.busy": "Wird entsperrt…",
+  "roomLock.prompt.wrong": "Das Passwort ist falsch. Versuche es erneut.",
+  "roomLock.prompt.lockedOut": "Zu viele falsche Versuche. Versuche es in {seconds} s erneut.",
+  "roomLock.prompt.unavailable": "Das Board konnte nicht entsperrt werden. Prüfe deine Verbindung und versuche es erneut.",
+  "roomLock.reunlock.title": "Passwort erneut eingeben",
+  "roomLock.reunlock.body": "Passwort oder Schlüssel dieses Boards haben sich geändert. Gib das aktuelle Passwort ein, um fortzufahren. Deine ungesendeten Änderungen bleiben erhalten.",
+  "roomLock.reunlock.submit": "Weiter",
 });

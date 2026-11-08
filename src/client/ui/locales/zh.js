@@ -1054,5 +1054,16 @@ export default Object.freeze({
   "pokerPage.decks": "Fibonacci（0–21）、改良 Fibonacci（0、½、1–100）、T 恤尺码（XS–XXL）和 2 的幂。每个牌组都有表示“不确定”的 ? 和表示“需要休息”的 ☕。",
   "pokerPage.section.why": "为什么要隐藏牌面",
   "pokerPage.why": "人们先看到一个数字时，往往会跟着它走。同时翻牌能获得每个人的真实想法，并立刻显示团队对哪些故事的理解不一致。",
-  "pokerPage.retroLink": "回顾看板"
+  "pokerPage.retroLink": "回顾看板",
+  "roomLock.prompt.title": "此看板受密码保护",
+  "roomLock.prompt.body": "输入密码即可打开。忘记密码将无法找回，服务器所有者也无法找回。",
+  "roomLock.password.label": "密码",
+  "roomLock.prompt.submit": "解锁看板",
+  "roomLock.prompt.busy": "正在解锁…",
+  "roomLock.prompt.wrong": "密码不正确，请重试。",
+  "roomLock.prompt.lockedOut": "错误次数过多，请在 {seconds} 秒后重试。",
+  "roomLock.prompt.unavailable": "无法解锁看板。请检查网络连接后重试。",
+  "roomLock.reunlock.title": "请再次输入密码",
+  "roomLock.reunlock.body": "此看板的密码或密钥已更改。请输入当前密码以继续。尚未发送的修改会保留。",
+  "roomLock.reunlock.submit": "继续",
 });
