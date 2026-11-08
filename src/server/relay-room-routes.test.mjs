@@ -97,3 +97,17 @@ test('preflight for room creation and session exchange answers 204; with a query
   const res = response();
   assert.equal(handleRoomRoute(req('OPTIONS', { origin: ORIGIN }), res, '/api/rooms', context({ hasQueryOrFragment: true })), false);
 });
+
+test('preflight for the lock routes is credentialed for allowed origins only', () => {
+  for (const suffix of ['password', 'rotate/begin', 'rotate/commit', 'rotate/abort']) {
+    const allowed = response();
+    assert.equal(handleRoomRoute(req('OPTIONS', { origin: ORIGIN }), allowed, `/api/rooms/${HANDLE}/lock/${suffix}`, context()), true);
+    assert.equal(allowed.status, 204);
+    assert.equal(allowed.headers['access-control-allow-credentials'], 'true');
+    assert.equal(allowed.headers['access-control-allow-methods'], 'POST, OPTIONS');
+    const foreign = response();
+    handleRoomRoute(req('OPTIONS', { origin: 'https://evil.example' }), foreign, `/api/rooms/${HANDLE}/lock/${suffix}`, context());
+    assert.equal(foreign.status, 403);
+  }
+  assert.equal(handleRoomRoute(req('OPTIONS', { origin: ORIGIN }), response(), `/api/rooms/${HANDLE}/lock/other`, context()), false);
+});

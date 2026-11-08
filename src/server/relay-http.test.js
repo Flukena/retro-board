@@ -9,6 +9,7 @@ import * as Y from 'yjs';
 import * as configHelpers from './relay-config.js';
 import { isRelayReady } from './relay-lifecycle.js';
 import { handleRoomRoute } from './relay-room-routes.js';
+import { createRoomSessionRoutes } from './room-session-routes.js';
 import { setCredentialCors, acceptCredentialOrigin, isExactAllowedOrigin, readJsonBody, sendJson, sendIfWritable, sendUpgradeRejection, sendCredentialPreflight } from './relay-http.js';
 
 const ORIGIN = 'https://allowed.example';
@@ -128,10 +129,25 @@ const entrypointHttp = (overrides = {}) => {
       handleGetLegacyImage() { assert.fail('unexpected legacy dispatch'); } },
     ...overrides,
   };
-  const handlers = sourceSection('const handleCreateRoom =', '\nconst globalTrafficLimits');
+  // The two handlers live in room-session-routes.js; the entrypoint slice only dispatches to them.
+  const routes = createRoomSessionRoutes({
+    registry: {
+      createRoom: () => context.createRegisteredRoom(), registeredDocForCapability: (...args) => context.registeredDocForCapability(...args),
+      roomHandleForDoc: (...args) => context.roomHandleForDoc(...args), isLocked: () => false,
+    },
+    sessions: { createCookie: (...args) => context.createSessionCookie(...args) },
+    buckets: {
+      takeCreateToken: (...args) => context.takeCreateToken(...args), takeSessionExchangeToken: (...args) => context.takeSessionExchangeToken(...args),
+      failureAttemptAvailable: (...args) => context.failureAttemptAvailable(...args), recordSessionFailure: (...args) => context.recordSessionFailure(...args),
+    },
+    config: { allowedOrigins: [ORIGIN], allowInsecureHttp: false, sessionTtlMs: context.ROOM_SESSION_TTL_MS, maxApiBodyBytes: context.MAX_API_BODY_BYTES },
+    unavailable: () => context.shuttingDown || Boolean(context.storageFailure),
+    onStorageFailure: (...args) => context.markStorageFailure(...args),
+  });
+  Object.assign(context, routes);
   const server = sourceSection('const server = http.createServer', '\nserver.requestTimeout');
-  const endpoints = runInNewContext(`${handlers}\n${server}\n({ handleCreateRoom, handleRoomSession });`, context);
-  return { dispatch, ...endpoints };
+  runInNewContext(server, context);
+  return { dispatch, ...routes };
 };
 const routeRequest = (method, url, origin = ORIGIN) => ({ method, url, headers: { origin } });
 const routeResponse = () => Object.assign(response(), { once() {} });

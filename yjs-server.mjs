@@ -36,7 +36,10 @@ import { provisionPublicWall, RelayPublicWall, retainPublicDocument } from './sr
 import { createRejectionCounters } from './src/server/relay-rejection-counters.js';
 import { startMaintainer } from './src/server/maintainer-server.js';
 import { maintainerSnapshot } from './src/server/maintainer-snapshot.js';
-import { checkedStorage } from './src/server/relay-storage.js';
+import { checkedStorage, durableMetaBatch } from './src/server/relay-storage.js';
+import { RoomLockVerifier } from './src/server/room-lock.js';
+import { CORRUPT_LOCK } from './src/server/room-lock-record.js';
+import { createRoomSessionRoutes } from './src/server/room-session-routes.js';
 import { retireIdleRooms } from './src/server/room-retirement.js';
 import { admitPublicAction, registerPublicQuotaClient, notifyPublicQuota } from './src/server/public-action-limit.js';
 
@@ -295,6 +298,7 @@ const registryPersistence = {
   storeUpdate: checkedStoreUpdate,
   flushDocument: checkedFlushDocument,
   clearDocument: checkedClearDocument,
+  durableMetaBatch: (docName, ops) => durableMetaBatch(ldb, docName, ops),
   hasCapacity: () => dbUsageBytes + pendingStoreBytes < MAX_DB_BYTES,
   reserveStore(estimatedBytes) {
     if (pendingStoreOps >= MAX_PENDING_STORE_OPS
@@ -862,13 +866,18 @@ for (const name of MIGRATE) {
   }
 }
 
-const createRegisteredRoom = () => roomRegistry.createRoom({ unavailable: shuttingDown || Boolean(storageFailure) });
-const registeredDocForCapability = (code, token) => roomRegistry.registeredDocForCapability(code, token);
 
+// null = normal room; a locked room's cookie is bound to its key epoch; an unreadable lock matches nothing (-1).
+const CORRUPT_LOCK_EPOCH = -1;
+const roomKeyEpoch = (docName) => {
+  const lock = roomRegistry.lockFor(docName);
+  if (!lock) return null;
+  return lock === CORRUPT_LOCK ? CORRUPT_LOCK_EPOCH : lock.keyEpoch;
+};
 const roomSessions = new RoomSessions({
   signingKey: SESSION_SIGNING_KEY, rooms: registeredRoomsByHandle,
   ttlMs: ROOM_SESSION_TTL_MS, maxCookieHeaderBytes: MAX_COOKIE_HEADER_BYTES,
-  allowInsecureHttp: ALLOW_INSECURE_HTTP,
+  allowInsecureHttp: ALLOW_INSECURE_HTTP, epochOf: roomKeyEpoch,
 });
 const createSessionCookie = roomSessions.createCookie.bind(roomSessions);
 const authenticatedDocFromRequest = roomSessions.authenticate.bind(roomSessions);
@@ -987,74 +996,6 @@ const takeWsUpgradeToken = (ip, docName, coldRoom) => {
   if (reservations.some((bucket) => bucket.tokens < 1)) return false;
   for (const bucket of reservations) bucket.tokens -= 1;
   return true;
-};
-
-
-const handleCreateRoom = async (req, res, clientIp) => {
-  if (!acceptCredentialOrigin(req, res, ALLOWED_ORIGINS, ALLOW_INSECURE_HTTP)) return;
-  res.setHeader('cache-control', 'no-store');
-  if (shuttingDown || storageFailure) { res.writeHead(503); res.end(); return; }
-  const retryAfterSeconds = takeCreateToken(clientIp);
-  if (retryAfterSeconds) { res.writeHead(429, { 'retry-after': String(retryAfterSeconds) }); res.end(); return; }
-  let body;
-  try {
-    body = await readJsonBody(req, MAX_API_BODY_BYTES, { allowEmpty: true });
-  } catch (err) {
-    sendIfWritable(res, err.code === 'BODY_TOO_LARGE' ? 413 : 400);
-    return;
-  }
-  if (Object.keys(body).length !== 0) { res.writeHead(400); res.end(); return; }
-  try {
-    const room = await createRegisteredRoom();
-    sendJson(res, 201, room);
-  } catch (err) {
-    if (err.code === 'STORAGE_FAILURE') markStorageFailure(err);
-    else if (!['ROOM_CAPACITY', 'SERVER_UNAVAILABLE'].includes(err.code)) {
-      console.error('[yjs] room creation failed', { code: err.code || 'UNKNOWN', err: err.message });
-    }
-    sendIfWritable(res, err.code === 'ROOM_CAPACITY' ? 507 : 503);
-  }
-};
-
-const handleRoomSession = async (req, res, clientIp, prefixed) => {
-  if (!acceptCredentialOrigin(req, res, ALLOWED_ORIGINS, ALLOW_INSECURE_HTTP)) return;
-  res.setHeader('cache-control', 'no-store');
-  if (shuttingDown || storageFailure) { res.writeHead(503); res.end(); return; }
-  let body;
-  try { body = await readJsonBody(req, MAX_API_BODY_BYTES); }
-  catch (err) {
-    if (!failureAttemptAvailable(clientIp)) sendIfWritable(res, 429, { 'retry-after': RETRY_AFTER_LONG_SECONDS });
-    else {
-      recordSessionFailure(clientIp);
-      sendIfWritable(res, err.code === 'BODY_TOO_LARGE' ? 413 : 400);
-    }
-    return;
-  }
-  const keys = Object.keys(body).sort();
-  const wellFormed = keys.length === 2
-    && keys[0] === 'code'
-    && keys[1] === 'token'
-    && typeof body.code === 'string'
-    && typeof body.token === 'string';
-  const docName = wellFormed ? registeredDocForCapability(body.code, body.token) : null;
-  if (!docName) {
-    if (!failureAttemptAvailable(clientIp)) sendIfWritable(res, 429, { 'retry-after': RETRY_AFTER_LONG_SECONDS });
-    else {
-      recordSessionFailure(clientIp);
-      sendIfWritable(res, 404);
-    }
-    return;
-  }
-  if (!takeSessionExchangeToken(clientIp)) {
-    sendIfWritable(res, 429, { 'retry-after': RETRY_AFTER_SHORT_SECONDS });
-    return;
-  }
-  const roomHandle = roomHandleForDoc(docName);
-  const expiresAt = Date.now() + ROOM_SESSION_TTL_MS;
-  const cookiePath = `${prefixed ? '/yjs' : ''}/rooms/${roomHandle}`;
-  sendJson(res, 200, { roomHandle, expiresAt }, {
-    'set-cookie': createSessionCookie(roomHandle, expiresAt, docName, cookiePath),
-  });
 };
 
 
@@ -1319,9 +1260,17 @@ if (publicWall) {
 }
 const rejectionCounters = createRejectionCounters((message, counts) => console.log(message, counts));
 const ACCOUNT_SIGNING_KEY = loadSigningKey(DB_DIR, ACCOUNT_SESSION_KEY);
+const accountSessions = new AccountSessions({ signingKey: ACCOUNT_SIGNING_KEY, allowInsecureHttp: ALLOW_INSECURE_HTTP, maxCookieHeaderBytes: MAX_COOKIE_HEADER_BYTES });
+const roomLockVerifier = new RoomLockVerifier();
+const { handleCreateRoom, handleRoomSession } = createRoomSessionRoutes({
+  registry: roomRegistry, sessions: roomSessions, verifier: roomLockVerifier, accountSessions, accountStore,
+  buckets: { takeCreateToken, takeSessionExchangeToken, failureAttemptAvailable, recordSessionFailure },
+  config: { allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, sessionTtlMs: ROOM_SESSION_TTL_MS, maxApiBodyBytes: MAX_API_BODY_BYTES },
+  unavailable: () => shuttingDown || Boolean(storageFailure), onStorageFailure: markStorageFailure,
+});
 const authRoutes = createAuthRoutes({
   oauth: enabledOAuthConfig(process.env, { allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, publicWall: PUBLIC_WALL, log: console }),
-  sessions: new AccountSessions({ signingKey: ACCOUNT_SIGNING_KEY, allowInsecureHttp: ALLOW_INSECURE_HTTP, maxCookieHeaderBytes: MAX_COOKIE_HEADER_BYTES }),
+  sessions: accountSessions,
   accountKey: ACCOUNT_SIGNING_KEY, store: accountStore, ledger: new FlowLedger(), allowedOrigins: ALLOWED_ORIGINS,
   allowInsecureHttp: ALLOW_INSECURE_HTTP, maxCookieHeaderBytes: MAX_COOKIE_HEADER_BYTES, rejectionCounters,
 });
@@ -1350,7 +1299,7 @@ const runMaintenance = () => maintenance.run({
   votes: { finalize: finalizeExpiredVotes },
   storage: { measureDatabase: registryPersistence.measureDatabase, reconcileUploadUsage },
 });
-const maintenanceTimer = setInterval(runMaintenance, MAINTENANCE_INTERVAL_MS);
+const maintenanceTimer = setInterval(() => { roomLockVerifier.sweep(); runMaintenance(); }, MAINTENANCE_INTERVAL_MS);
 maintenanceTimer.unref();
 
 const server = http.createServer({ maxHeaderSize: MAX_HEADER_BYTES }, (req, res) => {

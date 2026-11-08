@@ -5,6 +5,7 @@ const ROOM_IMAGE_PATH = /^\/rooms\/([A-Za-z0-9_-]{32})\/images\/([a-f0-9-]+\.(?:
 const LEGACY_IMAGE_PREFIX = '/images/';
 const PREFLIGHT_METHODS = 'POST, OPTIONS';
 const API_PREFLIGHT_PATHS = new Set(['/api/rooms', '/api/room-session']);
+const LOCK_PREFLIGHT_PATH = /^\/api\/rooms\/[A-Za-z0-9_-]{32}\/lock\/(?:password|rotate\/(?:begin|commit|abort))$/;
 
 const reply = (res, status) => {
   res.writeHead(status);
@@ -45,7 +46,7 @@ const handleRoomImageGet = (req, res, [, handle, imageName], ctx) => {
 export const handleRoomRoute = (req, res, routePath, ctx) => {
   const uploadMatch = ctx.hasQueryOrFragment ? null : routePath.match(UPLOAD_PATH);
   const imageMatch = ctx.hasQueryOrFragment ? null : routePath.match(ROOM_IMAGE_PATH);
-  if (req.method === 'OPTIONS' && !ctx.hasQueryOrFragment && API_PREFLIGHT_PATHS.has(routePath)) {
+  if (req.method === 'OPTIONS' && !ctx.hasQueryOrFragment && (API_PREFLIGHT_PATHS.has(routePath) || LOCK_PREFLIGHT_PATH.test(routePath))) {
     sendCredentialPreflight(req, res, { ...credentialOptions(ctx), methods: PREFLIGHT_METHODS });
     return true;
   }

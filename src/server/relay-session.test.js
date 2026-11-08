@@ -34,3 +34,24 @@ test('expired, missing, oversized and tampered cookies never authenticate', () =
   assert.equal(sessions.authenticate(request(cookie.replace('v1.', 'v2.')), HANDLE), null);
   assert.equal(create().authenticate(request(cookie), HANDLE), null);
 });
+
+test('a locked-room cookie is bound to its key epoch and a normal cookie never authenticates a locked room', () => {
+  const sessions = create();
+  const expiresAt = Date.now() + TTL_MS;
+  const bound = sessions.createCookie(HANDLE, expiresAt, 'one', '/', { keyEpoch: 3 }).split(';')[0];
+  assert.deepEqual(sessions.authenticate(request(bound), HANDLE, { expectedEpoch: 3 }), { docName: 'one', expiresAt });
+  assert.equal(sessions.authenticate(request(bound), HANDLE, { expectedEpoch: 4 }), null);
+  assert.equal(sessions.authenticate(request(bound), HANDLE), null, 'unbound expectation rejects an epoch cookie');
+  const plain = sessions.createCookie(HANDLE, expiresAt, 'one', '/').split(';')[0];
+  assert.equal(sessions.authenticate(request(plain), HANDLE, { expectedEpoch: 0 }), null);
+});
+
+test('epochOf supplies the expected epoch when the caller passes none', () => {
+  const epochs = new Map([['one', 2]]);
+  const sessions = create({ epochOf: (docName) => epochs.get(docName) ?? null });
+  const expiresAt = Date.now() + TTL_MS;
+  const cookie = sessions.createCookie(HANDLE, expiresAt, 'one', '/', { keyEpoch: 2 }).split(';')[0];
+  assert.ok(sessions.authenticate(request(cookie), HANDLE));
+  epochs.set('one', 3);
+  assert.equal(sessions.authenticate(request(cookie), HANDLE), null);
+});
