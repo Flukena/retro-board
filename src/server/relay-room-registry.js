@@ -3,6 +3,7 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { ROOM_HANDLE_RE, ROOM_ID_ALLOCATION_ATTEMPTS, STORE_OPERATION_OVERHEAD_BYTES } from './relay-config.js';
 import { roomLogId } from './relay-log-id.js';
 import { RoomActivity } from './room-activity.js';
+import { ROOM_LOCK_META, decodeLockRecord, encodeLockRecord } from './room-lock-record.js';
 
 export const ROOM_REGISTRATION_META = 'retro-room-registration-v1';
 export const ROOM_HANDLE_META = 'retro-room-handle-v1';
@@ -34,6 +35,10 @@ const SERVICE_UNAVAILABLE_MESSAGE = 'service unavailable';
 const ROOM_CAPACITY_MESSAGE = 'room capacity reached';
 const QUARANTINE_LOG = '[yjs] quarantined incomplete room';
 const USAGE_RECONCILED_LOG = '[yjs] reconciled room upload usage';
+const INVALID_LOCK_LOG = '[yjs] quarantined room with invalid lock record';
+const INVALID_LOCK_ARGUMENT_MESSAGE = 'invalid room lock record';
+const LOCK_STORAGE_UNSUPPORTED_MESSAGE = 'persistence has no durableMetaBatch for locked rooms';
+const PUT_OPERATION = 'put';
 const ROLLBACK_FAILED_LOG = '[yjs] incomplete room rollback failed';
 
 export const canonicalDocName = (code, token) => `${DOCUMENT_PREFIX}board-${code}-${token}`;
@@ -70,6 +75,8 @@ const persistedUsage = (usage) => ({
  * @property {function(string, Uint8Array): Promise<*>} storeUpdate
  * @property {function(string): Promise<void>} flushDocument
  * @property {function(string): Promise<void>} clearDocument
+ * @property {function(string, {type: string, key: string, value?: *}[]): Promise<void>} [durableMetaBatch]
+ *   fsynced atomic meta batch; required only to create locked rooms
  * @property {function(): boolean} hasCapacity
  * @property {function(number): function(): void} reserveStore
  * @property {function(): number} measureDatabase
@@ -80,6 +87,7 @@ export class RoomRegistry extends EventEmitter {
   registeredRoomsByHandle = new Map();
   registeredRoomHandlesByDoc = new Map();
   roomUploadUsage = new Map();
+  locksByDoc = new Map();
   pendingRoomHandles = new Set();
   existingDocNames = new Set();
   pendingRoomCreations = 0;
@@ -148,6 +156,8 @@ export class RoomRegistry extends EventEmitter {
     if (this.registeredDocs.size >= this.#maxRooms) {
       throw new Error(EXISTING_ROOM_LIMIT_MESSAGE);
     }
+    const lock = await this.#readLock(docName);
+    if (lock === undefined) return;
     let handle = await this.#persistence.getMeta(docName, ROOM_HANDLE_META);
     if (!ROOM_HANDLE_RE.test(handle || '')) {
       handle = this.newUniqueRoomHandle();
@@ -155,6 +165,7 @@ export class RoomRegistry extends EventEmitter {
     }
     await this.activity.hydrate(docName);
     this.registerDocInMemory(docName, handle);
+    if (lock) this.locksByDoc.set(docName, lock);
     const stored = persistedUsage(await this.#persistence.getMeta(docName, ROOM_UPLOAD_USAGE_META));
     const actual = initialUploadUsage.roomsByHandle.get(handle) || emptyUsage();
     const { bytes, files } = initialUploadUsage.complete ? actual : stored;
@@ -164,6 +175,29 @@ export class RoomRegistry extends EventEmitter {
       this.#log.warn(USAGE_RECONCILED_LOG, { docName: roomLogId(docName), ...usage });
     }
     this.roomUploadUsage.set(docName, activeUsage(usage));
+  }
+
+  // null = unlocked room, undefined = unreadable lock (room stays unreachable).
+  async #readLock(docName) {
+    const raw = await this.#persistence.getMeta(docName, ROOM_LOCK_META);
+    if (raw === undefined || raw === null) return null;
+    const lock = decodeLockRecord(raw);
+    if (!lock) {
+      this.#log.warn(INVALID_LOCK_LOG, { docName: roomLogId(docName) });
+      return undefined;
+    }
+    return lock;
+  }
+
+  lockFor(docName) { return this.locksByDoc.get(docName) ?? null; }
+
+  isLocked(docName) { return this.locksByDoc.has(docName); }
+
+  // Memory only: the caller has already written the record in its own durable batch.
+  publishLock(docName, record) {
+    const lock = decodeLockRecord(record);
+    if (!lock) throw new TypeError(INVALID_LOCK_ARGUMENT_MESSAGE);
+    this.locksByDoc.set(docName, lock);
   }
 
   registeredDocForCapability(code, token) {
@@ -197,7 +231,7 @@ export class RoomRegistry extends EventEmitter {
     this.emit(REGISTRY_STORAGE_FAILURE_EVENT, error);
   }
 
-  async persistRoom(docName, handle, update) {
+  async persistRoom(docName, handle, update, lock = null) {
     await this.#persistence.storeUpdate(docName, update);
     await this.#persistence.setMeta(docName, ROOM_HANDLE_META, handle);
     await this.#persistence.setMeta(docName, ROOM_UPLOAD_USAGE_META, emptyUsage());
@@ -208,12 +242,17 @@ export class RoomRegistry extends EventEmitter {
       this.reportStorageFailure(error);
       throw error;
     }
+    // The lock lands durably BEFORE the marker: a reachable room is never unlocked.
+    if (lock) {
+      await this.#persistence.durableMetaBatch(docName, [{ type: PUT_OPERATION, key: ROOM_LOCK_META, value: encodeLockRecord(lock) }]);
+    }
     // Marker LAST, then in-memory publication; never adopt a failed creation.
     await this.#persistence.setMeta(docName, ROOM_REGISTRATION_META, REGISTRATION_VERSION);
   }
 
-  publishRoom(docName, handle) {
+  publishRoom(docName, handle, lock = null) {
     this.existingDocNames.add(docName);
+    if (lock) this.locksByDoc.set(docName, lock);
     this.registerDocInMemory(docName, handle);
     this.roomUploadUsage.set(docName, activeUsage(emptyUsage()));
   }
@@ -242,6 +281,7 @@ export class RoomRegistry extends EventEmitter {
     this.registeredRoomsByHandle.delete(handle);
     this.registeredRoomHandlesByDoc.delete(docName);
     this.roomUploadUsage.delete(docName);
+    this.locksByDoc.delete(docName);
     this.existingDocNames.delete(docName);
     this.activity.forget(docName);
     try {
@@ -255,7 +295,10 @@ export class RoomRegistry extends EventEmitter {
     return handle;
   }
 
-  async createRoom({ unavailable = false, initialUpdate = null } = {}) {
+  async createRoom({ unavailable = false, initialUpdate = null, lock = null } = {}) {
+    const record = lock === null ? null : decodeLockRecord(lock);
+    if (lock !== null && !record) throw new TypeError(INVALID_LOCK_ARGUMENT_MESSAGE);
+    if (record && typeof this.#persistence.durableMetaBatch !== 'function') throw new TypeError(LOCK_STORAGE_UNSUPPORTED_MESSAGE);
     if (unavailable) throw Object.assign(new Error(SERVICE_UNAVAILABLE_MESSAGE), { code: SERVER_UNAVAILABLE_CODE });
     if (this.registeredDocs.size + this.pendingRoomCreations >= this.#maxRooms) {
       throw Object.assign(new Error(ROOM_CAPACITY_MESSAGE), { code: ROOM_CAPACITY_CODE });
@@ -271,8 +314,8 @@ export class RoomRegistry extends EventEmitter {
       this.pendingRoomHandles.add(handle);
       const update = initialUpdate ?? this.seedUpdate();
       releaseStore = this.#persistence.reserveStore(update.byteLength + STORE_OPERATION_OVERHEAD_BYTES);
-      await this.persistRoom(identity.docName, handle, update);
-      this.publishRoom(identity.docName, handle);
+      await this.persistRoom(identity.docName, handle, update, record);
+      this.publishRoom(identity.docName, handle, record);
       return { code: identity.code, token: identity.token };
     } catch (error) {
       await this.rollback(identity?.docName);
