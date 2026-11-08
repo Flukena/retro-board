@@ -1,6 +1,6 @@
 export const E2E_FRAME = Object.freeze({
   APPEND: 1, SNAPSHOT: 2, EPHEMERAL: 3,
-  UPDATE: 11, SNAPSHOT_OUT: 12, SYNCED: 13, ACK: 14, EPHEMERAL_OUT: 15, REJECT: 16,
+  UPDATE: 11, SNAPSHOT_OUT: 12, SYNCED: 13, ACK: 14, EPHEMERAL_OUT: 15, REJECT: 16, RESUMED: 17,
 });
 export const E2E_REJECT = Object.freeze({ QUOTA: 1, STALE_SNAPSHOT: 2, RATE: 3, MALFORMED: 4, FROZEN: 5 });
 export const E2E_CIPHERTEXT_OVERHEAD_BYTES = 28;
@@ -15,7 +15,7 @@ const BYTE_RANGE = 256;
 
 const CLIENT_TYPES = new Set([E2E_FRAME.APPEND, E2E_FRAME.SNAPSHOT, E2E_FRAME.EPHEMERAL]);
 const SERVER_TYPES = new Set([E2E_FRAME.UPDATE, E2E_FRAME.SNAPSHOT_OUT, E2E_FRAME.SYNCED,
-  E2E_FRAME.ACK, E2E_FRAME.EPHEMERAL_OUT, E2E_FRAME.REJECT]);
+  E2E_FRAME.ACK, E2E_FRAME.EPHEMERAL_OUT, E2E_FRAME.REJECT, E2E_FRAME.RESUMED]);
 const SEQ_TYPES = new Set([E2E_FRAME.SNAPSHOT, E2E_FRAME.UPDATE, E2E_FRAME.SNAPSHOT_OUT, E2E_FRAME.SYNCED]);
 const EPHEMERAL_TYPES = new Set([E2E_FRAME.EPHEMERAL, E2E_FRAME.EPHEMERAL_OUT]);
 
@@ -47,7 +47,7 @@ const layoutFor = (type, { seq, ciphertext, code, clientRef }) => {
   if (SEQ_TYPES.has(type)) { assertSeq(seq); return [[SEQ_BYTES, seq]]; }
   if (type === E2E_FRAME.ACK) { assertSeq(seq); assertRef(clientRef); return [[SEQ_BYTES, seq], [REF_BYTES, clientRef]]; }
   if (type === E2E_FRAME.REJECT) { assertRef(clientRef); return [[CODE_BYTES, code], [REF_BYTES, clientRef]]; }
-  if (EPHEMERAL_TYPES.has(type)) return [];
+  if (EPHEMERAL_TYPES.has(type) || type === E2E_FRAME.RESUMED) return [];
   throw new RangeError(`unknown frame type ${type}`);
 };
 
@@ -80,7 +80,8 @@ const readFields = (type, bytes) => {
   return {};
 };
 
-const needsCiphertext = (type) => type !== E2E_FRAME.SYNCED && type !== E2E_FRAME.ACK && type !== E2E_FRAME.REJECT;
+const PAYLOAD_FREE_TYPES = new Set([E2E_FRAME.SYNCED, E2E_FRAME.ACK, E2E_FRAME.REJECT, E2E_FRAME.RESUMED]);
+const needsCiphertext = (type) => !PAYLOAD_FREE_TYPES.has(type);
 
 function decodeFrame(bytes, allowed, maxBytes, maxEphemeralBytes) {
   if (!(bytes instanceof Uint8Array) || bytes.length < TYPE_BYTES || bytes.length > maxBytes) return null;

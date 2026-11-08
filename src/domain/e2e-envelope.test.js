@@ -12,7 +12,7 @@ const CLIENT_REF = 0xdeadbeef;
 const limits = { maxBytes: MAX_BYTES, maxEphemeralBytes: E2E_EPHEMERAL_MAX_BYTES };
 
 test('frame constants match the wire contract', () => {
-  assert.deepEqual({ ...E2E_FRAME }, { APPEND: 1, SNAPSHOT: 2, EPHEMERAL: 3, UPDATE: 11, SNAPSHOT_OUT: 12, SYNCED: 13, ACK: 14, EPHEMERAL_OUT: 15, REJECT: 16 });
+  assert.deepEqual({ ...E2E_FRAME }, { APPEND: 1, SNAPSHOT: 2, EPHEMERAL: 3, UPDATE: 11, SNAPSHOT_OUT: 12, SYNCED: 13, ACK: 14, EPHEMERAL_OUT: 15, REJECT: 16, RESUMED: 17 });
   assert.deepEqual({ ...E2E_REJECT }, { QUOTA: 1, STALE_SNAPSHOT: 2, RATE: 3, MALFORMED: 4, FROZEN: 5 });
   assert.equal(E2E_CIPHERTEXT_OVERHEAD_BYTES, 28);
 });
@@ -95,4 +95,12 @@ test('seq above 2^53-1 is rejected on decode and encode', () => {
   const max = Uint8Array.of(12, 0, 0x1f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 5);
   assert.equal(decodeServerFrame(max, limits).seq, Number.MAX_SAFE_INTEGER);
   assert.throws(() => encodeFrame(E2E_FRAME.SNAPSHOT, { seq: 2 ** 53, ciphertext: CIPHER }));
+});
+
+test('RESUMED is a bare type byte accepted only from the server', () => {
+  const bytes = encodeFrame(E2E_FRAME.RESUMED);
+  assert.deepEqual([...bytes], [17]);
+  assert.deepEqual({ ...decodeServerFrame(bytes, limits) }, { type: 17 });
+  assert.equal(decodeServerFrame(Uint8Array.of(17, 1), limits), null);
+  assert.equal(decodeClientFrame(bytes, limits), null);
 });
