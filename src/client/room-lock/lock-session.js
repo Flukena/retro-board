@@ -1,5 +1,5 @@
 import { deriveRoomSecrets, unwrapRoomKey } from './e2e-crypto.js';
-import { parseLockParams } from '../../domain/room-lock-contract.js';
+import { isCounter, parseLockParams } from '../../domain/room-lock-contract.js';
 import {
   ROOM_SESSION_ERROR, RoomSessionError, establishRoomSession, replaceRoomAuthKey,
 } from '../session/room-session.js';
@@ -30,9 +30,15 @@ export function clearRoomKey() {
   state = null;
 }
 
-/** Releases the key of the previous epoch once image repair no longer needs it. */
-export function dropPreviousKey() {
-  if (state) state = Object.freeze({ ...state, previousKey: undefined });
+/** The key of an earlier epoch that still has unrepaired images, or undefined. */
+export const getPreviousKey = (keyEpoch) => state?.previousKeys.get(keyEpoch);
+
+/** Releases the key of one earlier epoch once image repair no longer needs it. */
+export function dropPreviousKey(keyEpoch) {
+  if (!state?.previousKeys.has(keyEpoch)) return;
+  const previousKeys = new Map(state.previousKeys);
+  previousKeys.delete(keyEpoch);
+  state = Object.freeze({ ...state, previousKeys });
 }
 
 async function exchangeWithPassword({ code, token, password, lockHint }) {
@@ -50,8 +56,10 @@ export async function unlockRoom({ code, token, password, lockHint }) {
     roomHandle: session.roomHandle,
     keyEpoch: session.lock.keyEpoch,
     dek,
+    lockRevision: session.lock.lockRevision,
     isOwner: session.lock.isOwner,
     lock: lockRecord(lockHint, session.lock),
+    previousKeys: new Map(),
   });
   return snapshot();
 }
@@ -83,20 +91,21 @@ export async function reunlock(password) {
     roomHandle: session.roomHandle,
     keyEpoch: session.lock.keyEpoch,
     dek,
+    lockRevision: session.lock.lockRevision,
     isOwner: session.lock.isOwner,
     lock: lockRecord(lockHint, session.lock),
-    previousKey: epochChanged ? state.dek : state.previousKey,
+    previousKeys: epochChanged ? new Map(state.previousKeys).set(state.keyEpoch, state.dek) : state.previousKeys,
   });
   announceKeyChange({ keyEpoch: state.keyEpoch, epochChanged });
   return snapshot();
 }
 
 /** After this page changed the password: renewals and the cached lock follow the new record. */
-export function updateLockAfterPasswordChange({ lock, authKey }) {
+export function updateLockAfterPasswordChange({ lock, authKey, lockRevision }) {
   const params = parseLockParams(lock);
-  if (state === null || params === null) throw new RoomSessionError(ROOM_SESSION_ERROR.INVALID);
+  if (state === null || params === null || !isCounter(lockRevision)) throw new RoomSessionError(ROOM_SESSION_ERROR.INVALID);
   replaceRoomAuthKey(authKey);
-  state = Object.freeze({ ...state, lock: lockRecord(params, params) });
+  state = Object.freeze({ ...state, lock: lockRecord(params, params), lockRevision });
 }
 
 /** Opens the room's session: unlocked rooms keep their session, others do the plain exchange. */

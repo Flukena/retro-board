@@ -1,5 +1,5 @@
 import { ROOM_SESSION_HEALTH, getRoomSessionHealth, onRoomSessionHealth } from '../session/room-session.js';
-import { KEY_ROTATED_EVENT } from './lock-session.js';
+import { KEY_ROTATED_EVENT, reunlock } from './lock-session.js';
 
 /**
  * Decides when the in-page re-unlock dialog is open: while the session needs
@@ -25,8 +25,9 @@ export function createReunlockController(eventTarget) {
         eventTarget.removeEventListener(KEY_ROTATED_EVENT, onRotated);
       };
     },
-    /** The user unlocked again: close the dialog even if no health change follows. */
-    acknowledge() {
+    /** Re-unlocks with the password; on success the dialog closes even if no health change follows. */
+    async unlock(password) {
+      await reunlock(password);
       rotated = false;
       notify();
     },

@@ -186,12 +186,23 @@ test('the right authKey returns the wrapped key and an epoch-bound cookie; isOwn
   const asOwner = await f.post('/api/room-session', { ...room, authKey: RIGHT_KEY }, owner.cookie);
   assert.equal(asOwner.status, OK);
   const body = await asOwner.json();
-  assert.deepEqual(body.lock, { wrappedDek, wrapIv, keyEpoch: 0, isOwner: true });
+  assert.deepEqual(body.lock, { wrappedDek, wrapIv, keyEpoch: 0, lockRevision: 0, isOwner: true });
   const handle = body.roomHandle;
   assert.deepEqual(f.sessions.authenticate(cookieRequest(cookieHeaderOf(asOwner)), handle)?.docName, docName);
   const isOwnerFor = async (cookie) => (await (await f.post('/api/room-session', { ...room, authKey: RIGHT_KEY }, cookie)).json()).lock.isOwner;
   assert.equal(await isOwnerFor(other.cookie), false);
   assert.equal(await isOwnerFor(undefined), false);
+});
+
+test('the session response carries the current lock revision, which advances with the record', async (t) => {
+  const f = await fixture(t);
+  const owner = await f.signIn('owner@example.com');
+  const room = await lockedRoom(f, owner);
+  const docName = f.registry.registeredDocForCapability(room.code, room.token);
+  const revisionOf = async () => (await (await f.post('/api/room-session', { ...room, authKey: RIGHT_KEY }, owner.cookie)).json()).lock.lockRevision;
+  const before = await revisionOf();
+  f.registry.publishLock(docName, { ...f.registry.lockFor(docName), lockRevision: before + 3 });
+  assert.equal(await revisionOf(), before + 3);
 });
 
 test('a cookie issued at epoch 0 stops authenticating once the epoch is 1', async (t) => {

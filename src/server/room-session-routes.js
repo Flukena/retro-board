@@ -105,7 +105,10 @@ export function createRoomSessionRoutes(ctx) {
     const { roomHandle, expiresAt, cookie } = issueSession(docName, prefixed, lock.keyEpoch);
     sendJson(res, HTTP.OK, {
       roomHandle, expiresAt,
-      lock: { wrappedDek: lock.wrappedDek, wrapIv: lock.wrapIv, keyEpoch: lock.keyEpoch, isOwner: account?.id === lock.ownerAccountId },
+      lock: {
+        wrappedDek: lock.wrappedDek, wrapIv: lock.wrapIv, keyEpoch: lock.keyEpoch,
+        lockRevision: lock.lockRevision, isOwner: account?.id === lock.ownerAccountId,
+      },
     }, { 'set-cookie': cookie });
   };
 

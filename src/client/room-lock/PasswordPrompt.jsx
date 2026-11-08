@@ -1,10 +1,10 @@
-import React, { useEffect, useId, useState } from 'react';
+import React, { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Button } from '../ui/UiPrimitives.jsx';
 import { BUTTON_VARIANT } from '../ui/ui-variants.js';
 import { t } from '../ui/i18n.js';
-import { PROMPT_ERROR, promptErrorFor } from './password-prompt-state.js';
+import { PROMPT_ERROR } from './password-prompt-state.js';
+import { createPasswordPromptController } from './password-prompt-controller.js';
 
-const COUNTDOWN_TICK_MS = 1_000;
 const FORM_STYLE = Object.freeze({ display: 'grid', gap: 12, textAlign: 'start' });
 const INPUT_STYLE = Object.freeze({ padding: '10px 12px', fontSize: 15, width: '100%' });
 const ERROR_STYLE = Object.freeze({ color: 'var(--danger)', fontSize: 13, margin: 0 });
@@ -47,49 +47,25 @@ export function PasswordPromptView({
   );
 }
 
-/** The lock-out seconds left, counting down once a second; set it to begin. */
-function useLockoutCountdown() {
-  const [seconds, setSeconds] = useState(0);
-  useEffect(() => {
-    if (seconds <= 0) return undefined;
-    const timer = setTimeout(() => setSeconds(seconds - 1), COUNTDOWN_TICK_MS);
-    return () => clearTimeout(timer);
-  }, [seconds]);
-  return [seconds, setSeconds];
-}
-
 /** Collects a password and hands it to `submit`; shows the busy, wrong-password and lock-out states. */
 export default function PasswordPrompt({ submit, submitLabel }) {
   const [password, setPassword] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(null);
-  const [lockedOutSeconds, setLockedOutSeconds] = useLockoutCountdown();
+  const submitRef = useRef(submit);
+  submitRef.current = submit;
+  const controller = useMemo(() => createPasswordPromptController((value) => submitRef.current(value)), []);
+  useEffect(() => controller.dispose, [controller]);
+  const { busy, error, lockedOutSeconds } = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   const onSubmit = async (event) => {
     event.preventDefault();
-    if (busy || lockedOutSeconds > 0) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await submit(password);
-      setPassword('');
-    } catch (failure) {
-      const next = promptErrorFor(failure);
-      setError(next);
-      setLockedOutSeconds(next.seconds);
-    } finally {
-      setBusy(false);
-    }
+    if (await controller.submit(password)) setPassword('');
   };
-  const lockedOut = error?.kind === PROMPT_ERROR.LOCKED_OUT;
-  let shown = error;
-  if (lockedOut) shown = lockedOutSeconds > 0 ? { ...error, seconds: lockedOutSeconds } : null;
   return (
     <PasswordPromptView
       password={password}
       onPasswordChange={setPassword}
       onSubmit={onSubmit}
       busy={busy}
-      error={shown}
+      error={error}
       lockedOutSeconds={lockedOutSeconds}
       submitLabel={submitLabel}
     />

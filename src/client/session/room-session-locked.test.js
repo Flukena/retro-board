@@ -57,7 +57,7 @@ test('the second step sends the authKey, returns the lock grant, and renewals ke
   const result = await session.establishRoomSession(CODE, TOKEN, { authKey: fixture.authKey });
   assert.deepEqual(relay.calls[0], { code: CODE, token: TOKEN, authKey: fixture.authKey });
   assert.deepEqual(result.lock, {
-    wrappedDek: fixture.lock.wrappedDek, wrapIv: fixture.lock.wrapIv, keyEpoch: 3, isOwner: false,
+    wrappedDek: fixture.lock.wrappedDek, wrapIv: fixture.lock.wrapIv, keyEpoch: 3, lockRevision: 0, isOwner: false,
   });
   assert.equal(Object.hasOwn(session.getActiveRoomSession(), 'lock'), false);
   await session.refreshActiveRoomSession();
@@ -119,4 +119,25 @@ test('a direct refresh rejected for the password also asks for re-auth', async (
   const error = await rejection(session.refreshActiveRoomSession());
   assert.equal(error.code, ROOM_SESSION_ERROR.WRONG_PASSWORD);
   assert.equal(session.getRoomSessionHealth(), ROOM_SESSION_HEALTH.REAUTH_REQUIRED);
+});
+
+test('a renewal that started before a key replacement cannot restore the old key', async (context) => {
+  const relay = installRelay(context);
+  await session.establishRoomSession(CODE, TOKEN, { authKey: fixture.authKey });
+  const next = await createRoomLock('another long password');
+  let releaseRenewal;
+  const held = new Promise((resolve) => { releaseRenewal = resolve; });
+  context.mock.method(globalThis, 'fetch', async (url, init) => {
+    const response = await relay.fetch(url, init);
+    if (JSON.parse(init.body).authKey === fixture.authKey) await held;
+    return response;
+  });
+  const staleRenewal = session.refreshActiveRoomSession();
+  await flushRequests();
+  session.replaceRoomAuthKey(next.authKey);
+  relay.lock = next.lock;
+  releaseRenewal();
+  await staleRenewal;
+  await session.refreshActiveRoomSession();
+  assert.equal(relay.calls.at(-1).authKey, next.authKey);
 });

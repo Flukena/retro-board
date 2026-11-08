@@ -2,7 +2,6 @@ import React, { useMemo, useSyncExternalStore } from 'react';
 import { ModalShell } from '../ui/ModalShell.jsx';
 import { t } from '../ui/i18n.js';
 import PasswordPrompt from './PasswordPrompt.jsx';
-import { reunlock } from './lock-session.js';
 import { createReunlockController } from './reunlock-controller.js';
 
 const TITLE_ID = 'room-reunlock-dialog-title';
@@ -22,10 +21,5 @@ export function ReunlockDialogView({ onUnlock }) {
 export default function ReunlockDialog() {
   const controller = useMemo(() => createReunlockController(globalThis.window), []);
   const open = useSyncExternalStore(controller.subscribe, controller.getSnapshot, () => false);
-  if (!open) return null;
-  const unlock = async (password) => {
-    await reunlock(password);
-    controller.acknowledge();
-  };
-  return <ReunlockDialogView onUnlock={unlock} />;
+  return open ? <ReunlockDialogView onUnlock={controller.unlock} /> : null;
 }

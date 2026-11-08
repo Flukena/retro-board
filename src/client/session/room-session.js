@@ -109,11 +109,13 @@ export function validateLockGrant(value) {
     || !hasBase64UrlBytes(value.wrappedDek, LOCK_BYTES.wrappedDek)
     || !hasBase64UrlBytes(value.wrapIv, LOCK_BYTES.wrapIv)
     || !isCounter(value.keyEpoch)
+    || !isCounter(value.lockRevision)
     || typeof value.isOwner !== 'boolean') {
     fail(ROOM_SESSION_ERROR.UNAVAILABLE);
   }
   return Object.freeze({
-    wrappedDek: value.wrappedDek, wrapIv: value.wrapIv, keyEpoch: value.keyEpoch, isOwner: value.isOwner,
+    wrappedDek: value.wrappedDek, wrapIv: value.wrapIv, keyEpoch: value.keyEpoch,
+    lockRevision: value.lockRevision, isOwner: value.isOwner,
   });
 }
 
@@ -300,6 +302,8 @@ export async function createRoom() {
 let activeSession = null;
 let activeCredentials = null;
 let activeAuthKey = null;
+// Bumped whenever the authKey is deliberately replaced, so a slower response cannot restore an older one.
+let credentialGeneration = 0;
 let refreshTimer = null;
 let sessionRequest = null;
 let requestGeneration = 0;
@@ -320,6 +324,7 @@ export const isReauthRequiredError = (error) => (
 export function replaceRoomAuthKey(authKey) {
   if (activeAuthKey === null || parseAuthKey(authKey) === null) fail(ROOM_SESSION_ERROR.INVALID);
   activeAuthKey = authKey;
+  credentialGeneration += 1;
 }
 
 const setSessionHealth = (health) => {
@@ -387,6 +392,7 @@ const exchangeSession = async (code, token, { expectedHandle = null, replacedHan
   }
 
   const generation = ++requestGeneration;
+  const credentialGenerationAtStart = credentialGeneration;
   const promise = (async () => {
     const value = await postJson(
       publicWall ? publicSessionPath(expectedHandle) : '/api/room-session',
@@ -402,7 +408,7 @@ const exchangeSession = async (code, token, { expectedHandle = null, replacedHan
     }
     if (generation !== requestGeneration) fail(ROOM_SESSION_ERROR.UNAVAILABLE);
     activeCredentials = Object.freeze({ code, token });
-    activeAuthKey = authKey;
+    if (credentialGeneration === credentialGenerationAtStart) activeAuthKey = authKey;
     activeSession = session;
     retryDelayMs = SESSION_RETRY_MIN_MS;
     scheduleRefresh(session);
@@ -429,6 +435,7 @@ export async function establishRoomSession(code, token, { authKey = null } = {})
     activeAuthKey = null;
     activeSession = null;
   }
+  if (authKey !== null) credentialGeneration += 1;
   const expectedHandle = sameCredentials(activeCredentials, code, token)
     ? activeSession?.roomHandle || null
     : null;

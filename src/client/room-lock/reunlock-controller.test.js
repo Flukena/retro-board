@@ -6,10 +6,12 @@ import {
   clearRoomSession, establishRoomSession, refreshActiveRoomSession,
 } from '../session/room-session.js';
 import { createRoomLock } from './e2e-crypto.js';
-import { KEY_ROTATED_EVENT } from './lock-session.js';
+import { KEY_ROTATED_EVENT, clearRoomKey, unlockRoom } from './lock-session.js';
 import { createReunlockController } from './reunlock-controller.js';
 
-const fixture = await createRoomLock('correct horse battery staple');
+const PASSWORD = 'correct horse battery staple';
+const fixture = await createRoomLock(PASSWORD);
+const lockHint = { salt: fixture.lock.salt, kdf: fixture.lock.kdf };
 
 function setup(context) {
   const oldWindow = globalThis.window;
@@ -18,6 +20,7 @@ function setup(context) {
   context.mock.method(globalThis, 'fetch', relay.fetch);
   const target = new EventTarget();
   context.after(() => {
+    clearRoomKey();
     clearRoomSession();
     if (oldWindow === undefined) delete globalThis.window;
     else globalThis.window = oldWindow;
@@ -49,14 +52,16 @@ test('a renewal rejected for the password opens the dialog and notifies subscrib
 
 test('the key-rotated event opens the dialog until the user unlocks again, and unsubscribing detaches it', async (context) => {
   const { target } = setup(context);
-  await establishRoomSession(CODE, TOKEN, { authKey: fixture.authKey });
+  await unlockRoom({ code: CODE, token: TOKEN, password: PASSWORD, lockHint });
   const controller = createReunlockController(target);
   let notified = 0;
   const unsubscribe = controller.subscribe(() => { notified += 1; });
   target.dispatchEvent(new Event(KEY_ROTATED_EVENT));
   assert.equal(controller.getSnapshot(), true);
   assert.equal(notified, 1);
-  controller.acknowledge();
+  await assert.rejects(controller.unlock('wrong password entirely'), { code: 'wrong_password' });
+  assert.equal(controller.getSnapshot(), true, 'a wrong password keeps the dialog open');
+  await controller.unlock(PASSWORD);
   assert.equal(controller.getSnapshot(), false);
   unsubscribe();
   const seen = notified;
