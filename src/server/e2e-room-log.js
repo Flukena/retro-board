@@ -17,10 +17,10 @@ export const E2E_BLOB_GRACE_MS = 86_400_000;
 /** Log entries allowed since the last snapshot; clients snapshot at 500, so this is a backstop. */
 export const E2E_MAX_LOG_ENTRIES = 10_000;
 
-const HEAD_KEY = 'e2e-head';
-const SNAPSHOT_KEY = 'e2e-snapshot';
-const BLOBS_KEY = 'e2e-blobs';
-const UPDATE_KEY_PREFIX = 'e2e-u-';
+export const E2E_HEAD_KEY = 'e2e-head';
+export const E2E_SNAPSHOT_KEY = 'e2e-snapshot';
+export const E2E_BLOBS_KEY = 'e2e-blobs';
+export const E2E_UPDATE_KEY_PREFIX = 'e2e-u-';
 const SEQ_KEY_DIGITS = 16;
 const STORE_OVERHEAD_BYTES = 64;
 const DIGEST_ALGORITHM = 'sha256';
@@ -29,8 +29,8 @@ const noop = () => undefined;
 const clampTtl = (ttlMs) => (Number.isFinite(ttlMs) && ttlMs > 0 ? Math.min(ttlMs, MAX_FREEZE_TTL_MS) : MAX_FREEZE_TTL_MS);
 
 const codedError = (code, message) => Object.assign(new Error(message), { code });
-const updateKey = (seq) => UPDATE_KEY_PREFIX + seq.toString().padStart(SEQ_KEY_DIGITS, '0');
-const seqOfKey = (key) => Number.parseInt(key.slice(UPDATE_KEY_PREFIX.length), 10);
+const updateKey = (seq) => E2E_UPDATE_KEY_PREFIX + seq.toString().padStart(SEQ_KEY_DIGITS, '0');
+export const e2eSeqOfKey = (key) => Number.parseInt(key.slice(E2E_UPDATE_KEY_PREFIX.length), 10);
 const digestOf = (bytes) => createHash(DIGEST_ALGORITHM).update(bytes).digest(DIGEST_ENCODING);
 const put = (key, value) => ({ type: 'put', key, value });
 const del = (key) => ({ type: 'del', key });
@@ -39,8 +39,8 @@ const snapshotValue = (baseSeq, bytes) => ({ baseSeq, bytes, sha256: digestOf(by
 // Upper bounds for payload reserved before it is queued: the widest seq key and head value.
 // Like normal-room compaction, the key-only deletes a snapshot prunes are not charged as payload.
 const appendReservationBytes = (docName, ciphertext) => STORE_OVERHEAD_BYTES
-  + metaBatchBytes(docName, [put(updateKey(Number.MAX_SAFE_INTEGER), ciphertext), put(HEAD_KEY, Number.MAX_SAFE_INTEGER)]);
-const snapshotReservationBytes = (docName, value) => STORE_OVERHEAD_BYTES + metaBatchBytes(docName, [put(SNAPSHOT_KEY, value)]);
+  + metaBatchBytes(docName, [put(updateKey(Number.MAX_SAFE_INTEGER), ciphertext), put(E2E_HEAD_KEY, Number.MAX_SAFE_INTEGER)]);
+const snapshotReservationBytes = (docName, value) => STORE_OVERHEAD_BYTES + metaBatchBytes(docName, [put(E2E_SNAPSHOT_KEY, value)]);
 // Smallest ciphertext whose length prefix is as wide as any allowed document's (every size below 2^28).
 const SNAPSHOT_LENGTH_PROBE_BYTES = 2 ** 21;
 const snapshotLengthProbe = new Uint8Array(SNAPSHOT_LENGTH_PROBE_BYTES);
@@ -167,7 +167,7 @@ export class E2ERoomLog {
       this.#assertWithinQuota(roomSize(room) + ciphertext.byteLength);
       if (room.sizes.size >= this.#maxLogEntries) throw codedError(E2E_QUOTA, 'log entry limit reached');
       const seq = room.head + 1;
-      await this.#write(docName, [put(updateKey(seq), ciphertext), put(HEAD_KEY, seq)], { reserved: true });
+      await this.#write(docName, [put(updateKey(seq), ciphertext), put(E2E_HEAD_KEY, seq)], { reserved: true });
       room.head = seq;
       room.sizes.set(seq, ciphertext.byteLength);
       this.#notify(room, { kind: 'update', seq, bytes: ciphertext });
@@ -188,7 +188,7 @@ export class E2ERoomLog {
       const covered = range(room.base + 1, baseSeq);
       const keptBytes = [...room.sizes].filter(([seq]) => seq > baseSeq).reduce((sum, [, n]) => sum + n, 0);
       this.#assertWithinQuota(ciphertext.byteLength + keptBytes);
-      const ops = [put(SNAPSHOT_KEY, value), ...covered.map((seq) => del(updateKey(seq)))];
+      const ops = [put(E2E_SNAPSHOT_KEY, value), ...covered.map((seq) => del(updateKey(seq)))];
       await this.#write(docName, ops, { reserved: true });
       covered.forEach((seq) => room.sizes.delete(seq));
       room.base = baseSeq;
@@ -282,9 +282,9 @@ export class E2ERoomLog {
       const inventory = this.#retireOldEpochs(blobInventory, nextRecord.keyEpoch);
       const ops = [
         ...[...room.sizes.keys()].map((seq) => del(updateKey(seq))),
-        put(SNAPSHOT_KEY, snapshotValue(room.head, snapshot)),
+        put(E2E_SNAPSHOT_KEY, snapshotValue(room.head, snapshot)),
         put(ROOM_LOCK_META, nextRecord),
-        put(BLOBS_KEY, inventory),
+        put(E2E_BLOBS_KEY, inventory),
       ];
       await this.#write(docName, ops, { durable: true });
       this.#clearTimer(room.frozen.timer);
@@ -314,7 +314,7 @@ export class E2ERoomLog {
       if (room.blobs.some((entry) => entry.id === blob.id)) throw codedError(E2E_BLOB_DUPLICATE, 'blob id already inventoried');
       const entry = { id: blob.id, bytes: blob.bytes, epoch: blob.epoch, stagedFor: blob.stagedFor ?? null };
       const inventory = [...room.blobs, entry];
-      await this.#write(docName, [put(BLOBS_KEY, inventory)]);
+      await this.#write(docName, [put(E2E_BLOBS_KEY, inventory)]);
       room.blobs = inventory;
     });
   }
@@ -343,7 +343,7 @@ export class E2ERoomLog {
       const doomed = new Set(ids);
       const inventory = room.blobs.filter((entry) => !doomed.has(entry.id));
       if (inventory.length === room.blobs.length) return;
-      await this.#write(docName, [put(BLOBS_KEY, inventory)]);
+      await this.#write(docName, [put(E2E_BLOBS_KEY, inventory)]);
       room.blobs = inventory;
     });
   }
@@ -356,7 +356,7 @@ export class E2ERoomLog {
       const removed = room.blobs.filter(expired).map((entry) => entry.id);
       if (removed.length === 0) return removed;
       const inventory = room.blobs.filter((entry) => !expired(entry));
-      await this.#write(docName, [put(BLOBS_KEY, inventory)]);
+      await this.#write(docName, [put(E2E_BLOBS_KEY, inventory)]);
       room.blobs = inventory;
       return removed;
     });
@@ -417,7 +417,7 @@ export class E2ERoomLog {
   async #dropStagedBlobs(docName, room, rotationId) {
     const inventory = room.blobs.filter((entry) => entry.stagedFor !== rotationId);
     if (inventory.length !== room.blobs.length) {
-      await this.#write(docName, [put(BLOBS_KEY, inventory)]);
+      await this.#write(docName, [put(E2E_BLOBS_KEY, inventory)]);
       room.blobs = inventory;
     }
     await this.#deleteStagedBlobs(docName, rotationId);
@@ -456,12 +456,12 @@ export class E2ERoomLog {
   /** Reads storage, refreshes the room's cached counters, and returns the verified public state. */
   async #readState(docName, room) {
     const metas = await this.#readMetas(docName);
-    const stored = metas.get(SNAPSHOT_KEY);
+    const stored = metas.get(E2E_SNAPSHOT_KEY);
     if (stored && !verifySnapshotDigest(stored)) throw codedError(E2E_CORRUPT, 'snapshot digest mismatch');
-    const updates = [...metas.keys()].filter((key) => key.startsWith(UPDATE_KEY_PREFIX)).sort()
-      .map((key) => ({ seq: seqOfKey(key), bytes: metas.get(key) }));
-    const blobs = metas.get(BLOBS_KEY) ?? [];
-    const head = metas.get(HEAD_KEY) ?? 0;
+    const updates = [...metas.keys()].filter((key) => key.startsWith(E2E_UPDATE_KEY_PREFIX)).sort()
+      .map((key) => ({ seq: e2eSeqOfKey(key), bytes: metas.get(key) }));
+    const blobs = metas.get(E2E_BLOBS_KEY) ?? [];
+    const head = metas.get(E2E_HEAD_KEY) ?? 0;
     if (!room.loaded) {
       room.head = head;
       room.base = stored?.baseSeq ?? 0;

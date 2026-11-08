@@ -18,11 +18,14 @@ gpg --batch --quiet --decrypt --pinentry-mode loopback --passphrase-file "$key_f
 }
 cd "$repo_dir"
 for database in data public-data; do
-BACKUP_VERIFY_DB_DIR="$scratch/$database" BACKUP_VERIFY_MODE="$database" BACKUP_VERIFY_PUBLIC_UPLOADS="$scratch/public-uploads" node --input-type=module -e '
+uploads_dir="$scratch/uploads"
+[[ "$database" = public-data ]] && uploads_dir="$scratch/public-uploads"
+BACKUP_VERIFY_UPLOADS="$uploads_dir" BACKUP_VERIFY_DB_DIR="$scratch/$database" BACKUP_VERIFY_MODE="$database" BACKUP_VERIFY_PUBLIC_UPLOADS="$scratch/public-uploads" node --input-type=module -e '
   import { LeveldbPersistence } from "y-leveldb";
   import { ROOM_REGISTRATION_META } from "./src/server/relay-room-registry.js";
   import { verifyPublicUploadFiles } from "./src/server/public-upload-backup.js";
   import { verifyBackupAccounts } from "./scripts/verify-backup-accounts.mjs";
+  import { verifyBackupE2ERooms } from "./scripts/verify-backup-e2e.mjs";
   const persistence = new LeveldbPersistence(process.env.BACKUP_VERIFY_DB_DIR);
   try {
     const names = await persistence.getAllDocNames();
@@ -44,7 +47,8 @@ BACKUP_VERIFY_DB_DIR="$scratch/$database" BACKUP_VERIFY_MODE="$database" BACKUP_
       throw new Error("public backup must contain exactly one registered room");
     }
     const { accounts } = await verifyBackupAccounts(persistence);
-    console.log(`restored ${process.env.BACKUP_VERIFY_MODE} LevelDB opens; ${committed} documents and ${accounts} accounts decoded`);
+    const { rooms, stagedBlobs, orphanBlobs } = await verifyBackupE2ERooms(persistence, process.env.BACKUP_VERIFY_UPLOADS);
+    console.log(`restored ${process.env.BACKUP_VERIFY_MODE} LevelDB opens; ${committed} documents and ${accounts} accounts decoded; ${rooms} encrypted rooms verified (${stagedBlobs} staged, ${orphanBlobs} orphan blobs)`);
   } finally { await persistence.destroy(); }
 '
 done
