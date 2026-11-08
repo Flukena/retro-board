@@ -254,7 +254,7 @@ src/client/session/
 - `snapshot(docName, baseSeq, ciphertext)` → requires `currentBase < baseSeq ≤ head`, else `E2E_STALE_SNAPSHOT`. One atomic batch.
 - `freeze(docName, ttlMs, { expectedRevision })` → `{ head, rotationId, lockRevision }`. The freeze is released by commit, by `release(rotationId)`, or when the TTL expires. Release calls an `onResume(docName)` hook (the relay sends RESUMED) and deletes the blobs staged for that rotation.
 - `mutateLock(docName, { verify, next })`: the serialized password-change path. It re-verifies inside the chain and bumps `lockRevision` `[S4]`.
-- `commitRotation(docName, { rotationId, expectedHead, snapshot, lockRecord, blobInventory })` `[R2][R3]`:
+- `commitRotation(docName, { rotationId, expectedHead, knownSnapshotBase, verify, snapshot, lockRecord, blobInventory })` `[R2][R3]`:
   - Requires an active matching freeze and `head === expectedHead`; otherwise `E2E_ROTATION_STALE`.
   - Writes in **one durable batch**: delete all updates, put the snapshot (`baseSeq = head`), put the lock record and the inventory. Releases the freeze.
 - `addBlob(docName, { id, bytes, epoch, stagedFor })` / `blobs(docName)` / `expireOldEpochBlobs(docName, now)`: inventory updates for Task 7. Old-epoch entries are removed after the 24 h grace.
@@ -356,7 +356,7 @@ Every route requires an account cookie whose account id equals `ownerAccountId` 
 - `POST /api/rooms/<h>/lock/password`, JSON `{ oldAuthKey, expectedRevision, lock }` (≤ 1 KiB). Runs through `log.mutateLock` with re-verification and a revision check inside the chain, and is refused with 409 during a freeze. One durable write of the new record with the **same** epoch and `lockRevision + 1` → 204 `{ lockRevision }`. Open sessions continue.
 - `POST /api/rooms/<h>/lock/rotate/begin`, JSON `{ oldAuthKey, expectedRevision }` → 200 `{ head, rotationId, lockRevision, expiresInMs: 120000 }`. A second begin while one is active → 409.
 - `POST /api/rooms/<h>/lock/rotate/commit`, binary per Deviation 5.
-  - Header `{ oldAuthKey, rotationId, expectedHead, keyEpoch, lock, keepBlobs: [uuid…] }`. `keyEpoch` must be the current epoch + 1; `keepBlobs` holds ≤ 10,000 unique ids, each in the inventory.
+  - Header `{ oldAuthKey, rotationId, expectedHead, knownSnapshotBase, keyEpoch, lock, keepBlobs: [uuid…] }`. `keyEpoch` must be the current epoch + 1; `keepBlobs` holds ≤ 10,000 unique ids, each in the inventory.
   - The commit runs `log.commitRotation` (one durable batch, re-verifying the key and the revision inside the chain; old-epoch inventory entries keep their epoch for the grace), then `registry.publishLock` and `e2eRelay.closeRoom(4001, 'key rotated')` → 204. Old-epoch blobs are deleted by `expireOldEpochBlobs` after 24 h, not at commit `[S3]`.
   - Stale → 409 (the client retries from begin). Storage failure → 503 with the old state intact.
 - `POST /api/rooms/<h>/lock/rotate/abort`, `{ oldAuthKey, rotationId }` → 204 and the freeze is released.
