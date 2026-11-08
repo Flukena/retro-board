@@ -1035,7 +1035,7 @@ const rejectionCounters = createRejectionCounters((message, counts) => console.l
 const ACCOUNT_SIGNING_KEY = loadSigningKey(DB_DIR, ACCOUNT_SESSION_KEY);
 const accountSessions = new AccountSessions({ signingKey: ACCOUNT_SIGNING_KEY, allowInsecureHttp: ALLOW_INSECURE_HTTP, maxCookieHeaderBytes: MAX_COOKIE_HEADER_BYTES });
 const roomLockVerifier = new RoomLockVerifier();
-const { handleCreateRoom, handleRoomSession } = createRoomSessionRoutes({
+const roomSessionRoutes = createRoomSessionRoutes({
   registry: roomRegistry, sessions: roomSessions, verifier: roomLockVerifier, accountSessions, accountStore,
   buckets: { takeCreateToken, takeSessionExchangeToken, failureAttemptAvailable, recordSessionFailure },
   config: { allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, sessionTtlMs: ROOM_SESSION_TTL_MS, maxApiBodyBytes: MAX_API_BODY_BYTES },
@@ -1122,14 +1122,7 @@ const server = http.createServer({ maxHeaderSize: MAX_HEADER_BYTES }, (req, res)
     res.end(ok ? 'ready' : 'not ready');
     return;
   }
-  if (req.method === 'POST' && !hasQueryOrFragment && routePath === '/api/rooms') {
-    void handleCreateRoom(req, res, clientIp);
-    return;
-  }
-  if (req.method === 'POST' && !hasQueryOrFragment && routePath === '/api/room-session') {
-    void handleRoomSession(req, res, clientIp, prefixed);
-    return;
-  }
+  if (roomSessionRoutes.handle(req, res, routePath, { clientIp, prefixed, hasQueryOrFragment })) return;
   if (roomLockRoutes.handle(req, res, routePath, { clientIp, hasQueryOrFragment })) return;
   if (authRoutes.handle(req, res, routePath, { prefixed, clientIp, unavailable: () => shuttingDown || Boolean(storageFailure) })) return;
   if (handleRoomRoute(req, res, routePath, {
@@ -1180,7 +1173,7 @@ const e2eBlobs = createE2EBlobs({
   roomLog: e2eRoomLog, registry: roomRegistry, onStorageFailure: markStorageFailure,
 });
 const roomLockRoutes = createRoomLockRoutes({
-  registry: roomRegistry, roomLog: e2eRoomLog, closeRoom: e2eRelay.closeRoom, verifier: roomLockVerifier, accountSessions, accountStore,
+  registry: roomRegistry, roomLog: e2eRoomLog, blobStore: e2eBlobStore, closeRoom: e2eRelay.closeRoom, verifier: roomLockVerifier, accountSessions, accountStore,
   config: { allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, maxApiBodyBytes: MAX_API_BODY_BYTES },
   unavailable: () => shuttingDown || Boolean(storageFailure), onStorageFailure: markStorageFailure,
 });

@@ -1,17 +1,16 @@
-import { BLOB_ID_PATTERN, hasExactKeys, isCounter, parseAuthKey, parseLockParams } from '../domain/room-lock-contract.js';
+import { hasExactKeys, isCounter, parseAuthKey, parseLockParams } from '../domain/room-lock-contract.js';
 import { authenticateAccount } from './auth-session.js';
 import {
   E2E_BUSY, E2E_CORRUPT, E2E_FROZEN, E2E_LOCK_MISMATCH, E2E_QUOTA, E2E_ROTATION_STALE, MAX_FREEZE_TTL_MS,
 } from './e2e-room-log.js';
-import { acceptCredentialOrigin, readBoundedBody, readJsonBody, sendIfWritable, sendJson } from './relay-http.js';
+import { acceptCredentialOrigin, readJsonBody, sendIfWritable, sendJson } from './relay-http.js';
+import { isBlobId, readCommitBody } from './room-lock-commit-body.js';
 import { RETRY_AFTER_SHORT_SECONDS } from './relay-config.js';
 import { CORRUPT_LOCK } from './room-lock-record.js';
 
 export const KEY_ROTATED_CLOSE_CODE = 4001;
 export const KEY_ROTATED_REASON = 'key rotated';
-export const MAX_COMMIT_HEADER_BYTES = 1024 * 1024;
-export const MAX_KEEP_BLOBS = 10_000;
-const HEADER_LENGTH_BYTES = 4;
+export const MAX_PASSWORD_BODY_BYTES = 1024;
 const OCTET_STREAM = 'application/octet-stream';
 const LOCK_LIMITED = 'LOCK_LIMITED';
 const STORAGE_FAILURE = 'STORAGE_FAILURE';
@@ -23,12 +22,9 @@ const LOCK_PATH = /^\/api\/rooms\/([A-Za-z0-9_-]{32})\/lock\/(password|rotate\/b
 const PASSWORD_KEYS = ['oldAuthKey', 'expectedRevision', 'lock'];
 const BEGIN_KEYS = ['oldAuthKey', 'expectedRevision'];
 const ABORT_KEYS = ['oldAuthKey', 'rotationId'];
-const COMMIT_KEYS = ['oldAuthKey', 'rotationId', 'expectedHead', 'keyEpoch', 'lock', 'keepBlobs'];
 
 const bad = () => Object.assign(new Error('bad request'), { status: HTTP.BAD_REQUEST });
-const tooLarge = () => Object.assign(new Error('too large'), { status: HTTP.TOO_LARGE });
 const conflict = () => Object.assign(new Error('conflict'), { status: HTTP.CONFLICT });
-const isBlobId = (value) => typeof value === 'string' && BLOB_ID_PATTERN.test(value);
 
 /**
  * Verifies `oldAuthKey` against whatever record the log holds at that moment, with the wrong-password limits.
@@ -58,33 +54,9 @@ const requireKeys = (body, keys) => {
   requireAuthKey(body.oldAuthKey);
 };
 
-const parseKeepBlobs = (value) => {
-  const unique = Array.isArray(value) && value.length <= MAX_KEEP_BLOBS && new Set(value).size === value.length;
-  if (!unique || !value.every(isBlobId)) throw bad();
-  return value;
-};
-
-/** Splits `[u32 BE header length][JSON header][snapshot]` and validates the header (Deviation 5). */
-function parseCommitBody(body, maxSnapshotBytes) {
-  if (body.length < HEADER_LENGTH_BYTES) throw bad();
-  const headerLength = body.readUInt32BE(0);
-  if (headerLength > MAX_COMMIT_HEADER_BYTES) throw tooLarge();
-  const snapshotAt = HEADER_LENGTH_BYTES + headerLength;
-  if (snapshotAt > body.length) throw bad();
-  const snapshot = body.subarray(snapshotAt);
-  if (snapshot.length === 0 || snapshot.length > maxSnapshotBytes) throw tooLarge();
-  let header;
-  try { header = JSON.parse(body.subarray(HEADER_LENGTH_BYTES, snapshotAt).toString('utf8')); } catch { throw bad(); }
-  if (!header || typeof header !== 'object' || Array.isArray(header)) throw bad();
-  requireKeys(header, COMMIT_KEYS);
-  const lock = parseLockParams(header.lock);
-  if (!lock || !isBlobId(header.rotationId) || !isCounter(header.expectedHead) || !isCounter(header.keyEpoch)) throw bad();
-  return { ...header, lock, keepBlobs: parseKeepBlobs(header.keepBlobs), snapshot: new Uint8Array(snapshot) };
-}
-
 /**
  * Owner-only lock routes: password change and barrier-based key rotation (begin / commit / abort).
- * ctx: registry, roomLog (E2ERoomLog), closeRoom(docName, code, reason), verifier (RoomLockVerifier),
+ * ctx: registry, roomLog (E2ERoomLog), blobStore (settleStaged), closeRoom(docName, code, reason), verifier (RoomLockVerifier),
  * accountSessions, accountStore, config { allowedOrigins, allowInsecureHttp, maxApiBodyBytes },
  * unavailable() getter, onStorageFailure(error).
  * @returns {{ handle: (req, res, routePath: string, options: { clientIp: string, hasQueryOrFragment: boolean }) => boolean }}
@@ -93,7 +65,7 @@ export function createRoomLockRoutes(ctx) {
   const { registry, roomLog, verifier, config } = ctx;
 
   const changePassword = async (req, { docName }, clientIp) => {
-    const body = await readJsonBody(req, config.maxApiBodyBytes);
+    const body = await readJsonBody(req, MAX_PASSWORD_BODY_BYTES);
     requireKeys(body, PASSWORD_KEYS);
     const params = parseLockParams(body.lock);
     if (!params || !isCounter(body.expectedRevision)) throw bad();
@@ -136,21 +108,30 @@ export function createRoomLockRoutes(ctx) {
     return blobs.filter((entry) => (entry.stagedFor ? keep.has(entry.id) && entry.stagedFor === rotationId : true));
   };
 
+  // The commit is durable already: a cleanup failure leaves the files for the startup orphan sweep, never fails the request.
+  const settleStagedFiles = async (rotationId, keepBlobs) => {
+    try {
+      await ctx.blobStore.settleStaged(rotationId, keepBlobs);
+    } catch (error) {
+      console.error('[yjs] staged blob cleanup failed', { code: error.code || 'UNKNOWN' });
+    }
+  };
+
   const commitRotation = async (req, { docName, lock }, clientIp) => {
     if (String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase() !== OCTET_STREAM) {
       throw Object.assign(new Error('unsupported content type'), { status: HTTP.UNSUPPORTED });
     }
-    const maxBody = HEADER_LENGTH_BYTES + MAX_COMMIT_HEADER_BYTES + roomLog.maxSnapshotBytes;
-    const header = parseCommitBody(await readBoundedBody(req, maxBody), roomLog.maxSnapshotBytes);
+    const { header, snapshot } = await readCommitBody(req, roomLog.maxSnapshotBytes);
     const attempt = authorizer(verifier, clientIp, docName, header.oldAuthKey);
     const blobInventory = await commitInventory(docName, header.rotationId, header.keepBlobs);
     const lockRecord = { ...lock, ...header.lock, keyEpoch: header.keyEpoch };
     const committed = await roomLog.commitRotation(docName, {
       rotationId: header.rotationId, expectedHead: header.expectedHead, verify: attempt.verify,
-      snapshot: header.snapshot, lockRecord, blobInventory,
+      snapshot, lockRecord, blobInventory,
     }).catch((error) => { throw Object.assign(error, { attempt }); });
     registry.publishLock(docName, committed);
     ctx.closeRoom(docName, KEY_ROTATED_CLOSE_CODE, KEY_ROTATED_REASON);
+    await settleStagedFiles(header.rotationId, header.keepBlobs);
     return { status: HTTP.NO_CONTENT };
   };
 
@@ -200,7 +181,8 @@ export function createRoomLockRoutes(ctx) {
       else sendIfWritable(res, result.status);
     } catch (error) {
       const { status, headers } = statusOf(error);
-      sendIfWritable(res, status, headers);
+      // An early refusal leaves the request body unread; close the connection instead of draining it.
+      sendIfWritable(res, status, req.complete ? headers : { ...headers, connection: 'close' });
     }
   };
 

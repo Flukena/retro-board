@@ -147,7 +147,7 @@ const entrypointHttp = (overrides = {}) => {
     unavailable: () => context.shuttingDown || Boolean(context.storageFailure),
     onStorageFailure: (...args) => context.markStorageFailure(...args),
   });
-  Object.assign(context, routes);
+  Object.assign(context, routes, { roomSessionRoutes: routes });
   const server = sourceSection('const server = http.createServer', '\nserver.requestTimeout');
   runInNewContext(server, context);
   return { dispatch, ...routes };

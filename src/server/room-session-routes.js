@@ -19,7 +19,7 @@ const SOFT_CREATE_ERRORS = ['ROOM_CAPACITY', 'SERVER_UNAVAILABLE'];
 /**
  * Room creation and session exchange. ctx: registry, sessions (RoomSessions), verifier (RoomLockVerifier),
  * accountSessions, accountStore, buckets (rate limiters), config, unavailable() getter, onStorageFailure.
- * @returns {{ handleCreateRoom: Function, handleRoomSession: Function }}
+ * @returns {{ handle: Function, handleCreateRoom: Function, handleRoomSession: Function }}
  */
 export function createRoomSessionRoutes(ctx) {
   const { registry, sessions, verifier, buckets, config } = ctx;
@@ -143,5 +143,13 @@ export function createRoomSessionRoutes(ctx) {
     }
   };
 
-  return { handleCreateRoom, handleRoomSession };
+  const handle = (req, res, routePath, { clientIp, prefixed, hasQueryOrFragment }) => {
+    if (req.method !== 'POST' || hasQueryOrFragment) return false;
+    if (routePath === '/api/rooms') void handleCreateRoom(req, res, clientIp);
+    else if (routePath === '/api/room-session') void handleRoomSession(req, res, clientIp, prefixed);
+    else return false;
+    return true;
+  };
+
+  return { handle, handleCreateRoom, handleRoomSession };
 }

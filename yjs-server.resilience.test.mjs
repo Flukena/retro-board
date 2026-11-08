@@ -45,7 +45,7 @@ test('storage latch requests one fatal drain and retains the first failure', () 
 test('readiness rejects requests during drain', () => {
   let status;
   let body;
-  evaluate(`(() => { ${section("if (req.method === 'GET' && routePath === '/readyz')", "\n  if (req.method === 'POST' && !hasQueryOrFragment && routePath === '/api/rooms')")} })()`, {
+  evaluate(`(() => { ${section("if (req.method === 'GET' && routePath === '/readyz')", "\n  if (roomSessionRoutes.handle(")} })()`, {
     req: { method: 'GET' }, routePath: '/readyz', storageFailure: null, shuttingDown: true,
     res: { writeHead: (value) => { status = value; }, end: (value) => { body = value; } },
   });

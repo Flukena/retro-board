@@ -129,6 +129,18 @@ test('a blob staged during a rotation is deleted, with its usage, when the rotat
   assert.equal(state.bytes, 0);
 }));
 
+test('settleStaged deletes only the staged files that are not kept, with their usage, and can be repeated', () => withBlobs(async ({ blobs, roomLog, store, roomUploadUsage, uploadsDir }) => {
+  const { rotationId } = await roomLog.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
+  const kept = await upload(blobs, { stage: rotationId });
+  const dropped = await upload(blobs, { stage: rotationId });
+  await store.settleStaged(rotationId, [kept.id]);
+  assert.deepEqual(await e2eFiles(uploadsDir), [e2eBlobFilename(HANDLE, kept.id)]);
+  assert.deepEqual(roomUploadUsage.get(DOC), { bytes: BLOB_BYTES, files: 1, active: 0, reservedBytes: 0 });
+  await store.settleStaged(rotationId, [kept.id]);
+  assert.equal(roomUploadUsage.get(DOC).files, 1);
+  assert.notEqual(dropped.id, kept.id);
+}));
+
 test('a staged upload that arrives after its rotation ended is refused and leaves no file or usage', () => withBlobs(async ({ blobs, roomLog, roomUploadUsage, uploadsDir, state }) => {
   const { rotationId } = await roomLog.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
   await roomLog.release(DOC, rotationId);

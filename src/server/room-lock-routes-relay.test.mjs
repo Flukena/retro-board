@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
+import { readdir } from 'node:fs/promises';
+import { join as joinPath } from 'node:path';
 import WebSocket from 'ws';
 import { tempRoot } from '../test-support/relay-harness.mjs';
 import { ORIGIN, PASSWORD, cookiePair, createLockedRoom, lockedRelay, post, signIn } from '../test-support/locked-room-harness.mjs';
@@ -80,11 +82,20 @@ test('a committed rotation closes sockets with 4001, ends old cookies and keys, 
   const begun = await ownerPost(env, room, 'rotate/begin', { oldAuthKey: ROOM_LOCK.authKey, expectedRevision: 0 }, ownerCookie);
   assert.equal(begun.status, STATUS.OK);
   const rotation = await begun.json();
+  const stage = (id) => fetch(`${env.relay.url}/rooms/${room.handle}/e2e-blobs`, {
+    method: 'POST', headers: { origin: ORIGIN, cookie: room.cookie, 'content-type': 'application/octet-stream', 'x-blob-id': id, 'x-blob-stage': rotation.rotationId }, body: BLOB,
+  });
+  const keptId = randomUUID();
+  const droppedId = randomUUID();
+  assert.equal((await stage(keptId)).status, STATUS.CREATED);
+  assert.equal((await stage(droppedId)).status, STATUS.CREATED);
   const stale = await commit(env, room, { ...rotation, rotationId: randomUUID() }, ownerCookie);
   assert.equal(stale.status, 409);
-  const done = await commit(env, room, rotation, ownerCookie);
+  const done = await commit(env, room, rotation, ownerCookie, { keepBlobs: [keptId] });
   assert.equal(done.status, STATUS.NO_CONTENT, env.relay.output());
   assert.deepEqual(await member.closed, { code: KEY_ROTATED_CLOSE, reason: 'key rotated' });
+  const files = (await readdir(joinPath(env.relay.root, 'uploads'))).filter((name) => name.endsWith('.e2e')).sort();
+  assert.deepEqual(files, [blobId, keptId].map((id) => `${room.handle}.${id}.e2e`).sort(), 'the unkept staged file is gone, the old-epoch file stays');
 
   assert.equal(await upgradeStatus(e2eUrl(env.relay, room), room.cookie), STATUS.UNAUTHORIZED, 'old cookie');
   assert.equal((await exchangeStatus(env, room, ROOM_LOCK.authKey)).status, STATUS.FORBIDDEN, 'old authKey');

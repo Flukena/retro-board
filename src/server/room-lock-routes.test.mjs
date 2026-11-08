@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
+import { once } from 'node:events';
 import { createRequire } from 'node:module';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -12,7 +13,8 @@ import { E2ERoomLog, E2E_FROZEN, MAX_FREEZE_TTL_MS } from './e2e-room-log.js';
 import { RoomRegistry } from './relay-room-registry.js';
 import { checkedStorage, durableMetaBatch } from './relay-storage.js';
 import { ROOM_LOCK_META, RoomLockVerifier, WRONG_PASSWORDS_PER_IP_ROOM, decodeLockRecord } from './room-lock.js';
-import { KEY_ROTATED_CLOSE_CODE, MAX_COMMIT_HEADER_BYTES, createRoomLockRoutes } from './room-lock-routes.js';
+import { KEY_ROTATED_CLOSE_CODE, createRoomLockRoutes } from './room-lock-routes.js';
+import { MAX_COMMIT_HEADER_BYTES } from './room-lock-commit-body.js';
 import { createNextRoomKey, createRoomLock, rewrapRoomLock } from '../client/room-lock/e2e-crypto.js';
 import { encodeBase64Url } from '../domain/room-lock-contract.js';
 
@@ -31,6 +33,7 @@ const UNLIMITED = Number.MAX_SAFE_INTEGER;
 const PASSWORD = 'correct horse battery staple';
 const NEXT_PASSWORD = 'another long passphrase 2';
 const HEADER_LENGTH_BYTES = 4;
+const EARLY_RESPONSE_MS = 2000;
 const STATUS = Object.freeze({
   OK: 200, NO_CONTENT: 204, BAD_REQUEST: 400, UNAUTHORIZED: 401, FORBIDDEN: 403, NOT_FOUND: 404, CONFLICT: 409,
   TOO_LARGE: 413, TOO_MANY: 429, UNAVAILABLE: 503,
@@ -42,9 +45,10 @@ const SNAPSHOT = new Uint8Array(64).fill(9);
 const bytesOf = (length, fill = 1) => new Uint8Array(length).fill(fill);
 
 async function fixture(t, { maxBodyBytes = MAX_BODY_BYTES } = {}) {
+  const settled = { calls: [], fail: false };
   const directory = await mkdtemp(join(tmpdir(), 'room-lock-routes-'));
   const ldb = new LeveldbPersistence(directory);
-  t.after(async () => { await ldb.destroy(); await rm(directory, { recursive: true, force: true }); });
+  t.after(async () => { await ldb.destroy().catch(() => {}); await rm(directory, { recursive: true, force: true }); });
   const storage = checkedStorage(ldb, Y);
   const registry = new RoomRegistry({
     persistence: {
@@ -67,7 +71,9 @@ async function fixture(t, { maxBodyBytes = MAX_BODY_BYTES } = {}) {
   const verifier = new RoomLockVerifier();
   const closed = [];
   const routes = createRoomLockRoutes({
-    registry, roomLog, closeRoom: (doc, code, reason) => closed.push({ doc, code, reason }), verifier, accountSessions, accountStore,
+    registry, roomLog,
+    blobStore: { settleStaged: async (...args) => { settled.calls.push(args); if (settled.fail) throw new Error('disk gone'); } },
+    closeRoom: (doc, code, reason) => closed.push({ doc, code, reason }), verifier, accountSessions, accountStore,
     config: { allowedOrigins: [ORIGIN], allowInsecureHttp: false, maxApiBodyBytes: maxBodyBytes },
     unavailable: () => false, onStorageFailure() {},
   });
@@ -102,7 +108,7 @@ async function fixture(t, { maxBodyBytes = MAX_BODY_BYTES } = {}) {
     });
   };
   const storedLock = async (room) => decodeLockRecord(await ldb.getMeta(room.docName, ROOM_LOCK_META));
-  return { registry, roomLog, verifier, ldb, flaky, timers, staged, closed, signIn, createRoom, postJson, postCommit, storedLock };
+  return { directory, settled, base, registry, roomLog, verifier, ldb, flaky, timers, staged, closed, signIn, createRoom, postJson, postCommit, storedLock };
 }
 
 async function lockedRoom(t) {
@@ -232,6 +238,7 @@ test('commit swaps snapshot, lock and keys in one step, closes sockets with 4001
   await f.roomLog.append(f.room.docName, bytesOf(5));
   const oldBlob = randomUUID();
   await f.roomLog.addBlob(f.room.docName, { id: oldBlob, bytes: 10, epoch: 0 });
+  const createdAt = (await f.storedLock(f.room)).createdAt;
   const rotation = await begin(f);
   const keptBlob = await stageBlob(f, rotation);
   const response = await f.postCommit(f.room, commitHeader(rotation, { keepBlobs: [keptBlob] }), SNAPSHOT, f.owner.cookie);
@@ -241,7 +248,8 @@ test('commit swaps snapshot, lock and keys in one step, closes sockets with 4001
   assert.deepEqual([stored.keyEpoch, stored.lockRevision, stored.ownerAccountId], [1, 1, f.owner.account.id]);
   assert.deepEqual(f.registry.lockFor(f.room.docName), stored);
   assert.equal(stored.verifier, NEXT_KEY.lock.verifier);
-  assert.equal(stored.createdAt, f.registry.lockFor(f.room.docName).createdAt);
+  assert.equal(stored.createdAt, createdAt, 'createdAt is kept');
+  assert.deepEqual(f.settled.calls, [[rotation.rotationId, [keptBlob]]], 'discarded staged files are settled after the commit');
   assert.equal(f.verifier.check(IP, f.room.docName, stored, NEXT_KEY.authKey), 'ok');
   assert.equal(f.verifier.check(IP, f.room.docName, stored, ROOM_LOCK.authKey), 'wrong');
   const state = await f.roomLog.open(f.room.docName);
@@ -351,4 +359,76 @@ test('a password change that landed first makes the rotation begun for the old r
   assert.equal(password.status, STATUS.OK);
   assert.equal(started.status, STATUS.CONFLICT);
   await f.roomLog.append(f.room.docName, bytesOf(1));
+});
+
+test('a staged-file cleanup failure after a durable commit does not fail the 204', async (t) => {
+  const f = await lockedRoom(t);
+  f.settled.fail = true;
+  const rotation = await begin(f);
+  assert.equal((await f.postCommit(f.room, commitHeader(rotation), SNAPSHOT, f.owner.cookie)).status, STATUS.NO_CONTENT);
+  assert.equal((await f.storedLock(f.room)).keyEpoch, 1);
+});
+
+test('the password route has its own 1 KiB cap even when the shared API cap is larger', async (t) => {
+  const f = await fixture(t, { maxBodyBytes: 16 * 1024 });
+  const owner = await f.signIn('owner@example.com');
+  const room = await f.createRoom(owner, ROOM_LOCK);
+  const change = await rewrapRoomLock({ currentPassword: PASSWORD, lock: ROOM_LOCK.lock, newPassword: NEXT_PASSWORD });
+  const padded = { oldAuthKey: change.oldAuthKey, expectedRevision: 0, lock: change.lock, pad: 'x'.repeat(1024) };
+  assert.equal((await f.postJson(room, 'password', padded, owner.cookie)).status, STATUS.TOO_LARGE);
+  const plain = { oldAuthKey: change.oldAuthKey, expectedRevision: 0, lock: change.lock };
+  assert.equal((await f.postJson(room, 'password', plain, owner.cookie)).status, STATUS.OK);
+});
+
+// A chunked request that never ends: the refusal must arrive while the client is still "sending".
+async function earlyStatus(f, room, ownerCookie, chunks) {
+  const url = new URL(`${f.base}/api/rooms/${room.handle}/lock/rotate/commit`);
+  const req = http.request(url, { method: 'POST', headers: { origin: ORIGIN, cookie: ownerCookie, 'content-type': 'application/octet-stream', 'transfer-encoding': 'chunked' } });
+  req.on('error', () => {});
+  const responded = once(req, 'response');
+  for (const chunk of chunks) req.write(chunk);
+  const timeout = new Promise((_, reject) => { setTimeout(() => reject(new Error('no early response')), EARLY_RESPONSE_MS); });
+  const [response] = await Promise.race([responded, timeout]);
+  response.resume();
+  req.destroy();
+  return response.statusCode;
+}
+
+const lengthPrefix = (length) => { const prefix = Buffer.alloc(HEADER_LENGTH_BYTES); prefix.writeUInt32BE(length); return prefix; };
+
+test('a commit with a bad header length, header or oversized snapshot is refused before the body ends', async (t) => {
+  const f = await lockedRoom(t);
+  const rotation = await begin(f);
+  const header = Buffer.from(JSON.stringify(commitHeader(rotation)));
+  assert.equal(await earlyStatus(f, f.room, f.owner.cookie, [lengthPrefix(MAX_COMMIT_HEADER_BYTES + 1)]), STATUS.TOO_LARGE);
+  const garbage = Buffer.from('{not json');
+  assert.equal(await earlyStatus(f, f.room, f.owner.cookie, [lengthPrefix(garbage.length), garbage]), STATUS.BAD_REQUEST);
+  const huge = Buffer.alloc(f.roomLog.maxSnapshotBytes + 1, 1);
+  assert.equal(await earlyStatus(f, f.room, f.owner.cookie, [lengthPrefix(header.length), header, huge]), STATUS.TOO_LARGE);
+  assert.equal((await f.storedLock(f.room)).keyEpoch, 0);
+});
+
+test('a crash after the durable commit batch and before publish reopens to one consistent new state', async (t) => {
+  const f = await lockedRoom(t);
+  await f.roomLog.append(f.room.docName, bytesOf(5));
+  const oldBlob = randomUUID();
+  await f.roomLog.addBlob(f.room.docName, { id: oldBlob, bytes: 10, epoch: 0 });
+  const rotation = await begin(f);
+  const keptBlob = await stageBlob(f, rotation);
+  f.registry.publishLock = () => { throw new Error('crash before publish'); };
+  const response = await f.postCommit(f.room, commitHeader(rotation, { keepBlobs: [keptBlob] }), SNAPSHOT, f.owner.cookie);
+  assert.equal(response.status, STATUS.UNAVAILABLE);
+  assert.deepEqual(f.closed, []);
+  await f.ldb.destroy();
+  const reopened = new LeveldbPersistence(f.directory);
+  t.after(() => reopened.destroy());
+  const lock = decodeLockRecord(await reopened.getMeta(f.room.docName, ROOM_LOCK_META));
+  assert.deepEqual([lock.keyEpoch, lock.lockRevision, lock.verifier], [1, 1, NEXT_KEY.lock.verifier]);
+  const log = new E2ERoomLog({ ldb: reopened, maxRoomBytes: MAX_ROOM_BYTES, reserveStore: () => () => {}, hasCapacity: () => true });
+  const state = await log.open(f.room.docName);
+  assert.deepEqual(state.updates, []);
+  assert.deepEqual([state.snapshot.baseSeq, [...state.snapshot.bytes]], [1, [...SNAPSHOT]]);
+  const blobs = Object.fromEntries(state.blobs.map((entry) => [entry.id, entry]));
+  assert.ok(blobs[oldBlob].retiredAt !== undefined);
+  assert.equal(blobs[keptBlob].stagedFor, null);
 });

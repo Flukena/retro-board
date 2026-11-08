@@ -98,6 +98,16 @@ export class E2EBlobStore {
     this.#staged.delete(rotationId);
   }
 
+  /**
+   * After a durable rotation commit: deletes the files staged for `rotationId` that were not kept, then forgets the
+   * rotation. A failed run keeps the record, so calling again retries.
+   */
+  async settleStaged(rotationId, keepIds) {
+    const keep = new Set(keepIds);
+    await this.#removeAll((this.#staged.get(rotationId) ?? []).filter(({ id }) => !keep.has(id)));
+    this.#staged.delete(rotationId);
+  }
+
   async discardTemp(tempPath) { await this.#unlinkQuietly(tempPath); }
 
   /** Unlinks a blob file that was never counted (a failed upload). */
