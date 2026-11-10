@@ -1,5 +1,5 @@
 // Shared Playwright helpers for two-participant board live checks
-// (retro-outcomes-live-check.mjs, facilitation-live-check.mjs, account-live-check.mjs).
+// (retro-outcomes-live-check.mjs, facilitation-live-check.mjs, account-live-check.mjs, room-lock-live-check.mjs).
 import { execFileSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import { mkdir, stat, writeFile } from 'node:fs/promises';
@@ -36,10 +36,14 @@ export async function prepareDataVolumeOutput(out, roots = DATA_VOLUME_ROOTS) {
 
 export const BASE_LABELS = {
   en: { create: 'Create', namePlaceholder: 'e.g. "Fluke"', nameConfirm: 'Enter room', sticky: 'Double-click to edit',
-    more: 'More', reveal: 'Off: hide in the normal UI (not encrypted)' },
+    more: 'More', reveal: 'Off: hide in the normal UI (not encrypted)', signIn: 'Sign in with Google' },
   th: { create: 'สร้างห้อง', namePlaceholder: 'เช่น "ฟลุค"', nameConfirm: 'เข้าห้อง', sticky: 'ดับเบิลคลิกเพื่อแก้ไข', more: 'เพิ่มเติม',
-    reveal: 'ปิด: ซ่อนในหน้าจอปกติ (ไม่ได้เข้ารหัส)' },
+    reveal: 'ปิด: ซ่อนในหน้าจอปกติ (ไม่ได้เข้ารหัส)', signIn: 'เข้าสู่ระบบด้วย Google' },
 };
+export const UNDO_KEY = 'ControlOrMeta+z';
+export const REDO_KEY = 'ControlOrMeta+Shift+z';
+const UNDO_PRESS_LIMIT = 12;
+const UNDO_SETTLE_TIMEOUT_MS = 2_000;
 
 export async function loadPlaywright() {
   const dir = process.env.PLAYWRIGHT_MODULE || join(execFileSync('npm', ['root', '-g'], { encoding: 'utf8' }).trim(), 'playwright');
@@ -55,7 +59,7 @@ export async function participant(browser, lang, report, name) {
   const page = await context.newPage();
   page.setDefaultTimeout(ACTION_TIMEOUT_MS);
   page.on('pageerror', error => report.pageErrors.push({ name, message: error.message }));
-  page.on('console', message => { if (message.type() === 'error') report.consoleErrors.push({ name, text: message.text() }); });
+  page.on('console', message => { if (message.type() === 'error') report.consoleErrors.push({ name, text: message.text(), url: message.location().url }); });
   return page;
 }
 
@@ -75,6 +79,48 @@ export async function addSticky(page, lang, text, position) {
   await editor.fill(text);
   await editor.press('Escape');
   await page.getByText(text, { exact: true }).waitFor();
+}
+
+// New stickies start private, so each one is revealed for the other participant.
+export async function addSharedSticky(page, lang, text, position) {
+  await addSticky(page, lang, text, position);
+  await page.getByTitle(BASE_LABELS[lang].reveal, { exact: true }).click();
+}
+
+export const waitForTextOn = (pages, text, state = 'visible') => Promise.all(
+  pages.map(page => page.getByText(text, { exact: true }).waitFor({ state, timeout: SYNC_TIMEOUT_MS })),
+);
+
+/** Presses undo until `text` is gone; returns how many presses it took, for the matching redo. */
+export async function undoUntilHidden(page, text) {
+  for (let presses = 1; presses <= UNDO_PRESS_LIMIT; presses += 1) {
+    await page.keyboard.press(UNDO_KEY);
+    try {
+      await page.getByText(text, { exact: true }).waitFor({ state: 'hidden', timeout: UNDO_SETTLE_TIMEOUT_MS });
+      return presses;
+    } catch (error) {
+      if (error.name !== 'TimeoutError') throw error;
+    }
+  }
+  throw new Error(`"${text}" still shows after ${UNDO_PRESS_LIMIT} undo presses.`);
+}
+
+/** Opens the landing page and waits for its Create button in either language. */
+export async function openLanding(page, baseUrl) {
+  await page.goto(baseUrl);
+  await page.getByRole('button', { name: BASE_LABELS.en.create, exact: true })
+    .or(page.getByRole('button', { name: BASE_LABELS.th.create, exact: true })).first().waitFor();
+}
+
+export const signInLink = (page, lang) => page.getByRole('link', { name: BASE_LABELS[lang].signIn, exact: true });
+/** The fake Google consent page's buttons (scripts/fake-google-oidc.mjs). */
+export const FAKE_GOOGLE_DECISION = Object.freeze({ APPROVE: '#approve', CANCEL: '#cancel' });
+
+/** Goes through the fake Google consent page with `decision` and returns to the landing page. */
+export async function visitStub(page, baseUrl, decision) {
+  await signInLink(page, 'en').click();
+  await page.locator(decision).click();
+  await page.waitForURL((url) => url.origin === new URL(baseUrl).origin);
 }
 
 const EMPTY_CLICK_PX = { x: 200, y: 200 };

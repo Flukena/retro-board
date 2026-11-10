@@ -21,17 +21,15 @@
  */
 import assert from 'node:assert/strict';
 import { FAKE_GOOGLE_PROFILE } from './fake-google-oidc.mjs';
-import { BASE_LABELS, SYNC_TIMEOUT_MS, addSticky, enter, participant, runLiveCheck, shot, step } from './board-live-helpers.mjs';
+import {
+  BASE_LABELS, FAKE_GOOGLE_DECISION, REDO_KEY, SYNC_TIMEOUT_MS, addSharedSticky, enter, openLanding, participant, runLiveCheck,
+  shot, signInLink, step, undoUntilHidden, visitStub, waitForTextOn,
+} from './board-live-helpers.mjs';
 
 const BOARD_URL_PATTERN = /\/b\/[A-Za-z0-9_-]+#[A-Za-z0-9_-]+$/;
-const APPROVE_SELECTOR = '#approve';
-const CANCEL_SELECTOR = '#cancel';
+const { APPROVE: APPROVE_SELECTOR, CANCEL: CANCEL_SELECTOR } = FAKE_GOOGLE_DECISION;
 const AUTH_ERROR_PARAM = 'auth_error';
 const PLAN_PRO = 'pro';
-const UNDO_KEY = 'ControlOrMeta+z';
-const REDO_KEY = 'ControlOrMeta+Shift+z';
-const UNDO_PRESS_LIMIT = 12;
-const UNDO_SETTLE_TIMEOUT_MS = 2_000;
 const STICKY_A_PX = { x: 480, y: 360 };
 const STICKY_B_PX = { x: 960, y: 360 };
 const NAME_A = 'Ada';
@@ -39,9 +37,8 @@ const GUEST_NAME_PATTERN = /^Guest-\d{4}$/;
 const PREFILL_POLL_MS = 100;
 const NAME_B = 'บี';
 const LABELS = {
-  en: { signIn: 'Sign in with Google', menu: 'Account menu', free: 'Free plan', pro: 'Pro plan',
+  en: { menu: 'Account menu', free: 'Free plan', pro: 'Pro plan',
     signOutAll: 'Sign out everywhere', delete: 'Delete account', cancelled: 'Sign-in was cancelled.' },
-  th: { signIn: 'เข้าสู่ระบบด้วย Google' },
 };
 
 function maintainerSettings() {
@@ -64,7 +61,6 @@ async function grantPlan(plan) {
   assert.equal((await changed.json()).plan, plan);
 }
 
-const sameOrigin = (baseUrl) => (url) => url.origin === new URL(baseUrl).origin;
 const namePrompt = (page, lang) => page.getByPlaceholder(BASE_LABELS[lang].namePlaceholder, { exact: true });
 
 // The first-visit name dialog offers the Google name once the account check returns.
@@ -81,7 +77,6 @@ async function waitForNameDraft(page, lang, matches) {
   return value;
 }
 const accountTrigger = (page) => page.getByRole('button', { name: LABELS.en.menu, exact: true });
-const signInLink = (page, lang) => page.getByRole('link', { name: LABELS[lang].signIn, exact: true });
 
 async function expectSignedIn(page, planLabel) {
   const trigger = accountTrigger(page);
@@ -94,45 +89,9 @@ async function expectSignedOut(page) {
   assert.equal(await accountTrigger(page).count(), 0, 'no account menu while signed out');
 }
 
-/** Goes through the stub's consent page and returns to the landing page. */
-async function visitStub(page, baseUrl, decision) {
-  await signInLink(page, 'en').click();
-  await page.locator(decision).click();
-  await page.waitForURL(sameOrigin(baseUrl));
-}
-
-async function openLanding(page, baseUrl) {
-  await page.goto(baseUrl);
-  await page.getByRole('button', { name: BASE_LABELS.en.create, exact: true })
-    .or(page.getByRole('button', { name: BASE_LABELS.th.create, exact: true })).first().waitFor();
-}
-
 async function chooseFromMenu(page, label) {
   await accountTrigger(page).click();
   await page.getByRole('button', { name: label, exact: true }).click();
-}
-
-async function undoUntilHidden(page, text) {
-  for (let presses = 1; presses <= UNDO_PRESS_LIMIT; presses += 1) {
-    await page.keyboard.press(UNDO_KEY);
-    try {
-      await page.getByText(text, { exact: true }).waitFor({ state: 'hidden', timeout: UNDO_SETTLE_TIMEOUT_MS });
-      return presses;
-    } catch (error) {
-      if (error.name !== 'TimeoutError') throw error;
-    }
-  }
-  throw new Error(`"${text}" still shows after ${UNDO_PRESS_LIMIT} undo presses.`);
-}
-
-const waitForTextOn = (pages, text, state = 'visible') => Promise.all(
-  pages.map(page => page.getByText(text, { exact: true }).waitFor({ state, timeout: SYNC_TIMEOUT_MS })),
-);
-
-// New stickies start private, so each one is revealed for the other participant.
-async function addSharedSticky(page, lang, text, position) {
-  await addSticky(page, lang, text, position);
-  await page.getByTitle(BASE_LABELS[lang].reveal, { exact: true }).click();
 }
 
 async function accountSteps({ a, b, report, browser, baseUrl }) {
