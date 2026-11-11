@@ -14,12 +14,14 @@ import { readRelayConfig } from './relay-config.js';
 import { RelayWsTraffic, POLICY_CLOSE_CODE, SESSION_EXPIRED_REASON } from './relay-ws-traffic.js';
 import { ROOM_LOCK_META, encodeLockRecord } from './room-lock-record.js';
 import { lockRecord } from './room-lock-fixtures.mjs';
+import { KEY_ROTATED_CLOSE_CODE, KEY_ROTATED_REASON } from '../domain/room-lock-contract.js';
 import { sharedReservations } from '../test-support/store-reservations.mjs';
 
 const require = createRequire(import.meta.url);
 const { LeveldbPersistence } = require('y-leveldb');
 
 const DOC = 'yjs/board-e2e-protocol-room';
+const EPOCH = lockRecord().keyEpoch;
 const IP = '203.0.113.9';
 const MAX_ROOM_BYTES = 4096;
 const MAX_FRAME_BYTES = 64 * 1024;
@@ -29,6 +31,8 @@ const SERVER_ERROR_CLOSE = 1011;
 const FREEZE_TTL_MS = 60_000;
 const DRAIN_APPENDS = 200;
 const SESSION_LIFETIME_MS = 150;
+// Long enough for a frame sent on loopback to reach the relay's socket buffer.
+const SOCKET_FLUSH_MS = 50;
 const GENEROUS = '100000';
 const quietLogger = { log() {}, warn() {} };
 const bytes = (length, fill = 1) => new Uint8Array(length).fill(fill);
@@ -41,7 +45,7 @@ const generousConfig = (env = {}) => readRelayConfig({
 });
 
 async function fixture(t, {
-  config = generousConfig(), expiresAt = null, prepare = () => {}, maxRoomBytes = MAX_ROOM_BYTES, maxAppendBytes = MAX_FRAME_BYTES,
+  config = generousConfig(), expiresAt = null, keyEpoch = EPOCH, prepare = () => {}, maxRoomBytes = MAX_ROOM_BYTES, maxAppendBytes = MAX_FRAME_BYTES,
   reserveStore = () => () => {},
 } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'e2e-relay-protocol-'));
@@ -57,7 +61,7 @@ async function fixture(t, {
   });
   const server = http.createServer();
   server.on('upgrade', (req, socket, head) => {
-    req.wsSecurityContext = { docName: DOC, clientIp: IP, expiresAt };
+    req.wsSecurityContext = { docName: DOC, clientIp: IP, expiresAt, keyEpoch };
     relay.handleUpgrade(req, socket, head);
   });
   server.listen(0, '127.0.0.1');
@@ -139,6 +143,67 @@ test('an append during a freeze is REJECT FROZEN with its clientRef; release sen
   await writer.until(() => writer.has(E2E_FRAME.ACK));
   assert.deepEqual(writer.ofType(E2E_FRAME.ACK), [{ type: E2E_FRAME.ACK, seq: 1, clientRef: 41 }]);
   assert.deepEqual(f.touched, [DOC], 'activity is touched on the successful append only');
+});
+
+// Resolves once the relay has handed an append to the room log (it is queued in the room's chain).
+const appendHandedToLog = (roomLog) => new Promise((resolve) => {
+  const append = roomLog.append.bind(roomLog);
+  roomLog.append = (...args) => { resolve(); return append(...args); };
+});
+
+const NEXT_LOCK = lockRecord({ keyEpoch: EPOCH + 1 });
+const commitEmpty = (roomLog, rotationId) => roomLog.commitRotation(DOC, {
+  rotationId, expectedHead: 0, knownSnapshotBase: 0, verify: approve, snapshot: bytes(2), lockRecord: NEXT_LOCK, blobInventory: [],
+});
+
+const assertNothingStoredOrAcknowledged = async (f, writer) => {
+  const reader = new E2ERoomLog({ ldb: f.ldb, maxRoomBytes: MAX_ROOM_BYTES, reserveStore: () => () => {} });
+  const state = await reader.open(DOC);
+  assert.equal(state.head, 0);
+  assert.deepEqual(state.updates, []);
+  assert.equal(writer.has(E2E_FRAME.ACK), false, 'the entry stays pending on the page');
+  assert.equal(writer.has(E2E_FRAME.REJECT), false);
+};
+
+test('an old-epoch append queued behind a rotation commit closes its socket 4001 and is never stored or ACKed', async (t) => {
+  const f = await fixture(t);
+  const writer = await Client.join(f);
+  const { rotationId } = await f.roomLog.freeze(DOC, FREEZE_TTL_MS, { verify: approve });
+  const resume = stallStorage(f.ldb);
+  const commit = commitEmpty(f.roomLog, rotationId);
+  const handed = appendHandedToLog(f.roomLog);
+  writer.append(7, bytes(4));
+  await within(handed);
+  resume();
+  await commit;
+  assert.deepEqual(await within(writer.closed), { code: KEY_ROTATED_CLOSE_CODE, reason: KEY_ROTATED_REASON });
+  await assertNothingStoredOrAcknowledged(f, writer);
+});
+
+test('an old-epoch append arriving after the commit, before the socket is closed, closes it 4001 unstored', async (t) => {
+  const f = await fixture(t);
+  const writer = await Client.join(f);
+  const { rotationId } = await f.roomLog.freeze(DOC, FREEZE_TTL_MS, { verify: approve });
+  await commitEmpty(f.roomLog, rotationId);
+  writer.append(7, bytes(4));
+  assert.deepEqual(await within(writer.closed), { code: KEY_ROTATED_CLOSE_CODE, reason: KEY_ROTATED_REASON });
+  await assertNothingStoredOrAcknowledged(f, writer);
+});
+
+test('a frame that arrives while the relay is closing the socket is ignored', async (t) => {
+  const f = await fixture(t);
+  const writer = await Client.join(f);
+  const [serverSide] = f.relay.wss.clients;
+  const handed = appendHandedToLog(f.roomLog);
+  serverSide._socket.pause();
+  writer.append(7, bytes(4));
+  await new Promise((resolve) => { setTimeout(resolve, SOCKET_FLUSH_MS); });
+  f.relay.closeRoom(DOC, KEY_ROTATED_CLOSE_CODE, KEY_ROTATED_REASON);
+  serverSide._socket.resume();
+  assert.equal((await within(writer.closed)).code, KEY_ROTATED_CLOSE_CODE);
+  const outcome = await Promise.race([handed.then(() => 'handed to the log'), f.roomLog.whenIdle().then(() => 'ignored')]);
+  assert.equal(outcome, 'ignored');
+  await assertNothingStoredOrAcknowledged(f, writer);
 });
 
 test('an append over the room quota is REJECT QUOTA with its clientRef and is not fanned out', async (t) => {
@@ -283,7 +348,7 @@ test('a joiner behind a multi-chunk backlog and a live stream sees every seq onc
   const BACKLOG = 1000;
   const LIVE = 200;
   const f = await fixture(t, { maxRoomBytes: 1024 * 1024 });
-  for (let i = 0; i < BACKLOG; i += 1) await f.roomLog.append(DOC, bytes(16, i % 255));
+  for (let i = 0; i < BACKLOG; i += 1) await f.roomLog.append(DOC, bytes(16, i % 255), EPOCH);
   const writer = await Client.join(f);
   for (let ref = 1; ref <= LIVE; ref += 1) writer.append(ref, bytes(16));
   const joiner = await Client.join(f);

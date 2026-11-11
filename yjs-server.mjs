@@ -1365,7 +1365,7 @@ server.on('upgrade', (req, socket, head) => {
     expiresAt,
     expectedAwarenessClientId: roomTarget?.awarenessClientId ?? null,
     supportsQuota: roomTarget?.supportsQuota ?? false,
-    e2e,
+    e2e, keyEpoch: roomKeyEpoch(docName),
   };
   if (e2e) {
     e2eRelay.handleUpgrade(req, socket, head);

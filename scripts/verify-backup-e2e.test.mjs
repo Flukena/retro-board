@@ -17,6 +17,7 @@ const { LeveldbPersistence } = require('y-leveldb');
 const Y = require('yjs');
 
 const DOC = 'room-doc-1';
+const EPOCH = lockRecord().keyEpoch;
 const HANDLE = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 const BLOB_A = '11111111-1111-4111-8111-111111111111';
 const BLOB_B = '22222222-2222-4222-8222-222222222222';
@@ -51,8 +52,8 @@ async function seedRoom({ ldb, log, uploads }, { stagedBlob = false } = {}) {
   await ldb.storeUpdate(DOC, Y.encodeStateAsUpdate(new Y.Doc()));
   await ldb.setMeta(DOC, ROOM_LOCK_META, encodeLockRecord(lockRecord()));
   await ldb.setMeta(DOC, ROOM_HANDLE_META, HANDLE);
-  for (let i = 0; i < 4; i += 1) await log.append(DOC, bytesOf(4, i));
-  await log.snapshot(DOC, 2, bytesOf(6, 9), 0);
+  for (let i = 0; i < 4; i += 1) await log.append(DOC, bytesOf(4, i), EPOCH);
+  await log.snapshot(DOC, 2, bytesOf(6, 9), 0, EPOCH);
   await log.addBlob(DOC, { id: BLOB_A, bytes: BLOB_BYTES, epoch: 1 });
   await writeFile(blobPath(uploads, BLOB_A), bytesOf(BLOB_BYTES));
   if (stagedBlob) {

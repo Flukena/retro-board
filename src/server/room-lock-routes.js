@@ -1,5 +1,5 @@
 import {
-  KEY_ROTATED_CLOSE_CODE, hasExactKeys, isCounter, parseAuthKey, parseLockParams,
+  KEY_ROTATED_CLOSE_CODE, KEY_ROTATED_REASON, hasExactKeys, isCounter, parseAuthKey, parseLockParams,
 } from '../domain/room-lock-contract.js';
 import { authenticateAccount } from './auth-session.js';
 import {
@@ -10,8 +10,7 @@ import { isBlobId, readCommitBody } from './room-lock-commit-body.js';
 import { RETRY_AFTER_SHORT_SECONDS } from './relay-config.js';
 import { CORRUPT_LOCK } from './room-lock-record.js';
 
-export { KEY_ROTATED_CLOSE_CODE };
-export const KEY_ROTATED_REASON = 'key rotated';
+export { KEY_ROTATED_CLOSE_CODE, KEY_ROTATED_REASON };
 export const MAX_PASSWORD_BODY_BYTES = 1024;
 const OCTET_STREAM = 'application/octet-stream';
 const LOCK_LIMITED = 'LOCK_LIMITED';

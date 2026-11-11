@@ -5,7 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  E2ERoomLog, E2E_BUSY, E2E_CORRUPT, E2E_FROZEN, E2E_LOCK_MISMATCH, E2E_QUOTA, E2E_ROTATION_STALE, E2E_STALE_SNAPSHOT,
+  E2ERoomLog, E2E_BUSY, E2E_CORRUPT, E2E_EPOCH_STALE, E2E_FROZEN, E2E_LOCK_MISMATCH, E2E_QUOTA, E2E_ROTATION_STALE, E2E_STALE_SNAPSHOT,
   MAX_PENDING_OPS_PER_ROOM, MAX_FREEZE_TTL_MS, E2E_BLOB_GRACE_MS, E2E_MAX_LOG_ENTRIES, verifySnapshotDigest,
   E2E_SNAPSHOT_RESERVATION_OVERHEAD_BYTES, measureSnapshotReservationOverheadBytes,
 } from './e2e-room-log.js';
@@ -20,6 +20,7 @@ const { LeveldbPersistence, keyEncoding } = require('y-leveldb');
 const { encodeAny } = require('lib0/buffer');
 
 const DOC = 'room-doc-1';
+const EPOCH = lockRecord().keyEpoch;
 const MAX_ROOM_BYTES = 1000;
 const FREEZE_TTL_MS = 120_000;
 const GRACE_MS = 86_400_000;
@@ -59,7 +60,7 @@ const e2eKeys = async (ldb) => [...(await ldb.getMetas(DOC)).keys()].filter((k) 
 const storedLock = async (ldb) => decodeLockRecord(await ldb.getMeta(DOC, ROOM_LOCK_META));
 
 test('appends get contiguous seqs and reopen keeps numeric order (9 before 10)', () => withLog(async ({ log, make }) => {
-  for (let i = 1; i <= 12; i += 1) assert.deepEqual(await log.append(DOC, bytesOf(2, i)), { seq: i });
+  for (let i = 1; i <= 12; i += 1) assert.deepEqual(await log.append(DOC, bytesOf(2, i), EPOCH), { seq: i });
   const reopened = await make().open(DOC);
   assert.equal(reopened.head, 12);
   assert.equal(reopened.snapshot, null);
@@ -69,91 +70,91 @@ test('appends get contiguous seqs and reopen keeps numeric order (9 before 10)',
 }));
 
 test('concurrent appends get contiguous seqs', () => withLog(async ({ log }) => {
-  const results = await Promise.all(Array.from({ length: 20 }, (_, i) => log.append(DOC, bytesOf(1, i))));
+  const results = await Promise.all(Array.from({ length: 20 }, (_, i) => log.append(DOC, bytesOf(1, i), EPOCH)));
   assert.deepEqual(results.map((r) => r.seq).sort((a, b) => a - b), Array.from({ length: 20 }, (_, i) => i + 1));
 }));
 
 test('snapshot prunes covered updates, keeps later ones, and stale snapshots fail', () => withLog(async ({ log, make }) => {
-  for (let i = 0; i < 5; i += 1) await log.append(DOC, bytesOf(10));
-  await log.snapshot(DOC, 3, bytesOf(7, 9), 0);
+  for (let i = 0; i < 5; i += 1) await log.append(DOC, bytesOf(10), EPOCH);
+  await log.snapshot(DOC, 3, bytesOf(7, 9), 0, EPOCH);
   const state = await make().open(DOC);
   assert.equal(state.snapshot.baseSeq, 3);
   assert.deepEqual([...state.snapshot.bytes], [...bytesOf(7, 9)]);
   assert.deepEqual(state.updates.map((u) => u.seq), [4, 5]);
   assert.equal(await log.sizeOf(DOC), 7 + 20);
-  await rejectsWith(log.snapshot(DOC, 3, bytesOf(1), 3), E2E_STALE_SNAPSHOT);
-  await rejectsWith(log.snapshot(DOC, 2, bytesOf(1), 3), E2E_STALE_SNAPSHOT);
-  await rejectsWith(log.snapshot(DOC, 6, bytesOf(1), 3), E2E_STALE_SNAPSHOT);
-  assert.equal((await log.append(DOC, bytesOf(1))).seq, 6);
+  await rejectsWith(log.snapshot(DOC, 3, bytesOf(1), 3, EPOCH), E2E_STALE_SNAPSHOT);
+  await rejectsWith(log.snapshot(DOC, 2, bytesOf(1), 3, EPOCH), E2E_STALE_SNAPSHOT);
+  await rejectsWith(log.snapshot(DOC, 6, bytesOf(1), 3, EPOCH), E2E_STALE_SNAPSHOT);
+  assert.equal((await log.append(DOC, bytesOf(1), EPOCH)).seq, 6);
 }));
 
 test('a snapshot whose writer has not applied the stored snapshot is STALE and leaves it in place', () => withLog(async ({ log, make }) => {
-  for (let i = 0; i < 4; i += 1) await log.append(DOC, bytesOf(10));
-  await log.snapshot(DOC, 2, bytesOf(5, 1), 0);
-  await rejectsWith(log.snapshot(DOC, 4, bytesOf(5, 2), 0), E2E_STALE_SNAPSHOT);
-  await rejectsWith(log.snapshot(DOC, 4, bytesOf(5, 2), 3), E2E_STALE_SNAPSHOT);
+  for (let i = 0; i < 4; i += 1) await log.append(DOC, bytesOf(10), EPOCH);
+  await log.snapshot(DOC, 2, bytesOf(5, 1), 0, EPOCH);
+  await rejectsWith(log.snapshot(DOC, 4, bytesOf(5, 2), 0, EPOCH), E2E_STALE_SNAPSHOT);
+  await rejectsWith(log.snapshot(DOC, 4, bytesOf(5, 2), 3, EPOCH), E2E_STALE_SNAPSHOT);
   const kept = await make().open(DOC);
   assert.equal(kept.snapshot.baseSeq, 2);
   assert.deepEqual([...kept.snapshot.bytes], [...bytesOf(5, 1)]);
   assert.deepEqual(kept.updates.map((u) => u.seq), [3, 4]);
-  await log.snapshot(DOC, 4, bytesOf(5, 2), 2);
+  await log.snapshot(DOC, 4, bytesOf(5, 2), 2, EPOCH);
   assert.equal((await make().open(DOC)).snapshot.baseSeq, 4);
 }));
 
 test('a quota failure leaves storage untouched and the reservation is released', () => withLog(async ({ log, ldb, calls }) => {
-  await log.append(DOC, bytesOf(600));
+  await log.append(DOC, bytesOf(600), EPOCH);
   const before = await ldb.getMetas(DOC);
-  await rejectsWith(log.append(DOC, bytesOf(401)), E2E_QUOTA);
-  await rejectsWith(log.snapshot(DOC, 1, bytesOf(MAX_ROOM_BYTES + 1), 0), E2E_QUOTA);
+  await rejectsWith(log.append(DOC, bytesOf(401), EPOCH), E2E_QUOTA);
+  await rejectsWith(log.snapshot(DOC, 1, bytesOf(MAX_ROOM_BYTES + 1), 0, EPOCH), E2E_QUOTA);
   assert.deepEqual([...(await ldb.getMetas(DOC)).entries()], [...before.entries()]);
   assert.equal(calls.released, 0, 'every taken reservation was released');
-  assert.equal((await log.append(DOC, bytesOf(400))).seq, 2);
+  assert.equal((await log.append(DOC, bytesOf(400), EPOCH)).seq, 2);
 }));
 
 test('a capacity refusal from reserveStore leaves storage untouched', () => withLog(async ({ log, ldb }) => {
   const before = await e2eKeys(ldb);
-  await rejectsWith(log.append(DOC, bytesOf(5)), 'DB_FULL');
+  await rejectsWith(log.append(DOC, bytesOf(5), EPOCH), 'DB_FULL');
   assert.deepEqual(await e2eKeys(ldb), before);
 }, { reserveStore: () => { throw Object.assign(new Error('full'), { code: 'DB_FULL' }); } }));
 
 test('a subscriber joining during appends sees every seq exactly once', () => withLog(async ({ log }) => {
-  const pending = Array.from({ length: 10 }, () => log.append(DOC, bytesOf(1)));
+  const pending = Array.from({ length: 10 }, () => log.append(DOC, bytesOf(1), EPOCH));
   const live = [];
   const joined = log.subscribeAfterReplay(DOC, (entry) => live.push(entry));
-  const more = Array.from({ length: 10 }, () => log.append(DOC, bytesOf(1)));
+  const more = Array.from({ length: 10 }, () => log.append(DOC, bytesOf(1), EPOCH));
   const { state, unsubscribe } = await joined;
   await Promise.all([...pending, ...more]);
   const seen = [...state.updates.map((u) => u.seq), ...live.filter((e) => e.kind === 'update').map((e) => e.seq)];
   assert.deepEqual(seen.sort((a, b) => a - b), Array.from({ length: 20 }, (_, i) => i + 1));
   unsubscribe();
-  await log.append(DOC, bytesOf(1));
+  await log.append(DOC, bytesOf(1), EPOCH);
   assert.equal(live.length + state.updates.length, 20, 'unsubscribed listener hears nothing more');
 }));
 
 test('snapshots reach subscribers', () => withLog(async ({ log }) => {
   const live = [];
   await log.subscribeAfterReplay(DOC, (entry) => live.push(entry));
-  await log.append(DOC, bytesOf(2));
-  await log.snapshot(DOC, 1, bytesOf(3), 0);
+  await log.append(DOC, bytesOf(2), EPOCH);
+  await log.snapshot(DOC, 1, bytesOf(3), 0, EPOCH);
   assert.deepEqual(live.map((e) => e.kind), ['update', 'snapshot']);
   assert.equal(live[1].baseSeq, 1);
 }));
 
 test('appends during a freeze are FROZEN and the freeze expires on its TTL', () => withLog(async ({ log, timers, calls }) => {
-  await log.append(DOC, bytesOf(1));
+  await log.append(DOC, bytesOf(1), EPOCH);
   const live = [];
   await log.subscribeAfterReplay(DOC, (entry) => live.push(entry));
   const frozen = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
   assert.equal(frozen.head, 1);
   assert.equal(frozen.lockRevision, 0);
   assert.equal(timers[0].ms, FREEZE_TTL_MS);
-  await rejectsWith(log.append(DOC, bytesOf(1)), E2E_FROZEN);
-  await rejectsWith(log.snapshot(DOC, 1, bytesOf(1), 0), E2E_FROZEN);
+  await rejectsWith(log.append(DOC, bytesOf(1), EPOCH), E2E_FROZEN);
+  await rejectsWith(log.snapshot(DOC, 1, bytesOf(1), 0, EPOCH), E2E_FROZEN);
   timers[0].fn();
   await log.sizeOf(DOC);
   assert.deepEqual(calls.resumed, [DOC]);
   assert.deepEqual(live.map((e) => e.kind), ['resumed']);
-  assert.equal((await log.append(DOC, bytesOf(1))).seq, 2);
+  assert.equal((await log.append(DOC, bytesOf(1), EPOCH)).seq, 2);
 }));
 
 test('freeze rejects a wrong revision, a failed verify and a second freeze', () => withLog(async ({ log }) => {
@@ -174,14 +175,15 @@ test('release resumes, deletes only that rotation\'s staged blobs, and drops the
   assert.deepEqual(calls.resumed, [DOC]);
   assert.equal(timers[0].cleared, true);
   assert.deepEqual((await make().blobs(DOC)).map((b) => b.id).sort(), ['kept', 'other']);
-  assert.equal((await log.append(DOC, bytesOf(1))).seq, 1);
+  assert.equal((await log.append(DOC, bytesOf(1), EPOCH)).seq, 1);
 }));
 
 const newLock = () => lockRecord({ keyEpoch: 1, wrapIv: lockRecord().wrapIv });
+const NEXT_EPOCH = newLock().keyEpoch;
 
 test('commit with the wrong head, wrong rotationId, or no freeze is stale', () => withLog(async ({ log, ldb }) => {
   const args = (over) => ({ expectedHead: 1, knownSnapshotBase: 0, verify: approve, snapshot: bytesOf(4), lockRecord: newLock(), blobInventory: [], ...over });
-  await log.append(DOC, bytesOf(3));
+  await log.append(DOC, bytesOf(3), EPOCH);
   await rejectsWith(log.commitRotation(DOC, { rotationId: 'x', ...args() }), E2E_ROTATION_STALE);
   const { rotationId } = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
   await rejectsWith(log.commitRotation(DOC, { rotationId: 'wrong', ...args() }), E2E_ROTATION_STALE);
@@ -191,8 +193,8 @@ test('commit with the wrong head, wrong rotationId, or no freeze is stale', () =
 }));
 
 test('a commit built without the stored snapshot is stale and leaves the snapshot in place', () => withLog(async ({ log, make, ldb }) => {
-  for (let i = 0; i < 3; i += 1) await log.append(DOC, bytesOf(3));
-  await log.snapshot(DOC, 2, bytesOf(5, 1), 0);
+  for (let i = 0; i < 3; i += 1) await log.append(DOC, bytesOf(3), EPOCH);
+  await log.snapshot(DOC, 2, bytesOf(5, 1), 0, EPOCH);
   const { rotationId } = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
   const commit = (knownSnapshotBase) => log.commitRotation(DOC, {
     rotationId, expectedHead: 3, knownSnapshotBase, verify: approve, snapshot: bytesOf(4), lockRecord: newLock(), blobInventory: [],
@@ -204,8 +206,8 @@ test('a commit built without the stored snapshot is stale and leaves the snapsho
 }));
 
 test('a failed commit batch leaves the old lock and the log intact', () => withLog(async ({ log, make, ldb }) => {
-  await log.append(DOC, bytesOf(3));
-  await log.append(DOC, bytesOf(3));
+  await log.append(DOC, bytesOf(3), EPOCH);
+  await log.append(DOC, bytesOf(3), EPOCH);
   const { rotationId } = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
   const realTransact = ldb._transact;
   // Fails any batch that writes the snapshot key, so a non-atomic commit would leave the new lock behind.
@@ -227,7 +229,7 @@ test('a failed commit batch leaves the old lock and the log intact', () => withL
 const rejects = (promise) => assert.rejects(promise);
 
 test('commit stores exactly one snapshot plus the new lock, bumps the revision and ends the freeze', () => withLog(async ({ log, make, ldb, timers }) => {
-  for (let i = 0; i < 3; i += 1) await log.append(DOC, bytesOf(5));
+  for (let i = 0; i < 3; i += 1) await log.append(DOC, bytesOf(5), EPOCH);
   const { rotationId } = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
   const inventory = [{ id: 'b1', bytes: 9, epoch: 1, stagedFor: null }, { id: 'b0', bytes: 8, epoch: 0, stagedFor: null }];
   await log.commitRotation(DOC, { rotationId, knownSnapshotBase: 0, expectedHead: 3, verify: approve, snapshot: bytesOf(6, 2), lockRecord: newLock(), blobInventory: inventory });
@@ -241,7 +243,7 @@ test('commit stores exactly one snapshot plus the new lock, bumps the revision a
   assert.equal(state.head, 3);
   assert.equal(await log.sizeOf(DOC), 6);
   assert.equal(timers[0].cleared, true);
-  assert.equal((await log.append(DOC, bytesOf(1))).seq, 4);
+  assert.equal((await log.append(DOC, bytesOf(1), NEXT_EPOCH)).seq, 4);
   const blobs = await log.blobs(DOC);
   assert.equal(blobs.find((b) => b.id === 'b1').retiredAt, undefined);
   assert.equal(blobs.find((b) => b.id === 'b0').retiredAt, START_MS);
@@ -254,6 +256,40 @@ test('a password change queued behind a commit fails re-verification and leaves 
   await commit;
   await rejectsWith(change, E2E_LOCK_MISMATCH);
   assert.equal((await storedLock(ldb)).keyEpoch, 1);
+}));
+
+const commitEmpty = (log, rotationId) => log.commitRotation(DOC, {
+  rotationId, knownSnapshotBase: 0, expectedHead: 0, verify: approve, snapshot: bytesOf(2), lockRecord: newLock(), blobInventory: [],
+});
+
+test('an append or snapshot queued behind a rotation commit at the old epoch is refused and never stored', () => withLog(async ({ log, make }) => {
+  const { rotationId } = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
+  const commit = commitEmpty(log, rotationId);
+  const append = log.append(DOC, bytesOf(3), EPOCH);
+  const snapshot = log.snapshot(DOC, 1, bytesOf(3), 0, EPOCH);
+  await commit;
+  await rejectsWith(append, E2E_EPOCH_STALE);
+  await rejectsWith(snapshot, E2E_EPOCH_STALE);
+  const state = await make().open(DOC);
+  assert.equal(state.head, 0);
+  assert.deepEqual(state.updates, []);
+  assert.equal(state.snapshot.baseSeq, 0, 'only the commit snapshot is stored');
+}));
+
+test('after a commit only the new epoch may append, also once the log is reloaded from storage', () => withLog(async ({ log, make }) => {
+  const { rotationId } = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
+  await commitEmpty(log, rotationId);
+  await rejectsWith(log.append(DOC, bytesOf(1), EPOCH), E2E_EPOCH_STALE);
+  assert.equal((await log.append(DOC, bytesOf(1), NEXT_EPOCH)).seq, 1);
+  const reloaded = make();
+  await rejectsWith(reloaded.append(DOC, bytesOf(1), EPOCH), E2E_EPOCH_STALE);
+  assert.equal((await reloaded.append(DOC, bytesOf(1), NEXT_EPOCH)).seq, 2);
+}));
+
+test('an append admitted at another epoch than the stored lock is refused before the room is touched', () => withLog(async ({ log, make }) => {
+  await rejectsWith(log.append(DOC, bytesOf(1), NEXT_EPOCH), E2E_EPOCH_STALE);
+  await rejectsWith(log.append(DOC, bytesOf(1), undefined), E2E_EPOCH_STALE);
+  assert.equal((await make().open(DOC)).head, 0);
 }));
 
 test('mutateLock writes next(record) with revision + 1, and refuses stale, unverified or frozen calls', () => withLog(async ({ log, ldb }) => {
@@ -272,17 +308,17 @@ test('the 257th queued op is BUSY', () => withLog(async ({ log }) => {
   let open;
   const gate = new Promise((resolve) => { open = resolve; });
   const blocker = log.mutateLock(DOC, { expectedRevision: 0, verify: () => gate, next: (r) => r });
-  const queued = Array.from({ length: MAX_PENDING_OPS_PER_ROOM - 1 }, () => log.append(DOC, bytesOf(1)));
-  await rejectsWith(log.append(DOC, bytesOf(1)), E2E_BUSY);
+  const queued = Array.from({ length: MAX_PENDING_OPS_PER_ROOM - 1 }, () => log.append(DOC, bytesOf(1), EPOCH));
+  await rejectsWith(log.append(DOC, bytesOf(1), EPOCH), E2E_BUSY);
   open(true);
   await blocker;
   assert.equal((await Promise.all(queued)).length, MAX_PENDING_OPS_PER_ROOM - 1);
-  assert.equal((await log.append(DOC, bytesOf(1))).seq, MAX_PENDING_OPS_PER_ROOM);
+  assert.equal((await log.append(DOC, bytesOf(1), EPOCH)).seq, MAX_PENDING_OPS_PER_ROOM);
 }, { maxRoomBytes: 1_000_000 }));
 
 test('a truncated snapshot fails open', () => withLog(async ({ log, ldb, make }) => {
-  await log.append(DOC, bytesOf(3));
-  await log.snapshot(DOC, 1, bytesOf(8, 4), 0);
+  await log.append(DOC, bytesOf(3), EPOCH);
+  await log.snapshot(DOC, 1, bytesOf(8, 4), 0, EPOCH);
   const stored = await ldb.getMeta(DOC, 'e2e-snapshot');
   await ldb.setMeta(DOC, 'e2e-snapshot', { ...stored, bytes: stored.bytes.slice(0, 5) });
   await rejectsWith(make().open(DOC), E2E_CORRUPT);
@@ -316,9 +352,9 @@ test('a commit moves the blobs staged for it to the new epoch, unretired, and re
 }));
 
 test('clearDocument removes every e2e key', () => withLog(async ({ log, ldb }) => {
-  await log.append(DOC, bytesOf(2));
-  await log.append(DOC, bytesOf(2));
-  await log.snapshot(DOC, 1, bytesOf(2), 0);
+  await log.append(DOC, bytesOf(2), EPOCH);
+  await log.append(DOC, bytesOf(2), EPOCH);
+  await log.snapshot(DOC, 1, bytesOf(2), 0, EPOCH);
   await log.addBlob(DOC, { id: 'b', bytes: 1, epoch: 0, stagedFor: null });
   assert.deepEqual(await e2eKeys(ldb), ['e2e-blobs', 'e2e-head', 'e2e-snapshot', 'e2e-u-0000000000000002']);
   await ldb.clearDocument(DOC);
@@ -326,15 +362,15 @@ test('clearDocument removes every e2e key', () => withLog(async ({ log, ldb }) =
 }));
 
 test('forget drops in-memory state and the room reloads from storage', () => withLog(async ({ log }) => {
-  await log.append(DOC, bytesOf(2));
+  await log.append(DOC, bytesOf(2), EPOCH);
   log.forget(DOC);
-  assert.equal((await log.append(DOC, bytesOf(2))).seq, 2);
+  assert.equal((await log.append(DOC, bytesOf(2), EPOCH)).seq, 2);
 }));
 
 test('forget during in-flight appends keeps seqs unique and contiguous', () => withLog(async ({ log }) => {
-  const first = Array.from({ length: 5 }, () => log.append(DOC, bytesOf(1)));
+  const first = Array.from({ length: 5 }, () => log.append(DOC, bytesOf(1), EPOCH));
   log.forget(DOC);
-  const second = Array.from({ length: 5 }, () => log.append(DOC, bytesOf(1)));
+  const second = Array.from({ length: 5 }, () => log.append(DOC, bytesOf(1), EPOCH));
   const seqs = (await Promise.all([...first, ...second])).map((r) => r.seq).sort((a, b) => a - b);
   assert.deepEqual(seqs, Array.from({ length: 10 }, (_, i) => i + 1));
 }));
@@ -342,9 +378,9 @@ test('forget during in-flight appends keeps seqs unique and contiguous', () => w
 test('forget does not evict a frozen room or one with listeners until they end', () => withLog(async ({ log }) => {
   const { rotationId } = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
   log.forget(DOC);
-  await rejectsWith(log.append(DOC, bytesOf(1)), E2E_FROZEN);
+  await rejectsWith(log.append(DOC, bytesOf(1), EPOCH), E2E_FROZEN);
   await log.release(DOC, rotationId);
-  assert.equal((await log.append(DOC, bytesOf(1))).seq, 1);
+  assert.equal((await log.append(DOC, bytesOf(1), EPOCH)).seq, 1);
 }));
 
 test('freeze ttl is clamped to the maximum', () => withLog(async ({ log, timers }) => {
@@ -357,21 +393,21 @@ test('TTL expiry bypasses the admission cap and unfreezes after the queue drains
   let open;
   const gate = new Promise((resolve) => { open = resolve; });
   const blocker = log.release(DOC, rotationId, { verify: () => gate });
-  const queued = Array.from({ length: MAX_PENDING_OPS_PER_ROOM - 1 }, () => log.append(DOC, bytesOf(1)));
-  await rejectsWith(log.append(DOC, bytesOf(1)), E2E_BUSY);
+  const queued = Array.from({ length: MAX_PENDING_OPS_PER_ROOM - 1 }, () => log.append(DOC, bytesOf(1), EPOCH));
+  await rejectsWith(log.append(DOC, bytesOf(1), EPOCH), E2E_BUSY);
   timers[0].fn();
   open(false);
   await rejectsWith(blocker, E2E_LOCK_MISMATCH);
   const settled = await Promise.allSettled(queued);
   assert.ok(settled.every((r) => r.status === 'rejected' && r.reason.code === E2E_FROZEN));
-  assert.equal((await log.append(DOC, bytesOf(1))).seq, 1);
+  assert.equal((await log.append(DOC, bytesOf(1), EPOCH)).seq, 1);
   assert.deepEqual(calls.resumed, [DOC]);
 }, { maxRoomBytes: 1_000_000 }));
 
 test('release with verify: a failed verify keeps the freeze, a passing one releases it', () => withLog(async ({ log }) => {
   const { rotationId } = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
   await rejectsWith(log.release(DOC, rotationId, { verify: reject }), E2E_LOCK_MISMATCH);
-  await rejectsWith(log.append(DOC, bytesOf(1)), E2E_FROZEN);
+  await rejectsWith(log.append(DOC, bytesOf(1), EPOCH), E2E_FROZEN);
   assert.equal(await log.release(DOC, rotationId, { verify: approve }), true);
 }));
 
@@ -379,7 +415,7 @@ test('commit with a failing verify is a lock mismatch and keeps the freeze', () 
   const { rotationId } = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
   await rejectsWith(log.commitRotation(DOC, { rotationId, knownSnapshotBase: 0, expectedHead: 0, verify: reject, snapshot: bytesOf(2), lockRecord: newLock(), blobInventory: [] }), E2E_LOCK_MISMATCH);
   assert.equal((await storedLock(ldb)).keyEpoch, 0);
-  await rejectsWith(log.append(DOC, bytesOf(1)), E2E_FROZEN);
+  await rejectsWith(log.append(DOC, bytesOf(1), EPOCH), E2E_FROZEN);
 }));
 
 let failBlobBatch = false;
@@ -408,7 +444,7 @@ for (const [name, setFault, clearFault] of [
       await log.addBlob(DOC, { id: 'staged', bytes: 6, epoch: 1, stagedFor: rotationId });
       setFault();
       assert.equal(await log.release(DOC, rotationId), true);
-      assert.equal((await log.append(DOC, bytesOf(1))).seq, 1, 'appends resume despite the failed cleanup');
+      assert.equal((await log.append(DOC, bytesOf(1), EPOCH)).seq, 1, 'appends resume despite the failed cleanup');
       assert.equal(await log.retryCleanup(DOC), false);
       clearFault();
       assert.equal(await log.retryCleanup(DOC), true);
@@ -440,7 +476,7 @@ test('expireOldEpochBlobs defaults to the 24 h grace', () => withLog(async ({ lo
 }));
 
 test('reservations cover the keys and values actually written', () => withLog(async ({ log, calls }) => {
-  await log.append(DOC, bytesOf(100));
+  await log.append(DOC, bytesOf(100), EPOCH);
   assert.ok(calls.reserved[0] >= 100 + 'e2e-head'.length + 'e2e-u-0000000000000001'.length);
   calls.reserved.length = 0;
   await log.addBlob(DOC, { id: 'blob-id', bytes: 5, epoch: 0, stagedFor: null });
@@ -454,8 +490,8 @@ test('reservations cover the keys and values actually written', () => withLog(as
 }));
 
 test('verifySnapshotDigest accepts intact snapshots only', () => withLog(async ({ log, ldb }) => {
-  await log.append(DOC, bytesOf(2));
-  await log.snapshot(DOC, 1, bytesOf(6, 3), 0);
+  await log.append(DOC, bytesOf(2), EPOCH);
+  await log.snapshot(DOC, 1, bytesOf(6, 3), 0, EPOCH);
   const stored = await ldb.getMeta(DOC, 'e2e-snapshot');
   assert.equal(verifySnapshotDigest(stored), true);
   assert.equal(verifySnapshotDigest({ ...stored, bytes: stored.bytes.slice(1) }), false);
@@ -490,12 +526,13 @@ test('forget keeps a room with pending cleanup until the retry removes the stage
   }, cleanupDeps(calls));
 });
 
-test('whenIdle settles only after every queued append in every room is written', () => withLog(async ({ log, make }) => {
+test('whenIdle settles only after every queued append in every room is written', () => withLog(async ({ log, make, ldb }) => {
   const OTHER_DOC = 'room-doc-2';
+  await ldb.setMeta(OTHER_DOC, ROOM_LOCK_META, encodeLockRecord(lockRecord()));
   const APPENDS = 5;
   for (let i = 0; i < APPENDS; i += 1) {
-    void log.append(DOC, bytesOf(1, i));
-    void log.append(OTHER_DOC, bytesOf(1, i));
+    void log.append(DOC, bytesOf(1, i), EPOCH);
+    void log.append(OTHER_DOC, bytesOf(1, i), EPOCH);
   }
   await log.whenIdle();
   const reader = make();
@@ -505,7 +542,7 @@ test('whenIdle settles only after every queued append in every room is written',
 
 test('whenIdle resolves at once with nothing queued and is not failed by a rejected op', () => withLog(async ({ log }) => {
   await log.whenIdle();
-  const refused = log.append(DOC, bytesOf(MAX_ROOM_BYTES + 1));
+  const refused = log.append(DOC, bytesOf(MAX_ROOM_BYTES + 1), EPOCH);
   await log.whenIdle();
   await rejectsWith(refused, E2E_QUOTA);
 }));
@@ -513,10 +550,10 @@ test('whenIdle resolves at once with nothing queued and is not failed by a rejec
 test('appends beyond the log entry cap are QUOTA until a snapshot prunes the log', () => withLog(async ({ log }) => {
   const CAP = 3;
   assert.equal(E2E_MAX_LOG_ENTRIES, 10_000);
-  for (let i = 1; i <= CAP; i += 1) await log.append(DOC, bytesOf(1));
-  await rejectsWith(log.append(DOC, bytesOf(1)), E2E_QUOTA);
-  await log.snapshot(DOC, 2, bytesOf(1), 0);
-  assert.deepEqual(await log.append(DOC, bytesOf(1)), { seq: CAP + 1 });
+  for (let i = 1; i <= CAP; i += 1) await log.append(DOC, bytesOf(1), EPOCH);
+  await rejectsWith(log.append(DOC, bytesOf(1), EPOCH), E2E_QUOTA);
+  await log.snapshot(DOC, 2, bytesOf(1), 0, EPOCH);
+  assert.deepEqual(await log.append(DOC, bytesOf(1), EPOCH), { seq: CAP + 1 });
 }, { maxLogEntries: 3 }));
 
 const stallStorage = (ldb) => {
@@ -531,9 +568,10 @@ const SHARED_MAX_OPS = 3;
 const shared = sharedReservations({ maxOps: SHARED_MAX_OPS });
 test('queued client ops hold shared pending capacity before they run, across rooms, released once each', () => withLog(async ({ log, ldb }) => {
   const OTHER_DOC = 'room-doc-2';
+  await ldb.setMeta(OTHER_DOC, ROOM_LOCK_META, encodeLockRecord(lockRecord()));
   const resume = stallStorage(ldb);
-  const queued = [log.append(DOC, bytesOf(4)), log.append(DOC, bytesOf(4)), log.snapshot(OTHER_DOC, 0, bytesOf(4), 0)];
-  const extra = log.append(OTHER_DOC, bytesOf(4));
+  const queued = [log.append(DOC, bytesOf(4), EPOCH), log.append(DOC, bytesOf(4), EPOCH), log.snapshot(OTHER_DOC, 0, bytesOf(4), 0, EPOCH)];
+  const extra = log.append(OTHER_DOC, bytesOf(4), EPOCH);
   // While storage is stalled the extra op must be refused at once, not queued.
   const outcome = await Promise.race([extra.then(() => 'queued and written', (error) => error.code),
     new Promise((resolve) => { setImmediate(() => resolve('still queued')); })]);
@@ -547,7 +585,7 @@ test('queued client ops hold shared pending capacity before they run, across roo
   assert.equal(stale.reason.code, E2E_STALE_SNAPSHOT, 'a rejected op releases its slot too');
   assert.equal(shared.pending, 0);
   assert.equal(shared.released, shared.taken);
-  assert.deepEqual(await log.append(OTHER_DOC, bytesOf(4)), { seq: 1 });
+  assert.deepEqual(await log.append(OTHER_DOC, bytesOf(4), EPOCH), { seq: 1 });
 }, { reserveStore: shared.reserveStore }));
 
 const PENDING_STORE_CAP_BYTES = 4 * 1024 * 1024;
@@ -569,14 +607,14 @@ test('the largest snapshot fits a shared pending-byte cap of maxRoomBytes; one b
   return withLog(async ({ log, ldb }) => {
     const doc = LONGEST_CANONICAL_DOC_NAME;
     await ldb.setMeta(doc, ROOM_LOCK_META, encodeLockRecord(lockRecord()));
-    await log.append(doc, bytesOf(1));
+    await log.append(doc, bytesOf(1), EPOCH);
     assert.equal(log.maxSnapshotBytes, PENDING_STORE_CAP_BYTES - E2E_SNAPSHOT_RESERVATION_OVERHEAD_BYTES);
-    await log.snapshot(doc, 1, bytesOf(log.maxSnapshotBytes, 7), 0);
+    await log.snapshot(doc, 1, bytesOf(log.maxSnapshotBytes, 7), 0, EPOCH);
     assert.equal((await ldb.getMeta(doc, 'e2e-snapshot')).bytes.byteLength, log.maxSnapshotBytes);
     assert.ok(store.reservedBytes.at(-1) <= PENDING_STORE_CAP_BYTES, 'the reservation stays within the cap');
     const taken = store.taken;
-    await log.append(doc, bytesOf(1));
-    await rejectsWith(log.snapshot(doc, 2, bytesOf(log.maxSnapshotBytes + 1, 7), 1), E2E_QUOTA);
+    await log.append(doc, bytesOf(1), EPOCH);
+    await rejectsWith(log.snapshot(doc, 2, bytesOf(log.maxSnapshotBytes + 1, 7), 1, EPOCH), E2E_QUOTA);
     assert.equal(store.taken, taken + 1, 'an oversized snapshot takes no reservation');
     assert.equal((await ldb.getMeta(doc, 'e2e-snapshot')).baseSeq, 1);
   }, { maxRoomBytes: PENDING_STORE_CAP_BYTES, reserveStore: store.reserveStore });

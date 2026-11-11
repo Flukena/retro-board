@@ -16,6 +16,8 @@ export const E2E_ROTATION_STALE = 'E2E_ROTATION_STALE';
 export const E2E_LOCK_MISMATCH = 'E2E_LOCK_MISMATCH';
 export const E2E_CORRUPT = 'E2E_CORRUPT';
 export const E2E_BLOB_DUPLICATE = 'E2E_BLOB_DUPLICATE';
+/** The writer's socket was admitted at a key epoch the room has left: it must re-unlock, never be acknowledged. */
+export const E2E_EPOCH_STALE = 'E2E_EPOCH_STALE';
 export const MAX_PENDING_OPS_PER_ROOM = 256;
 export const MAX_FREEZE_TTL_MS = 120_000;
 export const E2E_BLOB_GRACE_MS = 86_400_000;
@@ -59,7 +61,7 @@ export function verifySnapshotDigest(snapshot) {
 
 function newRoom() {
   return {
-    pending: 0, tail: Promise.resolve(), loaded: false, head: 0, base: 0, snapshotBytes: 0,
+    pending: 0, tail: Promise.resolve(), loaded: false, head: 0, base: 0, snapshotBytes: 0, keyEpoch: null,
     sizes: new Map(), blobs: [], frozen: null, listeners: new Set(),
     pendingStagedCleanup: new Set(), forgetRequested: false,
   };
@@ -159,10 +161,13 @@ export class E2ERoomLog {
 
   // Client ops reserve shared store capacity before they queue, so queued payloads count as
   // pending work; the reservation is released once, when the op settles either way.
-  async append(docName, ciphertext) {
+  // `keyEpoch` is the epoch the writer's socket was admitted at; it is checked inside the chain, so an op queued
+  // behind a rotation commit is refused rather than stored under the new epoch.
+  async append(docName, ciphertext, keyEpoch) {
     const release = this.#reserveStore(appendReservationBytes(docName, ciphertext));
     return this.#enqueue(docName, async (room) => {
       await this.#load(docName, room);
+      this.#assertAdmittedEpoch(room, keyEpoch);
       this.#assertNotFrozen(room);
       this.#assertWithinQuota(roomSize(room) + ciphertext.byteLength);
       if (room.sizes.size >= this.#maxLogEntries) throw codedError(E2E_QUOTA, 'log entry limit reached');
@@ -178,14 +183,15 @@ export class E2ERoomLog {
   /**
    * Replaces the snapshot and prunes the log through `baseSeq`. `knownBase` is the baseSeq of the newest snapshot
    * the writer has applied: it must equal the stored one (0 for none), so a snapshot never drops content that only
-   * an earlier snapshot holds.
+   * an earlier snapshot holds. `keyEpoch` is fenced like append's.
    */
-  async snapshot(docName, baseSeq, ciphertext, knownBase) {
+  async snapshot(docName, baseSeq, ciphertext, knownBase, keyEpoch) {
     if (ciphertext.byteLength > this.maxSnapshotBytes) throw codedError(E2E_QUOTA, 'snapshot exceeds the size limit');
     const value = snapshotValue(baseSeq, ciphertext);
     const release = this.#reserveStore(snapshotReservationBytes(docName, value));
     return this.#enqueue(docName, async (room) => {
       await this.#load(docName, room);
+      this.#assertAdmittedEpoch(room, keyEpoch);
       this.#assertNotFrozen(room);
       if (!(baseSeq > room.base && baseSeq <= room.head)) {
         throw codedError(E2E_STALE_SNAPSHOT, 'snapshot does not advance the base');
@@ -266,6 +272,7 @@ export class E2ERoomLog {
       const current = await this.#verifiedRecord(docName, expectedRevision, verify);
       const updated = encodeLockRecord({ ...(await next(current)), lockRevision: current.lockRevision + 1 });
       await this.#write(docName, [put(ROOM_LOCK_META, updated)], { durable: true });
+      room.keyEpoch = updated.keyEpoch;
       return decodeLockRecord(updated);
     });
   }
@@ -298,6 +305,7 @@ export class E2ERoomLog {
       await this.#write(docName, ops, { durable: true });
       this.#clearTimer(room.frozen.timer);
       room.frozen = null;
+      room.keyEpoch = nextRecord.keyEpoch;
       room.base = room.head;
       room.snapshotBytes = snapshot.byteLength;
       room.sizes.clear();
@@ -400,6 +408,10 @@ export class E2ERoomLog {
     }
   }
 
+  #assertAdmittedEpoch(room, keyEpoch) {
+    if (keyEpoch !== room.keyEpoch) throw codedError(E2E_EPOCH_STALE, 'socket was admitted at another key epoch');
+  }
+
   #assertNotFrozen(room) {
     if (room.frozen) throw codedError(E2E_FROZEN, 'room is frozen for rotation');
   }
@@ -477,6 +489,7 @@ export class E2ERoomLog {
       room.snapshotBytes = stored?.bytes.byteLength ?? 0;
       room.sizes = new Map(updates.map((u) => [u.seq, u.bytes.byteLength]));
       room.blobs = blobs;
+      room.keyEpoch = decodeLockRecord(metas.get(ROOM_LOCK_META))?.keyEpoch ?? null;
       room.loaded = true;
     }
     return { state: { head, snapshot: stored ? { baseSeq: stored.baseSeq, bytes: stored.bytes } : null, updates, blobs } };

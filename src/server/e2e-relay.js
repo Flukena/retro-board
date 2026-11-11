@@ -3,7 +3,8 @@ import {
   E2E_EPHEMERAL_MAX_BYTES, E2E_FRAME, E2E_MAX_FRAME_HEADER_BYTES, E2E_REJECT, decodeClientFrame, e2eFrameHeaderBytes, encodeFrame,
 } from '../domain/e2e-envelope.js';
 import { E2E_SNAPSHOT_MIN_INTERVAL_MS } from '../domain/e2e-limits.js';
-import { E2E_BUSY, E2E_CORRUPT, E2E_FROZEN, E2E_QUOTA, E2E_STALE_SNAPSHOT } from './e2e-room-log.js';
+import { KEY_ROTATED_CLOSE_CODE, KEY_ROTATED_REASON } from '../domain/room-lock-contract.js';
+import { E2E_BUSY, E2E_CORRUPT, E2E_EPOCH_STALE, E2E_FROZEN, E2E_QUOTA, E2E_STALE_SNAPSHOT } from './e2e-room-log.js';
 import { closeWebSocket } from './relay-lifecycle.js';
 import { roomLogId } from './relay-log-id.js';
 import { ROOM_CAPACITY_CODE } from './relay-room-registry.js';
@@ -69,6 +70,7 @@ function* replayChunks(frames) {
 class E2EConnection {
   #ws;
   #docName;
+  #keyEpoch;
   #room;
   #meter;
   #deps;
@@ -83,9 +85,10 @@ class E2EConnection {
   #ownSnapshots = new Set();
   #unsubscribe = null;
 
-  constructor(ws, docName, room, deps) {
+  constructor(ws, { docName, keyEpoch }, room, deps) {
     this.#ws = ws;
     this.#docName = docName;
+    this.#keyEpoch = keyEpoch;
     this.#room = room;
     this.#deps = deps;
     this.#meter = deps.traffic.attach(ws, docName);
@@ -170,7 +173,8 @@ class E2EConnection {
   }
 
   #onMessage(data, isBinary) {
-    if (this.#limited) return;
+    // `ws` still emits frames that arrive while its close handshake runs; none of them may reach the log.
+    if (this.#limited || this.#ws.readyState !== WS_OPEN_STATE) return;
     const size = data?.byteLength ?? 0;
     const isSnapshot = isBinary && data[0] === E2E_FRAME.SNAPSHOT;
     // A snapshot pays a message token but not ordinary bytes; its own allowance bounds it.
@@ -206,7 +210,7 @@ class E2EConnection {
   #append({ clientRef, ciphertext }) {
     const { roomLog, touch } = this.#deps;
     this.#ownAppends.set(ciphertext, clientRef);
-    roomLog.append(this.#docName, ciphertext).then(() => touch(this.#docName), (error) => {
+    roomLog.append(this.#docName, ciphertext, this.#keyEpoch).then(() => touch(this.#docName), (error) => {
       this.#ownAppends.delete(ciphertext);
       this.#refuse(error, clientRef);
     });
@@ -214,7 +218,7 @@ class E2EConnection {
 
   #snapshot({ seq, knownBase, ciphertext }) {
     this.#ownSnapshots.add(ciphertext);
-    this.#deps.roomLog.snapshot(this.#docName, seq, ciphertext, knownBase).catch((error) => {
+    this.#deps.roomLog.snapshot(this.#docName, seq, ciphertext, knownBase, this.#keyEpoch).catch((error) => {
       this.#ownSnapshots.delete(ciphertext);
       this.#refuse(error, NO_CLIENT_REF);
     });
@@ -226,6 +230,12 @@ class E2EConnection {
   }
 
   #refuse(error, clientRef) {
+    // The key rotated after this socket was admitted: no REJECT, so the page keeps the entry and re-sends it
+    // under the new key once it has re-unlocked.
+    if (error?.code === E2E_EPOCH_STALE) {
+      safeClose(this.#ws, KEY_ROTATED_CLOSE_CODE, KEY_ROTATED_REASON);
+      return;
+    }
     const code = REJECT_FOR_ERROR.get(error?.code);
     if (code === undefined) this.#fail(error);
     else this.send(encodeFrame(E2E_FRAME.REJECT, { code, clientRef }));
@@ -286,9 +296,9 @@ export function createE2ERelay({
 
   return {
     wss,
-    /** Call only after the shared admission gates passed and `req.wsSecurityContext` is set. */
+    /** Call only after the shared admission gates passed and `req.wsSecurityContext` (with the admitted `keyEpoch`) is set. */
     handleUpgrade(req, socket, head) {
-      const { docName, clientIp, expiresAt } = req.wsSecurityContext;
+      const { docName, clientIp, expiresAt, keyEpoch } = req.wsSecurityContext;
       let room = rooms.get(docName);
       if (!room) {
         room = { members: 0, connections: new Set() };
@@ -298,7 +308,7 @@ export function createE2ERelay({
       const joined = room;
       socket.once('close', () => leave(docName, joined));
       wss.handleUpgrade(req, socket, head, (ws) => {
-        const connection = new E2EConnection(ws, docName, joined, deps);
+        const connection = new E2EConnection(ws, { docName, keyEpoch }, joined, deps);
         joined.connections.add(connection);
         closeOnSessionExpiry(ws, expiresAt);
         connection.start(clientIp);

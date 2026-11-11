@@ -30,6 +30,7 @@ const MAX_BODY_BYTES = 4096;
 const MAX_ROOM_BYTES = 1024 * 1024;
 const MAX_ROOMS = 50;
 const UNLIMITED = Number.MAX_SAFE_INTEGER;
+const EPOCH = 0;
 const PASSWORD = 'correct horse battery staple';
 const NEXT_PASSWORD = 'another long passphrase 2';
 const HEADER_LENGTH_BYTES = 4;
@@ -88,7 +89,7 @@ async function fixture(t, { maxBodyBytes = MAX_BODY_BYTES } = {}) {
     return { account, cookie: accountSessions.createCookie(account.id, account.sessionGeneration, '/api').split(';')[0] };
   };
   const createRoom = async (owner, lock = null) => {
-    const record = lock === null ? null : { v: 1, ...ROOM_LOCK.lock, keyEpoch: 0, ownerAccountId: owner.account.id, createdAt: Date.now(), lockRevision: 0 };
+    const record = lock === null ? null : { v: 1, ...ROOM_LOCK.lock, keyEpoch: EPOCH, ownerAccountId: owner.account.id, createdAt: Date.now(), lockRevision: 0 };
     const { code, token } = await registry.createRoom({ lock: record });
     const docName = registry.registeredDocForCapability(code, token);
     return { docName, handle: registry.roomHandleForDoc(docName) };
@@ -144,7 +145,7 @@ test('every route refuses a missing account, a non-owner, a normal room and an u
   assert.equal((await f.postJson(f.room, 'password', { ...body, lock: NEXT_KEY.lock }, stranger.cookie)).status, STATUS.FORBIDDEN);
   assert.equal((await f.postCommit(f.room, commitHeader({ rotationId: randomUUID(), head: 0 }), SNAPSHOT, stranger.cookie)).status, STATUS.FORBIDDEN);
   assert.equal((await f.storedLock(f.room)).lockRevision, 0);
-  assert.equal((await f.roomLog.append(f.room.docName, bytesOf(3))).seq, 1);
+  assert.equal((await f.roomLog.append(f.room.docName, bytesOf(3), EPOCH)).seq, 1);
 });
 
 test('a wrong oldAuthKey is 403 on every route and the sixth wrong try is 429 with retry-after', async (t) => {
@@ -162,7 +163,7 @@ test('a wrong oldAuthKey is 403 on every route and the sixth wrong try is 429 wi
   assert.ok(Number(limited.headers.get('retry-after')) >= 1);
   // The right key is limited too while the window is full, and the freeze is still in place.
   assert.equal((await f.postJson(f.room, 'rotate/abort', { oldAuthKey: ROOM_LOCK.authKey, rotationId: rotation.rotationId }, f.owner.cookie)).status, STATUS.TOO_MANY);
-  await assert.rejects(f.roomLog.append(f.room.docName, bytesOf(1)), (e) => e.code === E2E_FROZEN);
+  await assert.rejects(f.roomLog.append(f.room.docName, bytesOf(1), EPOCH), (e) => e.code === E2E_FROZEN);
 });
 
 test('malformed bodies are 400 and oversized JSON is 413', async (t) => {
@@ -198,13 +199,13 @@ test('password change keeps the epoch, bumps the revision once, and swaps which 
 
 test('begin freezes appends for 120 s, a second begin is 409, and abort resumes and deletes staged blobs', async (t) => {
   const f = await lockedRoom(t);
-  await f.roomLog.append(f.room.docName, bytesOf(3));
+  await f.roomLog.append(f.room.docName, bytesOf(3), EPOCH);
   const rotation = await begin(f);
   assert.deepEqual(Object.keys(rotation).sort(), ['expiresInMs', 'head', 'lockRevision', 'rotationId']);
   assert.equal(rotation.head, 1);
   assert.equal(rotation.expiresInMs, MAX_FREEZE_TTL_MS);
   assert.equal(f.timers.at(-1).ms, MAX_FREEZE_TTL_MS);
-  await assert.rejects(f.roomLog.append(f.room.docName, bytesOf(1)), (e) => e.code === E2E_FROZEN);
+  await assert.rejects(f.roomLog.append(f.room.docName, bytesOf(1), EPOCH), (e) => e.code === E2E_FROZEN);
   const again = await f.postJson(f.room, 'rotate/begin', { oldAuthKey: ROOM_LOCK.authKey, expectedRevision: 0 }, f.owner.cookie);
   assert.equal(again.status, STATUS.CONFLICT);
   const pwd = await f.postJson(f.room, 'password', { oldAuthKey: ROOM_LOCK.authKey, expectedRevision: 0, lock: NEXT_KEY.lock }, f.owner.cookie);
@@ -216,7 +217,7 @@ test('begin freezes appends for 120 s, a second begin is 409, and abort resumes 
   assert.equal(aborted.status, STATUS.NO_CONTENT);
   assert.deepEqual(f.staged, [rotation.rotationId]);
   assert.equal((await f.roomLog.blobs(f.room.docName)).some((entry) => entry.id === stagedId), false);
-  assert.equal((await f.roomLog.append(f.room.docName, bytesOf(1))).seq, 2);
+  assert.equal((await f.roomLog.append(f.room.docName, bytesOf(1), EPOCH)).seq, 2);
 });
 
 test('a freeze that reaches its TTL releases by itself', async (t) => {
@@ -224,7 +225,7 @@ test('a freeze that reaches its TTL releases by itself', async (t) => {
   await begin(f);
   f.timers.at(-1).fn();
   await f.roomLog.whenIdle();
-  assert.equal((await f.roomLog.append(f.room.docName, bytesOf(1))).seq, 1);
+  assert.equal((await f.roomLog.append(f.room.docName, bytesOf(1), EPOCH)).seq, 1);
 });
 
 test('begin with a stale revision is 409', async (t) => {
@@ -235,7 +236,7 @@ test('begin with a stale revision is 409', async (t) => {
 
 test('commit swaps snapshot, lock and keys in one step, closes sockets with 4001 and keeps old blobs for the grace', async (t) => {
   const f = await lockedRoom(t);
-  await f.roomLog.append(f.room.docName, bytesOf(5));
+  await f.roomLog.append(f.room.docName, bytesOf(5), EPOCH);
   const oldBlob = randomUUID();
   await f.roomLog.addBlob(f.room.docName, { id: oldBlob, bytes: 10, epoch: 0 });
   const createdAt = (await f.storedLock(f.room)).createdAt;
@@ -259,7 +260,7 @@ test('commit swaps snapshot, lock and keys in one step, closes sockets with 4001
   assert.ok(blobs[oldBlob].retiredAt !== undefined, 'old-epoch blob is retired, not deleted');
   assert.equal(blobs[keptBlob].stagedFor, null);
   assert.equal(blobs[keptBlob].retiredAt, undefined);
-  assert.equal((await f.roomLog.append(f.room.docName, bytesOf(1))).seq, 2, 'appends resume after the commit');
+  assert.equal((await f.roomLog.append(f.room.docName, bytesOf(1), stored.keyEpoch)).seq, 2, 'appends at the new epoch resume after the commit');
 });
 
 test('commit is 409 for a wrong head, rotationId, epoch or a rotation that was never begun, and leaves the freeze', async (t) => {
@@ -274,20 +275,20 @@ test('commit is 409 for a wrong head, rotationId, epoch or a rotation that was n
   for (const header of refused) assert.equal((await f.postCommit(f.room, header, SNAPSHOT, f.owner.cookie)).status, STATUS.CONFLICT);
   assert.equal((await f.storedLock(f.room)).keyEpoch, 0);
   assert.deepEqual(f.closed, []);
-  await assert.rejects(f.roomLog.append(f.room.docName, bytesOf(1)), (e) => e.code === E2E_FROZEN);
+  await assert.rejects(f.roomLog.append(f.room.docName, bytesOf(1), EPOCH), (e) => e.code === E2E_FROZEN);
 });
 
 test('a committer that missed the stored snapshot is 409 and the snapshot, lock and freeze stay', async (t) => {
   const f = await lockedRoom(t);
-  for (let i = 0; i < 2; i += 1) await f.roomLog.append(f.room.docName, bytesOf(4));
-  await f.roomLog.snapshot(f.room.docName, 2, bytesOf(6), 0);
+  for (let i = 0; i < 2; i += 1) await f.roomLog.append(f.room.docName, bytesOf(4), EPOCH);
+  await f.roomLog.snapshot(f.room.docName, 2, bytesOf(6), 0, EPOCH);
   const rotation = await begin(f);
   const missed = await f.postCommit(f.room, commitHeader(rotation, { knownSnapshotBase: 0 }), SNAPSHOT, f.owner.cookie);
   assert.equal(missed.status, STATUS.CONFLICT);
   assert.equal((await f.storedLock(f.room)).keyEpoch, 0);
   assert.equal((await f.roomLog.open(f.room.docName)).snapshot.baseSeq, 2);
   assert.deepEqual(f.closed, []);
-  await assert.rejects(f.roomLog.append(f.room.docName, bytesOf(1)), (e) => e.code === E2E_FROZEN);
+  await assert.rejects(f.roomLog.append(f.room.docName, bytesOf(1), EPOCH), (e) => e.code === E2E_FROZEN);
   const current = await f.postCommit(f.room, commitHeader(rotation, { knownSnapshotBase: 2 }), SNAPSHOT, f.owner.cookie);
   assert.equal(current.status, STATUS.NO_CONTENT);
 });
@@ -336,7 +337,7 @@ test('commit body limits: header over 1 MiB, empty snapshot and oversized snapsh
 
 test('a storage failure during commit is 503 with the old lock, log and freeze intact', async (t) => {
   const f = await lockedRoom(t);
-  await f.roomLog.append(f.room.docName, bytesOf(4));
+  await f.roomLog.append(f.room.docName, bytesOf(4), EPOCH);
   const rotation = await begin(f);
   f.flaky.failWrites = true;
   const response = await f.postCommit(f.room, commitHeader(rotation), SNAPSHOT, f.owner.cookie);
@@ -376,7 +377,7 @@ test('a password change that landed first makes the rotation begun for the old r
   ]);
   assert.equal(password.status, STATUS.OK);
   assert.equal(started.status, STATUS.CONFLICT);
-  await f.roomLog.append(f.room.docName, bytesOf(1));
+  await f.roomLog.append(f.room.docName, bytesOf(1), EPOCH);
 });
 
 test('a staged-file cleanup failure after a durable commit does not fail the 204', async (t) => {
@@ -428,7 +429,7 @@ test('a commit with a bad header length, header or oversized snapshot is refused
 
 test('a crash after the durable commit batch and before publish reopens to one consistent new state', async (t) => {
   const f = await lockedRoom(t);
-  await f.roomLog.append(f.room.docName, bytesOf(5));
+  await f.roomLog.append(f.room.docName, bytesOf(5), EPOCH);
   const oldBlob = randomUUID();
   await f.roomLog.addBlob(f.room.docName, { id: oldBlob, bytes: 10, epoch: 0 });
   const rotation = await begin(f);

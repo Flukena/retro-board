@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as Y from 'yjs';
 import { decodeClientFrame, decodeServerFrame } from '../domain/e2e-envelope.js';
-import { KEY_ROTATED_CLOSE_CODE, e2eAad } from '../domain/room-lock-contract.js';
+import { KEY_ROTATED_CLOSE_CODE, KEY_ROTATED_REASON, e2eAad } from '../domain/room-lock-contract.js';
 import { encryptFrame } from '../client/room-lock/e2e-crypto.js';
 import { E2EProvider } from '../client/session/e2e-provider.js';
 import { E2E_ROTATION_STALE, E2ERoomLog } from '../server/e2e-room-log.js';
@@ -27,7 +27,6 @@ const FRAME_LIMITS = Object.freeze({ maxBytes: 64 * 1024 * 1024 });
 const POLL_MS = 5;
 const WAIT_MS = 5_000;
 const FREEZE_TTL_MS = 60_000;
-const KEY_ROTATED_REASON = 'key rotated';
 const quietLogger = { log() {}, warn() {} };
 const approve = async () => true;
 
@@ -121,6 +120,8 @@ export async function e2eRoom(t, { maxRoomBytes = 1024 * 1024, maxAppendBytes = 
   const dir = await mkdtemp(join(tmpdir(), 'e2e-provider-'));
   const ldb = new LeveldbPersistence(dir);
   await ldb.setMeta(DOC, ROOM_LOCK_META, encodeLockRecord(lockRecord()));
+  // Sockets are admitted at the room's current key epoch, as the relay's upgrade does.
+  let keyEpoch = lockRecord().keyEpoch;
   const roomLog = new E2ERoomLog({ ldb, maxRoomBytes, reserveStore: () => () => {} });
   const relay = createE2ERelay({
     roomLog, traffic: new RelayWsTraffic(generousConfig(), { log: quietLogger }), maxRoomBytes, maxAppendBytes,
@@ -128,7 +129,7 @@ export async function e2eRoom(t, { maxRoomBytes = 1024 * 1024, maxAppendBytes = 
   });
   const server = http.createServer();
   server.on('upgrade', (req, socket, head) => {
-    req.wsSecurityContext = { docName: DOC, clientIp: IP, expiresAt: null };
+    req.wsSecurityContext = { docName: DOC, clientIp: IP, expiresAt: null, keyEpoch };
     relay.handleUpgrade(req, socket, head);
   });
   server.listen(0, '127.0.0.1');
@@ -171,6 +172,7 @@ export async function e2eRoom(t, { maxRoomBytes = 1024 * 1024, maxAppendBytes = 
         verify: approve, snapshot, blobInventory: [],
         lockRecord: lockRecord({ keyEpoch: nextKey.keyEpoch }),
       });
+      keyEpoch = nextKey.keyEpoch;
       relay.closeRoom(DOC, KEY_ROTATED_CLOSE_CODE, KEY_ROTATED_REASON);
     },
   };
