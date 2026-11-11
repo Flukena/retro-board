@@ -4,7 +4,7 @@ import { classifyImportedImageSource } from '../../domain/security-boundaries.js
 import { listImageSources, rewriteImageSources } from '../session/item-image-sources.js';
 import { RoomKeyError, createNextRoomKey, deriveRoomSecrets, encryptFrame } from './e2e-crypto.js';
 import { isPermanentlyBrokenImage, readE2EImage, uploadEncryptedImage } from './e2e-images.js';
-import { LOCK_ACTION_ERROR, RoomLockActionError, lockActionErrorForStatus } from './room-lock-api.js';
+import { LOCK_ACTION_ERROR, RoomLockActionError, isRelayAnswer, lockActionErrorForStatus } from './room-lock-api.js';
 
 /** How long the drain and the catch-up to the frozen head may take before the rotation gives up. */
 export const ROTATION_WAIT_TIMEOUT_MS = 60_000;
@@ -219,7 +219,7 @@ export async function rotateRoom({
   } catch (error) {
     const released = await abort();
     // A commit that got no answer may have landed; the abort's refusal is then the only sign, so say so.
-    if (run.commitSent && !released && !(error instanceof RoomLockActionError)) throw new RotationError(ROTATION_FAILURE.UNKNOWN_OUTCOME);
+    if (run.commitSent && !released && !isRelayAnswer(error)) throw new RotationError(ROTATION_FAILURE.UNKNOWN_OUTCOME);
     throw rotationErrorFor(error, ROTATION_FAILURE.BOARD_CHANGED, run.signal);
   } finally {
     stopWatching();

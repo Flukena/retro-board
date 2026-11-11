@@ -27,11 +27,14 @@ export async function lockedRelay(t, env = {}, { root = null } = {}) {
   return { relay, stub };
 }
 
-export async function signIn({ relay, stub }) {
+/** The relay's whole account Set-Cookie line after a Google sign-in, Path included. */
+export async function signInSetCookie({ relay, stub }) {
   const { flowCookie, url } = await approvedCallback(relay, stub, '', `${ORIGIN}/`);
   const response = await fetch(url, { headers: { cookie: cookiePair(flowCookie) }, redirect: 'manual' });
-  return cookiePair(response.headers.getSetCookie().find((cookie) => cookie.startsWith('rb_account=')));
+  return response.headers.getSetCookie().find((cookie) => cookie.startsWith('rb_account='));
 }
+
+export const signIn = async (env) => cookiePair(await signInSetCookie(env));
 
 /** Runs the session exchange; pass the authKey for a locked room. */
 export async function exchange(relay, room, authKey) {

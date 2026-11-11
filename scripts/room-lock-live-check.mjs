@@ -463,6 +463,10 @@ async function credentialSteps({ a, b, report, state }) {
     await shot(a, 'reunlock-en.png', report);
     await reunlock(b, 'th', PASSWORDS.rotated);
     await reunlock(a, 'en', PASSWORDS.rotated);
+    // Re-unlocking sends the typed password where the account cookie goes, so A is still the owner.
+    await openOwnerMenu(a, 'en');
+    await shot(a, 'owner-menu-after-reunlock-en.png', report);
+    await a.keyboard.press('Escape');
     await b.keyboard.press('Escape');
     const typed = `${TEXT.rotating}-typed-more`;
     const [onA, onB] = await Promise.all([a, b].map((page) => eventually(

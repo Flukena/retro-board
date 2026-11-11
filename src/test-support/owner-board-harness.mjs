@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import WebSocket from 'ws';
 import * as Y from 'yjs';
-import { ORIGIN, cookiePair, lockedRelay, signIn } from './locked-room-harness.mjs';
+import { ORIGIN, cookiePair, lockedRelay, signInSetCookie } from './locked-room-harness.mjs';
 import { installBrowserStandIn } from './browser-stand-in.mjs';
 import { E2EProvider } from '../client/session/e2e-provider.js';
 import { attachE2ERoom } from '../client/session/e2e-room.js';
@@ -31,11 +31,11 @@ export class InboundGate {
   }
 }
 
-/** A WebSocket class that sends the page Origin and the cookie `cookie()` returns when it connects. */
+/** A WebSocket class that sends the page Origin and the cookie `cookie(url)` returns when it connects. */
 export function cookieSocket(cookie, gate = null) {
   return class CookieSocket extends WebSocket {
     constructor(url) {
-      super(url, { origin: ORIGIN, headers: { cookie: cookie() } });
+      super(url, { origin: ORIGIN, headers: { cookie: cookie(url) } });
     }
 
     get onmessage() { return super.onmessage; }
@@ -70,11 +70,11 @@ export async function peerSession(relay, room, password) {
  */
 export async function ownerBoard(t, { roomLock, password, relayEnv = {} }) {
   const env = await lockedRelay(t, relayEnv);
-  const ownerCookie = await signIn(env);
-  const created = await postJson(env.relay, '/api/rooms', { lock: roomLock.lock }, ownerCookie);
+  const ownerSetCookie = await signInSetCookie(env);
+  const created = await postJson(env.relay, '/api/rooms', { lock: roomLock.lock }, cookiePair(ownerSetCookie));
   assert.equal(created.status, STATUS.CREATED, env.relay.output());
   const room = await created.json();
-  const browser = installBrowserStandIn(t, env.relay.url, null, { cookies: [ownerCookie] });
+  const browser = installBrowserStandIn(t, env.relay.url, null, { cookies: [ownerSetCookie] });
   const events = new EventTarget();
   Object.assign(globalThis.window, {
     addEventListener: events.addEventListener.bind(events),

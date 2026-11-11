@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import { ownerBoard } from '../../test-support/owner-board-harness.mjs';
 import { PASSWORD } from '../../test-support/locked-room-harness.mjs';
 import { createRoomLock, deriveRoomSecrets } from './e2e-crypto.js';
-import { getRoomKey } from './lock-session.js';
+import { getRoomKey, reunlock } from './lock-session.js';
 import { refreshActiveRoomSession } from '../session/room-session.js';
 import { LOCK_ACTION_ERROR, createRoomLockApi } from './room-lock-api.js';
 import { changeRoomPassword } from './change-password.js';
+import { canManageRoomLock } from './room-lock-form.js';
 import { ROOM_SESSION_RENEWAL_SUFFIX } from '../../domain/room-lock-contract.js';
 
 const ROOM_LOCK = await createRoomLock(PASSWORD);
@@ -17,6 +18,8 @@ const FORBIDDEN = 403;
 const bodyText = ({ body }) => (body instanceof Uint8Array ? Buffer.from(body).toString('utf8') : String(body ?? ''));
 // Both the first exchange (/api/room-session) and a renewal (/rooms/<handle>/room-session) end with the suffix.
 const sessionBodies = (sent) => sent.filter(({ url }) => url.endsWith(ROOM_SESSION_RENEWAL_SUFFIX)).map((request) => JSON.parse(bodyText(request)));
+
+const ACCOUNT_SESSION_PATH = '/api/room-session';
 
 async function openBoard(t) {
   const board = await ownerBoard(t, { roomLock: ROOM_LOCK, password: PASSWORD });
@@ -71,4 +74,15 @@ test('a change built on an older lock revision is refused with a conflict and ch
   );
   assert.equal(getRoomKey().lockRevision, current.lockRevision);
   await board.openPeerPage(NEW_PASSWORD);
+});
+
+test('the owner keeps the lock controls after re-unlocking, with cookies sent only under their Path', async (t) => {
+  const { board, api } = await openBoard(t);
+  assert.equal(canManageRoomLock(getRoomKey()), true, 'the owner opened the board');
+  await changeRoomPassword({ currentPassword: PASSWORD, newPassword: NEW_PASSWORD, key: getRoomKey(), api });
+  const before = board.browser.sent.length;
+  await reunlock(NEW_PASSWORD);
+  const exchanges = board.browser.sent.slice(before).map(({ url }) => new URL(url).pathname);
+  assert.deepEqual(exchanges, [ACCOUNT_SESSION_PATH, ACCOUNT_SESSION_PATH], 'a typed password goes where the account cookie is sent');
+  assert.equal(canManageRoomLock(getRoomKey()), true, 'the relay still recognises the owner');
 });

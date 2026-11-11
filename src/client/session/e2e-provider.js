@@ -49,6 +49,8 @@ const SKIPPED_SUPPRESSED_LOG = '[e2e] more unreadable log entries skipped';
 const REMOTE = Object.freeze({ APPLIED: 'applied', UNDECRYPTABLE: 'undecryptable', INVALID: 'invalid' });
 const FAILURE_LOG = '[e2e] provider step failed';
 
+const PROBE_OUTCOME = Object.freeze({ RENEWED: 'renewed', REAUTH: 'reauth', INCONCLUSIVE: 'inconclusive' });
+const probeFailureOutcome = (error) => (isReauthRequiredError(error) ? PROBE_OUTCOME.REAUTH : PROBE_OUTCOME.INCONCLUSIVE);
 const backoffMs = (attempt) => Math.min(RECONNECT_BASE_MS * 2 ** attempt, E2E_MAX_BACKOFF_MS);
 const defaultTimers = Object.freeze({
   setTimeout: (callback, ms) => globalThis.setTimeout(callback, ms),
@@ -80,7 +82,7 @@ export class E2EProvider extends Observable {
   #replayDone = false;
   // Set by a rotation close or a session probe that needs the password: no reconnect until setKey.
   #awaitingReunlock = false;
-  // A socket refused before it opened probes the session once per run of failed opens (M3).
+  // A socket refused before it opened probes the session until one probe is conclusive (M3).
   #sessionProbed = false;
   #probeSession;
   #reconnectAttempts = 0;
@@ -277,8 +279,9 @@ export class E2EProvider extends Observable {
     if (this.shouldConnect && !this.#awaitingReunlock) this.#scheduleReconnect(!wasConnected && !this.#sessionProbed);
   }
 
-  // A refused upgrade looks like any network close (1006), so after the first one the session is renewed once:
-  // a missed rotation then answers 403 and the re-unlock dialog takes over instead of a silent reconnect loop.
+  // A refused upgrade looks like any network close (1006), so a failed open renews the session: a missed rotation
+  // then answers 403 and the re-unlock dialog takes over instead of a silent reconnect loop. An inconclusive probe
+  // (network, 429, 5xx) is retried on the next failed open, at the reconnect backoff, until a probe or a socket succeeds.
   #scheduleReconnect(probe) {
     if (probe) this.#sessionProbed = true;
     this.#reconnectTimer = this.#timers.setTimeout(() => {
@@ -291,7 +294,9 @@ export class E2EProvider extends Observable {
   #probeThenConnect() {
     const generation = this.#generation;
     const key = this.#key;
-    this.#probeSession().then(() => true, (error) => !isReauthRequiredError(error)).then((retry) => {
+    this.#probeSession().then(() => PROBE_OUTCOME.RENEWED, probeFailureOutcome).then((outcome) => {
+      if (outcome === PROBE_OUTCOME.INCONCLUSIVE) this.#sessionProbed = false;
+      const retry = outcome !== PROBE_OUTCOME.REAUTH;
       // The health change reaches listeners first, and one may already have reconnected: unless setKey brought a
       // new key meanwhile, a re-auth answer still holds every reconnect until the page re-unlocks.
       if (!retry && this.#key === key) this.#awaitingReunlock = true;

@@ -37,6 +37,9 @@ export class RoomLockActionError extends Error {
   }
 }
 
+/** True when the relay answered with an HTTP status; a lost request or response (status null) is not an answer. */
+export const isRelayAnswer = (error) => error instanceof RoomLockActionError && error.status !== null;
+
 /** The failure an HTTP status means for a lock request or a staged upload. */
 export const lockActionErrorForStatus = (status, retryAfterSeconds = null) => new RoomLockActionError(
   KIND_BY_STATUS.get(status) ?? LOCK_ACTION_ERROR.UNAVAILABLE, { status, retryAfterSeconds },
@@ -59,7 +62,10 @@ const deadlineSignal = (signal, timeoutMs) => (signal ? AbortSignal.any([signal,
 
 const noBody = async () => undefined;
 
-/** One request whose deadline also covers reading the body with `read`; every failure is a RoomLockActionError. */
+/**
+ * One request whose deadline also covers reading the body with `read`; every failure is a RoomLockActionError,
+ * with the HTTP status once a response arrived and status null when none did.
+ */
 async function send(path, { body, contentType, expectedStatus, signal, keepalive, timeoutMs, read = noBody }) {
   const deadline = deadlineSignal(signal, timeoutMs);
   let response;
@@ -76,13 +82,14 @@ async function send(path, { body, contentType, expectedStatus, signal, keepalive
 }
 
 const jsonReader = (isValid) => async (response) => {
+  const unreadable = () => new RoomLockActionError(LOCK_ACTION_ERROR.UNAVAILABLE, { status: response.status });
   let value;
   try {
     value = await readSmallJson(response);
   } catch {
-    throw new RoomLockActionError(LOCK_ACTION_ERROR.UNAVAILABLE);
+    throw unreadable();
   }
-  if (!isPlainObject(value) || !isValid(value)) throw new RoomLockActionError(LOCK_ACTION_ERROR.UNAVAILABLE);
+  if (!isPlainObject(value) || !isValid(value)) throw unreadable();
   return value;
 };
 

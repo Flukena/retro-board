@@ -60,7 +60,8 @@ async function reunlockEveryone({ owner, peer }, password = NEW_PASSWORD) {
 }
 
 async function blobStatus(board, src) {
-  const response = await board.relayFetch(`${board.env.relay.url}${src}`, { headers: { origin: ORIGIN, cookie: board.browser.cookieHeader() } });
+  const url = `${board.env.relay.url}${src}`;
+  const response = await board.relayFetch(url, { headers: { origin: ORIGIN, cookie: board.browser.cookieHeader(url) } });
   await response.body?.cancel();
   return response.status;
 }
@@ -230,15 +231,37 @@ const commitWith = ({ commit, abort }) => {
     currentPassword: PASSWORD, newPassword: NEW_PASSWORD, key: offlineKey(), storage: stuckSource(), api, clock: fakeClock(),
   });
 };
-const lostResponse = async () => { throw new TypeError('network connection lost'); };
 const refusedAbort = async () => { throw lockActionErrorForStatus(CONFLICT); };
+const COMMIT_PATH_RE = /\/lock\/rotate\/commit$/;
 
-test('a commit whose response is lost and whose abort is refused reports that the new password may be active', async () => {
-  await rejectsWithKind(commitWith({ commit: lostResponse, abort: refusedAbort }), ROTATION_FAILURE.UNKNOWN_OUTCOME);
+/**
+ * The page's network drops the commit at the HTTP boundary: `afterRelay` lets the relay handle it and loses the
+ * response, otherwise the request never reaches the relay. The real room-lock-api sees only the failed fetch.
+ */
+function dropCommit(t, { afterRelay }) {
+  const pageFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (!COMMIT_PATH_RE.test(String(url))) return pageFetch(url, init);
+    if (afterRelay) await (await pageFetch(url, init)).body?.cancel();
+    throw new TypeError('network connection lost');
+  };
+  t.after(() => { globalThis.fetch = pageFetch; });
+}
+
+test('a commit the relay applied but whose response was lost reports that the new password may be active', async (t) => {
+  const { board, owner, peer, rotate } = await boardWithPeer(t);
+  dropCommit(t, { afterRelay: true });
+  await rejectsWithKind(rotate(), ROTATION_FAILURE.UNKNOWN_OUTCOME);
+  await reunlockEveryone({ owner, peer });
+  await assert.rejects(board.openPeerPage(PASSWORD), { status: FORBIDDEN }, 'the rotation did land');
 });
 
-test('a lost commit response is a plain failure when the abort still released the freeze', async () => {
-  await rejectsWithKind(commitWith({ commit: lostResponse, abort: async () => {} }), ROTATION_FAILURE.UNAVAILABLE);
+test('a commit lost before it reached the relay is a plain failure: the abort released the freeze', async (t) => {
+  const { board, rotate } = await boardWithPeer(t);
+  dropCommit(t, { afterRelay: false });
+  await rejectsWithKind(rotate(), ROTATION_FAILURE.UNAVAILABLE);
+  const peer = await board.openPeerPage(PASSWORD);
+  assert.equal(peer.key().keyEpoch, 0, 'the old password still opens the room');
 });
 
 test('a commit the relay answered with a refusal is a known failure even when the abort is refused too', async () => {

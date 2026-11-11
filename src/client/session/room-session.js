@@ -385,15 +385,20 @@ const scheduleRefresh = (session) => {
 };
 
 const publicSessionPath = handle => handle ? `/rooms/${handle}${PUBLIC_ROOM_SESSION_SUFFIX}` : PUBLIC_SESSION_ROUTE;
-// A locked room renews below its cookie's path, so the relay can tell a member's stale key from a guess.
-const roomSessionPath = (handle, authKey) => (handle && authKey !== null ? `/rooms/${handle}${ROOM_SESSION_RENEWAL_SUFFIX}` : '/api/room-session');
+// A background renewal of a locked room goes below its room cookie's path, so the relay can tell a member's stale
+// key from a guess. A typed password goes to the account-scoped path, whose account cookie tells the owner apart.
+const roomSessionPath = (handle, authKey, renewal) => (
+  renewal && handle && authKey !== null ? `/rooms/${handle}${ROOM_SESSION_RENEWAL_SUFFIX}` : '/api/room-session'
+);
 
-const exchangeSession = async (code, token, { expectedHandle = null, replacedHandle = null, authKey = null } = {}) => {
+const exchangeSession = async (code, token, { expectedHandle = null, replacedHandle = null, authKey = null, renewal = false } = {}) => {
   const publicWall = code === null && token === null;
   if (!publicWall && (!BOARD_CODE_RE.test(code || '') || !BOARD_TOKEN_RE.test(token || ''))) {
     fail(ROOM_SESSION_ERROR.INVALID);
   }
-  if (sessionRequest && sameCredentials(sessionRequest, code, token) && sessionRequest.authKey === authKey) {
+  const path = publicWall ? publicSessionPath(expectedHandle) : roomSessionPath(expectedHandle, authKey, renewal);
+  if (sessionRequest && sameCredentials(sessionRequest, code, token) && sessionRequest.authKey === authKey
+    && sessionRequest.path === path) {
     const session = await sessionRequest.promise;
     if (expectedHandle && session.roomHandle !== expectedHandle) {
       fail(ROOM_SESSION_ERROR.UNAVAILABLE);
@@ -405,7 +410,7 @@ const exchangeSession = async (code, token, { expectedHandle = null, replacedHan
   const credentialGenerationAtStart = credentialGeneration;
   const promise = (async () => {
     const value = await postJson(
-      publicWall ? publicSessionPath(expectedHandle) : roomSessionPath(expectedHandle, authKey),
+      path,
       publicWall ? {} : { code, token, ...(authKey === null ? {} : { authKey }) },
       200,
       [400, 404],
@@ -427,7 +432,7 @@ const exchangeSession = async (code, token, { expectedHandle = null, replacedHan
     return lock ? Object.freeze({ ...publicSession(session), lock }) : publicSession(session);
   })();
 
-  sessionRequest = { code, token, authKey, promise };
+  sessionRequest = { code, token, authKey, path, promise };
   try {
     return await promise;
   } finally {
@@ -462,6 +467,7 @@ export async function refreshActiveRoomSession() {
     return await exchangeSession(activeCredentials.code, activeCredentials.token, {
       expectedHandle: activeSession?.roomHandle || null,
       authKey: activeAuthKey,
+      renewal: true,
     });
   } catch (error) {
     setSessionHealth(isReauthRequiredError(error) ? ROOM_SESSION_HEALTH.REAUTH_REQUIRED : ROOM_SESSION_HEALTH.LOST);

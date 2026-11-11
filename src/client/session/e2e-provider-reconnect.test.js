@@ -108,3 +108,21 @@ test('a probe that fails for another reason keeps the reconnect backoff going', 
   await refuseAndWait();
   assert.equal(RefusedSocket.opened.length, 2);
 });
+
+test('an inconclusive probe is retried on the next failed open, and a later re-auth answer stops the loop', async (t) => {
+  const answers = [
+    new RoomSessionError(ROOM_SESSION_ERROR.UNAVAILABLE, { httpStatus: 503 }),
+    new RoomSessionError(ROOM_SESSION_ERROR.WRONG_PASSWORD, { httpStatus: 403 }),
+  ];
+  let probes = 0;
+  const { provider, timers, key, refuseAndWait } = await refusedProvider(t, async () => { throw answers[probes++]; });
+  await refuseAndWait();
+  assert.equal(probes, 1);
+  assert.equal(RefusedSocket.opened.length, 2, 'a transient probe failure reconnects');
+  await refuseAndWait();
+  assert.equal(probes, 2, 'the next refused open probes again');
+  assert.equal(RefusedSocket.opened.length, 2, 'the re-auth answer holds every reconnect');
+  assert.equal(timers.size, 0);
+  provider.setKey(key);
+  assert.equal(RefusedSocket.opened.length, 3, 're-unlocking reconnects');
+});
