@@ -274,7 +274,7 @@ export class E2EProvider extends Observable {
       this.#dispatch(KEY_ROTATED_EVENT);
       return;
     }
-    if (this.shouldConnect) this.#scheduleReconnect(!wasConnected && !this.#sessionProbed);
+    if (this.shouldConnect && !this.#awaitingReunlock) this.#scheduleReconnect(!wasConnected && !this.#sessionProbed);
   }
 
   // A refused upgrade looks like any network close (1006), so after the first one the session is renewed once:
@@ -290,10 +290,12 @@ export class E2EProvider extends Observable {
 
   #probeThenConnect() {
     const generation = this.#generation;
+    const key = this.#key;
     this.#probeSession().then(() => true, (error) => !isReauthRequiredError(error)).then((retry) => {
-      if (generation !== this.#generation || this.ws !== null || !this.shouldConnect) return;
-      if (retry) this.connect();
-      else this.#awaitingReunlock = true;
+      // The health change reaches listeners first, and one may already have reconnected: unless setKey brought a
+      // new key meanwhile, a re-auth answer still holds every reconnect until the page re-unlocks.
+      if (!retry && this.#key === key) this.#awaitingReunlock = true;
+      if (retry && generation === this.#generation && this.ws === null && this.shouldConnect) this.connect();
     }).catch(reportFailure);
   }
 

@@ -82,6 +82,26 @@ test('a probe that needs the password stops reconnecting until the page re-unloc
   assert.equal(RefusedSocket.opened.length, 2, 're-unlocking reconnects');
 });
 
+test('a re-auth probe stops the loop even when a health listener reconnected before the probe settled', async (t) => {
+  const reauth = new RoomSessionError(ROOM_SESSION_ERROR.WRONG_PASSWORD, { httpStatus: 403 });
+  let provider = null;
+  // client-sync reacts to the REAUTH_REQUIRED health change, sent before the probe's own promise settles.
+  const probe = async () => {
+    provider.disconnect();
+    provider.connect();
+    throw reauth;
+  };
+  const fixture = await refusedProvider(t, probe);
+  ({ provider } = fixture);
+  await fixture.refuseAndWait();
+  assert.equal(RefusedSocket.opened.length, 2, 'the listener opened one more socket');
+  RefusedSocket.opened.at(-1).refuse();
+  await flush();
+  assert.equal(fixture.timers.size, 0, 'no reconnect is scheduled under the re-unlock dialog');
+  provider.setKey(fixture.key);
+  assert.equal(RefusedSocket.opened.length, 3, 're-unlocking reconnects');
+});
+
 test('a probe that fails for another reason keeps the reconnect backoff going', async (t) => {
   const unavailable = new RoomSessionError(ROOM_SESSION_ERROR.UNAVAILABLE);
   const { refuseAndWait } = await refusedProvider(t, async () => { throw unavailable; });
