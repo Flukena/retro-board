@@ -1,7 +1,6 @@
 # Encrypted rooms rollout
 
-Status: **prepared, awaiting owner approval.** Nothing here has been run
-against production. Branch `feat/room-lock-e2e`.
+Status: **deployed 2026-11-11** (owner approved). See the deployment record below.
 
 ## What ships
 
@@ -80,3 +79,29 @@ serves the locked rooms again, with their passwords. Checked by hydrating a
 LevelDB written by this release with the `e2d1ab7` registry: the locked room
 was not served, the normal room was, and the new registry served the locked
 room again afterwards. Normal boards are unaffected in both directions.
+
+## Deployment record (2026-11-11)
+
+Files in `/Volumes/ssd-fluke/BaseData/retro-board/room-lock-e2e-20261111/`.
+
+1. Release gate on a clean `git archive` of `c23f18c` (`release/gate.log`):
+   2096 tests pass, 0 fail, build and maintainer build pass, `npm audit` 0.
+2. Images `miro-release-yjs:e2e-c23f18c` and `miro-release-web:e2e-c23f18c`
+   built with `--pull --no-cache`; `scan-production-images.sh` with
+   `COMPOSE_FILE=release/scan-images.yml` passed (0 findings).
+3. Backup `backups/retro-board-20261111T124859Z.tar.gpg` verified with this
+   release's verifier: 204 documents, 2 accounts, 0 encrypted rooms. The
+   verifier prints a harmless "Yjs was already imported" warning; the relay
+   does not.
+4. `feat/retro-outcomes` fast-forwarded to `c23f18c` in the main checkout.
+5. Deploy with `deploy.yml` (re-pins `yjs-public` and `cloudflared` unchanged):
+   only `miro-yjs-1` and `miro-web-1` were recreated (`containers-before.txt`,
+   `containers-after.txt`); `miro-yjs-1` healthy.
+6. Smoke (`smoke.log`, `live-browser/`): `/`, `/privacy` 200; signed-out
+   `/yjs/api/account` 401; Google start 302 with the exact redirect URI; a
+   normal room is created (201). Two guest browsers on production: edits sync
+   both ways, undo/redo syncs, landing renders in en and th with no
+   password-board option for guests.
+7. Not yet exercised on production: creating and using a locked board, which
+   needs a real Google sign-in by the owner.
+8. Rollback: `rollback.txt` (images `signin-e2d1ab7`, same command).
