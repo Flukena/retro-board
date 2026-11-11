@@ -5,7 +5,9 @@ import {
 } from '../src/server/e2e-room-log.js';
 import { BLOB_ID_PATTERN } from '../src/domain/room-lock-contract.js';
 import { ROOM_LOCK_META, decodeLockRecord, hasLockMeta } from '../src/server/room-lock-record.js';
-import { ROOM_HANDLE_META } from '../src/server/relay-room-registry.js';
+import {
+  LOCKED_REGISTRATION_MARKER, ROOM_HANDLE_META, ROOM_REGISTRATION_META, isCommittedRegistration,
+} from '../src/server/relay-room-registry.js';
 import { ROOM_HANDLE_RE } from '../src/server/relay-config.js';
 import { e2eBlobFilename, parseE2EBlobFilename } from '../src/server/relay-uploads.js';
 
@@ -67,8 +69,9 @@ async function listBlobFiles(uploadsDir) {
 }
 
 /**
- * Read-only check of the encrypted rooms in a restored relay LevelDB and uploads directory. Every room with a
- * lock record must decode it, have a snapshot whose digest matches whenever its log starts after seq 0, keep
+ * Read-only check of the encrypted rooms in a restored relay LevelDB and uploads directory. Documents without a
+ * committed registration marker are skipped, as the relay quarantines them. Every committed room with a lock record
+ * or the locked-room marker must decode its lock record, have a snapshot whose digest matches whenever its log starts after seq 0, keep
  * `head >= baseSeq` with updates contiguous from `baseSeq + 1` to `head`, and have a file of exactly the
  * recorded length for each blob inventory entry. Staged blobs (a backup taken mid-rotation) and files that
  * the inventory does not list are reported as counts, not errors. A backup without locked rooms verifies with 0.
@@ -84,7 +87,9 @@ export async function verifyBackupE2ERooms(persistence, uploadsDir) {
   for (const name of names) {
     const metas = await persistence.getMetas(name);
     if (!(metas instanceof Map)) fail(UNREADABLE);
-    if (!hasLockMeta(metas.get(ROOM_LOCK_META))) continue;
+    const marker = metas.get(ROOM_REGISTRATION_META);
+    if (!isCommittedRegistration(marker)) continue;
+    if (!hasLockMeta(metas.get(ROOM_LOCK_META)) && marker !== LOCKED_REGISTRATION_MARKER) continue;
     if (!decodeLockRecord(metas.get(ROOM_LOCK_META))) fail(INVALID_LOCK);
     checkSnapshotAndLog(metas);
     const inventory = readInventory(metas);

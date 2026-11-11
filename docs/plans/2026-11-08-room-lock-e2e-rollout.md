@@ -61,12 +61,22 @@ Put `image: miro-release-yjs:signin-e2d1ab7` and
 `image: miro-release-web:signin-e2d1ab7` in `deploy.yml`, then run the same
 command from step 5.
 
-Effect on locked boards while the old relay runs (from reading the old code at
-`e2d1ab7`, not tested live): room hydrate checks only the registration marker
-and the handle, so it ignores the `e2e-*` and lock meta keys, and the old
-relay treats a locked room as an ordinary room whose document holds only the
-seed. Anyone with the link, no password, would open an empty board, and
-anything written there would be plaintext in the old format. Encrypted data is
-neither shown nor changed, and `.e2e` files are ignored by the old upload
-matchers; it becomes reachable again after re-deploying this release. Create
-no locked boards and avoid sharing their links while rolled back.
+Effect on locked boards while the old relay runs: **they are closed, not
+open.** This release writes registration marker `2` for a locked room
+(`LOCKED_REGISTRATION_MARKER`) and keeps `1` for normal rooms; existing
+production rooms keep `1` and are unchanged. The old relay at `e2d1ab7`
+serves a document only when its marker is exactly `1`
+(`src/server/relay-room-registry.js` lines 24 and 142-147), so it quarantines
+every locked room at startup: the session exchange answers 404 (`yjs-server.mjs`
+lines 1039-1044) and so does the WebSocket upgrade (lines 1664-1666). Its only
+other way to reach a document by name needs both `YJS_ALLOW_LEGACY_ROOMS` and
+`YJS_ALLOW_LEGACY_URL_TOKENS` (lines 1672-1676). `docker-compose.prod.yml`
+sets neither; the relay's env file was not read for this note, so confirm
+both are unset there before a rollback.
+The old relay deletes nothing it quarantines: `retireIdleRooms` only visits
+registered rooms and `YJS_WIPE_DOCS` is unset, so every locked room's lock,
+log, snapshot and `.e2e` files stay as they were. Re-deploying this release
+serves the locked rooms again, with their passwords. Checked by hydrating a
+LevelDB written by this release with the `e2d1ab7` registry: the locked room
+was not served, the normal room was, and the new registry served the locked
+room again afterwards. Normal boards are unaffected in both directions.

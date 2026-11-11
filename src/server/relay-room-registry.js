@@ -31,6 +31,17 @@ const REGISTRATION_DIGEST_DOMAIN = 'room-registration\0';
 const SEED_META_MAP = 'meta';
 const SEED_REGISTRATION_KEY = '__roomRegistered';
 const REGISTRATION_VERSION = 1;
+/** Registration marker of a normal room: the only marker releases before encrypted rooms serve. */
+export const UNLOCKED_REGISTRATION_MARKER = REGISTRATION_VERSION;
+/**
+ * Registration marker of a locked room. Releases before encrypted rooms quarantine any marker other than 1, so a
+ * rollback answers 404 for locked rooms instead of serving them unlocked; rolling forward serves them again.
+ */
+export const LOCKED_REGISTRATION_MARKER = 2;
+/** True for a marker written as the last step of a completed room creation. */
+export const isCommittedRegistration = (marker) => (
+  marker === UNLOCKED_REGISTRATION_MARKER || marker === LOCKED_REGISTRATION_MARKER
+);
 export const ROOM_CAPACITY_CODE = 'ROOM_CAPACITY';
 const SERVER_UNAVAILABLE_CODE = 'SERVER_UNAVAILABLE';
 const DATABASE_CAPACITY_MESSAGE = 'database capacity reached';
@@ -163,15 +174,16 @@ export class RoomRegistry extends EventEmitter {
 
   async hydrateRoom(docName, initialUploadUsage) {
     // Only the final commit marker makes a partially created document reachable.
-    if ((await this.#persistence.getMeta(docName, ROOM_REGISTRATION_META)) !== REGISTRATION_VERSION) {
+    const marker = await this.#persistence.getMeta(docName, ROOM_REGISTRATION_META);
+    if (!isCommittedRegistration(marker)) {
       this.#log.warn(QUARANTINE_LOG, { docName: roomLogId(docName) });
-      await this.#dropOrphanLock(docName);
+      await this.#dropOrphanLock(docName, marker);
       return;
     }
     if (this.registeredDocs.size >= this.#maxRooms) {
       throw new Error(EXISTING_ROOM_LIMIT_MESSAGE);
     }
-    const lock = await this.#readLock(docName);
+    const lock = await this.#readLock(docName, marker);
     let handle = await this.#persistence.getMeta(docName, ROOM_HANDLE_META);
     if (!ROOM_HANDLE_RE.test(handle || '')) {
       handle = this.newUniqueRoomHandle();
@@ -191,18 +203,21 @@ export class RoomRegistry extends EventEmitter {
     this.roomUploadUsage.set(docName, activeUsage(usage));
   }
 
-  // An interrupted locked creation: the lock landed but the marker did not.
-  async #dropOrphanLock(docName) {
+  // An interrupted locked creation: the lock landed but the marker did not. A committed room's lock is never dropped.
+  async #dropOrphanLock(docName, marker) {
+    if (isCommittedRegistration(marker)) return;
     const raw = await this.#persistence.getMeta(docName, ROOM_LOCK_META);
     if (raw === undefined || raw === null || typeof this.#persistence.durableMetaBatch !== 'function') return;
     await this.#persistence.durableMetaBatch(docName, [{ type: DELETE_OPERATION, key: ROOM_LOCK_META }]);
   }
 
   // null = unlocked room, CORRUPT_LOCK = committed record that cannot be read (managed but never served).
-  async #readLock(docName) {
+  // A locked-room marker without its record is corrupt too: that room is never served unlocked.
+  async #readLock(docName, marker) {
     const raw = await this.#persistence.getMeta(docName, ROOM_LOCK_META);
-    if (!hasLockMeta(raw)) return null;
-    const lock = decodeLockRecord(raw);
+    const lockedMarker = marker === LOCKED_REGISTRATION_MARKER;
+    if (!hasLockMeta(raw) && !lockedMarker) return null;
+    const lock = hasLockMeta(raw) ? decodeLockRecord(raw) : null;
     if (!lock) {
       this.#log.warn(INVALID_LOCK_LOG, { docName: roomLogId(docName) });
       return CORRUPT_LOCK;
@@ -268,7 +283,7 @@ export class RoomRegistry extends EventEmitter {
       await this.#persistence.durableMetaBatch(docName, [{ type: PUT_OPERATION, key: ROOM_LOCK_META, value: encodeLockRecord(lock) }]);
     }
     // Marker LAST, then in-memory publication; never adopt a failed creation.
-    await this.#persistence.setMeta(docName, ROOM_REGISTRATION_META, REGISTRATION_VERSION);
+    await this.#persistence.setMeta(docName, ROOM_REGISTRATION_META, lock ? LOCKED_REGISTRATION_MARKER : UNLOCKED_REGISTRATION_MARKER);
   }
 
   publishRoom(docName, handle, lock = null) {

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { E2ERoomLog, E2E_BLOBS_KEY, E2E_HEAD_KEY, E2E_SNAPSHOT_KEY, E2E_UPDATE_KEY_PREFIX } from '../src/server/e2e-room-log.js';
 import { ROOM_LOCK_META, encodeLockRecord } from '../src/server/room-lock-record.js';
-import { ROOM_HANDLE_META } from '../src/server/relay-room-registry.js';
+import { LOCKED_REGISTRATION_MARKER, ROOM_HANDLE_META, ROOM_REGISTRATION_META } from '../src/server/relay-room-registry.js';
 import { e2eBlobFilename } from '../src/server/relay-uploads.js';
 import { durableMetaBatch } from '../src/server/relay-storage.js';
 import { lockRecord } from '../src/server/room-lock-fixtures.mjs';
@@ -47,11 +47,12 @@ async function openFixture(t) {
 
 const blobPath = (uploads, id) => join(uploads, e2eBlobFilename(HANDLE, id));
 
-async function seedRoom({ ldb, log, uploads }, { stagedBlob = false } = {}) {
+async function seedRoom({ ldb, log, uploads }, { stagedBlob = false, marker = LOCKED_REGISTRATION_MARKER } = {}) {
   // A registered room always stores a Yjs update, which is what makes getAllDocNames list it.
   await ldb.storeUpdate(DOC, Y.encodeStateAsUpdate(new Y.Doc()));
   await ldb.setMeta(DOC, ROOM_LOCK_META, encodeLockRecord(lockRecord()));
   await ldb.setMeta(DOC, ROOM_HANDLE_META, HANDLE);
+  if (marker !== null) await ldb.setMeta(DOC, ROOM_REGISTRATION_META, marker);
   for (let i = 0; i < 4; i += 1) await log.append(DOC, bytesOf(4, i), EPOCH);
   await log.snapshot(DOC, 2, bytesOf(6, 9), 0, EPOCH);
   await log.addBlob(DOC, { id: BLOB_A, bytes: BLOB_BYTES, epoch: 1 });
@@ -67,6 +68,20 @@ test('a valid room verifies', async (t) => {
   const fx = await openFixture(t);
   await seedRoom(fx);
   assert.deepEqual(await verifyBackupE2ERooms(fx.ldb, fx.uploads), { rooms: 1, stagedBlobs: 0, orphanBlobs: 0 });
+});
+
+test('an interrupted locked creation (lock written, no marker) is skipped, as the relay quarantines it', async (t) => {
+  const fx = await openFixture(t);
+  await seedRoom(fx, { marker: null });
+  await durableMetaBatch(fx.ldb, DOC, [del(E2E_SNAPSHOT_KEY)]);
+  assert.deepEqual(await verifyBackupE2ERooms(fx.ldb, fx.uploads), { rooms: 0, stagedBlobs: 0, orphanBlobs: 0 });
+});
+
+test('a locked-room marker without a lock record fails', async (t) => {
+  const fx = await openFixture(t);
+  await seedRoom(fx);
+  await durableMetaBatch(fx.ldb, DOC, [del(ROOM_LOCK_META)]);
+  await assert.rejects(verifyBackupE2ERooms(fx.ldb, fx.uploads), /encrypted room lock record is invalid/);
 });
 
 test('a pre-E2E backup verifies with 0 rooms', async (t) => {

@@ -5,7 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { checkedStorage, durableMetaBatch } from './relay-storage.js';
-import { RoomRegistry } from './relay-room-registry.js';
+import { LOCKED_REGISTRATION_MARKER, RoomRegistry, isCommittedRegistration } from './relay-room-registry.js';
 import { CORRUPT_LOCK, ROOM_LOCK_META, decodeLockRecord } from './room-lock.js';
 import { lockRecord } from './room-lock-fixtures.mjs';
 
@@ -136,6 +136,74 @@ test('createRoom rejects an invalid lock before reserving anything; publishLock 
 });
 
 const LOCK_DOC = 'yjs/board-Crashed1-abcdefgh12345678';
+
+const UNLOCKED_MARKER = 1;
+
+// The relay released before encrypted rooms (e2d1ab7, relay-room-registry.js hydrateRoom) serves a document only
+// when its marker is exactly 1 and ignores lock records; any other marker is quarantined (404).
+const previousReleaseServes = (marker) => marker === UNLOCKED_MARKER;
+
+test('a locked room is committed with a marker the previous release refuses; a normal room keeps marker 1', async () => {
+  await withDir(async (dir) => {
+    const fixture = await openFixture(dir);
+    const locked = await fixture.registry.createRoom({ lock: lockRecord() });
+    const normal = await fixture.registry.createRoom();
+    const lockedMarker = await fixture.storage.getMeta(fixture.registry.registeredDocForCapability(locked.code, locked.token), MARKER_META);
+    const normalMarker = await fixture.storage.getMeta(fixture.registry.registeredDocForCapability(normal.code, normal.token), MARKER_META);
+    assert.equal(lockedMarker, LOCKED_REGISTRATION_MARKER);
+    assert.equal(previousReleaseServes(lockedMarker), false, 'a rollback answers 404 for the locked room');
+    assert.equal(normalMarker, UNLOCKED_MARKER);
+    assert.equal(previousReleaseServes(normalMarker), true);
+    assert.equal(isCommittedRegistration(lockedMarker) && isCommittedRegistration(normalMarker), true);
+    assert.equal(isCommittedRegistration(0) || isCommittedRegistration(undefined) || isCommittedRegistration(3), false);
+  });
+});
+
+test('a locked-room marker without a lock record is served as corrupt, never unlocked, and nothing is dropped', async () => {
+  await withDir(async (dir) => {
+    const first = await openFixture(dir);
+    const room = await first.registry.createRoom({ lock: lockRecord() });
+    const docName = first.registry.registeredDocForCapability(room.code, room.token);
+    await durableMetaBatch(first.ldb, docName, [{ type: 'del', key: ROOM_LOCK_META }]);
+    await first.ldb.destroy();
+    opened.delete(first.ldb);
+
+    const second = await openFixture(dir);
+    assert.equal(second.registry.registeredDocs.has(docName), true);
+    assert.equal(second.registry.isLocked(docName), true);
+    assert.equal(second.registry.lockFor(docName), CORRUPT_LOCK);
+    assert.equal(await second.storage.getMeta(docName, MARKER_META), LOCKED_REGISTRATION_MARKER);
+  });
+});
+
+test('a locked room with marker 2 keeps its lock across hydration: the orphan sweep never treats it as interrupted', async () => {
+  await withDir(async (dir) => {
+    const first = await openFixture(dir);
+    const room = await first.registry.createRoom({ lock: lockRecord() });
+    const docName = first.registry.registeredDocForCapability(room.code, room.token);
+    await first.ldb.destroy();
+    opened.delete(first.ldb);
+    const second = await openFixture(dir);
+    assert.deepEqual(decodeLockRecord(await second.storage.getMeta(docName, ROOM_LOCK_META)), decodeLockRecord(lockRecord()));
+    assert.deepEqual(second.registry.lockFor(docName), decodeLockRecord(lockRecord()));
+  });
+});
+
+test('an unknown marker is quarantined like a missing one, and its lock key is dropped', async () => {
+  await withDir(async (dir) => {
+    const first = await openFixture(dir);
+    await first.storage.storeUpdate(LOCK_DOC, first.registry.seedUpdate());
+    await durableMetaBatch(first.ldb, LOCK_DOC, [{ type: 'put', key: ROOM_LOCK_META, value: lockRecord() }]);
+    await first.storage.setMeta(LOCK_DOC, MARKER_META, 0);
+    await first.ldb.destroy();
+    opened.delete(first.ldb);
+    const second = await openFixture(dir);
+    assert.equal(second.registry.registeredDocs.has(LOCK_DOC), false);
+    assert.equal(await second.storage.getMeta(LOCK_DOC, ROOM_LOCK_META), undefined);
+  });
+});
+
+
 
 test('hydration deletes the lock key of an interrupted creation and leaves the room unreachable', async () => {
   await withDir(async (dir) => {
