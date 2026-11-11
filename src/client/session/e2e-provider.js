@@ -13,6 +13,7 @@ import { decryptFrame, encryptFrame } from '../room-lock/e2e-crypto.js';
 import { KEY_ROTATED_EVENT } from '../room-lock/lock-session.js';
 import { SeqCoverage } from './e2e-coverage.js';
 import { PendingDeliveries } from './e2e-delivery.js';
+import { isReauthRequiredError, refreshActiveRoomSession } from './room-session.js';
 import { SNAPSHOT_JITTER_MAX_MS, SnapshotPolicy } from './e2e-snapshot-policy.js';
 
 /** Dispatched on the page when a log entry could not be decrypted or applied; detail `{ seq }`. */
@@ -44,6 +45,8 @@ const NORMAL_CLOSE = Object.freeze({ code: 1000, reason: 'disconnect' });
 export const E2E_SYNCED_SETTLE_MS = 1_000;
 const SKIPPED_LOG = '[e2e] skipped an unreadable log entry';
 const SKIPPED_SUPPRESSED_LOG = '[e2e] more unreadable log entries skipped';
+/** How a log frame ended: applied; not decrypted under the room key (nobody can read it); or decrypted but invalid. */
+const REMOTE = Object.freeze({ APPLIED: 'applied', UNDECRYPTABLE: 'undecryptable', INVALID: 'invalid' });
 const FAILURE_LOG = '[e2e] provider step failed';
 
 const backoffMs = (attempt) => Math.min(RECONNECT_BASE_MS * 2 ** attempt, E2E_MAX_BACKOFF_MS);
@@ -75,7 +78,11 @@ export class E2EProvider extends Observable {
   #synced = false;
   #generation = 0;
   #replayDone = false;
-  #keyRotated = false;
+  // Set by a rotation close or a session probe that needs the password: no reconnect until setKey.
+  #awaitingReunlock = false;
+  // A socket refused before it opened probes the session once per run of failed opens (M3).
+  #sessionProbed = false;
+  #probeSession;
   #reconnectAttempts = 0;
   #reconnectTimer = null;
   #inbox = Promise.resolve();
@@ -95,13 +102,14 @@ export class E2EProvider extends Observable {
   #awarenessDirty = false;
   #roomFullAnnounced = false;
   #suppressedSkips = 0;
+  #lossReported = false;
 
   constructor(wsBaseUrl, roomHandle, doc, {
     key, WebSocketImpl = globalThis.WebSocket, connect = true, awareness = new Awareness(doc),
     eventTarget = globalThis.window, cipher = { encryptFrame, decryptFrame }, timers = defaultTimers,
     random = Math.random, firstClientRef, snapshotPolicy = {},
     appendFrameBytes = RELAY_DEFAULT_MAX_WS_MESSAGE_BYTES, maxRoomBytes = RELAY_DEFAULT_MAX_DOCUMENT_BYTES,
-    syncedSettleMs = E2E_SYNCED_SETTLE_MS,
+    syncedSettleMs = E2E_SYNCED_SETTLE_MS, probeSession = refreshActiveRoomSession,
   } = {}) {
     super();
     this.url = `${wsBaseUrl.replace(/\/+$/, '')}/${roomHandle}/${SOCKET_PATH_SUFFIX}`;
@@ -120,6 +128,7 @@ export class E2EProvider extends Observable {
     this.#random = random;
     this.#appendFrameBytes = appendFrameBytes;
     this.#syncedSettleMs = syncedSettleMs;
+    this.#probeSession = probeSession;
     this.#maxSnapshotBytes = e2eMaxSnapshotCiphertextBytes(maxRoomBytes);
     this.#maxFrameBytes = maxRoomBytes + E2E_MAX_FRAME_HEADER_BYTES;
     this.#pending = new PendingDeliveries({ firstClientRef });
@@ -157,7 +166,7 @@ export class E2EProvider extends Observable {
 
   connect() {
     this.shouldConnect = true;
-    if (this.#keyRotated || this.ws !== null) return;
+    if (this.#awaitingReunlock || this.ws !== null) return;
     this.#open();
   }
 
@@ -190,7 +199,7 @@ export class E2EProvider extends Observable {
   /** After re-unlock: future frames use the new key and epoch; pending entries are re-sent under it. */
   setKey(key) {
     this.#key = key;
-    this.#keyRotated = false;
+    this.#awaitingReunlock = false;
     if (this.shouldConnect && this.ws === null) this.#open();
   }
 
@@ -224,10 +233,12 @@ export class E2EProvider extends Observable {
     this.wsconnecting = false;
     this.wsconnected = true;
     this.#reconnectAttempts = 0;
+    this.#sessionProbed = false;
     this.#replayDone = false;
     this.#appliedSnapshotBase = 0;
     this.#awaitingPeerSnapshot = false;
     this.#coverage.restart();
+    this.#lossReported = false;
     this.#policy.restart();
     this.emit('status', [{ status: STATUS.CONNECTED }]);
     this.#announcePresence();
@@ -259,16 +270,31 @@ export class E2EProvider extends Observable {
     if (wasConnected) this.emit('status', [{ status: STATUS.DISCONNECTED }]);
     else this.#reconnectAttempts += 1;
     if (event?.code === KEY_ROTATED_CLOSE_CODE) {
-      this.#keyRotated = true;
+      this.#awaitingReunlock = true;
       this.#dispatch(KEY_ROTATED_EVENT);
       return;
     }
-    if (this.shouldConnect) {
-      this.#reconnectTimer = this.#timers.setTimeout(() => {
-        this.#reconnectTimer = null;
-        this.connect();
-      }, backoffMs(this.#reconnectAttempts));
-    }
+    if (this.shouldConnect) this.#scheduleReconnect(!wasConnected && !this.#sessionProbed);
+  }
+
+  // A refused upgrade looks like any network close (1006), so after the first one the session is renewed once:
+  // a missed rotation then answers 403 and the re-unlock dialog takes over instead of a silent reconnect loop.
+  #scheduleReconnect(probe) {
+    if (probe) this.#sessionProbed = true;
+    this.#reconnectTimer = this.#timers.setTimeout(() => {
+      this.#reconnectTimer = null;
+      if (probe) this.#probeThenConnect();
+      else this.connect();
+    }, backoffMs(this.#reconnectAttempts));
+  }
+
+  #probeThenConnect() {
+    const generation = this.#generation;
+    this.#probeSession().then(() => true, (error) => !isReauthRequiredError(error)).then((retry) => {
+      if (generation !== this.#generation || this.ws !== null || !this.shouldConnect) return;
+      if (retry) this.connect();
+      else this.#awaitingReunlock = true;
+    }).catch(reportFailure);
   }
 
   #clearReconnect() {
@@ -339,39 +365,43 @@ export class E2EProvider extends Observable {
     }
   }
 
-  /** Decrypts and applies one log frame. Resolves true/false for applied/unreadable, or null when the socket is gone. */
+  /** Decrypts and applies one log frame. Resolves a REMOTE outcome, or null when the socket is gone. */
   async #applyRemote(ciphertext, aad, generation) {
     let plaintext;
     try {
       plaintext = await this.#cipher.decryptFrame(this.#key.dek, aad, ciphertext);
     } catch {
-      return generation === this.#generation ? false : null;
+      return generation === this.#generation ? REMOTE.UNDECRYPTABLE : null;
     }
     if (generation !== this.#generation) return null;
     try {
       Y.applyUpdate(this.doc, plaintext, this);
-      return true;
+      return REMOTE.APPLIED;
     } catch {
-      return false;
+      return REMOTE.INVALID;
     }
   }
 
+  // Every member of an epoch holds the same key, so an entry that does not decrypt under it is unreadable to all:
+  // it counts as covered and empty and never blocks snapshots or rotation. One that decrypts but does not apply may
+  // carry content another page can read, so it is skipped and blocks them.
   async #applyUpdate({ seq, ciphertext }, generation) {
     if (seq <= this.#coverage.appliedSeq) return;
-    const applied = await this.#applyRemote(ciphertext, this.#aad(AAD_KIND.UPDATE), generation);
-    if (applied === null) return;
-    if (applied) this.#coverage.cover(seq);
-    else this.#skip(seq);
+    const outcome = await this.#applyRemote(ciphertext, this.#aad(AAD_KIND.UPDATE), generation);
+    if (outcome === null) return;
+    if (outcome === REMOTE.INVALID) this.#skip(seq);
+    else this.#coverage.cover(seq);
+    if (outcome === REMOTE.UNDECRYPTABLE) this.#reportLoss(seq);
     this.#policy.noteLogEntry(ciphertext.byteLength);
     this.#afterProgress();
   }
 
   async #applySnapshot({ seq, ciphertext }, generation) {
     // Always applied: a snapshot may carry a peer's edit that never was a log entry (one too large to append).
-    const applied = await this.#applyRemote(ciphertext, this.#aad(AAD_KIND.SNAPSHOT, seq), generation);
-    if (applied === null) return;
+    const outcome = await this.#applyRemote(ciphertext, this.#aad(AAD_KIND.SNAPSHOT, seq), generation);
+    if (outcome === null) return;
     this.#unappliedSnapshots -= 1;
-    if (applied) this.#appliedSnapshotBase = seq;
+    if (outcome === REMOTE.APPLIED) this.#appliedSnapshotBase = seq;
     else this.#skip(seq);
     this.#coverage.coverThrough(seq);
     this.#awaitingPeerSnapshot = false;
@@ -379,14 +409,18 @@ export class E2EProvider extends Observable {
     this.#afterProgress();
   }
 
-  // Logs the first skip; later ones are counted and logged once when the connection closes.
   #skip(seq) {
-    const first = this.#coverage.skippedSeq === null;
     this.#coverage.skip(seq);
-    if (!first) {
+    this.#reportLoss(seq);
+  }
+
+  // Logs the first entry this connection could not use; later ones are counted and logged once when it closes.
+  #reportLoss(seq) {
+    if (this.#lossReported) {
       this.#suppressedSkips += 1;
       return;
     }
+    this.#lossReported = true;
     console.warn(SKIPPED_LOG, { seq });
     this.#dispatch(E2E_SKIPPED_EVENT, { seq });
   }

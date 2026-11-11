@@ -40,7 +40,7 @@ export function attachE2ERoom({ provider, ydoc, eventTarget, getRoomKey, clearUn
       head: provider.head,
       appliedSnapshotBase: provider.appliedSnapshotBase,
       pendingDelivery: provider.pendingDelivery,
-      // An entry this page could not decrypt or apply; a snapshot from this page would lose it.
+      // An entry that decrypted but did not apply; a snapshot from this page would lose it.
       skippedSeq: provider.skippedSeq,
       // Connected, replayed, caught up and every snapshot applied (the same rule as `e2eSynced` presence).
       synced: provider.e2eSynced,

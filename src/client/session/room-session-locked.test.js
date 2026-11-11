@@ -2,7 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createRoomLock } from '../room-lock/e2e-crypto.js';
-import { fakeLockedRelay, LOCKED_TEST_CODE as CODE, LOCKED_TEST_TOKEN as TOKEN } from '../../test-support/fake-locked-relay.js';
+import { ROOM_SESSION_RENEWAL_SUFFIX } from '../../domain/room-lock-contract.js';
+import {
+  fakeLockedRelay, LOCKED_TEST_CODE as CODE, LOCKED_TEST_HANDLE, LOCKED_TEST_TOKEN as TOKEN,
+} from '../../test-support/fake-locked-relay.js';
 import * as session from './room-session.js';
 
 const { ROOM_SESSION_ERROR, ROOM_SESSION_HEALTH } = session;
@@ -62,6 +65,13 @@ test('the second step sends the authKey, returns the lock grant, and renewals ke
   assert.equal(Object.hasOwn(session.getActiveRoomSession(), 'lock'), false);
   await session.refreshActiveRoomSession();
   assert.deepEqual(relay.calls[1], { code: CODE, token: TOKEN, authKey: fixture.authKey });
+});
+
+test('a renewal goes to the room-scoped path its session cookie is sent to; the first exchange does not', async (context) => {
+  const relay = installRelay(context);
+  await session.establishRoomSession(CODE, TOKEN, { authKey: fixture.authKey });
+  await session.refreshActiveRoomSession();
+  assert.deepEqual(relay.paths, ['/api/room-session', `/rooms/${LOCKED_TEST_HANDLE}${ROOM_SESSION_RENEWAL_SUFFIX}`]);
 });
 
 test('after replaceRoomAuthKey renewals send the new key', async (context) => {

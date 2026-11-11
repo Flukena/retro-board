@@ -7,14 +7,15 @@ const SESSION_TTL_MS = 8 * 60 * 60 * 1_000;
 const JSON_HEADERS = Object.freeze({ 'content-type': 'application/json' });
 
 /**
- * A fake of POST /api/room-session for one locked room, at the fetch boundary only.
+ * A fake of POST /api/room-session (and its room-scoped renewal path) for one locked room, at the fetch boundary only.
  * `lock` is a record from createRoomLock; `authKey` the key that record accepts.
  */
 export function fakeLockedRelay({ lock, authKey, keyEpoch = 1, isOwner = true, lockRevision = 0 }) {
-  const relay = { lock, authKey, keyEpoch, isOwner, lockRevision, limitedSeconds: null, calls: [] };
-  relay.fetch = async (_url, init) => {
+  const relay = { lock, authKey, keyEpoch, isOwner, lockRevision, limitedSeconds: null, calls: [], paths: [] };
+  relay.fetch = async (url, init) => {
     const body = JSON.parse(init.body);
     relay.calls.push(body);
+    relay.paths.push(new URL(url).pathname);
     if (!Object.hasOwn(body, 'authKey')) {
       const { salt, kdf } = relay.lock;
       return new Response(JSON.stringify({ locked: true, salt, kdf }), { status: 409, headers: JSON_HEADERS });

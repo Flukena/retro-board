@@ -28,8 +28,11 @@ export class RoomLockVerifier {
     this.#maxKeys = maxKeys;
   }
 
-  /** @returns {'ok' | 'wrong' | { limited: number }} */
-  check(ip, docName, record, authKeyB64) {
+  /**
+   * `countFailure: false` answers a wrong key without charging it: for a member whose session already proves access.
+   * @returns {'ok' | 'wrong' | { limited: number }}
+   */
+  check(ip, docName, record, authKeyB64, { countFailure = true } = {}) {
     if (!record) throw new Error(MISSING_RECORD_MESSAGE);
     const now = this.#now();
     const ipKey = `${ip}${KEY_SEPARATOR}${docName}`;
@@ -39,6 +42,7 @@ export class RoomLockVerifier {
     ]);
     if (blocked !== null) return { limited: blocked };
     if (this.#matches(record, authKeyB64)) return 'ok';
+    if (!countFailure) return 'wrong';
     this.#record(this.#byIpRoom, ipKey, now, WRONG_PASSWORDS_PER_IP_ROOM);
     this.#record(this.#byRoom, docName, now, WRONG_PASSWORDS_PER_ROOM);
     return 'wrong';

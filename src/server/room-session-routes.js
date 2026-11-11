@@ -1,5 +1,7 @@
 import { entitlementsFor } from '../domain/plan-entitlements.js';
-import { LOCK_KDF, hasExactKeys, parseAuthKey, parseLockParams } from '../domain/room-lock-contract.js';
+import {
+  LOCK_KDF, ROOM_SESSION_RENEWAL_SUFFIX, hasExactKeys, parseAuthKey, parseLockParams,
+} from '../domain/room-lock-contract.js';
 import { authenticateAccount } from './auth-session.js';
 import { acceptCredentialOrigin, readJsonBody, sendIfWritable, sendJson } from './relay-http.js';
 import { RETRY_AFTER_LONG_SECONDS, RETRY_AFTER_SHORT_SECONDS } from './relay-config.js';
@@ -15,6 +17,8 @@ const SESSION_KEYS = ['code', 'token'];
 const LOCKED_SESSION_KEYS = ['code', 'token', 'authKey'];
 const AUTH_KEY_FIELD = 'authKey';
 const SOFT_CREATE_ERRORS = ['ROOM_CAPACITY', 'SERVER_UNAVAILABLE'];
+const ROOM_SESSION_PATH = '/api/room-session';
+const RENEWAL_PATH = new RegExp(`^/rooms/([A-Za-z0-9_-]{32})${ROOM_SESSION_RENEWAL_SUFFIX}$`);
 
 /**
  * Room creation and session exchange. ctx: registry, sessions (RoomSessions), verifier (RoomLockVerifier),
@@ -90,7 +94,11 @@ export function createRoomSessionRoutes(ctx) {
     return { roomHandle, expiresAt, cookie: sessions.createCookie(roomHandle, expiresAt, docName, cookiePath, { keyEpoch }) };
   };
 
-  const exchangeLocked = async (req, res, clientIp, prefixed, docName, authKey) => {
+  // A renewal on the room-scoped path carries the room cookie; one valid at the current epoch proves membership.
+  const isMember = (req, docName, renewalHandle) => renewalHandle !== null
+    && sessions.authenticate(req, renewalHandle)?.docName === docName;
+
+  const exchangeLocked = async (req, res, { clientIp, prefixed, renewalHandle }, docName, authKey) => {
     const lock = registry.lockFor(docName);
     if (lock === CORRUPT_LOCK) { sendIfWritable(res, HTTP.UNAVAILABLE); return; }
     if (authKey === undefined) {
@@ -98,7 +106,8 @@ export function createRoomSessionRoutes(ctx) {
       return;
     }
     if (!parseAuthKey(authKey)) { sendIfWritable(res, HTTP.BAD_REQUEST); return; }
-    const verdict = verifier.check(clientIp, docName, lock, authKey);
+    // A member's stale key (the password changed) is still refused, but it is not a guess: never charge it.
+    const verdict = verifier.check(clientIp, docName, lock, authKey, { countFailure: !isMember(req, docName, renewalHandle) });
     if (verdict === 'wrong') { sendIfWritable(res, HTTP.FORBIDDEN); return; }
     if (verdict !== 'ok') { sendIfWritable(res, HTTP.TOO_MANY, { 'retry-after': String(verdict.limited) }); return; }
     const account = await accountOf(req);
@@ -117,7 +126,7 @@ export function createRoomSessionRoutes(ctx) {
     sendJson(res, HTTP.OK, { roomHandle, expiresAt }, { 'set-cookie': cookie });
   };
 
-  const handleRoomSession = async (req, res, clientIp, prefixed) => {
+  const handleRoomSession = async (req, res, clientIp, prefixed, renewalHandle = null) => {
     if (!preamble(req, res)) return;
     let body;
     try { body = await readJsonBody(req, config.maxApiBodyBytes); }
@@ -139,7 +148,7 @@ export function createRoomSessionRoutes(ctx) {
       return;
     }
     try {
-      await exchangeLocked(req, res, clientIp, prefixed, docName, hasAuthKeyField ? body.authKey : undefined);
+      await exchangeLocked(req, res, { clientIp, prefixed, renewalHandle }, docName, hasAuthKeyField ? body.authKey : undefined);
     } catch (err) {
       if (err.code === 'STORAGE_FAILURE') ctx.onStorageFailure(err);
       sendIfWritable(res, HTTP.UNAVAILABLE);
@@ -148,8 +157,10 @@ export function createRoomSessionRoutes(ctx) {
 
   const handle = (req, res, routePath, { clientIp, prefixed, hasQueryOrFragment }) => {
     if (req.method !== 'POST' || hasQueryOrFragment) return false;
+    const renewal = RENEWAL_PATH.exec(routePath);
     if (routePath === '/api/rooms') void handleCreateRoom(req, res, clientIp);
-    else if (routePath === '/api/room-session') void handleRoomSession(req, res, clientIp, prefixed);
+    else if (routePath === ROOM_SESSION_PATH) void handleRoomSession(req, res, clientIp, prefixed);
+    else if (renewal) void handleRoomSession(req, res, clientIp, prefixed, renewal[1]);
     else return false;
     return true;
   };

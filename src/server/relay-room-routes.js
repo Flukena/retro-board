@@ -1,5 +1,6 @@
 import { acceptCredentialOrigin, isExactAllowedOrigin, setCredentialCors, sendCredentialPreflight } from './relay-http.js';
 import { E2E_BLOB_PREFLIGHT_HEADERS } from './e2e-blobs.js';
+import { ROOM_SESSION_RENEWAL_SUFFIX } from '../domain/room-lock-contract.js';
 
 const UPLOAD_PATH = /^\/rooms\/([A-Za-z0-9_-]{32})\/upload$/;
 const ROOM_IMAGE_PATH = /^\/rooms\/([A-Za-z0-9_-]{32})\/images\/([a-f0-9-]+\.(?:png|jpe?g|webp|gif))$/;
@@ -9,6 +10,7 @@ const LEGACY_IMAGE_PREFIX = '/images/';
 const PREFLIGHT_METHODS = 'POST, OPTIONS';
 const API_PREFLIGHT_PATHS = new Set(['/api/rooms', '/api/room-session']);
 const LOCK_PREFLIGHT_PATH = /^\/api\/rooms\/[A-Za-z0-9_-]{32}\/lock\/(?:password|rotate\/(?:begin|commit|abort))$/;
+const RENEWAL_PREFLIGHT_PATH = new RegExp(`^/rooms/[A-Za-z0-9_-]{32}${ROOM_SESSION_RENEWAL_SUFFIX}$`);
 
 const reply = (res, status) => {
   res.writeHead(status);
@@ -86,7 +88,8 @@ const ROUTES = [
   { method: 'GET', pattern: ROOM_IMAGE_PATH, run: handleRoomImageGet },
 ];
 
-const isApiPreflight = (routePath) => API_PREFLIGHT_PATHS.has(routePath) || LOCK_PREFLIGHT_PATH.test(routePath);
+const isApiPreflight = (routePath) => API_PREFLIGHT_PATHS.has(routePath) || LOCK_PREFLIGHT_PATH.test(routePath)
+  || RENEWAL_PREFLIGHT_PATH.test(routePath);
 
 /**
  * Serves room upload, encrypted blob, room image and legacy image routes.

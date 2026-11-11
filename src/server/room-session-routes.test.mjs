@@ -14,6 +14,7 @@ import { checkedStorage, durableMetaBatch } from './relay-storage.js';
 import { CORRUPT_LOCK, RoomLockVerifier, WRONG_PASSWORDS_PER_IP_ROOM } from './room-lock.js';
 import { createRoomSessionRoutes } from './room-session-routes.js';
 import { PLAN } from '../domain/plan-entitlements.js';
+import { ROOM_SESSION_RENEWAL_SUFFIX } from '../domain/room-lock-contract.js';
 import { RIGHT_KEY, WRONG_KEY, lockRecord } from './room-lock-fixtures.mjs';
 
 const require = createRequire(import.meta.url);
@@ -80,7 +81,9 @@ async function fixture(t, { storedPlan } = {}) {
   });
   const server = http.createServer((req, res) => {
     if (req.url === '/api/rooms') void routes.handleCreateRoom(req, res, IP);
-    else void routes.handleRoomSession(req, res, IP, false);
+    else if (!routes.handle(req, res, req.url, { clientIp: IP, prefixed: false, hasQueryOrFragment: false })) {
+      void routes.handleRoomSession(req, res, IP, false);
+    }
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise((resolve) => { server.closeAllConnections(); server.close(resolve); }));
@@ -241,6 +244,42 @@ test('after five wrong keys the next attempt is 429 with retry-after and no cook
     assert.ok(Number(limited.headers.get('retry-after')) >= 1);
     assert.deepEqual(limited.headers.getSetCookie(), []);
   }
+});
+
+const renewalPath = (roomHandle) => `/rooms/${roomHandle}${ROOM_SESSION_RENEWAL_SUFFIX}`;
+
+test('renewals with a valid room cookie and a stale authKey are 403 but not counted; the right key then gets 200', async (t) => {
+  const f = await fixture(t);
+  const room = await lockedRoom(f, await f.signIn('owner@example.com'));
+  const unlocked = await f.post('/api/room-session', { ...room, authKey: RIGHT_KEY });
+  const { roomHandle } = await unlocked.json();
+  const cookie = cookieHeaderOf(unlocked);
+  for (let attempt = 0; attempt <= WRONG_PASSWORDS_PER_IP_ROOM; attempt += 1) {
+    const renewal = await f.post(renewalPath(roomHandle), { ...room, authKey: WRONG_KEY }, cookie);
+    assert.equal(renewal.status, FORBIDDEN);
+    assert.deepEqual(renewal.headers.getSetCookie(), []);
+  }
+  const reunlocked = await f.post('/api/room-session', { ...room, authKey: RIGHT_KEY });
+  assert.equal(reunlocked.status, OK);
+  const renewed = await f.post(renewalPath(roomHandle), { ...room, authKey: RIGHT_KEY }, cookie);
+  assert.equal(renewed.status, OK, 'the room-scoped path also renews with the right key');
+  assert.ok(f.sessions.authenticate(cookieRequest(cookieHeaderOf(renewed)), roomHandle));
+});
+
+test('a stale authKey on the renewal path is counted without a cookie, or with one from an older epoch', async (t) => {
+  const f = await fixture(t);
+  const room = await lockedRoom(f, await f.signIn('owner@example.com'));
+  const docName = f.registry.registeredDocForCapability(room.code, room.token);
+  const unlocked = await f.post('/api/room-session', { ...room, authKey: RIGHT_KEY });
+  const { roomHandle } = await unlocked.json();
+  const oldEpochCookie = cookieHeaderOf(unlocked);
+  f.registry.publishLock(docName, { ...f.registry.lockFor(docName), keyEpoch: 1, lockRevision: 1 });
+  const cookies = [undefined, oldEpochCookie];
+  for (let attempt = 0; attempt < WRONG_PASSWORDS_PER_IP_ROOM; attempt += 1) {
+    const cookie = cookies[attempt % cookies.length];
+    assert.equal((await f.post(renewalPath(roomHandle), { ...room, authKey: WRONG_KEY }, cookie)).status, FORBIDDEN);
+  }
+  assert.equal((await f.post('/api/room-session', { ...room, authKey: RIGHT_KEY })).status, TOO_MANY);
 });
 
 test('a room whose lock record is unreadable answers 503', async (t) => {

@@ -9,7 +9,8 @@ import { installBrowserStandIn } from '../../test-support/browser-stand-in.mjs';
 import { E2E_FRAME, decodeServerFrame, encodeFrame } from '../../domain/e2e-envelope.js';
 import { delivered, synced, textOf, until } from '../../test-support/e2e-room-fixture.mjs';
 import { ORIGIN, PASSWORD } from '../../test-support/locked-room-harness.mjs';
-import { createNextRoomKey, createRoomLock } from './e2e-crypto.js';
+import { e2eAad } from '../../domain/room-lock-contract.js';
+import { createNextRoomKey, createRoomLock, encryptFrame } from './e2e-crypto.js';
 import { getRoomKey, reunlock } from './lock-session.js';
 import { readE2EImage, uploadEncryptedImage } from './e2e-images.js';
 import { LOCK_ACTION_ERROR, createRoomLockApi } from './room-lock-api.js';
@@ -231,26 +232,34 @@ test('the new password must differ from the current one', async () => {
 
 const FRAME_LIMITS = Object.freeze({ maxBytes: 1024 * 1024 });
 const UNREADABLE_CIPHERTEXT_BYTES = 64;
+// Decodes as no Yjs update ("Unexpected end of array").
+const NOT_A_YJS_UPDATE = Uint8Array.of(255, 255, 255, 255);
 const CONFLICT = 409;
 const SHORT_TIMEOUT_MS = 200;
 
-/** Appends ciphertext no key opens, as a member with a broken client would; resolves once the relay acknowledged it. */
-async function appendUnreadable(board) {
+/** Appends `ciphertext` as a member with a broken client would; resolves once the relay acknowledged it. */
+async function appendRaw(board, ciphertext) {
   const { cookie } = await peerSession(board.env.relay, board.room, PASSWORD);
   const ws = new WebSocket(`${board.env.relay.wsUrl}/rooms/${getRoomKey().roomHandle}/e2e`, { origin: ORIGIN, headers: { cookie } });
   const acked = new Promise((resolve) => {
     ws.on('message', (data) => { if (decodeServerFrame(new Uint8Array(data), FRAME_LIMITS)?.type === E2E_FRAME.ACK) resolve(); });
   });
   await once(ws, 'open');
-  ws.send(encodeFrame(E2E_FRAME.APPEND, { clientRef: 1, ciphertext: new Uint8Array(UNREADABLE_CIPHERTEXT_BYTES).fill(3) }));
+  ws.send(encodeFrame(E2E_FRAME.APPEND, { clientRef: 1, ciphertext }));
   await acked;
   ws.close();
 }
 
+// Opens under the room key but is no Yjs update: a page that could read it might still hold content it carries.
+const undecodableEntry = () => {
+  const key = getRoomKey();
+  return encryptFrame(key.dek, e2eAad(key.roomHandle, key.keyEpoch, 'update'), NOT_A_YJS_UPDATE);
+};
+
 test('an acknowledged entry the owner page cannot apply aborts the rotation instead of dropping it from the snapshot', async (t) => {
   const { board, gate, owner, peer, api, rotate } = await boardWithPeer(t);
   gate.hold();
-  await appendUnreadable(board);
+  await appendRaw(board, await undecodableEntry());
   const begin = async (args, options) => {
     const rotation = await api.beginRotation(args, options);
     gate.release();
@@ -265,6 +274,18 @@ test('an acknowledged entry the owner page cannot apply aborts the rotation inst
   await delivered(peer);
   assert.equal(getRoomKey().keyEpoch, 0);
   await rejectsWithKind(rotate(), ROTATION_FAILURE.INCOMPLETE);
+});
+
+test('an entry no member can decrypt does not block the rotation; the board rotates without it', async (t) => {
+  const { board, owner, peer, rotate } = await boardWithPeer(t);
+  type(owner, 'kept');
+  await delivered(owner);
+  await appendRaw(board, new Uint8Array(UNREADABLE_CIPHERTEXT_BYTES).fill(3));
+  await rotate();
+  await reunlockEveryone({ owner, peer });
+  const late = await board.openPeerPage(NEW_PASSWORD);
+  await synced(late);
+  assert.equal(textOf(late), 'kept');
 });
 
 test('the owner typing during the freeze keeps the edit (re-sent under the new key); a plain image upload then gets 409', async (t) => {

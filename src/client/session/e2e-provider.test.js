@@ -6,13 +6,16 @@ import { KEY_ROTATED_EVENT } from '../room-lock/lock-session.js';
 import { decryptFrame, encryptFrame } from '../room-lock/e2e-crypto.js';
 import { attachClientSync } from './client-sync.js';
 import { E2E_ROOM_FULL_EVENT, E2E_SKIPPED_EVENT, E2E_SYNCED_FIELD } from './e2e-provider.js';
+import { e2eAad } from '../../domain/room-lock-contract.js';
 import {
-  delivered, dropFrame, e2eRoom, flipLastBit, roomKey, sleep, synced, textOf, until,
+  E2E_TEST_HANDLE, delivered, dropFrame, e2eRoom, flipLastBit, roomKey, sleep, synced, textOf, until,
 } from '../../test-support/e2e-room-fixture.mjs';
 
 const SMALL_SNAPSHOT_POLICY = Object.freeze({ afterUpdates: 3 });
 const QUIET_MS = 150;
 const LAST_CLIENT_REF = 2 ** 32 - 1;
+// Decodes as no Yjs update ("Unexpected end of array").
+const NOT_A_YJS_UPDATE = Uint8Array.of(255, 255, 255, 255);
 
 const type = ({ doc }, text, index = doc.getText('text').length, origin = 'local') => {
   doc.transact(() => doc.getText('text').insert(index, text), origin);
@@ -59,7 +62,7 @@ test('undo of local edits never reverts a peer change: remote applies are not lo
   assert.equal(undo.undoStack.length, 0, 'the peer change is not on the undo stack');
 });
 
-test('a tampered frame is skipped, the board stays intact and snapshots stop for the session', async (t) => {
+test('an entry that does not decrypt under the room key counts as covered and empty; snapshots go on', async (t) => {
   const room = await e2eRoom(t);
   const key = await roomKey();
   const a = room.join(key);
@@ -67,15 +70,30 @@ test('a tampered frame is skipped, the board stays intact and snapshots stop for
   const c = room.join(key);
   const skipped = eventsOf(b.events, E2E_SKIPPED_EVENT);
   await synced(a, b, c);
-  b.tap.rule(E2E_FRAME.UPDATE, flipLastBit);
+  b.tap.rule(E2E_FRAME.UPDATE, flipLastBit, { once: true });
   a.doc.getMap('meta').set('lost', true);
   await delivered(a);
-  // A later seq from another page applies; the author's own later edits would wait on the lost one (Yjs order).
   type(c, 'after');
   await until(() => textOf(b) === 'after', 'later seq applied');
-  assert.equal(b.doc.getMap('meta').get('lost'), undefined);
+  assert.equal(b.doc.getMap('meta').get('lost'), undefined, 'the unreadable entry is not applied');
+  assert.deepEqual(skipped, [{ seq: 1 }], 'the page is still told an entry could not be read');
+  assert.equal(b.provider.skippedSeq, null);
+  for (let i = 0; i < SMALL_SNAPSHOT_POLICY.afterUpdates * 2; i += 1) type(b, String(i));
+  await delivered(b);
+  await until(() => b.tap.sentOfType(E2E_FRAME.SNAPSHOT).length > 0, 'a snapshot after an unreadable entry');
+  await until(() => b.provider.e2eSynced, 'synced again');
+});
+
+test('an entry that decrypts but does not apply is skipped and stops snapshots for the session', async (t) => {
+  const room = await e2eRoom(t);
+  const key = await roomKey();
+  const b = room.join(key, { snapshotPolicy: SMALL_SNAPSHOT_POLICY });
+  const skipped = eventsOf(b.events, E2E_SKIPPED_EVENT);
+  await synced(b);
+  const ciphertext = await encryptFrame(key.dek, e2eAad(E2E_TEST_HANDLE, key.keyEpoch, 'update'), NOT_A_YJS_UPDATE);
+  await room.roomLog.append(room.docName, ciphertext, key.keyEpoch);
+  await until(() => b.provider.skippedSeq === 1, 'the entry is skipped');
   assert.deepEqual(skipped, [{ seq: 1 }]);
-  assert.equal(b.provider.skippedSeq, 1);
   for (let i = 0; i < SMALL_SNAPSHOT_POLICY.afterUpdates * 2; i += 1) type(b, String(i));
   await delivered(b);
   await sleep(QUIET_MS);

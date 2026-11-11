@@ -1,6 +1,6 @@
 import { PUBLIC_RELAY_PREFIX, PUBLIC_PATH, PUBLIC_SESSION_ROUTE, PUBLIC_ROOM_SESSION_SUFFIX } from '../../domain/public-wall-contract.js';
 import {
-  LOCK_BYTES, decodeBase64Url, isCounter, isLockKdf, isPlainObject, parseAuthKey,
+  LOCK_BYTES, ROOM_SESSION_RENEWAL_SUFFIX, decodeBase64Url, isCounter, isLockKdf, isPlainObject, parseAuthKey,
 } from '../../domain/room-lock-contract.js';
 
 // Exchanges the long-lived fragment capability for a short-lived, HttpOnly
@@ -385,6 +385,8 @@ const scheduleRefresh = (session) => {
 };
 
 const publicSessionPath = handle => handle ? `/rooms/${handle}${PUBLIC_ROOM_SESSION_SUFFIX}` : PUBLIC_SESSION_ROUTE;
+// A locked room renews below its cookie's path, so the relay can tell a member's stale key from a guess.
+const roomSessionPath = (handle, authKey) => (handle && authKey !== null ? `/rooms/${handle}${ROOM_SESSION_RENEWAL_SUFFIX}` : '/api/room-session');
 
 const exchangeSession = async (code, token, { expectedHandle = null, replacedHandle = null, authKey = null } = {}) => {
   const publicWall = code === null && token === null;
@@ -403,7 +405,7 @@ const exchangeSession = async (code, token, { expectedHandle = null, replacedHan
   const credentialGenerationAtStart = credentialGeneration;
   const promise = (async () => {
     const value = await postJson(
-      publicWall ? publicSessionPath(expectedHandle) : '/api/room-session',
+      publicWall ? publicSessionPath(expectedHandle) : roomSessionPath(expectedHandle, authKey),
       publicWall ? {} : { code, token, ...(authKey === null ? {} : { authKey }) },
       200,
       [400, 404],

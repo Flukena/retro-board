@@ -9,6 +9,8 @@ import { tempRoot } from '../test-support/relay-harness.mjs';
 import { ORIGIN, PASSWORD, cookiePair, createLockedRoom, lockedRelay, post, signIn } from '../test-support/locked-room-harness.mjs';
 import { createNextRoomKey, createRoomLock, rewrapRoomLock } from '../client/room-lock/e2e-crypto.js';
 import { E2E_FRAME, decodeServerFrame, encodeFrame } from '../domain/e2e-envelope.js';
+import { ROOM_SESSION_RENEWAL_SUFFIX } from '../domain/room-lock-contract.js';
+import { WRONG_PASSWORDS_PER_IP_ROOM } from './room-lock.js';
 
 const NEXT_PASSWORD = 'another long passphrase 2';
 const KEY_ROTATED_CLOSE = 4001;
@@ -151,6 +153,21 @@ test('a password change swaps the key but leaves open sockets and cookies workin
   while (!member.frames.some((frame) => frame?.type === E2E_FRAME.ACK) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
   assert.ok(member.frames.some((frame) => frame?.type === E2E_FRAME.ACK), 'the open cookie still appends');
   member.ws.close();
+});
+
+test('a member renewing on the room-scoped path with a stale key is refused but never locked out', async (t) => {
+  const env = await lockedRelay(t);
+  const room = await createLockedRoom(env, ROOM_LOCK);
+  const renewalUrl = `${env.relay.url}/rooms/${room.handle}${ROOM_SESSION_RENEWAL_SUFFIX}`;
+  const preflight = await fetch(renewalUrl, {
+    method: 'OPTIONS', headers: { origin: ORIGIN, 'access-control-request-method': 'POST', 'access-control-request-headers': 'content-type' },
+  });
+  assert.equal(preflight.status, STATUS.NO_CONTENT);
+  const body = (authKey) => ({ code: room.code, token: room.token, authKey });
+  for (let attempt = 0; attempt <= WRONG_PASSWORDS_PER_IP_ROOM; attempt += 1) {
+    assert.equal((await post(env.relay, renewalUrl.slice(env.relay.url.length), body(NEXT_KEY.authKey), room.cookie)).status, STATUS.FORBIDDEN);
+  }
+  assert.equal((await post(env.relay, '/api/room-session', body(ROOM_LOCK.authKey))).status, STATUS.OK);
 });
 
 test('the lock routes answer a credentialed preflight and refuse requests without the account cookie', async (t) => {

@@ -79,7 +79,7 @@ async function waitUntil(predicate, { clock, timeoutMs, signal }, failure) {
   }
 }
 
-/** A page that skipped an entry it could not decrypt or apply would drop it from the new snapshot: never commit. */
+/** A page that skipped an entry it decrypted but could not apply would drop it from the new snapshot: never commit. */
 const assertCompleteCoverage = (source) => {
   if (source.skippedSeq !== null) throw new RotationError(ROTATION_FAILURE.INCOMPLETE);
 };

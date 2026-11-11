@@ -4,6 +4,11 @@ export const ROOM_PASSWORD_MIN_LENGTH = 10;
 /** WebSocket close code for every encrypted-room socket when a key rotation commits; the page must re-unlock. */
 export const KEY_ROTATED_CLOSE_CODE = 4001;
 export const KEY_ROTATED_REASON = 'key rotated';
+/**
+ * Renewal of a locked room's session, below the room cookie's path so the cookie is sent with it: a member whose
+ * stored key went stale (the password changed) is told 403 without being charged a wrong-password attempt.
+ */
+export const ROOM_SESSION_RENEWAL_SUFFIX = '/room-session';
 
 const AAD_PREFIX = 'retroroom/e2e/v1';
 const AAD_SEPARATOR = '|';

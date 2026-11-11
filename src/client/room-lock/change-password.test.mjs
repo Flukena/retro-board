@@ -7,6 +7,7 @@ import { getRoomKey } from './lock-session.js';
 import { refreshActiveRoomSession } from '../session/room-session.js';
 import { LOCK_ACTION_ERROR, createRoomLockApi } from './room-lock-api.js';
 import { changeRoomPassword } from './change-password.js';
+import { ROOM_SESSION_RENEWAL_SUFFIX } from '../../domain/room-lock-contract.js';
 
 const ROOM_LOCK = await createRoomLock(PASSWORD);
 const NEW_PASSWORD = 'a changed passphrase';
@@ -14,7 +15,8 @@ const THIRD_PASSWORD = 'a third passphrase';
 const FORBIDDEN = 403;
 
 const bodyText = ({ body }) => (body instanceof Uint8Array ? Buffer.from(body).toString('utf8') : String(body ?? ''));
-const sessionBodies = (sent) => sent.filter(({ url }) => url.endsWith('/api/room-session')).map((request) => JSON.parse(bodyText(request)));
+// Both the first exchange (/api/room-session) and a renewal (/rooms/<handle>/room-session) end with the suffix.
+const sessionBodies = (sent) => sent.filter(({ url }) => url.endsWith(ROOM_SESSION_RENEWAL_SUFFIX)).map((request) => JSON.parse(bodyText(request)));
 
 async function openBoard(t) {
   const board = await ownerBoard(t, { roomLock: ROOM_LOCK, password: PASSWORD });
