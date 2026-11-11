@@ -1098,6 +1098,7 @@ export default Object.freeze({
   "roomLock.rotate.boardChanged": "再暗号化中にボードが変更されました。何も変更されていません。もう一度お試しください。",
   "roomLock.rotate.timeout": "一部の編集がまだサーバーに届いていません。何も変更されていません。接続を確認してもう一度お試しください。",
   "roomLock.rotate.incomplete": "このページはボードの一部を読み込めませんでした。何も変更されていません。ボードを再読み込みしてもう一度お試しください。",
+  "roomLock.rotate.unknownOutcome": "新しいパスワードの保存中に接続が切れたため、新しいパスワードがすでに有効になっている可能性があります。ボードを再読み込みし、パスワードを求められたらまず新しいパスワードを試してください。",
   "roomLock.manage.lockChanged": "ボードのパスワードが別の場所で変更されました。ボードを再読み込みしてもう一度お試しください。",
   "roomLock.manage.unavailable": "うまくいきませんでした。接続を確認してもう一度お試しください。",
   "roomLock.notice.skipped": "一部の変更を復号できず、スキップしました。ボードを再読み込みしてもう一度お試しください。",

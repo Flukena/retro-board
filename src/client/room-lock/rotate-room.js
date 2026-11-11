@@ -27,6 +27,8 @@ export const ROTATION_FAILURE = Object.freeze({
   WRONG_PASSWORD: 'wrong',
   LOCKED_OUT: 'locked-out',
   UNAVAILABLE: 'unavailable',
+  /** The commit was sent but no answer came back and the freeze could not be released: it may have committed. */
+  UNKNOWN_OUTCOME: 'unknown-outcome',
 });
 
 export class RotationError extends Error {
@@ -167,6 +169,7 @@ async function commitFrozen({ storage, api, key, keys, rotation, images, run }) 
   if (source.roomHandle !== key.roomHandle || source.keyEpoch !== key.keyEpoch) throw new RotationError(ROTATION_FAILURE.LOCK_CHANGED);
   const { header, snapshot } = await buildCommit(source, { key, keys, rotation, images, run });
   throwIfCancelled(run.signal);
+  run.commitSent = true;
   await api.commitRotation(header, snapshot, { signal: run.signal });
 }
 
@@ -200,10 +203,12 @@ export async function rotateRoom({
   clock = SYSTEM_CLOCK, timeoutMs = ROTATION_WAIT_TIMEOUT_MS, imageTimeoutMs = ROTATION_IMAGE_TIMEOUT_MS, onTerminate = onPageHide,
 }) {
   const hidden = new AbortController();
-  const run = { clock, timeoutMs, imageTimeoutMs, signal: AbortSignal.any([signal, hidden.signal]) };
+  const run = { clock, timeoutMs, imageTimeoutMs, signal: AbortSignal.any([signal, hidden.signal]), commitSent: false };
   const keys = await prepareKeys({ currentPassword, newPassword, key });
   const rotation = await beginFrozen({ api, key, keys, storage, run });
-  const abort = (options) => api.abortRotation({ oldAuthKey: keys.oldAuthKey, rotationId: rotation.rotationId }, options).catch(() => {});
+  // Resolves whether the relay released the freeze; a refusal means it is gone (committed or expired).
+  const abort = (options) => api.abortRotation({ oldAuthKey: keys.oldAuthKey, rotationId: rotation.rotationId }, options)
+    .then(() => true, () => false);
   // The page is going away: release the freeze with a request that outlives it, and never commit afterwards.
   const stopWatching = onTerminate(() => {
     hidden.abort();
@@ -212,7 +217,9 @@ export async function rotateRoom({
   try {
     await commitFrozen({ storage, api, key, keys, rotation, images, run });
   } catch (error) {
-    await abort();
+    const released = await abort();
+    // A commit that got no answer may have landed; the abort's refusal is then the only sign, so say so.
+    if (run.commitSent && !released && !(error instanceof RoomLockActionError)) throw new RotationError(ROTATION_FAILURE.UNKNOWN_OUTCOME);
     throw rotationErrorFor(error, ROTATION_FAILURE.BOARD_CHANGED, run.signal);
   } finally {
     stopWatching();

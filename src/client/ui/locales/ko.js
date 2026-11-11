@@ -1098,6 +1098,7 @@ export default Object.freeze({
   "roomLock.rotate.boardChanged": "다시 암호화하는 동안 보드가 변경되었습니다. 아무것도 바뀌지 않았으니 다시 시도하세요.",
   "roomLock.rotate.timeout": "일부 편집이 아직 서버에 도착하지 않았습니다. 아무것도 바뀌지 않았으니 연결을 확인하고 다시 시도하세요.",
   "roomLock.rotate.incomplete": "이 페이지가 보드 일부를 읽지 못했습니다. 아무것도 바뀌지 않았으니 보드를 새로 고친 뒤 다시 시도하세요.",
+  "roomLock.rotate.unknownOutcome": "새 비밀번호를 저장하는 동안 연결이 끊어져 새 비밀번호가 이미 적용되었을 수 있습니다. 보드를 새로 고치고, 비밀번호를 묻는다면 새 비밀번호를 먼저 입력해 보세요.",
   "roomLock.manage.lockChanged": "보드 비밀번호가 다른 곳에서 변경되었습니다. 보드를 새로 고친 뒤 다시 시도하세요.",
   "roomLock.manage.unavailable": "실패했습니다. 연결을 확인하고 다시 시도하세요.",
   "roomLock.notice.skipped": "일부 변경 사항을 복호화하지 못해 건너뛰었습니다. 보드를 새로 고쳐 다시 시도하세요.",

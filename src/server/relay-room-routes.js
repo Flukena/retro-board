@@ -34,7 +34,7 @@ const handleUploadPost = (req, res, handle, ctx) => {
   const session = ctx.authenticate(req, handle);
   if (!session) { reply(res, 401); return; }
   // Locked rooms never accept plaintext image bytes; their images go to /e2e-blobs as ciphertext.
-  if (ctx.lockFor?.(session.docName)) { reply(res, 403); return; }
+  if (ctx.lockFor(session.docName)) { reply(res, 403); return; }
   void ctx.uploads.handleUpload(req, res, ctx.clientIp, session.docName, handle);
 };
 

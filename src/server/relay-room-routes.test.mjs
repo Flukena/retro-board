@@ -28,6 +28,7 @@ const context = (overrides = {}) => ({
   unavailable: false,
   rooms: new Map([[HANDLE, DOC_NAME]]),
   authenticate: () => null,
+  lockFor: () => null,
   uploads: uploadsStub(),
   clientIp: '203.0.113.9',
   ...overrides,
@@ -62,6 +63,12 @@ test('upload with a room session is handed to uploads for that room document', (
   const request = req('POST', { origin: ORIGIN });
   assert.equal(handleRoomRoute(request, response(), `/rooms/${HANDLE}/upload`, ctx), true);
   assert.deepEqual([ctx.uploads.calls[0][0], ...ctx.uploads.calls[0].slice(4)], ['upload', DOC_NAME, HANDLE]);
+});
+
+test('an upload route wired without lockFor fails closed instead of accepting plaintext for a locked room', () => {
+  const ctx = context({ authenticate: () => ({ docName: DOC_NAME }), lockFor: undefined });
+  assert.throws(() => handleRoomRoute(req('POST', { origin: ORIGIN }), response(), `/rooms/${HANDLE}/upload`, ctx), TypeError);
+  assert.equal(ctx.uploads.calls.length, 0);
 });
 
 test('room image with a foreign Origin answers 403', () => {

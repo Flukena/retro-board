@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { BLOB_ID_PATTERN } from '../domain/room-lock-contract.js';
+import { BLOB_ID_PATTERN, E2E_BLOB_ID_HEADER, E2E_BLOB_STAGE_HEADER } from '../domain/room-lock-contract.js';
 import { IMAGE_MAX_BYTES } from '../domain/security-boundaries.js';
 import { E2E_CIPHERTEXT_OVERHEAD_BYTES } from '../domain/e2e-envelope.js';
 import { acceptCredentialOrigin, sendJson } from './relay-http.js';
@@ -12,9 +12,8 @@ import { E2E_BLOB_DUPLICATE, E2E_BUSY, E2E_FROZEN, E2E_QUOTA, E2E_ROTATION_STALE
 import { inventoryKey } from './e2e-blob-store.js';
 import { e2eBlobFilename } from './relay-uploads.js';
 
-export const E2E_BLOB_ID_HEADER = 'x-blob-id';
-export const E2E_BLOB_STAGE_HEADER = 'x-blob-stage';
-export const E2E_BLOB_PREFLIGHT_HEADERS = 'Content-Type, X-Blob-Id, X-Blob-Stage';
+export { E2E_BLOB_ID_HEADER, E2E_BLOB_STAGE_HEADER };
+export const E2E_BLOB_PREFLIGHT_HEADERS = ['Content-Type', E2E_BLOB_ID_HEADER, E2E_BLOB_STAGE_HEADER].join(', ');
 export const E2E_BLOB_CONTENT_TYPE = 'application/octet-stream';
 export const E2E_BLOB_CACHE_CONTROL = 'private, no-store';
 /** Ciphertext beyond MAX_UPLOAD_BYTES that a blob may carry: the encoding envelope around the image. */

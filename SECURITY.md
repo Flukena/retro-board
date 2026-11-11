@@ -255,7 +255,11 @@ the Public Wall are unchanged.
   key or any content. The relay never builds a `Y.Doc` for a locked room.
 - **Online guessing.** A wrong `authKey` returns 403 and is counted: at most 5
   failures per 15 minutes per IP and room, and 50 per 15 minutes per room
-  (rolling window; over the limit gives 429 with `retry-after`).
+  (rolling window; over the limit gives 429 with `retry-after`). A renewal
+  that carries a room cookie still valid at the current key epoch gets 403
+  but is not counted, so pages left open across a password change do not
+  lock out their network. The counters are kept in relay memory only, so a
+  relay restart or deploy resets them.
 - **Offline guessing.** Anyone holding a backup or database copy plus the room
   link has the salt and verifier and can guess passwords offline, limited only
   by PBKDF2 cost. This is why the minimum is 10 characters. Treat backups of

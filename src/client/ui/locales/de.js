@@ -1098,6 +1098,7 @@ export default Object.freeze({
   "roomLock.rotate.boardChanged": "Das Board hat sich während der Neuverschlüsselung geändert. Es wurde nichts geändert; versuche es erneut.",
   "roomLock.rotate.timeout": "Einige Änderungen haben den Server noch nicht erreicht. Es wurde nichts geändert; prüfe die Verbindung und versuche es erneut.",
   "roomLock.rotate.incomplete": "Diese Seite konnte einen Teil des Boards nicht lesen. Es wurde nichts geändert; lade das Board neu und versuche es erneut.",
+  "roomLock.rotate.unknownOutcome": "Die Verbindung brach ab, während das neue Passwort gespeichert wurde; es ist möglicherweise schon aktiv. Lade das Board neu; wenn es nach einem Passwort fragt, versuche zuerst das neue.",
   "roomLock.manage.lockChanged": "Das Board-Passwort wurde anderswo geändert. Lade das Board neu und versuche es erneut.",
   "roomLock.manage.unavailable": "Das hat nicht geklappt. Prüfe die Verbindung und versuche es erneut.",
   "roomLock.notice.skipped": "Einige Änderungen konnten nicht entschlüsselt werden und wurden übersprungen. Lade das Board neu, um es erneut zu versuchen.",

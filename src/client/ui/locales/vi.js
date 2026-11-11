@@ -1098,6 +1098,7 @@ export default Object.freeze({
   "roomLock.rotate.boardChanged": "Bảng đã thay đổi trong khi mã hóa lại. Không có gì bị thay đổi; hãy thử lại.",
   "roomLock.rotate.timeout": "Một số chỉnh sửa chưa tới máy chủ. Không có gì bị thay đổi; kiểm tra kết nối rồi thử lại.",
   "roomLock.rotate.incomplete": "Trang này không đọc được một phần của bảng. Không có gì bị thay đổi; tải lại bảng rồi thử lại.",
+  "roomLock.rotate.unknownOutcome": "Kết nối bị ngắt khi đang lưu mật khẩu mới, nên mật khẩu mới có thể đã có hiệu lực. Tải lại bảng; nếu được hỏi mật khẩu, hãy thử mật khẩu mới trước.",
   "roomLock.manage.lockChanged": "Mật khẩu bảng đã được đổi ở nơi khác. Tải lại bảng rồi thử lại.",
   "roomLock.manage.unavailable": "Không thành công. Kiểm tra kết nối rồi thử lại.",
   "roomLock.notice.skipped": "Một số thay đổi không giải mã được và đã bị bỏ qua. Tải lại bảng để thử lại.",

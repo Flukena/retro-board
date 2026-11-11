@@ -9,6 +9,9 @@ export const KEY_ROTATED_REASON = 'key rotated';
  * stored key went stale (the password changed) is told 403 without being charged a wrong-password attempt.
  */
 export const ROOM_SESSION_RENEWAL_SUFFIX = '/room-session';
+/** Request headers of an encrypted-blob upload: the client-chosen blob id, and the rotation a staged copy is for. */
+export const E2E_BLOB_ID_HEADER = 'x-blob-id';
+export const E2E_BLOB_STAGE_HEADER = 'x-blob-stage';
 
 const AAD_PREFIX = 'retroroom/e2e/v1';
 const AAD_SEPARATOR = '|';

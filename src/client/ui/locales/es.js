@@ -1098,6 +1098,7 @@ export default Object.freeze({
   "roomLock.rotate.boardChanged": "El tablero cambió mientras se volvía a cifrar. No se cambió nada; inténtalo de nuevo.",
   "roomLock.rotate.timeout": "Algunos cambios aún no han llegado al servidor. No se cambió nada; revisa tu conexión e inténtalo de nuevo.",
   "roomLock.rotate.incomplete": "Esta página no pudo leer parte del tablero. No se cambió nada; recarga el tablero e inténtalo de nuevo.",
+  "roomLock.rotate.unknownOutcome": "La conexión se cortó mientras se guardaba la contraseña nueva, así que puede que ya esté activa. Recarga el tablero; si pide una contraseña, prueba primero la nueva.",
   "roomLock.manage.lockChanged": "La contraseña del tablero cambió en otro lugar. Recarga el tablero e inténtalo de nuevo.",
   "roomLock.manage.unavailable": "No funcionó. Revisa tu conexión e inténtalo de nuevo.",
   "roomLock.notice.skipped": "Algunos cambios no se pudieron descifrar y se omitieron. Recarga el tablero para intentarlo de nuevo.",

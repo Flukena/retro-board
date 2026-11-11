@@ -1,4 +1,4 @@
-import { e2eAad } from '../../domain/room-lock-contract.js';
+import { E2E_BLOB_ID_HEADER, E2E_BLOB_STAGE_HEADER, e2eAad } from '../../domain/room-lock-contract.js';
 import { classifyImportedImageSource, isSafeImageMime } from '../../domain/security-boundaries.js';
 import { roomFetch } from '../session/room-session.js';
 import { RoomKeyError, decryptFrame, encryptFrame } from './e2e-crypto.js';
@@ -6,8 +6,6 @@ import { getRoomKey } from './lock-session.js';
 
 const BLOB_AAD_KIND = 'blob';
 const BLOB_ROUTE = 'e2e-blobs';
-const BLOB_ID_HEADER = 'x-blob-id';
-const BLOB_STAGE_HEADER = 'x-blob-stage';
 const BLOB_CONTENT_TYPE = 'application/octet-stream';
 const TYPE_LENGTH_BYTES = 1;
 /** Resolved blob epochs are remembered per source; the oldest entry goes first once the map is full. */
@@ -77,7 +75,7 @@ export async function encryptImageForUpload(blob, key = getRoomKey()) {
  */
 export async function uploadEncryptedImage(blob, { signal, key = getRoomKey(), stage = null } = {}) {
   const { bytes, id } = await encryptImageForUpload(blob, key);
-  const headers = { 'Content-Type': BLOB_CONTENT_TYPE, [BLOB_ID_HEADER]: id, ...(stage === null ? {} : { [BLOB_STAGE_HEADER]: stage }) };
+  const headers = { 'Content-Type': BLOB_CONTENT_TYPE, [E2E_BLOB_ID_HEADER]: id, ...(stage === null ? {} : { [E2E_BLOB_STAGE_HEADER]: stage }) };
   const response = await roomFetch(BLOB_ROUTE, { signal, method: 'POST', body: bytes, headers });
   if (!response.ok) throw Object.assign(new Error(`image upload failed: ${response.status}`), { status: response.status });
   const payload = await response.json();

@@ -1098,6 +1098,7 @@ export default Object.freeze({
   "roomLock.rotate.boardChanged": "Le tableau a changé pendant le rechiffrement. Rien n’a été modifié ; réessayez.",
   "roomLock.rotate.timeout": "Certaines modifications n’ont pas encore atteint le serveur. Rien n’a été modifié ; vérifiez votre connexion et réessayez.",
   "roomLock.rotate.incomplete": "Cette page n’a pas pu lire une partie du tableau. Rien n’a été modifié ; rechargez le tableau et réessayez.",
+  "roomLock.rotate.unknownOutcome": "La connexion a été coupée pendant l’enregistrement du nouveau mot de passe ; il est peut-être déjà actif. Rechargez le tableau ; s’il demande un mot de passe, essayez d’abord le nouveau.",
   "roomLock.manage.lockChanged": "Le mot de passe du tableau a été changé ailleurs. Rechargez le tableau et réessayez.",
   "roomLock.manage.unavailable": "Cela n’a pas fonctionné. Vérifiez votre connexion et réessayez.",
   "roomLock.notice.skipped": "Certaines modifications n’ont pas pu être déchiffrées et ont été ignorées. Rechargez le tableau pour réessayer.",

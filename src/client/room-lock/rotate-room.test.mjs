@@ -13,7 +13,7 @@ import { e2eAad } from '../../domain/room-lock-contract.js';
 import { createNextRoomKey, createRoomLock, encryptFrame } from './e2e-crypto.js';
 import { getRoomKey, reunlock } from './lock-session.js';
 import { readE2EImage, uploadEncryptedImage } from './e2e-images.js';
-import { LOCK_ACTION_ERROR, createRoomLockApi } from './room-lock-api.js';
+import { LOCK_ACTION_ERROR, createRoomLockApi, lockActionErrorForStatus } from './room-lock-api.js';
 import { ROTATION_FAILURE, ROTATION_WAIT_TIMEOUT_MS, rotateRoom } from './rotate-room.js';
 
 const ROOM_LOCK = await createRoomLock(PASSWORD);
@@ -220,6 +220,30 @@ test('a page that never reads up to the frozen head aborts the freeze and commit
   }), ROTATION_FAILURE.CATCH_UP_TIMEOUT);
   assert.deepEqual(api.calls.map(([name]) => name), ['begin', 'abort']);
   assert.equal(api.calls[1][1].rotationId, rotationId);
+});
+
+// A caught-up page: the commit is sent at once. `commit` and `abort` stand in for the relay's answers.
+const commitWith = ({ commit, abort }) => {
+  const rotationId = globalThis.crypto.randomUUID();
+  const api = { ...recordingApi({ head: 0, rotationId, lockRevision: 0 }), commitRotation: commit, abortRotation: abort };
+  return rotateRoom({
+    currentPassword: PASSWORD, newPassword: NEW_PASSWORD, key: offlineKey(), storage: stuckSource(), api, clock: fakeClock(),
+  });
+};
+const lostResponse = async () => { throw new TypeError('network connection lost'); };
+const refusedAbort = async () => { throw lockActionErrorForStatus(CONFLICT); };
+
+test('a commit whose response is lost and whose abort is refused reports that the new password may be active', async () => {
+  await rejectsWithKind(commitWith({ commit: lostResponse, abort: refusedAbort }), ROTATION_FAILURE.UNKNOWN_OUTCOME);
+});
+
+test('a lost commit response is a plain failure when the abort still released the freeze', async () => {
+  await rejectsWithKind(commitWith({ commit: lostResponse, abort: async () => {} }), ROTATION_FAILURE.UNAVAILABLE);
+});
+
+test('a commit the relay answered with a refusal is a known failure even when the abort is refused too', async () => {
+  const refusedCommit = async () => { throw lockActionErrorForStatus(CONFLICT); };
+  await rejectsWithKind(commitWith({ commit: refusedCommit, abort: refusedAbort }), ROTATION_FAILURE.BOARD_CHANGED);
 });
 
 test('the new password must differ from the current one', async () => {

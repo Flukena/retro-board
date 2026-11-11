@@ -1098,6 +1098,7 @@ export default Object.freeze({
   "roomLock.rotate.boardChanged": "重新加密期间看板发生了变化。未做任何更改，请重试。",
   "roomLock.rotate.timeout": "部分编辑尚未到达服务器。未做任何更改，请检查连接后重试。",
   "roomLock.rotate.incomplete": "此页面无法读取看板的部分内容。未做任何更改，请重新加载看板后重试。",
+  "roomLock.rotate.unknownOutcome": "保存新密码时连接中断，新密码可能已经生效。请重新加载看板；如果要求输入密码，请先尝试新密码。",
   "roomLock.manage.lockChanged": "看板密码已在别处更改。请重新加载看板后重试。",
   "roomLock.manage.unavailable": "操作未成功。请检查连接后重试。",
   "roomLock.notice.skipped": "部分更改无法解密，已跳过。请重新加载看板后重试。",

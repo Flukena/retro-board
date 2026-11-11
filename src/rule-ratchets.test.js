@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { filesUnder } from '../scripts/project-files.mjs';
+import { filesUnder, productionSources } from '../scripts/project-files.mjs';
 
 const REPO_ROOT = new URL('../', import.meta.url);
 // AGENTS.md: frozen in size. These line ceilings may only be lowered, never raised.
 const RETRO_BOARD_MAX_LINES = 3993;
-const YJS_SERVER_MAX_LINES = 1814;
+const YJS_SERVER_MAX_LINES = 1477;
 const LINE_CEILINGS = new Map([
   ['RetroBoard.jsx', RETRO_BOARD_MAX_LINES],
   ['yjs-server.mjs', YJS_SERVER_MAX_LINES],
@@ -89,4 +89,13 @@ test('colour scanner accepts tokens and functional selection signals', () => {
   const SELECTION_SOURCE = 'border: 2px solid #2563eb; background: rgba(37,99,235,0.10);';
   assert.deepEqual(forbiddenColourLiterals(TOKEN_SOURCE), []);
   assert.deepEqual(forbiddenColourLiterals(SELECTION_SOURCE), []);
+});
+
+// The encrypted-blob request headers are one contract between browser and relay: only the domain module names them.
+const BLOB_HEADER_OWNER = 'src/domain/room-lock-contract.js';
+const BLOB_HEADER_LITERAL = /['"`]x-blob-/i;
+test('encrypted-blob header names are spelled only in the shared contract module', () => {
+  const spelled = productionSources().filter(name => name !== BLOB_HEADER_OWNER)
+    .filter(name => BLOB_HEADER_LITERAL.test(readFileSync(new URL(name, REPO_ROOT), 'utf8')));
+  assert.deepEqual(spelled, []);
 });
