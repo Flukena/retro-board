@@ -1,6 +1,6 @@
 # Signed-in workspace: the home page for people who are signed in
 
-Status: draft for owner review (2026-11-17). A builder check ran; its
+Status: approved by the owner ("ok", 2026-11-17). A builder check ran; its
 questions were all settled as calls marked "my call" below.
 
 ## 1. Intent
@@ -105,9 +105,19 @@ Anti-goals (a failure even if it works):
     signing in.
 
   The prerendered HTML stays the guest landing.
-- **The rest of the site stays reachable:** the masthead keeps the existing
-  site links (templates, FAQ/guide pages, Planning Poker, Agile guide). The
-  marketing sections themselves are not shown to signed-in people at `/`.
+- **The rest of the site stays reachable:** the marketing sections are not
+  shown to signed-in people at `/`. Today's landing links "templates" and
+  "FAQ" are in-page anchors (`#landing-guide-templates`, `#landing-guide-faq`)
+  that do not exist in the workspace. My call: the workspace masthead keeps
+  only links to real pages (Planning Poker, Agile guide), and templates are
+  reached through the create menu.
+- **Getting in from the landing page** (owner asked, 2026-11-17). The guest
+  landing keeps the sign-in button it already has: "เข้าสู่ระบบด้วย Google",
+  top right, from `AccountMenu` in `SiteMasthead`. Google returns the person
+  to the page they left (`signInHref` passes `return=` with the current path),
+  so on `/` the workspace appears at once. Later visits open straight into the
+  workspace through the hint. Signing out clears the hint and returns the
+  person to the guest landing. The guest landing itself does not change.
 
 ### 5.2 Layout
 
