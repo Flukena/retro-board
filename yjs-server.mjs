@@ -55,7 +55,7 @@ import { createPlainRoomTeardown } from './src/server/plain-room-teardown.js';
 import { createPlainUpgrades } from './src/server/plain-upgrade.js';
 import { createHttpRequestSlots } from './src/server/relay-http-slots.js';
 import { createAccountRoomRoutes } from './src/server/account-room-routes.js';
-import { createRoomTitleReader, createRoomTitleWriter } from './src/server/room-title-writer.js';
+import { createRoomSummaryReader, createRoomTitleWriter } from './src/server/room-title-writer.js';
 import { orphanRoomsOfDeletedAccounts } from './src/server/room-orphaning.js';
 import { admitPublicAction, registerPublicQuotaClient, notifyPublicQuota } from './src/server/public-action-limit.js';
 
@@ -1044,7 +1044,7 @@ const hasActiveRoomCapacity = () => docs.size + e2eRelay.activeRooms() < MAX_ACT
 const titleWriter = createRoomTitleWriter({ docs, getYDoc, roomReady, fence: roomFence, refusal: plainRoomRefusal, admitsColdRoom: hasActiveRoomCapacity, storeWriteOf: (doc) => storeWrites.get(doc) });
 const accountRooms = createAccountRoomRoutes({
   registry: roomRegistry, store: accountStore, maxBodyBytes: MAX_API_BODY_BYTES, onStorageFailure: markStorageFailure,
-  deleteRoom: (docName) => roomDeletion.deleteRoom(docName), readTitle: createRoomTitleReader({ docs, roomReady, readStoredDoc: checkedGetYDoc }),
+  deleteRoom: (docName) => roomDeletion.deleteRoom(docName), readSummary: createRoomSummaryReader({ docs, roomReady, readStoredDoc: checkedGetYDoc }),
   writeTitle: (docName, title) => titleWriter.write(docName, title),
 });
 const authRoutes = createAuthRoutes({

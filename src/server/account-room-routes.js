@@ -1,4 +1,5 @@
 import { isBoardTitle } from '../domain/board-title.js';
+import { ROOM_KIND } from '../domain/room-ownership.js';
 import { RETRY_AFTER_SHORT_SECONDS } from './relay-config.js';
 import { readJsonBody, sendIfWritable, sendJson } from './relay-http.js';
 import { STORAGE_FAILURE_CODE } from './relay-storage.js';
@@ -29,6 +30,7 @@ const HTTP = Object.freeze({
 });
 const BODY_TOO_LARGE = 'BODY_TOO_LARGE';
 const LOCKED_ROOM_BODY = Object.freeze({ error: 'locked-room' });
+const NO_SUMMARY = Object.freeze({ title: null, preview: null });
 const TITLE_KEYS = ['title'];
 const DELETE_KEYS = ['confirmCode'];
 
@@ -39,12 +41,12 @@ const notFound = (res) => sendIfWritable(res, HTTP.NOT_FOUND);
 const tooManyRequests = (res) => sendIfWritable(res, HTTP.TOO_MANY, { 'retry-after': String(RETRY_AFTER_SHORT_SECONDS) });
 
 /**
- * Ports: registry (RoomRegistry), store (AccountStore), readTitle(docName) → title|null, writeTitle(docName, title) →
+ * Ports: registry (RoomRegistry), store (AccountStore), readSummary(docName) → { title, preview }, writeTitle(docName, title) →
  * TITLE_WRITE_STATUS, deleteRoom(docName) → RoomDeletion result, maxBodyBytes, onStorageFailure, log.
  * @returns {{ routeFor(routePath: string): ({ method: string, run: Function }|null), orphanRoomsOf(accountId: string): Promise<number> }}
  */
 export function createAccountRoomRoutes({
-  registry, store, readTitle, writeTitle, deleteRoom, maxBodyBytes, onStorageFailure = () => {}, log = console,
+  registry, store, readSummary, writeTitle, deleteRoom, maxBodyBytes, onStorageFailure = () => {}, log = console,
 }) {
   const buckets = new Map();
   const takeToken = (accountId) => takeTrafficTokens(
@@ -58,12 +60,13 @@ export function createAccountRoomRoutes({
     const ownership = registry.ownershipOf(docName);
     if (!ownership) return null;
     const { kind, locked, record } = ownership;
-    const title = locked ? null : await readTitle(docName);
-    // Deleted while its title was read.
+    const summary = locked ? NO_SUMMARY : await readSummary(docName);
+    // Deleted while its summary was read.
     if (!registry.ownershipOf(docName)) return null;
     const activity = registry.activity.get(docName);
     return {
-      code: roomCodeOf(docName), kind, locked, title, link: roomLink(docName, kind),
+      code: roomCodeOf(docName), kind, locked, title: summary.title,
+      preview: kind === ROOM_KIND.BOARD ? summary.preview : null, link: roomLink(docName, kind),
       createdAt: record?.createdAt ?? activity.createdAt, lastActiveAt: activity.lastActiveAt,
     };
   }
