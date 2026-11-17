@@ -3,12 +3,15 @@ import {
   LOCK_BYTES, ROOM_SESSION_RENEWAL_SUFFIX, decodeBase64Url, isCounter, isLockKdf, isPlainObject, parseAuthKey,
 } from '../../domain/room-lock-contract.js';
 import { ROOM_KIND } from '../../domain/room-ownership.js';
+import { pageRoomDeleted } from './room-deleted.js';
 
 // Exchanges the long-lived fragment capability for a short-lived, HttpOnly
 // room cookie. The fragment token stays module-private and is never copied to
 // a request URL, header, log message, error, or window property.
 
 const ROOM_SESSION_REJECTED_STATUSES = Object.freeze([401, 404]);
+// A renewal answered 404 for the room this page holds: the room was deleted.
+const ROOM_GONE_STATUS = 404;
 const BOARD_CODE_RE = /^[A-Za-z0-9_-]{3,32}$/;
 const BOARD_TOKEN_RE = /^[A-Za-z0-9_-]{8,64}$/;
 const ROOM_HANDLE_RE = /^[A-Za-z0-9_-]{32}$/;
@@ -365,7 +368,7 @@ const clearRefreshTimer = () => {
 };
 
 const scheduleRefreshRetry = (session, error) => {
-  if (activeSession !== session) return;
+  if (activeSession !== session || pageRoomDeleted.isDeleted()) return;
   clearRefreshTimer();
   if (isReauthRequiredError(error)) {
     // A rejected password never succeeds by retrying; the re-unlock dialog takes over.
@@ -469,7 +472,7 @@ export const canRefreshRoomSession = () => activeCredentials !== null;
 export const isPublicRoomSession = () => sameCredentials(activeCredentials, null, null);
 
 export async function refreshActiveRoomSession() {
-  if (!activeCredentials) fail(ROOM_SESSION_ERROR.UNAVAILABLE);
+  if (!activeCredentials || pageRoomDeleted.isDeleted()) fail(ROOM_SESSION_ERROR.UNAVAILABLE);
   try {
     return await exchangeSession(activeCredentials.code, activeCredentials.token, {
       expectedHandle: activeSession?.roomHandle || null,
@@ -477,6 +480,8 @@ export async function refreshActiveRoomSession() {
       renewal: true,
     });
   } catch (error) {
+    if (!isPublicRoomSession() && error.httpStatus === ROOM_GONE_STATUS) pageRoomDeleted.mark();
+    if (pageRoomDeleted.isDeleted()) throw error;
     setSessionHealth(isReauthRequiredError(error) ? ROOM_SESSION_HEALTH.REAUTH_REQUIRED : ROOM_SESSION_HEALTH.LOST);
     if (isPublicRoomSession() && ROOM_SESSION_REJECTED_STATUSES.includes(error.httpStatus)) {
       return exchangeSession(null, null, { replacedHandle: activeSession?.roomHandle || null });
@@ -535,6 +540,13 @@ export function establishPublicSession() {
   if (activeCredentials && !sameCredentials(activeCredentials, null, null)) clearRoomSession();
   return exchangeSession(null, null, { expectedHandle: activeSession?.roomHandle || null });
 }
+
+// A deleted room is never renewed again; a renewal still in flight is ignored when it lands.
+pageRoomDeleted.subscribe(() => {
+  clearRefreshTimer();
+  activeSession = null;
+  requestGeneration++;
+});
 
 export function clearRoomSession() {
   clearRefreshTimer();

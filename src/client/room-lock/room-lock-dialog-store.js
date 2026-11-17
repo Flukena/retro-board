@@ -1,6 +1,6 @@
 import { E2E_ROOM_FULL_EVENT, E2E_SKIPPED_EVENT } from '../session/e2e-provider.js';
 
-export const ROOM_LOCK_DIALOG = Object.freeze({ PASSWORD: 'password', ROTATE: 'rotate' });
+export const ROOM_LOCK_DIALOG = Object.freeze({ RENAME: 'rename', PASSWORD: 'password', ROTATE: 'rotate' });
 export const ROOM_LOCK_NOTICE = Object.freeze({
   PASSWORD_CHANGED: 'roomLock.change.done',
   SKIPPED: 'roomLock.notice.skipped',

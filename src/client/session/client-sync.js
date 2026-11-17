@@ -1,5 +1,6 @@
 import { SYNC_STATE, SyncStatus, shouldGuardUnload } from './sync-status.js';
 import { PUBLIC_ACTION_LIMIT_REASON } from '../../domain/public-wall-contract.js';
+import { pageRoomDeleted } from './room-deleted.js';
 import { ROOM_SESSION_HEALTH, getRoomSessionHealth, onRoomSessionHealth, isPublicRoomSession, refreshActiveRoomSession } from './room-session.js';
 
 const SESSION_POLICY_CLOSE_CODE = 1008;
@@ -16,7 +17,7 @@ function hasSharedLocalChange(doc, transaction, sharedMapNames) {
   return changedKeys && [...changedKeys].some((key) => key?.startsWith('s|'));
 }
 
-export function attachClientSync(provider, doc, browser, { sharedMapNames = BOARD_SHARED_MAP_NAMES } = {}) {
+export function attachClientSync(provider, doc, browser, { sharedMapNames = BOARD_SHARED_MAP_NAMES, roomDeleted = pageRoomDeleted } = {}) {
   const state = new SyncStatus();
   const onStatus = ({ status }) => state.transport(status);
   const onSync = (synced) => { if (synced) state.synced(provider.wsconnected); };
@@ -32,7 +33,7 @@ export function attachClientSync(provider, doc, browser, { sharedMapNames = BOAR
     if (hasSharedLocalChange(doc, transaction, sharedMapNames)) state.localChange(provider.wsconnected && provider.synced);
   };
   const onHealth = () => {
-    if (state.getSnapshot().status === SYNC_STATE.ACTION_LIMIT) return;
+    if (state.getSnapshot().status === SYNC_STATE.ACTION_LIMIT || roomDeleted.isDeleted()) return;
     if (getRoomSessionHealth() === ROOM_SESSION_HEALTH.REPLACED) {
       provider.disconnect();
       browser.removeEventListener('beforeunload', onUnload);
@@ -60,8 +61,12 @@ export function attachClientSync(provider, doc, browser, { sharedMapNames = BOAR
   doc.on('afterTransaction', onTransaction);
   browser.addEventListener('beforeunload', onUnload);
   const unsubscribe = onRoomSessionHealth(onHealth);
+  // Unsent edits of a deleted room can never be delivered, so leaving it must not be held up.
+  const onDeleted = () => browser.removeEventListener('beforeunload', onUnload);
+  const offDeleted = roomDeleted.subscribe(onDeleted);
   doc.on('destroy', () => {
     unsubscribe();
+    offDeleted();
     provider.off('connection-error', onConnectionError);
     provider.off('status', onStatus);
     provider.off('sync', onSync);

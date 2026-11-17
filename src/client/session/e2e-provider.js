@@ -15,6 +15,7 @@ import { SeqCoverage } from './e2e-coverage.js';
 import { PendingDeliveries } from './e2e-delivery.js';
 import { isReauthRequiredError, refreshActiveRoomSession } from './room-session.js';
 import { SNAPSHOT_JITTER_MAX_MS, SnapshotPolicy } from './e2e-snapshot-policy.js';
+import { isRoomDeletedClose, pageRoomDeleted } from './room-deleted.js';
 
 /** Dispatched on the page when a log entry could not be decrypted or applied; detail `{ seq }`. */
 export const E2E_SKIPPED_EVENT = 'retroroom:e2e-skipped';
@@ -85,6 +86,9 @@ export class E2EProvider extends Observable {
   // A socket refused before it opened probes the session until one probe is conclusive (M3).
   #sessionProbed = false;
   #probeSession;
+  // The page's terminal deleted state: once set, nothing opens a socket again.
+  #roomDeleted;
+  #offRoomDeleted;
   #reconnectAttempts = 0;
   #reconnectTimer = null;
   #inbox = Promise.resolve();
@@ -111,7 +115,7 @@ export class E2EProvider extends Observable {
     eventTarget = globalThis.window, cipher = { encryptFrame, decryptFrame }, timers = defaultTimers,
     random = Math.random, firstClientRef, snapshotPolicy = {},
     appendFrameBytes = RELAY_DEFAULT_MAX_WS_MESSAGE_BYTES, maxRoomBytes = RELAY_DEFAULT_MAX_DOCUMENT_BYTES,
-    syncedSettleMs = E2E_SYNCED_SETTLE_MS, probeSession = refreshActiveRoomSession,
+    syncedSettleMs = E2E_SYNCED_SETTLE_MS, probeSession = refreshActiveRoomSession, roomDeleted = pageRoomDeleted,
   } = {}) {
     super();
     this.url = `${wsBaseUrl.replace(/\/+$/, '')}/${roomHandle}/${SOCKET_PATH_SUFFIX}`;
@@ -131,6 +135,7 @@ export class E2EProvider extends Observable {
     this.#appendFrameBytes = appendFrameBytes;
     this.#syncedSettleMs = syncedSettleMs;
     this.#probeSession = probeSession;
+    this.#roomDeleted = roomDeleted;
     this.#maxSnapshotBytes = e2eMaxSnapshotCiphertextBytes(maxRoomBytes);
     this.#maxFrameBytes = maxRoomBytes + E2E_MAX_FRAME_HEADER_BYTES;
     this.#pending = new PendingDeliveries({ firstClientRef });
@@ -141,6 +146,7 @@ export class E2EProvider extends Observable {
     };
     doc.on('update', this._updateHandler);
     awareness.on('update', this._awarenessUpdateHandler);
+    this.#offRoomDeleted = roomDeleted.subscribe(() => this.disconnect());
     if (connect) this.connect();
   }
 
@@ -167,6 +173,7 @@ export class E2EProvider extends Observable {
   }
 
   connect() {
+    if (this.#roomDeleted.isDeleted()) return;
     this.shouldConnect = true;
     if (this.#awaitingReunlock || this.ws !== null) return;
     this.#open();
@@ -202,10 +209,11 @@ export class E2EProvider extends Observable {
   setKey(key) {
     this.#key = key;
     this.#awaitingReunlock = false;
-    if (this.shouldConnect && this.ws === null) this.#open();
+    if (this.shouldConnect && this.ws === null && !this.#roomDeleted.isDeleted()) this.#open();
   }
 
   destroy() {
+    this.#offRoomDeleted();
     this.disconnect();
     this.#clearTimers();
     this.awareness.off('update', this._awarenessUpdateHandler);
@@ -274,6 +282,11 @@ export class E2EProvider extends Observable {
     if (event?.code === KEY_ROTATED_CLOSE_CODE) {
       this.#awaitingReunlock = true;
       this.#dispatch(KEY_ROTATED_EVENT);
+      return;
+    }
+    // The relay deleted the room: the page's deleted state disconnects every provider for good.
+    if (isRoomDeletedClose(event)) {
+      this.#roomDeleted.mark();
       return;
     }
     if (this.shouldConnect && !this.#awaitingReunlock) this.#scheduleReconnect(!wasConnected && !this.#sessionProbed);

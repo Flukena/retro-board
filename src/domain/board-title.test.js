@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { boardTitleToSeed, isBoardTitle, normalizeBoardTitle } from './board-title.js';
+import { boardTitleToSeed, isBoardTitle, normalizeBoardTitle, renameTitleFrom } from './board-title.js';
 import { BOARD_TITLE_MAX_LENGTH } from './security-boundaries.js';
 
 test('board titles are trimmed, non-empty and bounded', () => {
@@ -19,4 +19,11 @@ test('a pending title seeds only a room that has never been named', () => {
   assert.equal(boardTitleToSeed({ storedTitle: 'Existing', pendingTitle: 'Retro' }), null);
   assert.equal(boardTitleToSeed({ storedTitle: null, pendingTitle: 'Retro' }), null);
   assert.equal(boardTitleToSeed({ storedTitle: undefined, pendingTitle: '' }), null);
+});
+
+test('renameTitleFrom trims and enforces the board title bounds', () => {
+  assert.equal(renameTitleFrom('  Retro  '), 'Retro');
+  assert.equal(renameTitleFrom('   '), null);
+  assert.equal(renameTitleFrom('x'.repeat(BOARD_TITLE_MAX_LENGTH)), 'x'.repeat(BOARD_TITLE_MAX_LENGTH));
+  assert.equal(renameTitleFrom('x'.repeat(BOARD_TITLE_MAX_LENGTH + 1)), null);
 });

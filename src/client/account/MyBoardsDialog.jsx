@@ -4,15 +4,12 @@ import { t } from '../ui/i18n.js';
 import { ModalShell } from '../ui/ModalShell.jsx';
 import { Button, portalToBody } from '../ui/UiPrimitives.jsx';
 import { TypeToConfirmDialog } from '../ui/TypeToConfirmDialog.jsx';
+import { BoardTitleDialog } from '../ui/BoardTitleDialog.jsx';
 import { BUTTON_VARIANT, MODAL_LAYER, MODAL_SIZE } from '../ui/ui-variants.js';
 import { formatRelativeTime } from '../ui/relative-time.js';
-import { isEnterKey } from '../ui/modal-model.js';
-import { BOARD_TITLE_MAX_LENGTH } from '../../domain/security-boundaries.js';
 import { ROOM_KIND } from '../../domain/room-ownership.js';
 import { signInHref } from './account-api.js';
-import {
-  MY_BOARDS_ERROR, MY_BOARDS_STATUS, createMyBoardsController, renameTitleFrom,
-} from './my-boards-controller.js';
+import { MY_BOARDS_ERROR, MY_BOARDS_STATUS, createMyBoardsController } from './my-boards-controller.js';
 import './my-boards.css';
 
 const BADGE_ICON_SIZE_PX = 12;
@@ -108,25 +105,6 @@ export function MyBoardsView({ onClose, ...bodyProps }) {
   );
 }
 
-export function RenameRoomDialog({ room, busy, onCancel, onSave }) {
-  const id = useId();
-  const [name, setName] = useState(room.title ?? '');
-  const canSave = !busy && renameTitleFrom(name) !== null;
-  const save = () => { if (canSave) onSave(name); };
-  return (
-    <ModalShell size={MODAL_SIZE.SM} layer={MODAL_LAYER.RAISED} labelledBy={`${id}-title`} onDismiss={onCancel} dismissDisabled={busy}>
-      <label id={`${id}-title`} htmlFor={`${id}-input`} className="rb-dialog__title">{t('myBoards.renameTitle')}</label>
-      <input id={`${id}-input`} autoFocus className="rb-input rb-dialog__input" value={name} disabled={busy}
-        maxLength={BOARD_TITLE_MAX_LENGTH} placeholder={t('myBoards.renamePlaceholder')}
-        onChange={(event) => setName(event.target.value)} onKeyDown={(event) => { if (isEnterKey(event)) save(); }} />
-      <div className="rb-dialog__actions">
-        <Button disabled={busy} onClick={onCancel}>{t('common.cancel')}</Button>
-        <Button variant={BUTTON_VARIANT.PRIMARY} disabled={!canSave} onClick={save}>{t('common.save')}</Button>
-      </div>
-    </ModalShell>
-  );
-}
-
 /** "My boards": the signed-in creator's rooms with open, rename and delete. */
 export default function MyBoardsDialog({ onClose }) {
   const controller = useMemo(() => createMyBoardsController(), []);
@@ -143,7 +121,7 @@ export default function MyBoardsDialog({ onClose }) {
       <MyBoardsView state={state} now={Date.now()} signInUrl={state.error === MY_BOARDS_ERROR.SIGN_IN ? signInHref() : ''}
         onClose={onClose} onRetry={() => void controller.load()} onAskRename={setRenaming} onAskDelete={setDeleting} />
       {renaming && (
-        <RenameRoomDialog room={renaming} busy={state.busyCode === renaming.code}
+        <BoardTitleDialog initialTitle={renaming.title} busy={state.busyCode === renaming.code} layer={MODAL_LAYER.RAISED}
           onCancel={() => setRenaming(null)} onSave={(title) => void rename(title)} />
       )}
       {deleting && (

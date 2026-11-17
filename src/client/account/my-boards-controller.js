@@ -1,4 +1,4 @@
-import { isBoardTitle } from '../../domain/board-title.js';
+import { renameTitleFrom } from '../../domain/board-title.js';
 import { typedConfirmationMatches } from '../ui/modal-model.js';
 import { forgetRecent } from '../app/router.js';
 import { deleteRoom, listRooms, renameRoom } from './account-api.js';
@@ -28,12 +28,6 @@ export function myBoardsErrorFor(failure) {
 export function tokenFromLink(link) {
   const mark = link.indexOf(FRAGMENT_MARK);
   return mark < 0 ? null : link.slice(mark + 1) || null;
-}
-
-/** The title to send, or null when the typed text is outside the board title bounds. */
-export function renameTitleFrom(raw) {
-  const title = String(raw).trim();
-  return isBoardTitle(title) ? title : null;
 }
 
 /**

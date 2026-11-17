@@ -101,17 +101,6 @@ test('an action refusal shows above the list, and a busy action disables the row
   });
 });
 
-test('Rename dialog bounds the title and disables Save for a blank name', async () => {
-  await withChromeModule(MODULE, ({ RenameRoomDialog }, { setLang }) => {
-    setLang('en');
-    const html = (room) => renderToStaticMarkup(React.createElement(RenameRoomDialog, { room, busy: false, onCancel: noop, onSave: noop }));
-    assert.match(html(BOARD), /maxLength="120"/);
-    assert.match(html(BOARD), /value="Sprint 12"/);
-    assert.match(html(BOARD).match(/<button[^>]*>[^<]*<\/button>/g).at(-1), /^(?!.*disabled)/);
-    assert.match(html({ ...BOARD, title: null }).match(/<button[^>]*>[^<]*<\/button>/g).at(-1), /disabled=""/);
-  });
-});
-
 test('delete copy names a Planning Poker room for poker and a board otherwise', async () => {
   await withChromeModule(MODULE, ({ DELETE_COPY_KEYS }, { t, setLang }) => {
     for (const lang of ['th', 'en']) {

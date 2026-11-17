@@ -29,12 +29,13 @@ async function withModules(check) {
 
 const render = (Component, props) => renderToStaticMarkup(React.createElement(Component, props));
 
-test('the owner sees change-password and remove-everyone in both languages; anyone else sees nothing', async () => {
+test('the owner sees rename, change-password and remove-everyone in both languages; anyone else sees nothing', async () => {
   await withModules(async ({ menu, store, i18n: { setLang, t } }) => {
     assert.equal(render(menu.RoomLockMenuItems, { isOwner: false, onSelect: noop }), '');
     for (const language of LANGUAGES) {
       setLang(language);
       const html = render(menu.RoomLockMenuItems, { isOwner: true, onSelect: noop });
+      assert.ok(html.includes(t('roomLock.menu.rename')));
       assert.ok(html.includes(t('roomLock.menu.changePassword')));
       assert.ok(html.includes(t('roomLock.menu.removeEveryone')));
       assert.doesNotMatch(html, /roomLock\./);
@@ -42,7 +43,7 @@ test('the owner sees change-password and remove-everyone in both languages; anyo
     const chosen = [];
     const items = menu.RoomLockMenuItems({ isOwner: true, onSelect: (dialog) => chosen.push(dialog) }).props.children;
     items.filter((item) => item.props.onClick).forEach((item) => item.props.onClick());
-    assert.deepEqual(chosen, [store.ROOM_LOCK_DIALOG.PASSWORD, store.ROOM_LOCK_DIALOG.ROTATE]);
+    assert.deepEqual(chosen, [store.ROOM_LOCK_DIALOG.RENAME, store.ROOM_LOCK_DIALOG.PASSWORD, store.ROOM_LOCK_DIALOG.ROTATE]);
   });
 });
 
@@ -104,5 +105,26 @@ test('an owner dialog is modal and cannot be dismissed while its action runs; no
         assert.ok(html.includes(t(key)));
       }
     }
+  });
+});
+
+test('rename opens on the board title and closes only after the board accepted the new title', async () => {
+  await withModules(async ({ dialogs: { RenameBoardDialog }, i18n: { setLang, t } }) => {
+    const renamed = [];
+    let closed = 0;
+    const writer = { title: 'Sprint 12', rename: (raw) => { renamed.push(raw); return raw.trim() === 'Sprint 13'; } };
+    const element = RenameBoardDialog({ writer, onClose: () => { closed += 1; } });
+    for (const language of LANGUAGES) {
+      setLang(language);
+      const html = renderToStaticMarkup(element);
+      assert.ok(html.includes(t('myBoards.renameTitle')));
+      assert.match(html, /value="Sprint 12"/);
+    }
+    element.props.onSave('rejected');
+    assert.equal(closed, 0, 'a refused rename keeps the dialog open');
+    element.props.onSave(' Sprint 13 ');
+    assert.deepEqual(renamed, ['rejected', ' Sprint 13 ']);
+    assert.equal(closed, 1);
+    assert.equal(RenameBoardDialog({ writer: null, onClose: noop }), null, 'no open board: nothing to rename');
   });
 });

@@ -1,5 +1,5 @@
 import React, { useSyncExternalStore } from 'react';
-import { KeyRound, UserX } from 'lucide-react';
+import { KeyRound, Pencil, UserX } from 'lucide-react';
 import { Divider, MenuItem } from '../ui/UiPrimitives.jsx';
 import { DIVIDER_ORIENTATION, MENU_ITEM_VARIANT } from '../ui/ui-variants.js';
 import { TOPBAR_ICON_SIZE_PX } from '../chrome/chrome-layout.js';
@@ -15,12 +15,17 @@ const subscribeToKey = (listener) => {
 const ownsOpenRoom = () => canManageRoomLock(getRoomKey());
 const serverOwnsNothing = () => false;
 
-/** The owner's entries in the More menu; nothing for anyone else. */
+/** The owner's entries in the More menu; nothing for anyone else. The relay cannot read a locked board's title, so its owner renames it here. */
 export function RoomLockMenuItems({ isOwner, onSelect }) {
   if (!isOwner) return null;
   return (
     <>
       <Divider orientation={DIVIDER_ORIENTATION.HORIZONTAL} />
+      <MenuItem
+        icon={<Pencil size={TOPBAR_ICON_SIZE_PX.MENU} />}
+        label={t('roomLock.menu.rename')}
+        onClick={() => onSelect(ROOM_LOCK_DIALOG.RENAME)}
+      />
       <MenuItem
         icon={<KeyRound size={TOPBAR_ICON_SIZE_PX.MENU} />}
         label={t('roomLock.menu.changePassword')}

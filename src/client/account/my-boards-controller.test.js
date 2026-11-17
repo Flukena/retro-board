@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AccountRequestError } from './account-api.js';
 import {
-  MY_BOARDS_ERROR, MY_BOARDS_STATUS, createMyBoardsController, myBoardsErrorFor, renameTitleFrom, tokenFromLink,
+  MY_BOARDS_ERROR, MY_BOARDS_STATUS, createMyBoardsController, myBoardsErrorFor, tokenFromLink,
 } from './my-boards-controller.js';
 
 const BOARD = Object.freeze({
@@ -39,13 +39,6 @@ test('tokenFromLink reads the fragment, or null for a tokenless link', () => {
   assert.equal(tokenFromLink('/b/Ab3dEf7h#tok12345tok12345'), 'tok12345tok12345');
   assert.equal(tokenFromLink('/p/Ab3dEf7h'), null);
   assert.equal(tokenFromLink('/b/Ab3dEf7h#'), null);
-});
-
-test('renameTitleFrom trims and enforces the board title bounds', () => {
-  assert.equal(renameTitleFrom('  Retro  '), 'Retro');
-  assert.equal(renameTitleFrom('   '), null);
-  assert.equal(renameTitleFrom('x'.repeat(120)), 'x'.repeat(120));
-  assert.equal(renameTitleFrom('x'.repeat(121)), null);
 });
 
 test('load moves from loading to ready with the rooms', async () => {

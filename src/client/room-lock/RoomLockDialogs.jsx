@@ -2,11 +2,13 @@ import React, {
   useEffect, useId, useMemo, useRef, useState, useSyncExternalStore,
 } from 'react';
 import { ModalShell } from '../ui/ModalShell.jsx';
-import { Button, Surface } from '../ui/UiPrimitives.jsx';
+import { Button, Surface, portalToBody } from '../ui/UiPrimitives.jsx';
+import { BoardTitleDialog } from '../ui/BoardTitleDialog.jsx';
 import { BUTTON_VARIANT } from '../ui/ui-variants.js';
 import { TOAST_BOTTOM_PX, Z } from '../chrome/chrome-layout.js';
 import { t, useLang } from '../ui/i18n.js';
 import { ROOM_PASSWORD_MIN_LENGTH } from '../../domain/room-lock-contract.js';
+import { boardTitleWriter } from '../app/board-title-writer.js';
 import { getRoomKey } from './lock-session.js';
 import { changeRoomPassword } from './change-password.js';
 import { rotateRoom } from './rotate-room.js';
@@ -136,6 +138,18 @@ function OwnerDialog({ spec, onClose }) {
   );
 }
 
+/** Renames the open board inside its encrypted state; closes once the board accepted the title. */
+export function RenameBoardDialog({ writer, onClose }) {
+  if (!writer) return null;
+  const save = (raw) => { if (writer.rename(raw)) onClose(); };
+  return portalToBody(<BoardTitleDialog initialTitle={writer.title} onCancel={onClose} onSave={save} />);
+}
+
+function RenameBoard({ onClose }) {
+  const writer = useSyncExternalStore(boardTitleWriter.subscribe, boardTitleWriter.getSnapshot, () => null);
+  return <RenameBoardDialog writer={writer} onClose={onClose} />;
+}
+
 export function RoomLockNoticeView({ messageKey }) {
   return (
     <Surface role="status" aria-live="polite" className="rb-sync-banner"
@@ -163,7 +177,8 @@ export default function RoomLockDialogs() {
   const close = () => roomLockDialog.set(null);
   return (
     <>
-      {open && <OwnerDialog key={open} spec={DIALOGS[open]} onClose={close} />}
+      {open === ROOM_LOCK_DIALOG.RENAME && <RenameBoard onClose={close} />}
+      {open && open !== ROOM_LOCK_DIALOG.RENAME && <OwnerDialog key={open} spec={DIALOGS[open]} onClose={close} />}
       <RoomLockNotices />
     </>
   );

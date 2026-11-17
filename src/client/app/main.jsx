@@ -13,6 +13,7 @@ import { NOT_FOUND_TITLE_KEY, seoPageForPath } from '../seo/seo-pages.js';
 import { usePageHead } from '../seo/use-page-head.js';
 import { BoardErrorBoundary } from './BoardErrorBoundary.jsx';
 import { SyncBanner } from '../session/SyncBanner.jsx';
+import RoomDeletedBoundary from '../session/RoomDeletedBoundary.jsx';
 import { languageReady, setLang, useLang } from '../ui/i18n.js';
 import RoomBootstrapScreen from './RoomBootstrapScreen.jsx';
 import { ROOM_BOOTSTRAP_STATUS, useRoomBootstrap } from './use-room-bootstrap.js';
@@ -20,7 +21,7 @@ import PokerBootstrap from '../poker/PokerBootstrap.jsx';
 import PokerGuidePage from '../poker/PokerGuidePage.jsx';
 import AgileGuidePage from '../guide/AgileGuidePage.jsx';
 import {
-  isBoardCreatedByMe, parseRoute, recentBoardName, rememberRecent,
+  ROOM_KIND, isBoardCreatedByMe, parseRoute, recentBoardName, rememberRecent,
 } from './router.js';
 import {
   ROOM_SESSION_ERROR,
@@ -81,9 +82,18 @@ function BoardBootstrap({ code, token, mode = BOARD_MODE.PRIVATE }) {
 }
 
 const ROUTE_VIEWS = {
-  board: () => <BoardBootstrap code={route.code} token={route.token} />,
+  // Every private room view ends on the deleted screen once its owner deletes it; the Public Wall is never deleted.
+  board: () => (
+    <RoomDeletedBoundary code={route.code} token={route.token} kind={ROOM_KIND.BOARD}>
+      <BoardBootstrap code={route.code} token={route.token} />
+    </RoomDeletedBoundary>
+  ),
   public: () => <BoardBootstrap mode={BOARD_MODE.PUBLIC} />,
-  poker: () => <PokerBootstrap code={route.code} token={route.token} />,
+  poker: () => (
+    <RoomDeletedBoundary code={route.code} token={route.token} kind={ROOM_KIND.POKER}>
+      <PokerBootstrap code={route.code} token={route.token} />
+    </RoomDeletedBoundary>
+  ),
   pokerGuide: () => <PokerGuidePage />,
   agileGuide: () => <AgileGuidePage />,
   legal: () => <LegalPage page={route.page} />,

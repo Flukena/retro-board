@@ -2,13 +2,13 @@
 // establishRoomSession() has set the room cookie (see PokerBootstrap).
 // Unlike storage-bridge.js it has no import-time side effects.
 import * as Y from 'yjs';
-import { WebsocketProvider } from 'y-websocket';
 import { getActiveRoomSession, getRoomWebSocketBaseUrl } from '../session/room-session.js';
 import { attachClientSync } from '../session/client-sync.js';
+import { PlainRoomProvider } from '../session/plain-room-provider.js';
 import { sendOnlyLocalAwareness } from '../session/awareness-transport.js';
 import { POKER_SHARED_MAP_NAMES, createStoryUndoManager } from './poker-actions.js';
 
-export function openPokerRoom({ browser = window, Provider = WebsocketProvider } = {}) {
+export function openPokerRoom({ browser = window, Provider = PlainRoomProvider } = {}) {
   const session = getActiveRoomSession();
   if (!session) throw new Error('room session has not been established');
   const doc = new Y.Doc();

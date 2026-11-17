@@ -1,5 +1,5 @@
-import { WebsocketProvider } from 'y-websocket';
 import { E2EProvider } from './e2e-provider.js';
+import { PlainRoomProvider } from './plain-room-provider.js';
 
 /** True when this page holds the unlocked key of exactly this room. */
 export const isEncryptedRoom = (roomKey, roomHandle) => roomKey?.roomHandle === roomHandle;
@@ -10,5 +10,5 @@ export const isEncryptedRoom = (roomKey, roomHandle) => roomKey?.roomHandle === 
  */
 export function createRoomProvider({ wsBaseUrl, roomHandle, ydoc, params, roomKey }) {
   if (isEncryptedRoom(roomKey, roomHandle)) return new E2EProvider(wsBaseUrl, roomHandle, ydoc, { key: roomKey, connect: false });
-  return new WebsocketProvider(wsBaseUrl, roomHandle, ydoc, { connect: false, params });
+  return new PlainRoomProvider(wsBaseUrl, roomHandle, ydoc, { connect: false, params });
 }
