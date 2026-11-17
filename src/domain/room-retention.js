@@ -8,6 +8,9 @@ export const IDLE_ROOM_RETENTION_MS = IDLE_ROOM_RETENTION_DAYS * MILLISECONDS_PE
 
 // Rooms created without signing in (owner decision 2026-11-11).
 export const GUEST_ROOM_RETENTION_MS = MILLISECONDS_PER_DAY;
+const MILLISECONDS_PER_HOUR = 3_600_000;
+export const GUEST_ROOM_RETENTION_HOURS = GUEST_ROOM_RETENTION_MS / MILLISECONDS_PER_HOUR;
+export const GUEST_SWEEP_INTERVAL_MS = MILLISECONDS_PER_HOUR;
 
 const knownTime = (value) => (Number.isSafeInteger(value) && value > 0 ? value : null);
 

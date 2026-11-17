@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { t } from '../ui/i18n.js';
-import { IDLE_ROOM_RETENTION_DAYS, idleRoomCandidates } from '../../domain/room-retention.js';
+import { GUEST_ROOM_RETENTION_HOURS, IDLE_ROOM_RETENTION_DAYS, idleRoomCandidates } from '../../domain/room-retention.js';
 
 const RETIRE_TIMEOUT_MS = 60_000;
 const RETIRE_IDLE_PATH = '/api/rooms/retire-idle';
+const RETENTION_LABEL = Object.freeze({ hours: GUEST_ROOM_RETENTION_HOURS, days: IDLE_ROOM_RETENTION_DAYS });
 export const IDLE_STEP = Object.freeze({ READY: 'ready', CONFIRM: 'confirm', BUSY: 'busy' });
 
 async function requestRetirement() {
@@ -19,7 +20,7 @@ function IdleAction({ idle, step, onAsk, onConfirm, onCancel }) {
   if (step === IDLE_STEP.READY) {
     return <button onClick={onAsk}>{t('maintainer.idle.delete', { n: idle })}</button>;
   }
-  return <div role="group" aria-label={t('maintainer.idle.title', { days: IDLE_ROOM_RETENTION_DAYS })}>
+  return <div role="group" aria-label={t('maintainer.idle.title', RETENTION_LABEL)}>
     <p><strong>{t('maintainer.idle.warning')}</strong></p>
     <button disabled={step === IDLE_STEP.BUSY} onClick={onConfirm}>
       {t(step === IDLE_STEP.BUSY ? 'maintainer.loading' : 'maintainer.idle.confirm', { n: idle })}
@@ -30,10 +31,9 @@ function IdleAction({ idle, step, onAsk, onConfirm, onCancel }) {
 
 // Stateless view, so each step renders on its own in tests.
 export function IdleRoomsView({ idle, unknownAge, step = IDLE_STEP.READY, result = null, error = '', ...actions }) {
-  const days = IDLE_ROOM_RETENTION_DAYS;
   return <section className="maintainer-idle">
-    <h2>{t('maintainer.idle.title', { days })}</h2>
-    <p>{t(idle ? 'maintainer.idle.summary' : 'maintainer.idle.none', { n: idle, unknown: unknownAge, days })}</p>
+    <h2>{t('maintainer.idle.title', RETENTION_LABEL)}</h2>
+    <p>{t(idle ? 'maintainer.idle.summary' : 'maintainer.idle.none', { n: idle, unknown: unknownAge, ...RETENTION_LABEL })}</p>
     <IdleAction idle={idle} step={step} {...actions} />
     {result && <p role="status">{t('maintainer.idle.done', { n: result.retired, files: result.files })}</p>}
     {error && <p role="alert">{t(error)}</p>}

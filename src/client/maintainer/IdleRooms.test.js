@@ -15,7 +15,7 @@ test('idle panel previews the relay rule and asks before deleting, in Thai and E
     for (const lang of ['th', 'en']) {
       setLang(lang);
       const ready = render(IdleRooms, { rooms: ROOMS, now: NOW, publicWall: false });
-      assert.ok(ready.includes(t('maintainer.idle.summary', { n: 2, unknown: 1, days: 60 })));
+      assert.ok(ready.includes(t('maintainer.idle.summary', { n: 2, unknown: 1, hours: 24, days: 60 })));
       assert.ok(ready.includes(t('maintainer.idle.delete', { n: 2 })));
       assert.ok(!ready.includes(t('maintainer.idle.warning')), 'nothing is deleted on the first click');
       const confirm = render(IdleRoomsView, { idle: 2, unknownAge: 1, step: IDLE_STEP.CONFIRM });
@@ -24,7 +24,7 @@ test('idle panel previews the relay rule and asks before deleting, in Thai and E
       assert.ok(confirm.includes(t('maintainer.idle.cancel')));
       const done = render(IdleRoomsView, { idle: 0, unknownAge: 1, result: { retired: 2, files: 5 } });
       assert.ok(done.includes(t('maintainer.idle.done', { n: 2, files: 5 })));
-      assert.ok(done.includes(t('maintainer.idle.none', { days: 60 })));
+      assert.ok(done.includes(t('maintainer.idle.none', { hours: 24, days: 60 })));
       assert.ok(!done.includes('<button'));
       assert.doesNotMatch(ready + confirm + done, /maintainer\.\w+/);
     }

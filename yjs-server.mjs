@@ -48,7 +48,7 @@ import { RoomLockVerifier } from './src/server/room-lock.js';
 import { CORRUPT_LOCK } from './src/server/room-lock-record.js';
 import { createRoomSessionRoutes } from './src/server/room-session-routes.js';
 import { createRoomLockRoutes } from './src/server/room-lock-routes.js';
-import { retireIdleRooms } from './src/server/room-retirement.js';
+import { GuestRoomSweep } from './src/server/guest-room-sweep.js';
 import { RoomFence } from './src/server/room-fence.js';
 import { DeletionJournal, RoomDeletion, createRoomFileRemover } from './src/server/room-deletion.js';
 import { createPlainRoomTeardown } from './src/server/plain-room-teardown.js';
@@ -1059,15 +1059,14 @@ const rejectUpgrade = (socket, status) => {
 };
 
 const maintenance = new RelayMaintenance();
+const guestSweep = new GuestRoomSweep({ registry: roomRegistry, docs, connections: wsTraffic.connectionsByRoom, publicWall: PUBLIC_WALL, log: console, deleteRoom: (docName) => roomDeletion.deleteRoom(docName) });
 const maintainer = await startMaintainer(process.env, () => maintainerSnapshot({
   registry: roomRegistry, docs, connections: wsTraffic.connectionsByRoom, blockedRooms, roomUsage,
   ready: isRelayReady(storageFailure, shuttingDown), publicWall: PUBLIC_WALL,
   databaseBytes: dbUsageBytes, uploadBytes: uploadState.bytes,
   pendingStoreOps, pendingStoreBytes, activeDocumentBytes,
   limits: { databaseBytes: MAX_DB_BYTES, uploadBytes: MAX_UPLOAD_STORAGE_BYTES, activeDocumentBytes: MAX_ACTIVE_DOCUMENT_BYTES, pendingStoreBytes: MAX_PENDING_STORE_BYTES, pendingStoreOps: MAX_PENDING_STORE_OPS },
-}), { registry: roomRegistry, boardOrigin: ALLOWED_ORIGINS[0], publicWall: PUBLIC_WALL }, () => retireIdleRooms({
-  registry: roomRegistry, docs, connections: wsTraffic.connectionsByRoom, publicWall: PUBLIC_WALL, log: console, deleteRoom: (docName) => roomDeletion.deleteRoom(docName),
-}), accountStore);
+}), { registry: roomRegistry, boardOrigin: ALLOWED_ORIGINS[0], publicWall: PUBLIC_WALL }, () => guestSweep.retireIdle(), accountStore);
 maintenance.on(MAINTENANCE_STORAGE_FAILURE_EVENT, markStorageFailure);
 const runMaintenance = () => maintenance.run({
   publicWall: publicWall && { docName: publicWall.docName, history: publicHistory },
@@ -1078,7 +1077,7 @@ const runMaintenance = () => maintenance.run({
   storage: { measureDatabase: registryPersistence.measureDatabase, reconcileUploadUsage },
   e2eBlobs,
 });
-const maintenanceTimer = setInterval(() => { roomLockVerifier.sweep(); runMaintenance(); void roomDeletion.recover(); }, MAINTENANCE_INTERVAL_MS);
+const maintenanceTimer = setInterval(() => { roomLockVerifier.sweep(); runMaintenance(); void roomDeletion.recover(); void guestSweep.tick(); }, MAINTENANCE_INTERVAL_MS);
 maintenanceTimer.unref();
 
 const server = http.createServer({ maxHeaderSize: MAX_HEADER_BYTES }, (req, res) => {
