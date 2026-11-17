@@ -112,6 +112,13 @@ export class AccountStore extends EventEmitter {
     }), expectedGeneration));
   }
 
+  /**
+   * True while the account exists at `generation`. Queued like a mutation, so a logout-all or delete admitted
+   * earlier is seen; room operations call it at their admission point.
+   * @returns {Promise<boolean>}
+   */
+  checkGeneration(id, generation) { return this.#enqueue(async () => Boolean(await this.#current(id, generation))); }
+
   /** @returns {Promise<boolean>} false when missing or, with `expectedGeneration`, stale */
   delete(id, { expectedGeneration } = {}) { return this.#enqueue(() => this.#delete(id, expectedGeneration)); }
 

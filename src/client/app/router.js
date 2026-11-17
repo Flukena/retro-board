@@ -2,6 +2,7 @@
 // No history API beyond plain navigation — each visit is a full page load.
 
 import { PUBLIC_PATH } from '../../domain/public-wall-contract.js';
+import { ROOM_KIND, roomPath } from '../../domain/room-ownership.js';
 import { legalPageForPath } from '../legal/legal-content.js';
 import { TEMPLATE_PATH_PREFIX, starterFormat } from '../templates/starter-formats.js';
 import { AGILE_GUIDE_PATH, PLANNING_POKER_PATH, splitLangPath } from '../seo/seo-pages.js';
@@ -9,10 +10,7 @@ import { AGILE_GUIDE_PATH, PLANNING_POKER_PATH, splitLangPath } from '../seo/seo
 const BOARD_PATH = /^\/b\/([A-Za-z0-9_-]{3,32})\/?$/;
 const POKER_PATH = /^\/p\/([A-Za-z0-9_-]{3,32})\/?$/;
 
-// Every room is the same relay room; the path picks which app opens it.
-export const ROOM_KIND = Object.freeze({ BOARD: 'board', POKER: 'poker' });
-const ROOM_PATH_PREFIX = Object.freeze({ [ROOM_KIND.BOARD]: '/b/', [ROOM_KIND.POKER]: '/p/' });
-const roomPath = (code, token, kind) => `${ROOM_PATH_PREFIX[kind]}${code}${token ? `#${token}` : ''}`;
+export { ROOM_KIND };
 // Tokens are 16 alphanumeric chars (Web Crypto generated). The pattern is
 // permissive so older links and hand-edits still parse cleanly; junk in the
 // fragment just resolves to an unreachable yjs doc name.

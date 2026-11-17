@@ -53,6 +53,10 @@ import { RoomFence } from './src/server/room-fence.js';
 import { DeletionJournal, RoomDeletion, createRoomFileRemover } from './src/server/room-deletion.js';
 import { createPlainRoomTeardown } from './src/server/plain-room-teardown.js';
 import { createPlainUpgrades } from './src/server/plain-upgrade.js';
+import { createHttpRequestSlots } from './src/server/relay-http-slots.js';
+import { createAccountRoomRoutes } from './src/server/account-room-routes.js';
+import { createRoomTitleReader, createRoomTitleWriter } from './src/server/room-title-writer.js';
+import { orphanRoomsOfDeletedAccounts } from './src/server/room-orphaning.js';
 import { admitPublicAction, registerPublicQuotaClient, notifyPublicQuota } from './src/server/public-action-limit.js';
 
 // yjs, y-leveldb, and y-websocket must all resolve to the SAME yjs module
@@ -294,6 +298,7 @@ const markStorageFailure = (err) => {
 roomRegistry.on(REGISTRY_STORAGE_FAILURE_EVENT, markStorageFailure);
 const accountStore = new AccountStore({ ldb, getMeta: checkedGetMeta, hasCapacity: registryPersistence.hasCapacity });
 accountStore.on(ACCOUNT_STORAGE_FAILURE_EVENT, markStorageFailure);
+await orphanRoomsOfDeletedAccounts({ registry: roomRegistry, accounts: accountStore, onStorageFailure: markStorageFailure });
 
 const reconcileUploadUsage = async () => {
   const scanned = scanUploadUsage(relayConfig);
@@ -514,6 +519,8 @@ const scheduleRoomCompaction = (docName, { remeasure = false } = {}) => {
   return compaction;
 };
 
+// The last store write each doc queued (true once stored): a relay rename awaits its own.
+const storeWrites = new WeakMap();
 const queueStoreUpdate = (docName, update, ydoc) => {
   const estimatedBytes = update.byteLength + STORE_OPERATION_OVERHEAD_BYTES;
   const churn = persistenceChurnFor(docName);
@@ -536,21 +543,23 @@ const queueStoreUpdate = (docName, update, ydoc) => {
   pendingStoreBytes += estimatedBytes;
   churn.uncompactedBytes += estimatedBytes;
   churn.uncompactedUpdates += 1;
-  checkedStoreUpdate(docName, update)
+  storeWrites.set(ydoc, checkedStoreUpdate(docName, update)
     .then(() => {
       dbUsageBytes += estimatedBytes;
       if (update.byteLength > LARGE_UPDATE_LOG_THRESHOLD_BYTES) {
         console.log('[yjs] storeUpdate ok', { docName: roomLogId(docName), bytes: update.byteLength });
       }
+      return true;
     })
     .catch((err) => {
       markStorageFailure(err);
       console.error('[yjs] storeUpdate failed', { docName: roomLogId(docName), err: err.message });
+      return false;
     })
     .finally(() => {
       pendingStoreOps = Math.max(0, pendingStoreOps - 1);
       pendingStoreBytes = Math.max(0, pendingStoreBytes - estimatedBytes);
-    });
+    }));
   if (churn.uncompactedBytes >= ROOM_COMPACT_AFTER_BYTES
       || churn.uncompactedUpdates >= ROOM_COMPACT_AFTER_UPDATES) {
     scheduleRoomCompaction(docName, { remeasure: true });
@@ -1013,26 +1022,7 @@ const releaseAwarenessForConnection = (doc, conn, context) => {
   }
 };
 
-let httpRequestCount = 0;
-const httpRequestsByIp = new Map();
-const reserveHttpRequest = (ip) => {
-  if (httpRequestCount >= MAX_HTTP_REQUESTS) return { status: 503 };
-  if ((httpRequestsByIp.get(ip) || 0) >= MAX_HTTP_REQUESTS_PER_IP) return { status: 429 };
-  httpRequestCount += 1;
-  httpRequestsByIp.set(ip, (httpRequestsByIp.get(ip) || 0) + 1);
-  let released = false;
-  return {
-    status: 0,
-    release() {
-      if (released) return;
-      released = true;
-      httpRequestCount = Math.max(0, httpRequestCount - 1);
-      const next = (httpRequestsByIp.get(ip) || 1) - 1;
-      if (next > 0) httpRequestsByIp.set(ip, next);
-      else httpRequestsByIp.delete(ip);
-    },
-  };
-};
+const reserveHttpRequest = createHttpRequestSlots({ maxRequests: MAX_HTTP_REQUESTS, maxRequestsPerIp: MAX_HTTP_REQUESTS_PER_IP });
 
 if (publicWall) {
   const publicDoc = getYDoc(publicWall.docName);
@@ -1049,11 +1039,19 @@ const roomSessionRoutes = createRoomSessionRoutes({
   config: { allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, sessionTtlMs: ROOM_SESSION_TTL_MS, maxApiBodyBytes: MAX_API_BODY_BYTES },
   unavailable: () => shuttingDown || Boolean(storageFailure), onStorageFailure: markStorageFailure, fence: roomFence,
 });
+const plainRoomRefusal = (doc, docName) => (shuttingDown && new Error('shutting down')) || storageFailure
+  || (capacityRejectedDocs.has(doc) && new Error('active document capacity reached')) || (isRoomBlocked(docName) && new Error('room unavailable')) || null;
+const titleWriter = createRoomTitleWriter({ docs, getYDoc, roomReady, fence: roomFence, refusal: plainRoomRefusal, storeWriteOf: (doc) => storeWrites.get(doc) });
+const accountRooms = createAccountRoomRoutes({
+  registry: roomRegistry, store: accountStore, maxBodyBytes: MAX_API_BODY_BYTES, onStorageFailure: markStorageFailure,
+  deleteRoom: (docName) => roomDeletion.deleteRoom(docName), readTitle: createRoomTitleReader({ docs, roomReady, readStoredDoc: checkedGetYDoc }),
+  writeTitle: (docName, title) => titleWriter.write(docName, title),
+});
 const authRoutes = createAuthRoutes({
   oauth: enabledOAuthConfig(process.env, { allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, publicWall: PUBLIC_WALL, log: console }),
   sessions: accountSessions,
   accountKey: ACCOUNT_SIGNING_KEY, store: accountStore, ledger: new FlowLedger(), allowedOrigins: ALLOWED_ORIGINS,
-  allowInsecureHttp: ALLOW_INSECURE_HTTP, maxCookieHeaderBytes: MAX_COOKIE_HEADER_BYTES, rejectionCounters,
+  allowInsecureHttp: ALLOW_INSECURE_HTTP, maxCookieHeaderBytes: MAX_COOKIE_HEADER_BYTES, rejectionCounters, accountRooms,
 });
 const rejectUpgrade = (socket, status) => {
   rejectionCounters.upgrade(status);
@@ -1190,9 +1188,7 @@ const roomDeletion = new RoomDeletion({
   files: createRoomFileRemover({ io: fs.promises, uploadsDir: UPLOADS_DIR, reconcileUploadUsage }),
 });
 const plainUpgrades = createPlainUpgrades({
-  docs, getYDoc, roomReady, wss, fence: roomFence, reject: rejectUpgrade, timeoutMs: UPGRADE_TIMEOUT_MS,
-  refusal: (doc, docName) => (shuttingDown && new Error('shutting down')) || storageFailure
-    || (capacityRejectedDocs.has(doc) && new Error('active document capacity reached')) || (isRoomBlocked(docName) && new Error('room unavailable')) || null,
+  docs, getYDoc, roomReady, wss, fence: roomFence, reject: rejectUpgrade, timeoutMs: UPGRADE_TIMEOUT_MS, refusal: plainRoomRefusal,
 });
 roomRegistry.activity.watch(e2eRelay.wss, (error) => roomRegistry.reportStorageFailure(error));
 wss.on('connection', (conn, req) => {

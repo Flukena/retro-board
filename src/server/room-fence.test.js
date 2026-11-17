@@ -57,3 +57,16 @@ test('lift ends the fenced state so the name can be entered again', () => {
   assert.equal(fence.isFenced(DOC), false);
   assert.equal(typeof fence.enter(DOC), 'function');
 });
+
+test('held is true while any entry of that room is held, and false once all are released', () => {
+  const fence = new RoomFence();
+  assert.equal(fence.held(DOC), false);
+  const first = fence.enter(DOC);
+  const second = fence.enter(DOC);
+  assert.equal(fence.held(DOC), true);
+  assert.equal(fence.held(OTHER), false);
+  first();
+  assert.equal(fence.held(DOC), true);
+  second();
+  assert.equal(fence.held(DOC), false);
+});

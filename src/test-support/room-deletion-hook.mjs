@@ -1,10 +1,11 @@
-// Test-only preload for a spawned relay (startRelay's `preload`): it reaches the relay's own deleter, which has no
-// route before the owner routes exist, and can stall hydration or crash the process at chosen points.
+// Test-only preload for a spawned relay (startRelay's `preload`): it reaches the relay's own deleter, counts fence
+// entries, and can stall hydration or a room creation, fail store writes, or crash the process at chosen points.
 import http from 'node:http';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { DeletionJournal, RoomDeletion } from '../server/room-deletion.js';
 import { RoomFence } from '../server/room-fence.js';
+import { RoomRegistry } from '../server/relay-room-registry.js';
 
 const require = createRequire(import.meta.url);
 const { LeveldbPersistence } = require('y-leveldb');
@@ -55,6 +56,31 @@ LeveldbPersistence.prototype.getYDoc = async function stallableGetYDoc(docName) 
   return getYDoc.call(this, docName);
 };
 
+// After /fail-store every Yjs update write fails the way a disk error does (y-leveldb resolves null).
+let failStore = false;
+const storeUpdate = LeveldbPersistence.prototype.storeUpdate;
+LeveldbPersistence.prototype.storeUpdate = function failableStoreUpdate(...args) {
+  return failStore ? Promise.resolve(null) : storeUpdate.apply(this, args);
+};
+
+// After /hold-create the next room creation stops before it persists, until /release-create.
+const creation = { armed: false, entered: false, release: null };
+const persistRoom = RoomRegistry.prototype.persistRoom;
+RoomRegistry.prototype.persistRoom = async function holdablePersistRoom(...args) {
+  if (creation.armed) {
+    creation.armed = false;
+    await new Promise((resolve) => { creation.release = resolve; creation.entered = true; });
+  }
+  return persistRoom.apply(this, args);
+};
+
+if (process.env.TEST_KILL_BEFORE_ORPHAN) {
+  RoomRegistry.prototype.setOwnerRecord = function crashBeforeOrphaning() {
+    process.kill(process.pid, 'SIGKILL');
+    return new Promise(() => {});
+  };
+}
+
 if (process.env.TEST_KILL_AFTER_JOURNAL_PUT) {
   const put = DeletionJournal.prototype.put;
   DeletionJournal.prototype.put = async function putThenCrash(...args) {
@@ -79,6 +105,11 @@ const ACTIONS = new Map([
   ['/hold', hold],
   ['/release', release],
   ['/state', (docName) => ({ resident: docs.has(docName) })],
+  ['/entries', (docName) => ({ entries: entries.get(docName) ?? 0 })],
+  ['/fail-store', () => { failStore = true; return {}; }],
+  ['/hold-create', () => { creation.armed = true; return {}; }],
+  ['/create-held', async () => ({ held: await barrier(() => creation.entered) })],
+  ['/release-create', () => { creation.release?.(); return {}; }],
   ['/entered', async (docName) => ({ entered: await barrier(() => (entries.get(docName) ?? 0) > 0) })],
   ['/fenced', async (docName) => ({ fenced: await barrier(() => fence?.isFenced(docName)) })],
 ]);

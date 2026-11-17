@@ -188,6 +188,29 @@ test('logout-all and delete with an older expected generation change nothing', a
   assert.equal(await store.get(created.id), null);
 });
 
+test('checkGeneration runs in the mutation queue, so a logout-all queued first makes the old generation stale', async (t) => {
+  const { store } = await openStore(t);
+  const created = await store.upsertFromGoogle(PROFILE);
+  const [bumped, stale] = await Promise.all([
+    store.bumpSessionGeneration(created.id, { expectedGeneration: 0 }),
+    store.checkGeneration(created.id, 0),
+  ]);
+  assert.equal(bumped.sessionGeneration, 1);
+  assert.equal(stale, false);
+  assert.equal(await store.checkGeneration(created.id, 1), true);
+  assert.equal(await store.checkGeneration('missing', 0), false);
+});
+
+test('checkGeneration after a queued delete is false, and it rejects once the store has stopped', async (t) => {
+  const { store } = await openStore(t);
+  const created = await store.upsertFromGoogle(PROFILE);
+  const [deleted, current] = await Promise.all([store.delete(created.id), store.checkGeneration(created.id, 0)]);
+  assert.equal(deleted, true);
+  assert.equal(current, false);
+  await store.stop();
+  await assert.rejects(store.checkGeneration(created.id, 0), UNAVAILABLE);
+});
+
 test('accounts never appear in getAllDocNames', async (t) => {
   const { store, ldb } = await openStore(t);
   const created = await store.upsertFromGoogle(PROFILE);

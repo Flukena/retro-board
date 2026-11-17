@@ -90,3 +90,12 @@ test('CLI refuses an invalid FAKE_OIDC_PORT', async () => {
   const [code] = await once(child, 'exit');
   assert.notEqual(code, 0);
 });
+
+test('useProfile makes later sign-ins return the other Google identity', async (t) => {
+  const stub = await startStub(t);
+  const other = Object.freeze({ sub: 'fake-google-sub-2', email: 'other.user@example.com', name: 'Other User' });
+  stub.useProfile(other);
+  const claims = claimsOf((await (await redeem(stub, codeFrom(await authorize(stub, 'approve')))).json()).id_token);
+  assert.equal(claims.sub, other.sub);
+  assert.equal(claims.email, other.email);
+});

@@ -4,6 +4,15 @@ const STATUS = Object.freeze({ NOT_FOUND: 404, UNAVAILABLE: 503 });
 const UPGRADE_FAILED_LOG = '[yjs] upgrade failed';
 const roomDeleted = () => Object.assign(new Error('room deleted'), { status: STATUS.NOT_FOUND });
 
+/** Unloads a room's doc that no socket is attached to; false when the doc is no longer the room's or has a socket. */
+export function unloadUnattachedDoc({ docs, roomReady }, docName, doc) {
+  if (docs.get(docName) !== doc || doc.conns.size > 0) return false;
+  docs.delete(docName);
+  roomReady.delete(doc);
+  doc.destroy();
+  return true;
+}
+
 /**
  * Attaches an admitted normal-room upgrade once its Y.Doc has hydrated. y-websocket starts answering the sync protocol
  * before hydration ends, so a socket attached early would be told "synced" against an empty doc.
@@ -13,11 +22,7 @@ const roomDeleted = () => Object.assign(new Error('room deleted'), { status: STA
 export function createPlainUpgrades({ docs, getYDoc, roomReady, wss, fence, refusal, reject, timeoutMs, log = console }) {
   // Only a doc created for this upgrade, still the room's doc and still unattached, is removed.
   const dropUnattached = (docName, doc, createdForUpgrade) => {
-    if (createdForUpgrade && docs.get(docName) === doc && doc.conns.size === 0) {
-      docs.delete(docName);
-      roomReady.delete(doc);
-      doc.destroy();
-    }
+    if (createdForUpgrade) unloadUnattachedDoc({ docs, roomReady }, docName, doc);
   };
 
   /** `leave` releases the fence entry the gate took for this upgrade; it is held until the socket is attached or refused. */

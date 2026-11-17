@@ -39,7 +39,8 @@ const PROVIDER_ACCESS_DENIED = 'access_denied';
 const CALLBACK_REFUSAL = Object.freeze({ RATE_LIMITED: 'rate-limited', EXCHANGE_CAP: 'exchange-cap' });
 const QUERY_BASE_URL = 'http://relay.invalid';
 const ACCOUNT_PREFLIGHT_METHODS = 'GET, POST, OPTIONS';
-const ALLOW_GET = 'GET';
+const GET_METHOD = 'GET';
+const ALLOW_GET = GET_METHOD;
 const ALLOW_ACCOUNT_GET = 'GET, OPTIONS';
 const ALLOW_ACCOUNT_POST = 'POST, OPTIONS';
 const HTTP_OK = 200;
@@ -103,6 +104,7 @@ function providerError(query) {
  */
 export function createAuthRoutes({
   oauth, accountKey, sessions, store, ledger, allowedOrigins, allowInsecureHttp, maxCookieHeaderBytes, fetchImpl, rejectionCounters,
+  accountRooms = null,
 }) {
   const flowBuckets = new Map();
   let pendingExchanges = 0;
@@ -199,6 +201,29 @@ export function createAuthRoutes({
     sendJson(res, HTTP_OK, { name, email, plan, entitlements: entitlementsFor(plan) });
   }
 
+  // Account-room routes: GETs take the optional-Origin policy, writes need an allowed Origin; both need the cookie.
+  const roomAction = ({ method, run }) => async (req, res, { prefixed }) => {
+    const accepted = method === GET_METHOD ? acceptOptionalOrigin(req, res) : acceptCredentialOrigin(req, res, allowedOrigins, allowInsecureHttp);
+    if (!accepted) return;
+    const account = await authenticateAccount(req, sessions, store);
+    if (!account) { unauthorized(req, res, prefixed); return; }
+    await run(req, res, { account, unauthorized: () => unauthorized(req, res, prefixed) });
+  };
+
+  function accountRoomRoute(routePath) {
+    const room = accountRooms?.routeFor(routePath);
+    if (!room) return null;
+    const allow = room.method === GET_METHOD ? ALLOW_ACCOUNT_GET : ALLOW_ACCOUNT_POST;
+    return { handlers: { [room.method]: roomAction(room) }, allow, preflight: true };
+  }
+
+  // The account's rooms are orphaned once its batch has committed; a crash in between is finished at startup.
+  async function deleteAccount(id, options) {
+    const deleted = await store.delete(id, options);
+    if (deleted && accountRooms) await accountRooms.orphanRoomsOf(id);
+    return deleted;
+  }
+
   const accountAction = (change) => async (req, res, { prefixed }) => {
     if (!acceptCredentialOrigin(req, res, allowedOrigins, allowInsecureHttp)) return;
     if (change) {
@@ -219,7 +244,7 @@ export function createAuthRoutes({
     [PATH.LOGOUT_ALL, {
       handlers: { POST: accountAction((id, options) => store.bumpSessionGeneration(id, options)) }, allow: ALLOW_ACCOUNT_POST, preflight: true,
     }],
-    [PATH.DELETE, { handlers: { POST: accountAction((id, options) => store.delete(id, options)) }, allow: ALLOW_ACCOUNT_POST, preflight: true }],
+    [PATH.DELETE, { handlers: { POST: accountAction(deleteAccount) }, allow: ALLOW_ACCOUNT_POST, preflight: true }],
   ]);
 
   async function run(handler, req, res, ctx) {
@@ -252,7 +277,7 @@ export function createAuthRoutes({
   return {
     /** True when the path is an auth or account route; the response is then this module's. */
     handle(req, res, routePath, ctx) {
-      const route = routes.get(routePath);
+      const route = routes.get(routePath) ?? accountRoomRoute(routePath);
       if (!route) return false;
       for (const [name, value] of Object.entries(RESPONSE_HEADERS)) res.setHeader(name, value);
       dispatch(req, res, route, ctx);

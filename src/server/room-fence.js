@@ -36,6 +36,9 @@ export class RoomFence {
 
   isFenced(docName) { return this.#fenced.has(docName); }
 
+  /** True while any entry of the room is held. */
+  held(docName) { return this.#entries.has(docName); }
+
   lift(docName) { this.#fenced.delete(docName); }
 
   /** True once no entry is held; false when one is still held after `timeoutMs`. */

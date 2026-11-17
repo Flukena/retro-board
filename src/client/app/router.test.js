@@ -146,6 +146,21 @@ test('poker rooms route by /p/ with the capability read from the fragment', asyn
   }
 });
 
+test('a relay room link opens the app of its kind', async () => {
+  const { parseRoute, ROOM_KIND } = await import('./router.js');
+  const { roomPath } = await import('../../domain/room-ownership.js');
+  const original = globalThis.window;
+  try {
+    for (const kind of [ROOM_KIND.BOARD, ROOM_KIND.POKER]) {
+      const [pathname, hash] = roomPath('Room1234', 'abcdefghijklmnop', kind).split('#');
+      globalThis.window = { location: { pathname, hash: `#${hash}` } };
+      assert.deepEqual(parseRoute(), { kind, code: 'Room1234', token: 'abcdefghijklmnop' });
+    }
+  } finally {
+    globalThis.window = original;
+  }
+});
+
 test('the Planning Poker guide routes in English and Thai', async () => {
   const { parseRoute } = await import('./router.js');
   const original = globalThis.window;

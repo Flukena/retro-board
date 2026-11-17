@@ -93,10 +93,10 @@ async function formBody(req) {
   return new URLSearchParams(Buffer.concat(chunks).toString('utf8'));
 }
 
-function idToken(issuer, grant) {
+function idToken({ issuer, profile }, grant) {
   const issuedAt = Math.floor(Date.now() / MILLISECONDS_PER_SECOND);
   const claims = {
-    iss: issuer, aud: grant.client_id, ...FAKE_GOOGLE_PROFILE, email_verified: true,
+    iss: issuer, aud: grant.client_id, ...profile, email_verified: true,
     nonce: grant.nonce, iat: issuedAt, exp: issuedAt + ID_TOKEN_LIFETIME_SECONDS,
   };
   return `${base64urlJson(UNSIGNED_JWT_HEADER)}.${base64urlJson(claims)}.`;
@@ -113,7 +113,8 @@ function redeemedGrant(form, codes) {
   return matches ? grant : null;
 }
 
-async function handleToken(req, res, { codes, issuer, onTokenRequest }) {
+async function handleToken(req, res, state) {
+  const { codes, onTokenRequest } = state;
   const form = await formBody(req);
   if (!form) { reply(res, HTTP_PAYLOAD_TOO_LARGE); return; }
   await onTokenRequest();
@@ -122,7 +123,7 @@ async function handleToken(req, res, { codes, issuer, onTokenRequest }) {
     reply(res, HTTP_BAD_REQUEST, { 'content-type': 'application/json' }, JSON.stringify({ error: INVALID_GRANT }));
     return;
   }
-  const body = JSON.stringify({ access_token: randomBytes(CODE_BYTES).toString(BASE64URL), token_type: 'Bearer', id_token: idToken(issuer, grant) });
+  const body = JSON.stringify({ access_token: randomBytes(CODE_BYTES).toString(BASE64URL), token_type: 'Bearer', id_token: idToken(state, grant) });
   reply(res, HTTP_OK, { 'content-type': 'application/json' }, body);
 }
 
@@ -131,11 +132,12 @@ const noWait = async () => {};
 /**
  * Starts the stub on 127.0.0.1. `issuer` defaults to the stub's own origin;
  * `onTokenRequest` may delay token responses (tests use it to hold an exchange open).
- * @returns {Promise<{ url: string, close: () => Promise<void> }>}
+ * `useProfile(profile)` makes later sign-ins return another Google identity (tests use it for a second account).
+ * @returns {Promise<{ url: string, close: () => Promise<void>, useProfile: (profile: object) => void }>}
  */
 export async function startFakeGoogleOidc({ port = 0, issuer = null, onTokenRequest = noWait } = {}) {
   const codes = new Map();
-  const state = { codes, issuer, onTokenRequest };
+  const state = { codes, issuer, onTokenRequest, profile: FAKE_GOOGLE_PROFILE };
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
     if (req.method === 'GET' && url.pathname === AUTH_PATH) { handleAuthorize(url, codes, res); return; }
@@ -149,7 +151,8 @@ export async function startFakeGoogleOidc({ port = 0, issuer = null, onTokenRequ
   const url = `http://${LOOPBACK_HOST}:${server.address().port}`;
   state.issuer = issuer ?? url;
   const close = () => new Promise((resolve) => { server.closeAllConnections(); server.close(() => resolve()); });
-  return { url, close };
+  const useProfile = (profile) => { state.profile = profile; };
+  return { url, close, useProfile };
 }
 
 function cliPort(raw = String(DEFAULT_CLI_PORT)) {

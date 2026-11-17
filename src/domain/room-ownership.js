@@ -2,6 +2,9 @@ import { isAccountId } from './account-identity.js';
 
 export const ROOM_OWNER_META = 'retro-room-owner-v1';
 export const ROOM_KIND = Object.freeze({ BOARD: 'board', POKER: 'poker' });
+/** Every room is the same relay room; the path picks which app opens it. */
+export const ROOM_PATH_PREFIX = Object.freeze({ [ROOM_KIND.BOARD]: '/b/', [ROOM_KIND.POKER]: '/p/' });
+export const roomPath = (code, token, kind) => `${ROOM_PATH_PREFIX[kind]}${code}${token ? `#${token}` : ''}`;
 export const RETENTION_CLASS = Object.freeze({ GUEST: 'guest', KEPT: 'kept' });
 export const MAX_OWNED_ROOMS_PER_ACCOUNT = 500;
 /** WebSocket close code for every socket of a room its owner just deleted. */
