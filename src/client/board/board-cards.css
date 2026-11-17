@@ -595,10 +595,10 @@
   width: var(--zone-popup-width);
   padding: var(--zone-popup-padding);
   box-sizing: border-box;
-  background: var(--tool-frame-bg);
-  border: var(--zone-popup-border-width) solid var(--tool-frame-border);
+  background: var(--bg-panel);
+  border: var(--zone-popup-border-width) solid var(--border);
   border-radius: var(--radius-md);
-  box-shadow: var(--tool-frame-shadow);
+  box-shadow: var(--shadow-pop);
   font-family: var(--font-ui);
   font-size: var(--zone-popup-font-size);
   color: var(--text);

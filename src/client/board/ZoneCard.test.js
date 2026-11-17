@@ -5,9 +5,15 @@ import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { withChromeModule } from '../../test-support/chrome-test-helper.js';
 import { TOKENS } from '../ui/theme.js';
+import { contrastRatio, parseColor } from '../ui/color-contrast.js';
+import { MIN_NORMAL_TEXT_CONTRAST_RATIO } from '../../test-support/contrast.js';
+import { Z } from '../chrome/chrome-layout.js';
 import { ZONE_HEADER_MENU_BREAKPOINT_PX } from '../../domain/zone-title.js';
 
 const AUTO_ITEM_TITLE_FONT_PX = 20;
+// CSS Color 4 defines the `transparent` keyword as rgba(0, 0, 0, 0).
+const CSS_TRANSPARENT_RGBA = 'rgba(0, 0, 0, 0)';
+const FULLY_OPAQUE_ALPHA = 1;
 
 const ITEM = { id: 'zone-a', type: 'zone', title: 'Ideas', x: 10, y: 20, w: 300, h: 200, color: 0 };
 function Editor({ value, className }) {
@@ -389,16 +395,34 @@ test('labelled popup row glyphs remain legible', () => {
   }
 });
 
-test('zone overflow uses the same transparent outer frame as other tool groups', () => {
-  const css = readFileSync(new URL('./board-cards.css', import.meta.url), 'utf8');
-  const popup = declarations(css, '.rb-zone__tool-popup');
-  assert.equal(popup.background, 'var(--tool-frame-bg)');
-  assert.equal(popup.border, 'var(--zone-popup-border-width) solid var(--tool-frame-border)');
-  assert.equal(popup['box-shadow'], 'var(--tool-frame-shadow)');
+function resolveToken(value, tokens) {
+  const reference = /^var\((--[\w-]+)\)$/.exec(value);
+  if (!reference) return value;
+  assert.ok(reference[1] in tokens, `${reference[1]} must be a theme token`);
+  return resolveToken(tokens[reference[1]], tokens);
+}
+
+function tokenColor(value, tokens) {
+  const resolved = resolveToken(value, tokens);
+  return parseColor(resolved === 'transparent' ? CSS_TRANSPARENT_RGBA : resolved);
+}
+
+test('zone options popup paints an opaque surface so cards beneath never show through its items', () => {
+  const popup = declarations(readFileSync(new URL('./board-cards.css', import.meta.url), 'utf8'), '.rb-zone__tool-popup');
+  for (const [mode, tokens] of Object.entries(TOKENS)) {
+    const surface = tokenColor(popup.background, tokens);
+    assert.equal(surface.a, FULLY_OPAQUE_ALPHA, `${mode} popup surface must be opaque`);
+    const ratio = contrastRatio(tokenColor(popup.color, tokens), surface);
+    assert.ok(ratio >= MIN_NORMAL_TEXT_CONTRAST_RATIO, `${mode} popup text contrast ${ratio} is too low`);
+  }
+});
+
+test('zone options popup layers above the board canvas that holds every card', () => {
+  const popup = declarations(readFileSync(new URL('./board-cards.css', import.meta.url), 'utf8'), '.rb-zone__tool-popup');
+  assert.equal(popup.position, 'fixed');
   for (const tokens of Object.values(TOKENS)) {
-    assert.equal(tokens['--tool-frame-bg'], 'transparent');
-    assert.equal(tokens['--tool-frame-border'], 'transparent');
-    assert.equal(tokens['--tool-frame-shadow'], 'none');
+    // Cards, including selected, dragged and remote-edited ones, stack inside the Z.CANVAS layer.
+    assert.ok(Number(resolveToken(popup['z-index'], tokens)) > Z.CANVAS);
   }
 });
 
