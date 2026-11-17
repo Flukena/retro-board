@@ -137,3 +137,10 @@ test('logout and friends keep sending no body', async () => {
   assert.equal(calls[0].init.body, undefined);
   assert.equal(calls[0].init.headers, undefined);
 });
+
+test('renameRoom rejects a 200 answer without a title string', async () => {
+  for (const body of [{}, { title: null }, { title: 7 }]) {
+    const error = await renameRoom('Ab3dEf7h', 'Retro', { fetchImpl: recording(200, body, []), baseUrl: BASE }).catch((e) => e);
+    assert.ok(error instanceof AccountRequestError, JSON.stringify(body));
+  }
+});

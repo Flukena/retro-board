@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { ChevronDown, LogIn, LogOut, Trash2, Copy, RefreshCw, LayoutGrid } from 'lucide-react';
 import { t, useLang } from '../ui/i18n.js';
-import { Button, MenuItem, Surface } from '../ui/UiPrimitives.jsx';
+import { Button, MenuItem, Surface, portalToBody } from '../ui/UiPrimitives.jsx';
 import { ConfirmDialog } from '../ui/Modals.jsx';
 import { Toast } from '../ui/Toast.jsx';
 import { useDismiss } from '../ui/useDismiss.js';
@@ -77,7 +77,7 @@ export function AccountMenuView({ session, inApp, href, open = false, confirming
     <>
       <SignedInMenu account={session.account} open={open} {...actions} />
       {showingBoards && <MyBoardsDialog onClose={actions.onCloseBoards} />}
-      {confirmingDelete && (
+      {confirmingDelete && portalToBody(
         <ConfirmDialog
           icon={<Trash2 size={DELETE_ICON_SIZE_PX} color="var(--danger)" />}
           title={t('account.delete')}

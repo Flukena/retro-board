@@ -7,8 +7,8 @@ import { GUEST_ROOM_RETENTION_HOURS } from '../../domain/room-retention.js';
 
 const ICON_SIZE_PX = 14;
 
-// Hidden while the account is loading and for signed-in users, whose boards are kept.
-const showsGuestRoomNote = (session) => session !== null && session.status !== ACCOUNT_STATUS.SIGNED_IN;
+// Only a definite "signed out": loading, a relay blip (unavailable) or sign-in being off (disabled) say nothing.
+const showsGuestRoomNote = (session) => session?.status === ACCOUNT_STATUS.SIGNED_OUT;
 
 /** Stateless, so each account state renders on its own in tests. */
 export function GuestRoomNoteView({ session }) {

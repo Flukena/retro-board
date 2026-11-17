@@ -125,6 +125,8 @@ export default Object.freeze({
   "myBoards.renamePlaceholder": "Nom du tableau",
   "myBoards.deleteTitle": "Supprimer définitivement le tableau",
   "myBoards.deleteBody": "Tout le contenu de ce tableau est supprimé pour tout le monde. Les personnes présentes sont déconnectées. Action irréversible.",
+  "myBoards.deleteTitlePoker": "Supprimer définitivement la salle Planning Poker",
+  "myBoards.deleteBodyPoker": "Tout le contenu de cette salle Planning Poker est supprimé pour tout le monde. Les personnes présentes sont déconnectées. Action irréversible.",
   "myBoards.deletePrompt": "Saisissez le code du tableau {code} pour confirmer.",
   "myBoards.error.signIn": "Votre session a expiré. Reconnectez-vous.",
   "myBoards.error.gone": "Ce tableau n’existe plus, il a donc été retiré de la liste.",

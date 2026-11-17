@@ -125,6 +125,8 @@ export default Object.freeze({
   "myBoards.renamePlaceholder": "Nama papan",
   "myBoards.deleteTitle": "Hapus papan secara permanen",
   "myBoards.deleteBody": "Semua isi papan ini dihapus untuk semua orang. Siapa pun yang sedang di dalamnya akan terputus. Tindakan ini tidak dapat dibatalkan.",
+  "myBoards.deleteTitlePoker": "Hapus ruang Planning Poker secara permanen",
+  "myBoards.deleteBodyPoker": "Semua isi ruang Planning Poker ini dihapus untuk semua orang. Siapa pun yang sedang di dalamnya akan terputus. Tindakan ini tidak dapat dibatalkan.",
   "myBoards.deletePrompt": "Ketik kode papan {code} untuk mengonfirmasi.",
   "myBoards.error.signIn": "Sesi Anda telah berakhir. Silakan masuk lagi.",
   "myBoards.error.gone": "Papan itu sudah tidak ada, jadi dihapus dari daftar.",

@@ -168,3 +168,29 @@ test('by default a delete forgets the room from this browser\'s recents', async 
   assert.equal(await controller.remove(BOARD.code, BOARD.code), true);
   assert.deepEqual(JSON.parse(store.get('rb_recents')), [other]);
 });
+
+test('a rename whose answer is unusable keeps the previous title', async () => {
+  const { controller } = harness({ renameRoom: async () => { throw new AccountRequestError('rooms/x/title', 200, null); } });
+  await controller.load();
+  assert.equal(await controller.rename(BOARD.code, 'New'), false);
+  assert.equal(controller.getSnapshot().rooms.find((room) => room.code === BOARD.code).title, 'Sprint 12');
+  assert.equal(controller.getSnapshot().error, MY_BOARDS_ERROR.UNAVAILABLE);
+});
+
+// A locked room is created by the same flow as any room: rememberRecent(code, name, token) with the token
+// that is also in its docName, which is the fragment of the relay's link. Deleting it must clear that entry.
+test('deleting a locked room forgets the recent entry its creation flow remembered', async () => {
+  const store = new Map();
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: { getItem: (key) => store.get(key) ?? null, setItem: (key, value) => store.set(key, String(value)) },
+  });
+  const { rememberRecent, loadRecents } = await import('../app/router.js');
+  const locked = { ...BOARD, code: 'Lk4mNo5p', locked: true, title: null, link: '/b/Lk4mNo5p#lok12345lok12345' };
+  rememberRecent(locked.code, 'Secret retro', 'lok12345lok12345');
+  assert.equal(loadRecents().length, 1);
+  const controller = createMyBoardsController({ api: { listRooms: async () => [locked], deleteRoom: async () => {} } });
+  await controller.load();
+  assert.equal(await controller.remove(locked.code, locked.code), true);
+  assert.deepEqual(loadRecents(), []);
+});

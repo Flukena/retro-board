@@ -111,3 +111,15 @@ test('Rename dialog bounds the title and disables Save for a blank name', async 
     assert.match(html({ ...BOARD, title: null }).match(/<button[^>]*>[^<]*<\/button>/g).at(-1), /disabled=""/);
   });
 });
+
+test('delete copy names a Planning Poker room for poker and a board otherwise', async () => {
+  await withChromeModule(MODULE, ({ DELETE_COPY_KEYS }, { t, setLang }) => {
+    for (const lang of ['th', 'en']) {
+      setLang(lang);
+      assert.ok(t(DELETE_COPY_KEYS.poker.title).includes('Planning Poker'));
+      assert.ok(t(DELETE_COPY_KEYS.poker.body).includes('Planning Poker'));
+      assert.ok(!t(DELETE_COPY_KEYS.board.title).includes('Planning Poker'));
+      assert.notEqual(t(DELETE_COPY_KEYS.board.body), t(DELETE_COPY_KEYS.poker.body));
+    }
+  });
+});

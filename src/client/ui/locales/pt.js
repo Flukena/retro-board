@@ -125,6 +125,8 @@ export default Object.freeze({
   "myBoards.renamePlaceholder": "Nome do quadro",
   "myBoards.deleteTitle": "Excluir quadro permanentemente",
   "myBoards.deleteBody": "Tudo neste quadro será excluído para todos. Quem estiver nele será desconectado. Não é possível desfazer.",
+  "myBoards.deleteTitlePoker": "Excluir sala de Planning Poker permanentemente",
+  "myBoards.deleteBodyPoker": "Tudo nesta sala de Planning Poker será excluído para todos. Quem estiver nela será desconectado. Não é possível desfazer.",
   "myBoards.deletePrompt": "Digite o código do quadro {code} para confirmar.",
   "myBoards.error.signIn": "Sua sessão terminou. Faça login novamente.",
   "myBoards.error.gone": "Esse quadro não existe mais, por isso foi removido da lista.",

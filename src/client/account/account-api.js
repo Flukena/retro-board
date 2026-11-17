@@ -95,7 +95,9 @@ export async function listRooms(options) {
 
 /** Resolves to the stored title. */
 export async function renameRoom(code, title, options) {
-  const body = await (await accountRequest(roomPath(code, 'title'), METHOD.POST, { title }, options)).json();
+  const path = roomPath(code, 'title');
+  const body = await (await accountRequest(path, METHOD.POST, { title }, options)).json();
+  if (typeof body?.title !== 'string') throw new AccountRequestError(path, HTTP_OK, null);
   return body.title;
 }
 

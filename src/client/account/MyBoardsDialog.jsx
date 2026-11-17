@@ -2,10 +2,11 @@ import React, { useEffect, useId, useMemo, useState, useSyncExternalStore } from
 import { Lock, Trash2 } from 'lucide-react';
 import { t } from '../ui/i18n.js';
 import { ModalShell } from '../ui/ModalShell.jsx';
-import { Button } from '../ui/UiPrimitives.jsx';
+import { Button, portalToBody } from '../ui/UiPrimitives.jsx';
 import { TypeToConfirmDialog } from '../ui/TypeToConfirmDialog.jsx';
 import { BUTTON_VARIANT, MODAL_LAYER, MODAL_SIZE } from '../ui/ui-variants.js';
 import { formatRelativeTime } from '../ui/relative-time.js';
+import { isEnterKey } from '../ui/modal-model.js';
 import { BOARD_TITLE_MAX_LENGTH } from '../../domain/security-boundaries.js';
 import { ROOM_KIND } from '../../domain/room-ownership.js';
 import { signInHref } from './account-api.js';
@@ -17,6 +18,11 @@ import './my-boards.css';
 const BADGE_ICON_SIZE_PX = 12;
 const DELETE_ICON_SIZE_PX = 20;
 const KIND_KEYS = Object.freeze({ [ROOM_KIND.BOARD]: 'myBoards.kind.board', [ROOM_KIND.POKER]: 'poker.title' });
+// Delete copy names what is being deleted: a board or a Planning Poker room.
+export const DELETE_COPY_KEYS = Object.freeze({
+  [ROOM_KIND.BOARD]: Object.freeze({ title: 'myBoards.deleteTitle', body: 'myBoards.deleteBody' }),
+  [ROOM_KIND.POKER]: Object.freeze({ title: 'myBoards.deleteTitlePoker', body: 'myBoards.deleteBodyPoker' }),
+});
 const ERROR_KEYS = Object.freeze({
   [MY_BOARDS_ERROR.SIGN_IN]: 'myBoards.error.signIn',
   [MY_BOARDS_ERROR.GONE]: 'myBoards.error.gone',
@@ -112,7 +118,7 @@ export function RenameRoomDialog({ room, busy, onCancel, onSave }) {
       <label id={`${id}-title`} htmlFor={`${id}-input`} className="rb-dialog__title">{t('myBoards.renameTitle')}</label>
       <input id={`${id}-input`} autoFocus className="rb-input rb-dialog__input" value={name} disabled={busy}
         maxLength={BOARD_TITLE_MAX_LENGTH} placeholder={t('myBoards.renamePlaceholder')}
-        onChange={(event) => setName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') save(); }} />
+        onChange={(event) => setName(event.target.value)} onKeyDown={(event) => { if (isEnterKey(event)) save(); }} />
       <div className="rb-dialog__actions">
         <Button disabled={busy} onClick={onCancel}>{t('common.cancel')}</Button>
         <Button variant={BUTTON_VARIANT.PRIMARY} disabled={!canSave} onClick={save}>{t('common.save')}</Button>
@@ -131,7 +137,8 @@ export default function MyBoardsDialog({ onClose }) {
   // Either outcome closes the small dialog; a refusal shows in the list behind it.
   const rename = async (title) => { await controller.rename(renaming.code, title); setRenaming(null); };
   const remove = async (typed) => { await controller.remove(deleting.code, typed); setDeleting(null); };
-  return (
+  // Portaled: the masthead's stacking context would otherwise trap the overlay below the sticky public bar.
+  return portalToBody(
     <>
       <MyBoardsView state={state} now={Date.now()} signInUrl={state.error === MY_BOARDS_ERROR.SIGN_IN ? signInHref() : ''}
         onClose={onClose} onRetry={() => void controller.load()} onAskRename={setRenaming} onAskDelete={setDeleting} />
@@ -143,8 +150,8 @@ export default function MyBoardsDialog({ onClose }) {
         <TypeToConfirmDialog
           layer={MODAL_LAYER.RAISED}
           icon={<Trash2 size={DELETE_ICON_SIZE_PX} color="var(--danger)" aria-hidden="true" />}
-          title={t('myBoards.deleteTitle')}
-          body={t('myBoards.deleteBody')}
+          title={t(DELETE_COPY_KEYS[deleting.kind].title)}
+          body={t(DELETE_COPY_KEYS[deleting.kind].body)}
           prompt={t('myBoards.deletePrompt', { code: deleting.code })}
           expected={deleting.code}
           cancelLabel={t('common.cancel')}
@@ -154,6 +161,6 @@ export default function MyBoardsDialog({ onClose }) {
           onConfirm={(typed) => void remove(typed)}
         />
       )}
-    </>
+    </>,
   );
 }

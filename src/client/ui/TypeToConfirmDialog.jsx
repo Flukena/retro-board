@@ -2,7 +2,7 @@ import React, { useId, useState } from 'react';
 import { ModalShell } from './ModalShell.jsx';
 import { Button } from './UiPrimitives.jsx';
 import { BUTTON_VARIANT, MODAL_LAYER, MODAL_SIZE } from './ui-variants.js';
-import { typedConfirmationMatches } from './modal-model.js';
+import { isEnterKey, typedConfirmationMatches } from './modal-model.js';
 import './modals.css';
 
 /** Stateless, so each typed value renders on its own in tests. Confirm enables only on an exact match. */
@@ -31,7 +31,7 @@ export function TypeToConfirmView({
         autoCapitalize="off"
         spellCheck={false}
         onChange={(event) => onTypedChange(event.target.value)}
-        onKeyDown={(event) => { if (event.key === 'Enter') submit(); }}
+        onKeyDown={(event) => { if (isEnterKey(event)) submit(); }}
       />
       <div className="rb-dialog__actions">
         <Button disabled={busy} onClick={onCancel}>{cancelLabel}</Button>

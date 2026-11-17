@@ -43,3 +43,6 @@ export function templateNameCanSubmit(mode, name, initialName, zoneCount) {
 
 /** Type-to-confirm: only the exact, case-sensitive text unlocks a destructive action. */
 export const typedConfirmationMatches = (typed, expected) => expected.length > 0 && typed === expected;
+
+/** A plain Enter, not the one that commits an IME composition (Thai, Japanese, ...). */
+export const isEnterKey = (event) => event.key === 'Enter' && !event.nativeEvent?.isComposing;

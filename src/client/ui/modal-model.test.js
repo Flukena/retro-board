@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pinValidity, sanitizePin, importWarningNotes, typedConfirmationMatches } from './modal-model.js';
+import { pinValidity, sanitizePin, importWarningNotes, isEnterKey, typedConfirmationMatches } from './modal-model.js';
 
 test('PIN accepts only four through eight digits and setting requires matching confirmation', () => {
   for (const pin of ['123', '123456789', 'abcd', '123a', '１２３４']) {
@@ -35,4 +35,10 @@ test('typed confirmation matches only the exact, case-sensitive text', () => {
     assert.equal(typedConfirmationMatches(typed, 'Ab3dEf7h'), false, JSON.stringify(typed));
   }
   assert.equal(typedConfirmationMatches('', ''), false);
+});
+
+test('isEnterKey ignores the Enter that commits an IME composition', () => {
+  assert.equal(isEnterKey({ key: 'Enter', nativeEvent: { isComposing: false } }), true);
+  assert.equal(isEnterKey({ key: 'Enter', nativeEvent: { isComposing: true } }), false);
+  assert.equal(isEnterKey({ key: 'a', nativeEvent: { isComposing: false } }), false);
 });

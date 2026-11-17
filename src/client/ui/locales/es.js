@@ -125,6 +125,8 @@ export default Object.freeze({
   "myBoards.renamePlaceholder": "Nombre del tablero",
   "myBoards.deleteTitle": "Eliminar tablero para siempre",
   "myBoards.deleteBody": "Todo lo que hay en este tablero se elimina para todos. Quien esté dentro se desconectará. No se puede deshacer.",
+  "myBoards.deleteTitlePoker": "Eliminar sala de Planning Poker para siempre",
+  "myBoards.deleteBodyPoker": "Todo lo que hay en esta sala de Planning Poker se elimina para todos. Quien esté dentro se desconectará. No se puede deshacer.",
   "myBoards.deletePrompt": "Escribe el código del tablero {code} para confirmar.",
   "myBoards.error.signIn": "Tu sesión ha terminado. Vuelve a iniciar sesión.",
   "myBoards.error.gone": "Ese tablero ya no existe, así que se quitó de la lista.",

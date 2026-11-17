@@ -125,6 +125,8 @@ export default Object.freeze({
   "myBoards.renamePlaceholder": "白板名称",
   "myBoards.deleteTitle": "永久删除白板",
   "myBoards.deleteBody": "此白板上的所有内容都将为所有人删除，正在其中的人会被断开连接。此操作无法撤销。",
+  "myBoards.deleteTitlePoker": "永久删除 Planning Poker 房间",
+  "myBoards.deleteBodyPoker": "此 Planning Poker 房间中的所有内容都将为所有人删除，正在其中的人会被断开连接。此操作无法撤销。",
   "myBoards.deletePrompt": "请输入白板代码 {code} 以确认。",
   "myBoards.error.signIn": "你的会话已结束，请重新登录。",
   "myBoards.error.gone": "该白板已不存在，已从列表中移除。",
