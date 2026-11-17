@@ -4,7 +4,7 @@ import { FIREWORKS_DURATION_MS, REACTION_LOOK } from './reaction-timeline.js';
 import { MAX_PARTICLES_PER_SHOW, particleCount } from './fireworks-physics.js';
 import { REACTION_PLAY_INTERVAL_MS } from './reaction-receiver.js';
 import {
-  MAX_ACTIVE_BY_LOOK, MAX_ACTIVE_PARTICLES, addReaction, liveReactions, nextExpiryInMs, reactionEntry, withoutMotion,
+  MAX_ACTIVE_BY_LOOK, MAX_ACTIVE_FIREWORKS_SHOWS, MAX_ACTIVE_PARTICLES, addReaction, liveReactions, nextExpiryInMs, reactionEntry, withoutMotion,
 } from './reaction-feed.js';
 
 const NOW_MS = 1_700_000_000_000;
@@ -45,15 +45,27 @@ test('concurrent effects stay bounded per look, dropping the oldest, so many sen
   assert.equal(MAX_ACTIVE_PARTICLES, MAX_ACTIVE_BY_LOOK[REACTION_LOOK.FIREWORKS] * MAX_PARTICLES_PER_SHOW);
 });
 
-test('fireworks a sender plays as often as a page admits them are never cut before their end', () => {
+// The ruling on the cap: when one sender is admitted every play interval, their 4th show ends their oldest one during
+// its last ~0.4 s of fade.
+const OLDEST_SHOW_CUT_WITHIN_MS = 400;
+
+test('at most three fireworks shows run at once; a sender played every play interval loses the oldest in its last 0.4 s', () => {
+  const playAt = (index) => NOW_MS + index * REACTION_PLAY_INTERVAL_MS;
+  const play = (entries, index) => addReaction(
+    entries, reactionEntry(event(1, index + 1, '🎆'), { ...MOTION, now: playAt(index) }), playAt(index),
+  );
   let entries = [];
-  const plays = Math.ceil(FIREWORKS_DURATION_MS / REACTION_PLAY_INTERVAL_MS);
-  for (let seq = 1; seq <= plays; seq += 1) {
-    const now = NOW_MS + (seq - 1) * REACTION_PLAY_INTERVAL_MS;
-    entries = addReaction(entries, reactionEntry(event(1, seq, '🎆'), { ...MOTION, now }), now);
-  }
-  assert.equal(entries.length, plays, 'every running show is still on screen');
-  assert.ok(entries.every((entry) => entry.endsAt > NOW_MS + (plays - 1) * REACTION_PLAY_INTERVAL_MS));
+  for (let index = 0; index < MAX_ACTIVE_FIREWORKS_SHOWS; index += 1) entries = play(entries, index);
+  assert.equal(MAX_ACTIVE_FIREWORKS_SHOWS, 3);
+  assert.equal(entries.length, MAX_ACTIVE_FIREWORKS_SHOWS, 'the first three shows all run');
+  const [oldest] = entries;
+  const cutAt = playAt(MAX_ACTIVE_FIREWORKS_SHOWS);
+  entries = play(entries, MAX_ACTIVE_FIREWORKS_SHOWS);
+  assert.equal(entries.length, MAX_ACTIVE_FIREWORKS_SHOWS, 'the cap holds');
+  assert.deepEqual(entries.map((entry) => entry.key), ['1:2', '1:3', '1:4'], 'the oldest show is the one dropped');
+  const cutShortByMs = oldest.endsAt - cutAt;
+  assert.ok(cutShortByMs > 0, 'the oldest show was still running');
+  assert.ok(cutShortByMs <= OLDEST_SHOW_CUT_WITHIN_MS, `cut ${cutShortByMs} ms before its end`);
 });
 
 test('the same key is never shown twice', () => {

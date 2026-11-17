@@ -7,12 +7,11 @@ export const FIREWORKS_SHAPE = Object.freeze({ SPHERE: 'sphere', RING: 'ring', W
 export const SHELL_COUNT_RANGE = Object.freeze([3, 5]);
 // Shells go up one after another over this window; the first goes up at once.
 export const LAUNCH_WINDOW_MS = 800;
-// Every particle and rocket one show may draw. Per frame the painter strokes each of them once per trail step plus once
-// more for the glow under the head step (fireworks-paint.js: 3 steps + 1 glow = 4 segments), in about 4 stroke calls
-// per shell, plus a 6-disc flash for each burst in its first 140 ms. With 4 shows overlapping (MAX_ACTIVE_BY_LOOK in
-// reaction-feed.js) the worst case is 4 shows x 180 x 4 = 2880 segments a frame. On a 4x CPU-throttled emulated phone
-// 4 x 180 kept the median frame at 16.7 ms; 4 x 240 doubled it.
-export const MAX_PARTICLES_PER_SHOW = 180;
+// Every particle and rocket one show may draw. Each frame the painter strokes every one of them once per trail step and
+// once more for the glow under the head step (TRAIL_STEPS + 1 segments, in about as many stroke calls per shell), and
+// draws FLASH_DISC_COUNT discs (fireworks-paint.js) for each burst during its first FLASH_MS. The worst case is
+// MAX_ACTIVE_FIREWORKS_SHOWS (reaction-feed.js) x this x (TRAIL_STEPS + 1) segments a frame: 3 x 240 x 4 = 2880.
+export const MAX_PARTICLES_PER_SHOW = 240;
 // Slots in the theme's fireworks palette (fireworks-paint.js reads one token per slot).
 export const FIREWORKS_PALETTE_SIZE = 6;
 const ROCKETS_PER_SHELL = 1;
