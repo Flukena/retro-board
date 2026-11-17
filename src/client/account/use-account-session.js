@@ -1,13 +1,11 @@
-import { useEffect, useState } from 'react';
-import { fetchAccount } from './account-api.js';
+import { useEffect, useSyncExternalStore } from 'react';
+import { accountSessionStore } from './account-session-store.js';
 
-/** The account session, or null while it is still loading (so nothing flashes before it is known). */
+const serverSnapshot = () => null;
+
+/** The shared account session, or null while it is still loading (so nothing flashes before it is known). */
 export function useAccountSession() {
-  const [session, setSession] = useState(null);
-  useEffect(() => {
-    let live = true;
-    fetchAccount().then((next) => { if (live) setSession(next); });
-    return () => { live = false; };
-  }, []);
+  const session = useSyncExternalStore(accountSessionStore.subscribe, accountSessionStore.getSnapshot, serverSnapshot);
+  useEffect(() => { void accountSessionStore.load(); }, []);
   return session;
 }
