@@ -1,5 +1,6 @@
 // Shared Playwright helpers for two-participant board live checks
-// (retro-outcomes-live-check.mjs, facilitation-live-check.mjs, account-live-check.mjs, room-lock-live-check.mjs).
+// (retro-outcomes-live-check.mjs, facilitation-live-check.mjs, account-live-check.mjs, room-lock-live-check.mjs,
+// room-management-live-check.mjs).
 import { execFileSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import { mkdir, stat, writeFile } from 'node:fs/promises';
@@ -10,7 +11,10 @@ export const VIEWPORT = { width: 1440, height: 900 };
 export const SYNC_TIMEOUT_MS = 15_000;
 export const CANVAS_SELECTOR = '.rb-no-select';
 const ACTION_TIMEOUT_MS = 15_000;
-const BOARD_URL_PATTERN = /\/b\/[A-Za-z0-9_-]+#[A-Za-z0-9_-]+$/;
+export const BOARD_URL_PATTERN = /\/b\/[A-Za-z0-9_-]+#[A-Za-z0-9_-]+$/;
+export const POKER_URL_PATTERN = /\/p\/[A-Za-z0-9_-]+#[A-Za-z0-9_-]+$/;
+// PBKDF2 (600k iterations) runs on every unlock.
+export const UNLOCK_TIMEOUT_MS = 30_000;
 const JSON_INDENT_SPACES = 2;
 // AGENTS.md §Data location: live-check output lives on a mounted data volume, never a fallback.
 export const DATA_VOLUME_ROOTS = Object.freeze(['/Volumes/ssd-fluke/BaseData', '/Volumes/BaseDisk/Base']);
@@ -52,15 +56,26 @@ export async function loadPlaywright() {
   return import(pathToFileURL(entry).href);
 }
 
-export async function participant(browser, lang, report, name) {
-  const context = await browser.newContext({ viewport: VIEWPORT, acceptDownloads: true });
-  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-  await context.addInitScript((value) => { if (!localStorage.getItem('rb_lang')) localStorage.setItem('rb_lang', value); }, lang);
-  const page = await context.newPage();
+/** Gives a page the action timeout and the error capture every participant page has. */
+function watchPage(page, report, name) {
   page.setDefaultTimeout(ACTION_TIMEOUT_MS);
   page.on('pageerror', error => report.pageErrors.push({ name, message: error.message }));
   page.on('console', message => { if (message.type() === 'error') report.consoleErrors.push({ name, text: message.text(), url: message.location().url }); });
   return page;
+}
+
+export async function participant(browser, lang, report, name) {
+  const context = await browser.newContext({ viewport: VIEWPORT, acceptDownloads: true });
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await context.addInitScript((value) => { if (!localStorage.getItem('rb_lang')) localStorage.setItem('rb_lang', value); }, lang);
+  return watchPage(await context.newPage(), report, name);
+}
+
+/** Another tab of the same participant (same cookies and storage); failure screenshots include it. */
+export async function secondTab(page, report, name) {
+  const tab = watchPage(await page.context().newPage(), report, name);
+  report.pages.push(tab);
+  return tab;
 }
 
 export async function enter(page, lang, name) {
@@ -121,6 +136,44 @@ export async function visitStub(page, baseUrl, decision) {
   await signInLink(page, 'en').click();
   await page.locator(decision).click();
   await page.waitForURL((url) => url.origin === new URL(baseUrl).origin);
+}
+
+export const LOCK_LABELS = {
+  en: {
+    toggle: 'Create a password-protected board', password: 'Password', confirm: 'Confirm password',
+    ack: 'If you forget the password nobody can recover the data, including the server owner',
+    submit: 'Create protected board', promptTitle: 'This board is password-protected', unlock: 'Unlock board',
+  },
+  th: { promptTitle: 'บอร์ดนี้ป้องกันด้วยรหัสผ่าน', password: 'รหัสผ่าน', unlock: 'ปลดล็อกบอร์ด' },
+};
+
+export const passwordScreen = (page, lang) => page.getByRole('heading', { name: LOCK_LABELS[lang].promptTitle, exact: true });
+
+/** Creates a password-protected board from the landing page (signed in, English) and returns its link. */
+export async function createLockedBoard(page, baseUrl, password) {
+  await openLanding(page, baseUrl);
+  await page.getByRole('button', { name: LOCK_LABELS.en.toggle }).click();
+  const form = page.getByRole('form', { name: LOCK_LABELS.en.toggle });
+  await form.getByLabel(LOCK_LABELS.en.password, { exact: true }).fill(password);
+  await form.getByLabel(LOCK_LABELS.en.confirm, { exact: true }).fill(password);
+  await form.getByLabel(LOCK_LABELS.en.ack, { exact: true }).check();
+  await form.getByRole('button', { name: LOCK_LABELS.en.submit, exact: true }).click();
+  await page.waitForURL(BOARD_URL_PATTERN, { timeout: UNLOCK_TIMEOUT_MS });
+  await passwordScreen(page, 'en').waitFor({ timeout: UNLOCK_TIMEOUT_MS });
+  return page.url();
+}
+
+export async function submitPassword(scope, lang, password, submitLabel) {
+  await scope.getByLabel(LOCK_LABELS[lang].password, { exact: true }).fill(password);
+  await scope.getByRole('button', { name: submitLabel, exact: true }).click();
+}
+
+/** Unlocks the board's password screen, then enters the board as `name`. */
+export async function unlockScreen(page, lang, password, name) {
+  await passwordScreen(page, lang).waitFor({ timeout: UNLOCK_TIMEOUT_MS });
+  await submitPassword(page, lang, password, LOCK_LABELS[lang].unlock);
+  await passwordScreen(page, lang).waitFor({ state: 'hidden', timeout: UNLOCK_TIMEOUT_MS });
+  await enter(page, lang, name);
 }
 
 const EMPTY_CLICK_PX = { x: 200, y: 200 };

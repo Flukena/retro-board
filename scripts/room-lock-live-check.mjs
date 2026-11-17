@@ -24,13 +24,12 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { crc32, deflateSync } from 'node:zlib';
 import {
-  BASE_LABELS, CANVAS_SELECTOR, FAKE_GOOGLE_DECISION, REDO_KEY, SYNC_TIMEOUT_MS, addSharedSticky, download, enter,
-  openLanding, openMenu, participant, runLiveCheck, shot, step, undoUntilHidden, visitStub, waitForTextOn,
+  BASE_LABELS, BOARD_URL_PATTERN, CANVAS_SELECTOR, FAKE_GOOGLE_DECISION, LOCK_LABELS, REDO_KEY, SYNC_TIMEOUT_MS, UNLOCK_TIMEOUT_MS,
+  addSharedSticky, createLockedBoard, download, enter, openLanding, openMenu, participant, passwordScreen, runLiveCheck, shot,
+  step, submitPassword, undoUntilHidden, unlockScreen, visitStub, waitForTextOn,
 } from './board-live-helpers.mjs';
 
-const BOARD_URL_PATTERN = /\/b\/[A-Za-z0-9_-]+#[A-Za-z0-9_-]+$/;
-// PBKDF2 (600k iterations) runs on every unlock; a rotation re-encrypts the board and its images.
-const UNLOCK_TIMEOUT_MS = 30_000;
+// A rotation re-encrypts the board and its images.
 const ROTATE_TIMEOUT_MS = 90_000;
 // TTL 60 s: the client renews 48 s after its last exchange; the margin covers a slow PBKDF2 and the round trip.
 const RENEWAL_REUNLOCK_TIMEOUT_MS = 75_000;
@@ -54,17 +53,13 @@ const SECRET_KEY_PATTERN = /authKey|wrappedDek|\bdek\b|roomKey|password/i;
 
 const LABELS = {
   en: {
-    lockToggle: 'Create a password-protected board', lockPassword: 'Password', lockConfirm: 'Confirm password',
-    lockAck: 'If you forget the password nobody can recover the data, including the server owner',
-    lockSubmit: 'Create protected board', promptTitle: 'This board is password-protected', password: 'Password',
-    unlock: 'Unlock board', reunlockTitle: 'Enter the password again', reunlockSubmit: 'Continue',
+    reunlockTitle: 'Enter the password again', reunlockSubmit: 'Continue',
     changePassword: 'Change board password', removeEveryone: 'Remove everyone (new key)',
     current: 'Current password', newPassword: 'New password', confirmNew: 'Confirm new password',
     changeSubmit: 'Change password', changed: 'Password changed. Others will be asked for the new password.',
     rotateSubmit: 'Remove everyone', exportZip: 'Export', import: 'Import', importOk: 'Overwrite',
   },
   th: {
-    promptTitle: 'บอร์ดนี้ป้องกันด้วยรหัสผ่าน', password: 'รหัสผ่าน', unlock: 'ปลดล็อกบอร์ด',
     wrong: 'รหัสผ่านไม่ถูกต้อง ลองอีกครั้ง', reunlockTitle: 'ใส่รหัสผ่านอีกครั้ง', reunlockSubmit: 'ดำเนินการต่อ',
     changePassword: 'เปลี่ยนรหัสผ่านบอร์ด', removeEveryone: 'นำทุกคนออก (กุญแจใหม่)',
   },
@@ -146,33 +141,7 @@ function noisePng(size = NOISE_IMAGE_PX) {
 
 // ---------- locked-board flows ----------
 
-const passwordScreen = (page, lang) => page.getByRole('heading', { name: LABELS[lang].promptTitle, exact: true });
 const reunlockDialog = (page, lang) => page.getByRole('dialog').filter({ has: page.getByText(LABELS[lang].reunlockTitle, { exact: true }) });
-
-async function createLockedBoard(page, baseUrl, password) {
-  await openLanding(page, baseUrl);
-  await page.getByRole('button', { name: LABELS.en.lockToggle }).click();
-  const form = page.getByRole('form', { name: LABELS.en.lockToggle });
-  await form.getByLabel(LABELS.en.lockPassword, { exact: true }).fill(password);
-  await form.getByLabel(LABELS.en.lockConfirm, { exact: true }).fill(password);
-  await form.getByLabel(LABELS.en.lockAck, { exact: true }).check();
-  await form.getByRole('button', { name: LABELS.en.lockSubmit, exact: true }).click();
-  await page.waitForURL(BOARD_URL_PATTERN, { timeout: UNLOCK_TIMEOUT_MS });
-  await passwordScreen(page, 'en').waitFor({ timeout: UNLOCK_TIMEOUT_MS });
-  return page.url();
-}
-
-async function submitPassword(scope, lang, password, submitLabel) {
-  await scope.getByLabel(LABELS[lang].password, { exact: true }).fill(password);
-  await scope.getByRole('button', { name: submitLabel, exact: true }).click();
-}
-
-async function unlockScreen(page, lang, password, name) {
-  await passwordScreen(page, lang).waitFor({ timeout: UNLOCK_TIMEOUT_MS });
-  await submitPassword(page, lang, password, LABELS[lang].unlock);
-  await passwordScreen(page, lang).waitFor({ state: 'hidden', timeout: UNLOCK_TIMEOUT_MS });
-  await enter(page, lang, name);
-}
 
 async function reunlock(page, lang, password) {
   const dialog = reunlockDialog(page, lang);
@@ -194,7 +163,7 @@ async function submitOwnerDialog(page, { menuLabel, current, next, submitLabel, 
   await dialog.getByLabel(LABELS.en.current, { exact: true }).fill(current);
   await dialog.getByLabel(LABELS.en.newPassword, { exact: true }).fill(next);
   await dialog.getByLabel(LABELS.en.confirmNew, { exact: true }).fill(next);
-  await dialog.getByLabel(LABELS.en.lockAck, { exact: true }).check();
+  await dialog.getByLabel(LOCK_LABELS.en.ack, { exact: true }).check();
   await dialog.getByRole('button', { name: submitLabel, exact: true }).click();
   return dialog.getByRole('button', { name: submitLabel, exact: true }).waitFor({ state: 'hidden', timeout });
 }
@@ -329,10 +298,10 @@ async function openAndShareSteps({ a, b, report, baseUrl, state }) {
     await b.goto(state.board1);
     await passwordScreen(b, 'th').waitFor({ timeout: UNLOCK_TIMEOUT_MS });
     await shot(b, 'password-screen-th.png', report);
-    await submitPassword(b, 'th', `${PASSWORDS.board1}x`, LABELS.th.unlock);
+    await submitPassword(b, 'th', `${PASSWORDS.board1}x`, LOCK_LABELS.th.unlock);
     await b.getByRole('alert').filter({ hasText: LABELS.th.wrong }).waitFor({ timeout: UNLOCK_TIMEOUT_MS });
     await shot(b, 'password-wrong-th.png', report);
-    await submitPassword(b, 'th', PASSWORDS.board1, LABELS.th.unlock);
+    await submitPassword(b, 'th', PASSWORDS.board1, LOCK_LABELS.th.unlock);
     await passwordScreen(b, 'th').waitFor({ state: 'hidden', timeout: UNLOCK_TIMEOUT_MS });
     await enter(b, 'th', NAME_B);
   });
