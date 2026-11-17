@@ -1,7 +1,6 @@
 # Room management rollout
 
-Status: **prepared, not deployed.** Needs owner approval before any step below
-touches production.
+Status: **deployed 2026-11-17** with owner approval ("deploy"). Record below.
 
 ## What ships
 
@@ -87,8 +86,38 @@ Effect while the old relay runs:
   Restore deleted rooms only from a backup.
 - Guest rooms created meanwhile fall back to the 60-day rule.
 
-## Deployment record
+## Deployment record (2026-11-17)
 
-Not deployed yet. Fill in after approval, in the structure of
-`2026-11-08-room-lock-e2e-rollout.md` (gate, images and scan, backup, deploy
-containers before/after, smoke, rollback file).
+Folder: `/Volumes/ssd-fluke/BaseData/retro-board/room-management-20261117/`.
+
+- **Release commit** `822e81d` (branch `feat/room-management`, merged with
+  `feat/retro-outcomes` `ca81722`); the main checkout was fast-forwarded to it.
+- **Gate** on a clean `git archive`: `npm ci`, `npm test` (2310/2310 pass, run
+  with `--test-concurrency=2` for a host-load window), `npm run build`,
+  `npm run maintainer:build`, `npm audit --audit-level=high` (0). Log:
+  `release/gate.log`.
+- **Images** `miro-release-yjs:rooms-822e81d` and
+  `miro-release-web:rooms-822e81d`, built `--pull --no-cache`; scan
+  `release/scan.log`: 0 findings.
+- **Backup** `backups/retro-board-20261117T073643Z.tar.gpg`; `verify.log`:
+  227 documents, 3 accounts, 1 encrypted room; public data 1 document.
+- **Deploy** `up -d --no-deps --no-build yjs web` with `deploy.yml`
+  (`yjs-public` `b65db69`, `cloudflared` `draw-eraser-security-20261028`
+  unchanged). `containers-after.txt`: only `miro-yjs-1` and `miro-web-1` were
+  recreated; the maintainer gateway is untouched.
+- **Smoke** (`smoke.log`, `live-browser/`):
+  - `/`, `/privacy` 200; `/yjs/api/account` 401; the privacy page shows
+    `2026-11-17`;
+  - `GET /yjs/api/account/rooms` and a signed-out delete answer 401;
+  - guest create `{}` and `{kind:"poker"}` answer 201; the malformed-body
+    cases hit the per-IP create burst (429) and were covered by the gate's
+    tests instead;
+  - two browser contexts on a new board: edits sync both ways, undo/redo
+    works; the guest landing shows the 24 h note in `en` and `th`;
+  - no room was retired: since the deploy the relay logged no sweep,
+    deletion or retirement line (`rooms-after.txt`).
+- **Not exercised on production:** signed-in "My boards", rename and delete
+  (needs a real Google account; covered by the live check
+  `scripts/room-management-live-check.mjs` against a local stack).
+- **Rollback:** `rollback.txt` (images `e2e-c23f18c`, after the
+  §Rollback pre-check).
