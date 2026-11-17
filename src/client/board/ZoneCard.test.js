@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { withChromeModule } from '../../test-support/chrome-test-helper.js';
 import { TOKENS } from '../ui/theme.js';
 import { contrastRatio, parseColor } from '../ui/color-contrast.js';
+import { MIN_NORMAL_TEXT_CONTRAST_RATIO } from '../../test-support/contrast.js';
 import { Z } from '../chrome/chrome-layout.js';
 import { ZONE_HEADER_MENU_BREAKPOINT_PX } from '../../domain/zone-title.js';
 
@@ -13,7 +14,6 @@ const AUTO_ITEM_TITLE_FONT_PX = 20;
 // CSS Color 4 defines the `transparent` keyword as rgba(0, 0, 0, 0).
 const CSS_TRANSPARENT_RGBA = 'rgba(0, 0, 0, 0)';
 const FULLY_OPAQUE_ALPHA = 1;
-const MIN_NORMAL_TEXT_CONTRAST_RATIO = 4.5; // WCAG 2.2 SC 1.4.3.
 
 const ITEM = { id: 'zone-a', type: 'zone', title: 'Ideas', x: 10, y: 20, w: 300, h: 200, color: 0 };
 function Editor({ value, className }) {

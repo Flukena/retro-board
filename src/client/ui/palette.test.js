@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { PALETTE, FONT_COLORS, paletteColor, paletteIndexByName } from './palette.js';
 import * as palette from './palette.js';
 import { contrastRatio, parseColor } from './color-contrast.js';
+import { MIN_NORMAL_TEXT_CONTRAST_RATIO } from '../../test-support/contrast.js';
 import { parseBoardCsv } from '../../domain/csv-import.js';
 import { normalizeImportManifest } from '../../domain/import-schema.js';
 
@@ -45,11 +46,9 @@ test('palette name lookup resolves known names and rejects unknown names', () =>
   }
 });
 
-const MIN_TEXT_CONTRAST_RATIO = 4.5; // WCAG 2.2 SC 1.4.3.
-
 test('sticky and zone inks meet AA contrast on every fixed pastel', () => {
   for (const entry of PALETTE) {
-    assert.ok(contrastRatio(entry.ink, entry.bg) >= MIN_TEXT_CONTRAST_RATIO, entry.name);
+    assert.ok(contrastRatio(entry.ink, entry.bg) >= MIN_NORMAL_TEXT_CONTRAST_RATIO, entry.name);
   }
 });
 
@@ -59,7 +58,7 @@ test('medal colors are frozen and meet AA contrast', () => {
   assert.deepEqual(Object.keys(palette.MEDAL_COLORS), ['1', '2', '3']);
   for (const entry of Object.values(palette.MEDAL_COLORS)) {
     assert.ok(Object.isFrozen(entry));
-    assert.ok(contrastRatio(entry.fg, entry.bg) >= MIN_TEXT_CONTRAST_RATIO);
+    assert.ok(contrastRatio(entry.fg, entry.bg) >= MIN_NORMAL_TEXT_CONTRAST_RATIO);
   }
 });
 

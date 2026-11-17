@@ -6,6 +6,7 @@ import { stickyCardVars, zoneCardVars, medalLook, ZONE_EDGE_HIT_WIDTH_PX } from 
 import { PALETTE } from './palette.js';
 import { defineTokens, TOKENS, ZONE_HEADER_SIZE_TOKENS } from './theme.js';
 import { compositeOver, contrastRatio } from './color-contrast.js';
+import { MIN_NORMAL_TEXT_CONTRAST_RATIO } from '../../test-support/contrast.js';
 import { zoneHeaderClearancePx } from '../../domain/zone-title.js';
 
 const REQUIRED_ZONE_EDGE_HIT_WIDTH_PX = 16;
@@ -41,7 +42,6 @@ test('both themes expose the 16 world-pixel zone edge hit width from card-look',
   }
 });
 
-const MIN_NORMAL_TEXT_CONTRAST_RATIO = 4.5; // WCAG 2.2 SC 1.4.3.
 const COMPONENT_LOCAL_TOKEN_PREFIX = '--rb-';
 const TOKEN_REFERENCE_PATTERN = /var\(\s*(--[\w-]+)/g;
 const TEXT_BACKGROUND_PAIRS = [

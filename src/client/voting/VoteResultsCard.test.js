@@ -6,6 +6,7 @@ import { withChromeModule } from '../../test-support/chrome-test-helper.js';
 import { buildVoteResults } from '../../domain/vote-results.js';
 import { TOKENS } from '../ui/theme.js';
 import { contrastRatio } from '../ui/color-contrast.js';
+import { MIN_NORMAL_TEXT_CONTRAST_RATIO } from '../../test-support/contrast.js';
 
 const zone = { id: 'z', title: 'Retro', voteTimer: { startedAt: 10, endsAt: null, voteLimit: 2, showNonVoters: true } };
 const sticky = { id: 's', type: 'sticky', private: true, authorId: 'owner', text: 'Private idea' };
@@ -32,8 +33,8 @@ test('results show historical counts, accessible labels and viewer-specific titl
 });
 test('result text and warning chips retain readable light/dark contrast', () => {
   for (const theme of Object.values(TOKENS)) {
-    assert.ok(contrastRatio(theme['--text'], theme['--bg-panel']) >= 4.5);
-    assert.ok(contrastRatio(theme['--warn-text'], theme['--warn-bg']) >= 4.5);
+    assert.ok(contrastRatio(theme['--text'], theme['--bg-panel']) >= MIN_NORMAL_TEXT_CONTRAST_RATIO);
+    assert.ok(contrastRatio(theme['--warn-text'], theme['--warn-bg']) >= MIN_NORMAL_TEXT_CONTRAST_RATIO);
   }
 });
 
@@ -68,6 +69,6 @@ test('polished results preserve empty, unlimited, incomplete and all-complete va
 
 test('success panel text retains readable contrast in light and dark themes', () => {
   for (const theme of Object.values(TOKENS)) {
-    assert.ok(contrastRatio(theme['--results-success-text'], theme['--results-success-bg']) >= 4.5);
+    assert.ok(contrastRatio(theme['--results-success-text'], theme['--results-success-bg']) >= MIN_NORMAL_TEXT_CONTRAST_RATIO);
   }
 });

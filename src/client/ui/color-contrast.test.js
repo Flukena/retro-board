@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseColor, relativeLuminance, contrastRatio, compositeOver } from './color-contrast.js';
+import { MIN_NORMAL_TEXT_CONTRAST_RATIO } from '../../test-support/contrast.js';
 
 test('parses supported hex and whitespace-tolerant functional colors', () => {
   assert.deepEqual(parseColor('#abc'), { r: 170, g: 187, b: 204, a: 1 });
@@ -15,8 +16,8 @@ test('WCAG luminance and contrast satisfy endpoints, symmetry and boundary pair'
   assert.equal(contrastRatio('#000', '#fff'), 21);
   assert.equal(contrastRatio('#abc', '#abc'), 1);
   assert.equal(contrastRatio('#123456', '#abcdef'), contrastRatio('#abcdef', '#123456'));
-  assert.ok(contrastRatio('#777777', '#ffffff') < 4.5);
-  assert.ok(contrastRatio('#767676', '#ffffff') >= 4.5);
+  assert.ok(contrastRatio('#777777', '#ffffff') < MIN_NORMAL_TEXT_CONTRAST_RATIO);
+  assert.ok(contrastRatio('#767676', '#ffffff') >= MIN_NORMAL_TEXT_CONTRAST_RATIO);
 });
 
 test('source-over compositing preserves endpoints and blends half alpha', () => {
