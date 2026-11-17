@@ -31,6 +31,8 @@ const E2E_META = 'e2e-head';
 const IMAGE_ID = '0a1b2c3d-0000-4000-8000-000000000001.png';
 const BLOB_ID = '123e4567-e89b-42d3-a456-426614174000';
 const OTHER_FILE = `${'K'.repeat(32)}.${IMAGE_ID}`;
+// A missing drain bound would hang; this fails the test instead, with room to spare on slow CI.
+const STALL_TEST_TIMEOUT_MS = 30_000;
 const SHORT_DRAIN_MS = 30;
 const STARTED_AT = 1_800_000_000_000;
 const injected = () => Object.assign(new Error('injected crash'), { code: 'STORAGE_FAILURE' });
@@ -264,7 +266,7 @@ function stall() {
   return { promise, release };
 }
 
-test('a teardown stalled in hydration answers 503 within the drain timeout, does not block other entries, and resumes later', async (t) => {
+test('a teardown stalled in hydration answers 503 within the drain timeout, does not block other entries, and resumes later', { timeout: STALL_TEST_TIMEOUT_MS }, async (t) => {
   const hydration = stall();
   const root = await withRoot(t);
   const first = await openRelay(root, { unregister: async () => { throw injected(); } });
@@ -289,7 +291,7 @@ test('a teardown stalled in hydration answers 503 within the drain timeout, does
   await assertGone(second, stuck);
 });
 
-test('a stalled encrypted-log op answers 503 within the drain timeout and the room finishes once it lands', async (t) => {
+test('a stalled encrypted-log op answers 503 within the drain timeout and the room finishes once it lands', { timeout: STALL_TEST_TIMEOUT_MS }, async (t) => {
   let log = null;
   const relay = await openRelay(await withRoot(t), {
     drainTimeoutMs: SHORT_DRAIN_MS, e2eRooms: { retireRoom: (docName) => log.retire(docName) },
