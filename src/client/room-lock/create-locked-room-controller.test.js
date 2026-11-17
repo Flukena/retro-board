@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { ACCOUNT_STATUS } from '../account/account-api.js';
 import { ROOM_SESSION_ERROR, RoomSessionError, clearRoomSession, createRoom } from '../session/room-session.js';
-import { createBoardError, CREATE_LOCK_ERROR } from '../app/create-board-error.js';
+import { createBoardError, CREATE_ERROR, CREATE_LOCK_ERROR } from '../app/create-board-error.js';
 import { parseLockParams } from '../../domain/room-lock-contract.js';
 import { runCreateBoard } from '../app/create-board-flow.js';
 import {
@@ -17,6 +17,7 @@ const CREATED = { code: 'ABCD', token: 'Abcdefgh12345678' };
 const HTTP_CREATED = 201;
 const HTTP_UNAUTHORIZED = 401;
 const HTTP_FORBIDDEN = 403;
+const HTTP_CONFLICT = 409;
 const valid = (overrides = {}) => ({ password: PASSWORD, confirmation: PASSWORD, acknowledged: true, ...overrides });
 const signedIn = (canCreateLockedRoom) => ({ status: ACCOUNT_STATUS.SIGNED_IN, account: { name: 'Ada', plan: 'free', entitlements: { canCreateLockedRoom } } });
 
@@ -110,6 +111,13 @@ test('locked creation maps 401 and 403 to sign-in and plan messages, anything el
   assert.equal(status(500).code, ROOM_SESSION_ERROR.UNAVAILABLE);
 });
 
+test('a 409 on creation is the owned-room limit, locked or not', () => {
+  const conflict = new RoomSessionError(ROOM_SESSION_ERROR.UNAVAILABLE, { httpStatus: HTTP_CONFLICT });
+  assert.equal(createBoardError(conflict).code, CREATE_ERROR.OWNED_ROOM_LIMIT);
+  assert.equal(createBoardError(conflict, { locked: true }).code, CREATE_ERROR.OWNED_ROOM_LIMIT);
+  assert.equal(createBoardError(conflict).retryAfterSeconds, null);
+});
+
 test('plain creation keeps the old message for 401 and 403 (a bad Origin is not a plan problem)', () => {
   for (const httpStatus of [HTTP_UNAUTHORIZED, HTTP_FORBIDDEN]) {
     const failure = new RoomSessionError(ROOM_SESSION_ERROR.UNAVAILABLE, { httpStatus });
@@ -130,7 +138,9 @@ test('the create flow forwards the lock to the relay call and maps errors by whe
   };
   assert.equal((await runCreateBoard({ lock }, steps)).code, CREATE_LOCK_ERROR.PLAN_REQUIRED);
   assert.equal((await runCreateBoard({}, steps)).code, ROOM_SESSION_ERROR.UNAVAILABLE);
-  assert.deepEqual(seen, [{ lock }, { lock: null }]);
+  assert.deepEqual(seen, [{ lock, kind: 'board' }, { lock: null, kind: 'board' }]);
+  await runCreateBoard({ kind: 'poker' }, steps);
+  assert.deepEqual(seen.at(-1), { lock: null, kind: 'poker' }, 'Poker forwards its kind');
 });
 
 test('the create flow remembers and opens the room after success', async () => {

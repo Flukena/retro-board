@@ -1105,4 +1105,5 @@ export default Object.freeze({
   "roomLock.notice.roomFull": "Ce tableau est plein. Les nouvelles modifications risquent de ne pas être enregistrées tant que du contenu n’est pas supprimé.",
   "landing.create.error.signIn": "Connectez-vous pour créer un tableau protégé par mot de passe.",
   "landing.create.error.plan": "Votre offre n’inclut pas les tableaux protégés par mot de passe.",
+  "landing.create.error.ownedRoomLimit": "Vous avez déjà {max} tableaux, le maximum par compte. Supprimez un tableau dont vous n’avez plus besoin, puis réessayez.",
 });

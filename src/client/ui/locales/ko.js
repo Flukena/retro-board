@@ -1105,4 +1105,5 @@ export default Object.freeze({
   "roomLock.notice.roomFull": "이 보드가 가득 찼습니다. 일부 내용을 삭제할 때까지 새 변경 사항이 저장되지 않을 수 있습니다.",
   "landing.create.error.signIn": "비밀번호로 보호되는 보드를 만들려면 로그인하세요.",
   "landing.create.error.plan": "현재 요금제에는 비밀번호로 보호되는 보드가 포함되어 있지 않습니다.",
+  "landing.create.error.ownedRoomLimit": "이미 보드가 {max}개 있어 계정당 최대 개수에 도달했습니다. 더 이상 필요 없는 보드를 삭제한 후 다시 시도해 주세요.",
 });

@@ -1105,4 +1105,5 @@ export default Object.freeze({
   "roomLock.notice.roomFull": "Este tablero está lleno. Es posible que los cambios nuevos no se guarden hasta que se elimine contenido.",
   "landing.create.error.signIn": "Inicia sesión para crear un tablero protegido con contraseña.",
   "landing.create.error.plan": "Tu plan no incluye tableros protegidos con contraseña.",
+  "landing.create.error.ownedRoomLimit": "Ya tienes {max} tableros, el máximo por cuenta. Elimina un tablero que ya no necesites e inténtalo de nuevo.",
 });

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { retireIdleRooms } from './room-retirement.js';
+import { RETENTION_CLASS } from '../domain/room-ownership.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const NOW = Date.UTC(2026, 10, 2);
@@ -13,10 +14,12 @@ const QUIET = { log() {} };
 
 function fixture(rooms, { files = [], publicWall = false } = {}) {
   const activity = new Map(rooms.map(({ label, createdAt }) => [docOf(label), { createdAt, lastSessionAt: null, lastActiveAt: null }]));
+  const retention = new Map(rooms.map(({ label, guest }) => [docOf(label), guest ? RETENTION_CLASS.GUEST : RETENTION_CLASS.KEPT]));
   const retiredDocs = [];
   const registry = {
     registeredRoomsByHandle: new Map(rooms.map(({ label }) => [handleOf(label), docOf(label)])),
     activity: { get: (docName) => activity.get(docName) },
+    ownershipOf: (docName) => ({ retention: retention.get(docName) }),
     async retireRoom(docName) {
       retiredDocs.push(docName);
       const handle = [...this.registeredRoomsByHandle].find(([, name]) => name === docName)[0];
@@ -42,6 +45,18 @@ function fixture(rooms, { files = [], publicWall = false } = {}) {
 }
 
 const daysAgo = (days) => NOW - days * DAY_MS;
+const HOUR_MS = 60 * 60 * 1000;
+const GUEST_EXPIRED_HOURS = 25;
+
+test('a guest room idle past a day is retired; a kept room idle as long is not', async () => {
+  const f = fixture([
+    { label: 'guest', createdAt: NOW - GUEST_EXPIRED_HOURS * HOUR_MS, guest: true },
+    { label: 'kept', createdAt: NOW - GUEST_EXPIRED_HOURS * HOUR_MS },
+  ]);
+  const result = await retireIdleRooms(f.context);
+  assert.equal(result.retired, 1);
+  assert.deepEqual(f.retiredDocs, [docOf('guest')]);
+});
 
 test('retires only rooms idle past sixty days, with their images and per-room state', async () => {
   const f = fixture([

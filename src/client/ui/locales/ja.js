@@ -1105,4 +1105,5 @@ export default Object.freeze({
   "roomLock.notice.roomFull": "このボードは容量がいっぱいです。内容を削除するまで新しい変更が保存されない場合があります。",
   "landing.create.error.signIn": "パスワードで保護されたボードを作成するにはサインインしてください。",
   "landing.create.error.plan": "ご利用のプランにはパスワードで保護されたボードは含まれません。",
+  "landing.create.error.ownedRoomLimit": "すでに {max} 個のボードがあり、1 アカウントの上限に達しています。不要なボードを削除してから、もう一度お試しください。",
 });

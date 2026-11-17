@@ -16,6 +16,7 @@ import { createRoomSessionRoutes } from './room-session-routes.js';
 import { PLAN } from '../domain/plan-entitlements.js';
 import { ROOM_SESSION_RENEWAL_SUFFIX } from '../domain/room-lock-contract.js';
 import { RIGHT_KEY, WRONG_KEY, lockRecord } from './room-lock-fixtures.mjs';
+import { RETENTION_CLASS, ROOM_KIND } from '../domain/room-ownership.js';
 
 const require = createRequire(import.meta.url);
 const Y = require('yjs');
@@ -322,4 +323,68 @@ test('a locked-create body is accepted at exactly 1 KiB and refused one byte ove
   assert.ok(exact > 0, 'fixture fits under the limit');
   assert.equal((await send(exact)).status, CREATED);
   assert.equal((await send(exact + 1)).status, TOO_LARGE);
+});
+
+const ownershipOfRoom = (f, room) => f.registry.ownershipOf(f.registry.registeredDocForCapability(room.code, room.token));
+
+test('a create with no cookie is a guest room and never reads the account store', async (t) => {
+  const f = await fixture(t);
+  const reads = t.mock.method(f.accountStore, 'get');
+  const created = await f.post('/api/rooms', {});
+  assert.equal(created.status, CREATED);
+  const ownership = ownershipOfRoom(f, await created.json());
+  assert.equal(ownership.record.accountId, null);
+  assert.equal(ownership.retention, RETENTION_CLASS.GUEST);
+  assert.equal(ownership.kind, ROOM_KIND.BOARD);
+  assert.equal(reads.mock.callCount(), 0);
+});
+
+test('a signed-in create is owned by that account; an invalid cookie makes a guest room, not an error', async (t) => {
+  const f = await fixture(t);
+  const { account, cookie } = await f.signIn('owner@example.com');
+  const owned = ownershipOfRoom(f, await (await f.post('/api/rooms', {}, cookie)).json());
+  assert.equal(owned.ownerAccountId, account.id);
+  assert.equal(owned.retention, RETENTION_CLASS.KEPT);
+  const forged = await f.post('/api/rooms', {}, `${cookie}x`);
+  assert.equal(forged.status, CREATED);
+  assert.equal(ownershipOfRoom(f, await forged.json()).record.accountId, null);
+  await f.accountStore.bumpSessionGeneration(account.id);
+  const stale = await f.post('/api/rooms', {}, cookie);
+  assert.equal(stale.status, CREATED);
+  assert.equal(ownershipOfRoom(f, await stale.json()).retention, RETENTION_CLASS.GUEST);
+});
+
+test('the create body is exactly {}, { kind } or { lock }; the kind is stored', async (t) => {
+  const f = await fixture(t);
+  const poker = ownershipOfRoom(f, await (await f.post('/api/rooms', { kind: ROOM_KIND.POKER })).json());
+  assert.equal(poker.kind, ROOM_KIND.POKER);
+  const board = ownershipOfRoom(f, await (await f.post('/api/rooms', { kind: ROOM_KIND.BOARD })).json());
+  assert.equal(board.kind, ROOM_KIND.BOARD);
+  const owner = await f.signIn('owner@example.com');
+  const refused = [
+    { kind: 'canvas' }, { kind: null }, { kind: ROOM_KIND.POKER, extra: 1 },
+    { lock: lockParams(), kind: ROOM_KIND.BOARD }, { other: 1 },
+  ];
+  for (const body of refused) {
+    assert.equal((await f.post('/api/rooms', body, owner.cookie)).status, BAD_REQUEST, JSON.stringify(body));
+  }
+  assert.equal(f.registry.registeredDocs.size, 2);
+});
+
+test('a locked room is a board owned by the account that locked it', async (t) => {
+  const f = await fixture(t);
+  const owner = await f.signIn('owner@example.com');
+  const ownership = ownershipOfRoom(f, await lockedRoom(f, owner));
+  assert.equal(ownership.record.accountId, owner.account.id);
+  assert.equal(ownership.kind, ROOM_KIND.BOARD);
+  assert.equal(ownership.locked, true);
+});
+
+test('the owned-room limit is a 409 with owned-room-limit', async (t) => {
+  const f = await fixture(t);
+  const owner = await f.signIn('owner@example.com');
+  t.mock.method(f.registry, 'createRoom', async () => { throw Object.assign(new Error('limit'), { code: 'OWNED_ROOM_LIMIT' }); });
+  const response = await f.post('/api/rooms', {}, owner.cookie);
+  assert.equal(response.status, CONFLICT);
+  assert.deepEqual(await response.json(), { error: 'owned-room-limit' });
 });

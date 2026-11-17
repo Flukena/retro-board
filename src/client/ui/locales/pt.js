@@ -1105,4 +1105,5 @@ export default Object.freeze({
   "roomLock.notice.roomFull": "Este quadro está cheio. Novas alterações podem não ser salvas até que algum conteúdo seja removido.",
   "landing.create.error.signIn": "Entre para criar um quadro protegido por senha.",
   "landing.create.error.plan": "Seu plano não inclui quadros protegidos por senha.",
+  "landing.create.error.ownedRoomLimit": "Você já tem {max} quadros, o máximo por conta. Exclua um quadro de que não precisa mais e tente novamente.",
 });

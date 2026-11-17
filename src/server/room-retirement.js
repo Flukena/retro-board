@@ -12,6 +12,7 @@ function roomRows({ registry, docs, connections }) {
     ...registry.activity.get(docName),
     connections: connections.get(docName) ?? 0,
     resident: docs.has(docName),
+    retention: registry.ownershipOf(docName).retention,
   }));
 }
 

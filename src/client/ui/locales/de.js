@@ -1105,4 +1105,5 @@ export default Object.freeze({
   "roomLock.notice.roomFull": "Dieses Board ist voll. Neue Änderungen werden eventuell nicht gespeichert, bis Inhalte entfernt werden.",
   "landing.create.error.signIn": "Melde dich an, um ein passwortgeschütztes Board zu erstellen.",
   "landing.create.error.plan": "Dein Tarif enthält keine passwortgeschützten Boards.",
+  "landing.create.error.ownedRoomLimit": "Du hast bereits {max} Boards, das Maximum pro Konto. Lösche ein Board, das du nicht mehr brauchst, und versuche es erneut.",
 });

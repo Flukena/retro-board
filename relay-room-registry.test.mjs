@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { ROOM_ACTIVITY_META } from './src/server/room-activity.js';
 import { ROOM_HANDLE_RE, STORE_OPERATION_OVERHEAD_BYTES } from './src/server/relay-config.js';
 import { RoomRegistry, REGISTRY_STORAGE_FAILURE_EVENT, databaseCapacityError } from './src/server/relay-room-registry.js';
+import { MAX_OWNED_ROOMS_PER_ACCOUNT, RETENTION_CLASS, ROOM_KIND, ROOM_OWNER_META, encodeOwnerRecord } from './src/domain/room-ownership.js';
 
 const require = createRequire(import.meta.url);
 const Y = require('yjs');
@@ -22,6 +23,11 @@ const SEED_STEP_LABEL = 'seed';
 const FLUSH_STEP_LABEL = 'flush';
 const ROLLBACK_STEP_LABEL = 'clear';
 const DISK_STEP_LABEL = 'disk';
+const DURABLE_STEP_LABEL = 'durable';
+const OWNER_ACCOUNT = 'ada-account-id-0001';
+const OWNER_CREATED_AT = 1_800_000_000_000;
+const ROOMS_BEYOND_THE_LIMIT = MAX_OWNED_ROOMS_PER_ACCOUNT + 2;
+const OWNED_ROOM_LIMIT_CODE = 'OWNED_ROOM_LIMIT';
 const ROOM_CAPACITY_CODE = 'ROOM_CAPACITY';
 const STORAGE_FAILURE_CODE = 'STORAGE_FAILURE';
 const SERVER_UNAVAILABLE_CODE = 'SERVER_UNAVAILABLE';
@@ -55,6 +61,14 @@ async function registryFixture(options = {}) {
       } finally { doc.destroy(); }
       if (options.holdSeed) await options.holdSeed;
       if (options.failAt === SEED_STEP_LABEL) throw options.error;
+    },
+    async durableMetaBatch(name, ops) {
+      trace.push(DURABLE_STEP_LABEL);
+      if (options.failAt === DURABLE_STEP_LABEL) throw options.error;
+      for (const { type, key, value } of ops) {
+        if (type === 'put') metadata.set(`${name}:${key}`, value);
+        else metadata.delete(`${name}:${key}`);
+      }
     },
     async flushDocument() { trace.push(FLUSH_STEP_LABEL); if (options.failAt === FLUSH_STEP_LABEL) throw options.error; },
     async clearDocument(name) {
@@ -317,4 +331,110 @@ test('registry retire storage failure latches and rejects', async () => {
   const docName = registry.registeredDocForCapability(room.code, room.token);
   await assert.rejects(instance.retireRoom(docName), error);
   assert.deepEqual(failures, [error]);
+});
+
+const ownedBy = (accountId, kind = ROOM_KIND.BOARD) => ({ kind, accountId });
+const ownedDocOf = (index) => `yjs/board-Owned${index}-abcdefgh12345678`;
+// Committed rooms already owned by OWNER_ACCOUNT, as hydrate finds them on disk.
+function ownedRoomsOnDisk(count) {
+  const names = [];
+  const metadata = new Map();
+  for (let index = 0; index < count; index += 1) {
+    const name = ownedDocOf(index);
+    names.push(name);
+    metadata.set(`${name}:${REGISTRATION_KEY}`, 1);
+    metadata.set(`${name}:${ROOM_OWNER_META}`, encodeOwnerRecord({ kind: ROOM_KIND.BOARD, accountId: OWNER_ACCOUNT, createdAt: OWNER_CREATED_AT }));
+  }
+  return { names, metadata };
+}
+
+test('an owned room writes its owner record durably, after the disk check and before the marker', async () => {
+  const { registry, instance, trace, metadata } = await registryFixture();
+  const room = await registry.createRoom({ owner: ownedBy(OWNER_ACCOUNT, ROOM_KIND.POKER) });
+  assert.deepEqual(trace, [SEED_STEP_LABEL, HANDLE_KEY, USAGE_KEY, ROOM_ACTIVITY_META, FLUSH_STEP_LABEL, DISK_STEP_LABEL, DURABLE_STEP_LABEL, REGISTRATION_KEY]);
+  const docName = registry.registeredDocForCapability(room.code, room.token);
+  const stored = metadata.get(`${docName}:${ROOM_OWNER_META}`);
+  assert.equal(stored.accountId, OWNER_ACCOUNT);
+  assert.equal(stored.kind, ROOM_KIND.POKER);
+  const ownership = instance.ownershipOf(docName);
+  assert.equal(ownership.retention, RETENTION_CLASS.KEPT);
+  assert.equal(ownership.ownerAccountId, OWNER_ACCOUNT);
+  assert.equal(ownership.kind, ROOM_KIND.POKER);
+  assert.equal(ownership.locked, false);
+  assert.deepEqual(instance.roomsOwnedBy(OWNER_ACCOUNT), [docName]);
+});
+
+test('a guest room is recorded with no account, indexed under nobody, and expires as a guest room', async () => {
+  const { registry, instance } = await registryFixture();
+  const room = await registry.createRoom({ owner: ownedBy(null) });
+  const docName = registry.registeredDocForCapability(room.code, room.token);
+  const ownership = instance.ownershipOf(docName);
+  assert.equal(ownership.record.accountId, null);
+  assert.equal(ownership.retention, RETENTION_CLASS.GUEST);
+  assert.equal(ownership.ownerAccountId, null);
+});
+
+test('a room created with no owner (the Public Wall) gets no record and is kept', async () => {
+  const { registry, instance, trace, metadata } = await registryFixture();
+  const room = await registry.createRoom();
+  const docName = registry.registeredDocForCapability(room.code, room.token);
+  assert.equal(trace.includes(DURABLE_STEP_LABEL), false);
+  assert.equal(metadata.has(`${docName}:${ROOM_OWNER_META}`), false);
+  assert.deepEqual(instance.ownershipOf(docName), {
+    record: null, retention: RETENTION_CLASS.KEPT, ownerAccountId: null, kind: ROOM_KIND.BOARD, locked: false,
+  });
+  assert.equal(instance.ownershipOf(DOC_NAME), null, 'an unknown room has no ownership');
+});
+
+test('an invalid owner is refused before anything is reserved', async () => {
+  const { registry, trace } = await registryFixture();
+  for (const owner of [ownedBy('short'), ownedBy(OWNER_ACCOUNT, 'canvas'), {}]) {
+    await assert.rejects(registry.createRoom({ owner }), TypeError);
+  }
+  assert.deepEqual(trace, []);
+  assertReservationsReleased(registry);
+});
+
+test('two concurrent creates at 499 owned rooms: exactly one succeeds and the limit is a 409 code', async () => {
+  let releaseSeed;
+  const holdSeed = new Promise((resolve) => { releaseSeed = resolve; });
+  const disk = ownedRoomsOnDisk(MAX_OWNED_ROOMS_PER_ACCOUNT - 1);
+  const { registry, instance } = await registryFixture({ ...disk, holdSeed, maxRooms: ROOMS_BEYOND_THE_LIMIT });
+  assert.equal(instance.roomsOwnedBy(OWNER_ACCOUNT).length, MAX_OWNED_ROOMS_PER_ACCOUNT - 1);
+  const first = registry.createRoom({ owner: ownedBy(OWNER_ACCOUNT) });
+  const second = registry.createRoom({ owner: ownedBy(OWNER_ACCOUNT) });
+  releaseSeed();
+  const [won, lost] = await Promise.allSettled([first, second]);
+  assert.equal(won.status, 'fulfilled');
+  assert.equal(lost.status, 'rejected');
+  assert.equal(lost.reason.code, OWNED_ROOM_LIMIT_CODE);
+  assert.equal(instance.roomsOwnedBy(OWNER_ACCOUNT).length, MAX_OWNED_ROOMS_PER_ACCOUNT);
+  assertReservationsReleased(registry);
+  const guest = await registry.createRoom({ owner: ownedBy(null) });
+  assert.ok(guest.code, 'the account limit never blocks guest rooms');
+});
+
+test('a failed owned create releases its reservation, so the last slot is still usable', async () => {
+  const error = Object.assign(new Error('injected marker failure'), { code: STORAGE_FAILURE_CODE });
+  const disk = ownedRoomsOnDisk(MAX_OWNED_ROOMS_PER_ACCOUNT - 1);
+  const options = { ...disk, maxRooms: ROOMS_BEYOND_THE_LIMIT, failAt: REGISTRATION_KEY, error };
+  const { registry, instance } = await registryFixture(options);
+  await assert.rejects(registry.createRoom({ owner: ownedBy(OWNER_ACCOUNT) }), (actual) => actual === error);
+  options.failAt = DURABLE_STEP_LABEL;
+  await assert.rejects(registry.createRoom({ owner: ownedBy(OWNER_ACCOUNT) }), (actual) => actual === error);
+  assert.equal(instance.roomsOwnedBy(OWNER_ACCOUNT).length, MAX_OWNED_ROOMS_PER_ACCOUNT - 1);
+  options.failAt = undefined;
+  await registry.createRoom({ owner: ownedBy(OWNER_ACCOUNT) });
+  await assert.rejects(registry.createRoom({ owner: ownedBy(OWNER_ACCOUNT) }), { code: OWNED_ROOM_LIMIT_CODE });
+  assertReservationsReleased(registry);
+});
+
+test('retiring an owned room removes it from the owner index at once', async () => {
+  const { registry, instance } = await registryFixture();
+  const room = await registry.createRoom({ owner: ownedBy(OWNER_ACCOUNT) });
+  const docName = registry.registeredDocForCapability(room.code, room.token);
+  const retiring = instance.retireRoom(docName);
+  assert.deepEqual(instance.roomsOwnedBy(OWNER_ACCOUNT), []);
+  assert.equal(instance.ownershipOf(docName), null);
+  await retiring;
 });

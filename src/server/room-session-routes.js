@@ -2,10 +2,12 @@ import { entitlementsFor } from '../domain/plan-entitlements.js';
 import {
   LOCK_KDF, ROOM_SESSION_RENEWAL_SUFFIX, hasExactKeys, parseAuthKey, parseLockParams,
 } from '../domain/room-lock-contract.js';
+import { ROOM_KIND } from '../domain/room-ownership.js';
 import { authenticateAccount } from './auth-session.js';
 import { acceptCredentialOrigin, readJsonBody, sendIfWritable, sendJson } from './relay-http.js';
 import { RETRY_AFTER_LONG_SECONDS, RETRY_AFTER_SHORT_SECONDS } from './relay-config.js';
 import { CORRUPT_LOCK, ROOM_LOCK_VERSION } from './room-lock-record.js';
+import { OWNED_ROOM_LIMIT_CODE } from './room-owner-index.js';
 
 const HTTP = Object.freeze({
   OK: 200, CREATED: 201, BAD_REQUEST: 400, UNAUTHORIZED: 401, FORBIDDEN: 403, NOT_FOUND: 404,
@@ -16,9 +18,19 @@ const INITIAL_LOCK_REVISION = 0;
 const SESSION_KEYS = ['code', 'token'];
 const LOCKED_SESSION_KEYS = ['code', 'token', 'authKey'];
 const AUTH_KEY_FIELD = 'authKey';
-const SOFT_CREATE_ERRORS = ['ROOM_CAPACITY', 'SERVER_UNAVAILABLE'];
+const SOFT_CREATE_ERRORS = ['ROOM_CAPACITY', 'SERVER_UNAVAILABLE', OWNED_ROOM_LIMIT_CODE];
+const OWNED_ROOM_LIMIT_BODY = Object.freeze({ error: 'owned-room-limit' });
+const ROOM_KINDS = new Set(Object.values(ROOM_KIND));
 const ROOM_SESSION_PATH = '/api/room-session';
 const RENEWAL_PATH = new RegExp(`^/rooms/([A-Za-z0-9_-]{32})${ROOM_SESSION_RENEWAL_SUFFIX}$`);
+
+/** The only create bodies: {} (a board), { kind } or { lock } (a locked board). null for anything else. */
+function parseCreateBody(body) {
+  if (hasExactKeys(body, [])) return { kind: ROOM_KIND.BOARD, lockParams: null };
+  if (hasExactKeys(body, ['kind'])) return ROOM_KINDS.has(body.kind) ? { kind: body.kind, lockParams: null } : null;
+  if (hasExactKeys(body, ['lock'])) return { kind: ROOM_KIND.BOARD, lockParams: body.lock };
+  return null;
+}
 
 /**
  * Room creation and session exchange. ctx: registry, sessions (RoomSessions), verifier (RoomLockVerifier),
@@ -50,6 +62,26 @@ export function createRoomSessionRoutes(ctx) {
     };
   };
 
+  // Returns { lock, owner } to create with, or sends the refusal and returns null. Without a cookie the account store
+  // is never read; an invalid or expired cookie makes a guest room.
+  const ownerForCreation = async (req, res, { kind, lockParams }) => {
+    if (lockParams === null) {
+      const account = await accountOf(req);
+      return { lock: null, owner: { kind, accountId: account?.id ?? null } };
+    }
+    const lock = await lockForCreation(req, res, lockParams);
+    return lock && { lock, owner: { kind, accountId: lock.ownerAccountId } };
+  };
+
+  const refuseCreation = (res, err) => {
+    if (err.code === 'STORAGE_FAILURE') ctx.onStorageFailure(err);
+    else if (!SOFT_CREATE_ERRORS.includes(err.code)) {
+      console.error('[yjs] room creation failed', { code: err.code || 'UNKNOWN', err: err.message });
+    }
+    if (err.code === OWNED_ROOM_LIMIT_CODE) sendJson(res, HTTP.CONFLICT, OWNED_ROOM_LIMIT_BODY);
+    else sendIfWritable(res, err.code === 'ROOM_CAPACITY' ? HTTP.CAPACITY : HTTP.UNAVAILABLE);
+  };
+
   const handleCreateRoom = async (req, res, clientIp) => {
     if (!preamble(req, res)) return;
     const retryAfterSeconds = buckets.takeCreateToken(clientIp);
@@ -61,21 +93,14 @@ export function createRoomSessionRoutes(ctx) {
       sendIfWritable(res, err.code === 'BODY_TOO_LARGE' ? HTTP.TOO_LARGE : HTTP.BAD_REQUEST);
       return;
     }
-    const wantsLock = hasExactKeys(body, ['lock']);
-    if (!wantsLock && Object.keys(body).length !== 0) { res.writeHead(HTTP.BAD_REQUEST); res.end(); return; }
+    const request = parseCreateBody(body);
+    if (!request) { res.writeHead(HTTP.BAD_REQUEST); res.end(); return; }
     try {
-      let lock = null;
-      if (wantsLock) {
-        lock = await lockForCreation(req, res, body.lock);
-        if (!lock) return;
-      }
-      sendJson(res, HTTP.CREATED, await registry.createRoom({ unavailable: ctx.unavailable(), lock }));
+      const creation = await ownerForCreation(req, res, request);
+      if (!creation) return;
+      sendJson(res, HTTP.CREATED, await registry.createRoom({ unavailable: ctx.unavailable(), ...creation }));
     } catch (err) {
-      if (err.code === 'STORAGE_FAILURE') ctx.onStorageFailure(err);
-      else if (!SOFT_CREATE_ERRORS.includes(err.code)) {
-        console.error('[yjs] room creation failed', { code: err.code || 'UNKNOWN', err: err.message });
-      }
-      sendIfWritable(res, err.code === 'ROOM_CAPACITY' ? HTTP.CAPACITY : HTTP.UNAVAILABLE);
+      refuseCreation(res, err);
     }
   };
 

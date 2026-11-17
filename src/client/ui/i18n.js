@@ -295,6 +295,7 @@ const dict = {
     'roomLock.notice.roomFull': 'บอร์ดนี้เต็มแล้ว การเปลี่ยนแปลงใหม่อาจไม่ถูกบันทึกจนกว่าจะลบเนื้อหาบางส่วน',
     'landing.create.error.signIn': 'ลงชื่อเข้าใช้เพื่อสร้างบอร์ดที่ป้องกันด้วยรหัสผ่าน',
     'landing.create.error.plan': 'แพ็กเกจของคุณไม่รวมบอร์ดที่ป้องกันด้วยรหัสผ่าน',
+    'landing.create.error.ownedRoomLimit': 'คุณมีบอร์ดครบ {max} บอร์ดแล้ว ซึ่งเป็นจำนวนสูงสุดต่อบัญชี ลบบอร์ดที่ไม่ใช้แล้วก่อนสร้างใหม่',
 
     // top bar
     'topbar.extraPlayers': '+{n}',
@@ -1433,6 +1434,7 @@ const dict = {
     'roomLock.notice.roomFull': 'This board is full. New changes may not be saved until some content is removed.',
     'landing.create.error.signIn': 'Sign in to create a password-protected board.',
     'landing.create.error.plan': 'Your plan does not include password-protected boards.',
+    'landing.create.error.ownedRoomLimit': 'You already have {max} boards, the most one account can keep. Delete a board you no longer need, then try again.',
 
     'topbar.extraPlayers': '+{n}',
     'topbar.home': 'Back to home',

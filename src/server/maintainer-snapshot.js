@@ -30,6 +30,8 @@ export function maintainerRooms({ registry, docs, connections, blockedRooms, roo
       uploadFiles: usage?.files ?? 0,
       collections: doc ? collectionCounts(doc) : null,
       encrypted,
+      // The retention class only: the owner account is user data and never listed here.
+      retention: registry.ownershipOf(docName).retention,
     };
   });
 }

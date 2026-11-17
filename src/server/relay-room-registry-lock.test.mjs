@@ -8,6 +8,7 @@ import { checkedStorage, durableMetaBatch } from './relay-storage.js';
 import { LOCKED_REGISTRATION_MARKER, RoomRegistry, isCommittedRegistration } from './relay-room-registry.js';
 import { CORRUPT_LOCK, ROOM_LOCK_META, decodeLockRecord } from './room-lock.js';
 import { lockRecord } from './room-lock-fixtures.mjs';
+import { RETENTION_CLASS, ROOM_KIND, ROOM_OWNER_META, decodeOwnerRecord, orphanOwnerRecord } from '../domain/room-ownership.js';
 
 const require = createRequire(import.meta.url);
 const Y = require('yjs');
@@ -243,5 +244,110 @@ test('a corrupt committed lock keeps the room managed, locked and retirable with
     assert.ok(await second.storage.getMeta(docName, 'retro-room-handle-v1'));
     assert.ok(await second.registry.retireRoom(docName));
     assert.equal(second.registry.lockFor(docName), null);
+  });
+});
+
+const GUEST = { kind: ROOM_KIND.BOARD, accountId: null };
+const ownerOf = (accountId, kind = ROOM_KIND.BOARD) => ({ kind, accountId });
+const docOfRoom = (registry, room) => registry.registeredDocForCapability(room.code, room.token);
+const ORPHANED_AT = 1_900_000_000_000;
+
+test('the owner record is durable before the registration marker is written', async () => {
+  await withDir(async (dir) => {
+    const ownerSeenAtMarker = [];
+    const fixture = await openFixture(dir, (persistence) => ({
+      ...persistence,
+      async setMeta(docName, key, value) {
+        if (key === MARKER_META) ownerSeenAtMarker.push(decodeOwnerRecord(await persistence.getMeta(docName, ROOM_OWNER_META)));
+        return persistence.setMeta(docName, key, value);
+      },
+    }));
+    const owner = lockRecord().ownerAccountId;
+    await fixture.registry.createRoom({ owner: GUEST });
+    await fixture.registry.createRoom({ lock: lockRecord(), owner: ownerOf(owner) });
+    assert.deepEqual(ownerSeenAtMarker.map((record) => record?.accountId), [null, owner]);
+    assert.deepEqual(fixture.events, ['lock', 'lock'], 'lock and owner record share one durable batch');
+  });
+});
+
+test('a failing owner write never writes the marker and leaves no room behind', async () => {
+  await withDir(async (dir) => {
+    const boom = new Error('injected');
+    const written = [];
+    const fixture = await openFixture(dir, (persistence) => ({
+      ...persistence,
+      async setMeta(docName, key, value) { written.push(key); return persistence.setMeta(docName, key, value); },
+      async durableMetaBatch() { throw boom; },
+    }));
+    await assert.rejects(fixture.registry.createRoom({ owner: GUEST }), (error) => error === boom);
+    assert.equal(written.includes(MARKER_META), false);
+    assert.deepEqual(await fixture.storage.getAllDocNames(), []);
+  });
+});
+
+test('a locked room must be owned by its lock owner, as a board', async () => {
+  await withDir(async (dir) => {
+    const fixture = await openFixture(dir);
+    const lockOwner = lockRecord().ownerAccountId;
+    await assert.rejects(fixture.registry.createRoom({ lock: lockRecord(), owner: ownerOf('someone-else-account') }), TypeError);
+    await assert.rejects(fixture.registry.createRoom({ lock: lockRecord(), owner: ownerOf(lockOwner, ROOM_KIND.POKER) }), TypeError);
+    await assert.rejects(fixture.registry.createRoom({ lock: lockRecord(), owner: GUEST }), TypeError);
+    assert.equal(fixture.registry.pendingRoomCreations, 0);
+    assert.deepEqual(await fixture.storage.getAllDocNames(), []);
+  });
+});
+
+test('after a restart ownershipOf gives the right retention for every kind of room', async () => {
+  await withDir(async (dir) => {
+    const first = await openFixture(dir);
+    const { registry } = first;
+    const lockOwner = lockRecord().ownerAccountId;
+    const rooms = {
+      legacy: await registry.createRoom({ owner: GUEST }),
+      guest: await registry.createRoom({ owner: GUEST }),
+      owned: await registry.createRoom({ owner: ownerOf(lockOwner, ROOM_KIND.POKER) }),
+      orphaned: await registry.createRoom({ owner: ownerOf(lockOwner) }),
+      legacyLocked: await registry.createRoom({ lock: lockRecord(), owner: ownerOf(lockOwner) }),
+      publicWall: await registry.createRoom(),
+    };
+    const docs = Object.fromEntries(Object.entries(rooms).map(([label, room]) => [label, docOfRoom(registry, room)]));
+    // Rooms made before this release have no owner record at all.
+    for (const label of ['legacy', 'legacyLocked']) {
+      await durableMetaBatch(first.ldb, docs[label], [{ type: 'del', key: ROOM_OWNER_META }]);
+    }
+    const orphanedRecord = orphanOwnerRecord(registry.ownershipOf(docs.orphaned).record, ORPHANED_AT);
+    await registry.setOwnerRecord(docs.orphaned, orphanedRecord);
+    assert.deepEqual(registry.roomsOwnedBy(lockOwner).sort(), [docs.owned, docs.legacyLocked].sort());
+    await first.ldb.destroy();
+    opened.delete(first.ldb);
+
+    const { registry: reopened } = await openFixture(dir);
+    const view = (label) => {
+      const { retention, ownerAccountId, kind, locked } = reopened.ownershipOf(docs[label]);
+      return { retention, ownerAccountId, kind, locked };
+    };
+    const kept = { retention: RETENTION_CLASS.KEPT, ownerAccountId: null, kind: ROOM_KIND.BOARD, locked: false };
+    assert.deepEqual(view('legacy'), kept);
+    assert.deepEqual(view('publicWall'), kept);
+    assert.deepEqual(view('guest'), { ...kept, retention: RETENTION_CLASS.GUEST });
+    assert.deepEqual(view('owned'), { ...kept, ownerAccountId: lockOwner, kind: ROOM_KIND.POKER });
+    assert.deepEqual(view('orphaned'), kept);
+    assert.deepEqual(reopened.ownershipOf(docs.orphaned).record, orphanedRecord);
+    assert.deepEqual(view('legacyLocked'), { ...kept, ownerAccountId: lockOwner, locked: true });
+    assert.equal(reopened.ownershipOf(docs.legacyLocked).record, null);
+    assert.deepEqual(reopened.roomsOwnedBy(lockOwner).sort(), [docs.owned, docs.legacyLocked].sort());
+  });
+});
+
+test('an unreadable owner record is kept, never treated as a guest room', async () => {
+  await withDir(async (dir) => {
+    const first = await openFixture(dir);
+    const docName = docOfRoom(first.registry, await first.registry.createRoom({ owner: GUEST }));
+    await durableMetaBatch(first.ldb, docName, [{ type: 'put', key: ROOM_OWNER_META, value: { v: 9 } }]);
+    await first.ldb.destroy();
+    opened.delete(first.ldb);
+    const { registry } = await openFixture(dir);
+    assert.equal(registry.ownershipOf(docName).retention, RETENTION_CLASS.KEPT);
+    assert.equal(registry.ownershipOf(docName).record, null);
   });
 });

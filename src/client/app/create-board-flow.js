@@ -9,11 +9,11 @@ const REAL_STEPS = Object.freeze({
 
 /**
  * Creates a room and opens it. Resolves null on success or the create error to show.
- * `lock` (a locked room's public record) is forwarded to the relay as is.
+ * `lock` (a locked room's public record) and `kind` are forwarded to the relay as is.
  */
 export async function runCreateBoard({ name = '', starter = null, kind = ROOM_KIND.BOARD, lock = null }, steps = REAL_STEPS) {
   try {
-    const { code, token } = await steps.createRoom({ lock });
+    const { code, token } = await steps.createRoom({ lock, kind });
     steps.markBoardCreated(code, token);
     steps.rememberRecent(code, name, token, kind);
     if (starter) steps.savePendingStarter(code, starter);

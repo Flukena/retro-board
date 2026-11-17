@@ -1105,4 +1105,5 @@ export default Object.freeze({
   "roomLock.notice.roomFull": "此看板已满。在删除部分内容之前，新的更改可能无法保存。",
   "landing.create.error.signIn": "请登录以创建受密码保护的看板。",
   "landing.create.error.plan": "你的套餐不包含受密码保护的看板。",
+  "landing.create.error.ownedRoomLimit": "你已有 {max} 个看板，已达到每个账户的上限。请删除不再需要的看板后重试。",
 });

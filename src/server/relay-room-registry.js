@@ -4,6 +4,8 @@ import { ROOM_HANDLE_RE, ROOM_ID_ALLOCATION_ATTEMPTS, STORE_OPERATION_OVERHEAD_B
 import { roomLogId } from './relay-log-id.js';
 import { RoomActivity } from './room-activity.js';
 import { CORRUPT_LOCK, ROOM_LOCK_META, decodeLockRecord, encodeLockRecord, hasLockMeta } from './room-lock-record.js';
+import { ROOM_KIND, ROOM_OWNER_META, decodeOwnerRecord, encodeOwnerRecord, retentionClass } from '../domain/room-ownership.js';
+import { RoomOwnerIndex, ownerEntry, storedOwnerValue } from './room-owner-index.js';
 
 export const ROOM_REGISTRATION_META = 'retro-room-registration-v1';
 export const ROOM_HANDLE_META = 'retro-room-handle-v1';
@@ -56,7 +58,9 @@ const QUARANTINE_LOG = '[yjs] quarantined incomplete room';
 const USAGE_RECONCILED_LOG = '[yjs] reconciled room upload usage';
 const INVALID_LOCK_LOG = '[yjs] room has an unreadable lock record';
 const INVALID_LOCK_ARGUMENT_MESSAGE = 'invalid room lock record';
-const LOCK_STORAGE_UNSUPPORTED_MESSAGE = 'persistence has no durableMetaBatch for locked rooms';
+const LOCK_STORAGE_UNSUPPORTED_MESSAGE = 'persistence has no durableMetaBatch for locked or owned rooms';
+const LOCK_OWNER_MISMATCH_MESSAGE = 'a locked room is a board owned by its lock owner';
+const INVALID_OWNER_LOG = '[yjs] room has an unreadable owner record';
 const PUT_OPERATION = 'put';
 const DELETE_OPERATION = 'del';
 const ROLLBACK_FAILED_LOG = '[yjs] incomplete room rollback failed';
@@ -101,7 +105,7 @@ const persistedUsage = (usage) => ({
  * @property {function(string): Promise<void>} flushDocument
  * @property {function(string): Promise<void>} clearDocument
  * @property {function(string, {type: string, key: string, value?: *}[]): Promise<void>} [durableMetaBatch]
- *   fsynced atomic meta batch; required only to create locked rooms
+ *   fsynced atomic meta batch; required only to create locked or owned rooms
  * @property {function(): boolean} hasCapacity
  * @property {function(number): function(): void} reserveStore
  * @property {function(): number} measureDatabase
@@ -125,6 +129,7 @@ export class RoomRegistry extends EventEmitter {
   #signingKey;
   #dummyDigest = randomBytes(REGISTRATION_DIGEST_BYTES);
   #log;
+  #owners = new RoomOwnerIndex();
 
   constructor({ persistence, Y, maxRooms, maxDatabaseBytes, signingKey, log = console }) {
     super();
@@ -184,6 +189,7 @@ export class RoomRegistry extends EventEmitter {
       throw new Error(EXISTING_ROOM_LIMIT_MESSAGE);
     }
     const lock = await this.#readLock(docName, marker);
+    const ownerRecord = await this.#readOwner(docName);
     let handle = await this.#persistence.getMeta(docName, ROOM_HANDLE_META);
     if (!ROOM_HANDLE_RE.test(handle || '')) {
       handle = this.newUniqueRoomHandle();
@@ -192,6 +198,7 @@ export class RoomRegistry extends EventEmitter {
     await this.activity.hydrate(docName);
     this.registerDocInMemory(docName, handle);
     if (lock) this.locksByDoc.set(docName, lock);
+    this.#owners.set(docName, ownerEntry(ownerRecord, lock));
     const stored = persistedUsage(await this.#persistence.getMeta(docName, ROOM_UPLOAD_USAGE_META));
     const actual = initialUploadUsage.roomsByHandle.get(handle) || emptyUsage();
     const { bytes, files } = initialUploadUsage.complete ? actual : stored;
@@ -223,6 +230,40 @@ export class RoomRegistry extends EventEmitter {
       return CORRUPT_LOCK;
     }
     return lock;
+  }
+
+  // null = no record (a legacy room or the Public Wall). An unreadable record is kept, never read as a guest room.
+  async #readOwner(docName) {
+    const raw = await this.#persistence.getMeta(docName, ROOM_OWNER_META);
+    if (raw === undefined || raw === null) return null;
+    const record = decodeOwnerRecord(raw);
+    if (!record) this.#log.warn(INVALID_OWNER_LOG, { docName: roomLogId(docName) });
+    return record;
+  }
+
+  /**
+   * Canonical ownership of a registered room, or null for any other docName. retention comes from the record alone;
+   * a locked room without one is owned by its lock owner and kept.
+   */
+  ownershipOf(docName) {
+    if (!this.registeredDocs.has(docName)) return null;
+    const { record, ownerAccountId } = this.#owners.entryOf(docName);
+    return {
+      record, retention: retentionClass(record), ownerAccountId,
+      kind: record?.kind ?? ROOM_KIND.BOARD, locked: this.isLocked(docName),
+    };
+  }
+
+  roomsOwnedBy(accountId) { return this.#owners.roomsOwnedBy(accountId); }
+
+  /** Durably replaces the owner record of a registered room (orphaning); false when the room is not registered. */
+  async setOwnerRecord(docName, record) {
+    const value = storedOwnerValue(record);
+    if (!this.registeredDocs.has(docName)) return false;
+    await this.#persistence.durableMetaBatch(docName, [{ type: PUT_OPERATION, key: ROOM_OWNER_META, value }]);
+    if (!this.registeredDocs.has(docName)) return false;
+    this.#owners.set(docName, ownerEntry(decodeOwnerRecord(value), this.lockFor(docName)));
+    return true;
   }
 
   lockFor(docName) { return this.locksByDoc.get(docName) ?? null; }
@@ -267,7 +308,7 @@ export class RoomRegistry extends EventEmitter {
     this.emit(REGISTRY_STORAGE_FAILURE_EVENT, error);
   }
 
-  async persistRoom(docName, handle, update, lock = null) {
+  async persistRoom(docName, handle, update, lock = null, ownerRecord = null) {
     await this.#persistence.storeUpdate(docName, update);
     await this.#persistence.setMeta(docName, ROOM_HANDLE_META, handle);
     await this.#persistence.setMeta(docName, ROOM_UPLOAD_USAGE_META, emptyUsage());
@@ -278,18 +319,21 @@ export class RoomRegistry extends EventEmitter {
       this.reportStorageFailure(error);
       throw error;
     }
-    // The lock lands durably BEFORE the marker: a reachable room is never unlocked.
-    if (lock) {
-      await this.#persistence.durableMetaBatch(docName, [{ type: PUT_OPERATION, key: ROOM_LOCK_META, value: encodeLockRecord(lock) }]);
-    }
+    // The lock and owner record land durably, in one batch, BEFORE the marker: a reachable room is never unlocked,
+    // and never mistaken for a legacy room.
+    const durableOps = [];
+    if (lock) durableOps.push({ type: PUT_OPERATION, key: ROOM_LOCK_META, value: encodeLockRecord(lock) });
+    if (ownerRecord) durableOps.push({ type: PUT_OPERATION, key: ROOM_OWNER_META, value: ownerRecord });
+    if (durableOps.length > 0) await this.#persistence.durableMetaBatch(docName, durableOps);
     // Marker LAST, then in-memory publication; never adopt a failed creation.
     await this.#persistence.setMeta(docName, ROOM_REGISTRATION_META, lock ? LOCKED_REGISTRATION_MARKER : UNLOCKED_REGISTRATION_MARKER);
   }
 
-  publishRoom(docName, handle, lock = null) {
+  publishRoom(docName, handle, lock = null, ownerRecord = null) {
     this.existingDocNames.add(docName);
     if (lock) this.locksByDoc.set(docName, lock);
     this.registerDocInMemory(docName, handle);
+    this.#owners.set(docName, ownerEntry(ownerRecord && decodeOwnerRecord(ownerRecord), lock));
     this.roomUploadUsage.set(docName, activeUsage(emptyUsage()));
   }
 
@@ -318,6 +362,7 @@ export class RoomRegistry extends EventEmitter {
     this.registeredRoomHandlesByDoc.delete(docName);
     this.roomUploadUsage.delete(docName);
     this.locksByDoc.delete(docName);
+    this.#owners.forget(docName);
     this.existingDocNames.delete(docName);
     this.activity.forget(docName);
     try {
@@ -331,15 +376,31 @@ export class RoomRegistry extends EventEmitter {
     return handle;
   }
 
-  async createRoom({ unavailable = false, initialUpdate = null, lock = null } = {}) {
+  // Validates the creation request before anything is reserved; returns the lock and owner records to write.
+  #creationRecords(lock, owner) {
     const record = lock === null ? null : decodeLockRecord(lock);
     if (lock !== null && !record) throw new TypeError(INVALID_LOCK_ARGUMENT_MESSAGE);
-    if (record && typeof this.#persistence.durableMetaBatch !== 'function') throw new TypeError(LOCK_STORAGE_UNSUPPORTED_MESSAGE);
+    // No owner (the Public Wall, a restore) means no record: the room is kept like a legacy room.
+    const ownerRecord = owner === undefined ? null : encodeOwnerRecord({ kind: owner.kind, accountId: owner.accountId, createdAt: Date.now() });
+    if (record && ownerRecord && (ownerRecord.accountId !== record.ownerAccountId || ownerRecord.kind !== ROOM_KIND.BOARD)) {
+      throw new TypeError(LOCK_OWNER_MISMATCH_MESSAGE);
+    }
+    if ((record || ownerRecord) && typeof this.#persistence.durableMetaBatch !== 'function') {
+      throw new TypeError(LOCK_STORAGE_UNSUPPORTED_MESSAGE);
+    }
+    return { record, ownerRecord };
+  }
+
+  /** owner: { kind, accountId|null }, or undefined for a room with no owner record (the Public Wall). */
+  async createRoom({ unavailable = false, initialUpdate = null, lock = null, owner = undefined } = {}) {
+    const { record, ownerRecord } = this.#creationRecords(lock, owner);
     if (unavailable) throw Object.assign(new Error(SERVICE_UNAVAILABLE_MESSAGE), { code: SERVER_UNAVAILABLE_CODE });
     if (this.registeredDocs.size + this.pendingRoomCreations >= this.#maxRooms) {
       throw Object.assign(new Error(ROOM_CAPACITY_MESSAGE), { code: ROOM_CAPACITY_CODE });
     }
     if (!this.#persistence.hasCapacity()) throw databaseCapacityError();
+    // Counted synchronously, before the first await, so concurrent creations cannot pass the per-account limit.
+    const releaseOwner = this.#owners.reserve(ownerRecord?.accountId ?? null);
     this.pendingRoomCreations += 1;
     let identity;
     let handle;
@@ -350,14 +411,15 @@ export class RoomRegistry extends EventEmitter {
       this.pendingRoomHandles.add(handle);
       const update = initialUpdate ?? this.seedUpdate();
       releaseStore = this.#persistence.reserveStore(update.byteLength + STORE_OPERATION_OVERHEAD_BYTES);
-      await this.persistRoom(identity.docName, handle, update, record);
-      this.publishRoom(identity.docName, handle, record);
+      await this.persistRoom(identity.docName, handle, update, record, ownerRecord);
+      this.publishRoom(identity.docName, handle, record, ownerRecord);
       return { code: identity.code, token: identity.token };
     } catch (error) {
       await this.rollback(identity?.docName);
       throw error;
     } finally {
       this.pendingRoomCreations = Math.max(0, this.pendingRoomCreations - 1);
+      releaseOwner();
       if (handle) this.pendingRoomHandles.delete(handle);
       if (releaseStore) releaseStore();
     }

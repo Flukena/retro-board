@@ -1105,4 +1105,5 @@ export default Object.freeze({
   "roomLock.notice.roomFull": "Papan ini penuh. Perubahan baru mungkin tidak tersimpan sampai sebagian konten dihapus.",
   "landing.create.error.signIn": "Masuk untuk membuat papan yang dilindungi kata sandi.",
   "landing.create.error.plan": "Paket Anda tidak mencakup papan yang dilindungi kata sandi.",
+  "landing.create.error.ownedRoomLimit": "Anda sudah memiliki {max} papan, batas maksimum per akun. Hapus papan yang tidak lagi diperlukan, lalu coba lagi.",
 });

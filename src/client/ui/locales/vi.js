@@ -1105,4 +1105,5 @@ export default Object.freeze({
   "roomLock.notice.roomFull": "Bảng này đã đầy. Thay đổi mới có thể không được lưu cho đến khi xóa bớt nội dung.",
   "landing.create.error.signIn": "Đăng nhập để tạo bảng được bảo vệ bằng mật khẩu.",
   "landing.create.error.plan": "Gói của bạn không bao gồm bảng được bảo vệ bằng mật khẩu.",
+  "landing.create.error.ownedRoomLimit": "Bạn đã có {max} bảng, mức tối đa cho mỗi tài khoản. Hãy xóa một bảng không còn cần rồi thử lại.",
 });

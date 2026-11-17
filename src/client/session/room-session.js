@@ -2,6 +2,7 @@ import { PUBLIC_RELAY_PREFIX, PUBLIC_PATH, PUBLIC_SESSION_ROUTE, PUBLIC_ROOM_SES
 import {
   LOCK_BYTES, ROOM_SESSION_RENEWAL_SUFFIX, decodeBase64Url, isCounter, isLockKdf, isPlainObject, parseAuthKey,
 } from '../../domain/room-lock-contract.js';
+import { ROOM_KIND } from '../../domain/room-ownership.js';
 
 // Exchanges the long-lived fragment capability for a short-lived, HttpOnly
 // room cookie. The fragment token stays module-private and is never copied to
@@ -301,9 +302,15 @@ const postJson = async (path, body, expectedStatus, invalidStatuses = [], { lock
   }
 };
 
-/** A plain room takes an empty body; a locked room sends its public lock record and nothing else. */
-export async function createRoom({ lock = null } = {}) {
-  const value = await postJson('/api/rooms', lock === null ? {} : { lock }, 201);
+// A board takes an empty body and Poker sends its kind; a locked room (always a board) sends its public lock record
+// and nothing else.
+const createRoomBody = (lock, kind) => {
+  if (lock !== null) return { lock };
+  return kind === ROOM_KIND.BOARD ? {} : { kind };
+};
+
+export async function createRoom({ lock = null, kind = ROOM_KIND.BOARD } = {}) {
+  const value = await postJson('/api/rooms', createRoomBody(lock, kind), 201);
   return validateCreatedRoomResponse(value);
 }
 

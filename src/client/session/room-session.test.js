@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   ROOM_SESSION_ERROR,
   RoomSessionError,
+  createRoom,
   normalizeRoomFetchPath,
   validateCreatedRoomResponse,
   validateRoomSessionResponse,
@@ -203,4 +204,21 @@ test('refresh honours HTTP-date Retry-After', async (context) => {
 
 test('garbage Retry-After falls back to the initial backoff', async (context) => {
   await assertRefreshRetryDelay(context, 'not-a-date-or-delay', FALLBACK_RETRY_DELAY_MS, 'garbage-header-test');
+});
+
+test('room creation sends {} for a board, { kind } for Poker, and only { lock } for a locked room', async (context) => {
+  const oldWindow = globalThis.window;
+  globalThis.window = { location: new URL('http://localhost:5180') };
+  context.after(() => { globalThis.window = oldWindow; });
+  const bodies = [];
+  context.mock.method(globalThis, 'fetch', async (url, init) => {
+    bodies.push(JSON.parse(init.body));
+    return new Response(JSON.stringify({ code: 'ABC12345', token: TOKEN }), { status: 201, headers: { 'content-type': 'application/json' } });
+  });
+  const lock = { salt: 'public-salt' };
+  await createRoom();
+  await createRoom({ kind: 'board' });
+  await createRoom({ kind: 'poker' });
+  await createRoom({ lock, kind: 'poker' });
+  assert.deepEqual(bodies, [{}, {}, { kind: 'poker' }, { lock }]);
 });

@@ -139,6 +139,9 @@ const entrypointHttp = (overrides = {}) => {
       roomHandleForDoc: (...args) => context.roomHandleForDoc(...args), isLocked: () => false,
     },
     sessions: { createCookie: (...args) => context.createSessionCookie(...args) },
+    // These requests carry no account cookie, so a guest create never reaches the account store.
+    accountSessions: { read: () => null },
+    accountStore: { get() { assert.fail('unexpected account read'); } },
     buckets: {
       takeCreateToken: (...args) => context.takeCreateToken(...args), takeSessionExchangeToken: (...args) => context.takeSessionExchangeToken(...args),
       failureAttemptAvailable: (...args) => context.failureAttemptAvailable(...args), recordSessionFailure: (...args) => context.recordSessionFailure(...args),
