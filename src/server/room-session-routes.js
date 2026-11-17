@@ -26,9 +26,9 @@ const RENEWAL_PATH = new RegExp(`^/rooms/([A-Za-z0-9_-]{32})${ROOM_SESSION_RENEW
 
 /** The only create bodies: {} (a board), { kind } or { lock } (a locked board). null for anything else. */
 function parseCreateBody(body) {
-  if (hasExactKeys(body, [])) return { kind: ROOM_KIND.BOARD, lockParams: null };
-  if (hasExactKeys(body, ['kind'])) return ROOM_KINDS.has(body.kind) ? { kind: body.kind, lockParams: null } : null;
-  if (hasExactKeys(body, ['lock'])) return { kind: ROOM_KIND.BOARD, lockParams: body.lock };
+  if (hasExactKeys(body, [])) return { kind: ROOM_KIND.BOARD, locked: false, lockParams: null };
+  if (hasExactKeys(body, ['kind'])) return ROOM_KINDS.has(body.kind) ? { kind: body.kind, locked: false, lockParams: null } : null;
+  if (hasExactKeys(body, ['lock'])) return { kind: ROOM_KIND.BOARD, locked: true, lockParams: body.lock };
   return null;
 }
 
@@ -64,8 +64,8 @@ export function createRoomSessionRoutes(ctx) {
 
   // Returns { lock, owner } to create with, or sends the refusal and returns null. Without a cookie the account store
   // is never read; an invalid or expired cookie makes a guest room.
-  const ownerForCreation = async (req, res, { kind, lockParams }) => {
-    if (lockParams === null) {
+  const ownerForCreation = async (req, res, { kind, locked, lockParams }) => {
+    if (!locked) {
       const account = await accountOf(req);
       return { lock: null, owner: { kind, accountId: account?.id ?? null } };
     }

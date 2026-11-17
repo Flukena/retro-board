@@ -162,6 +162,16 @@ test('locked creation: bad params 400, no account 401, unknown plan 403, free an
   assert.equal((await f.post('/api/rooms', { lock: lockParams() }, pro.cookie)).status, CREATED);
 });
 
+test('an explicit null or non-object lock is a 400 and creates nothing', async (t) => {
+  const f = await fixture(t);
+  const owner = await f.signIn('nulllock@example.com');
+  const before = f.registry.registeredRoomsByHandle.size;
+  for (const lock of [null, 'x', 0, []]) {
+    assert.equal((await f.post('/api/rooms', { lock }, owner.cookie)).status, BAD_REQUEST);
+  }
+  assert.equal(f.registry.registeredRoomsByHandle.size, before);
+});
+
 test('an unknown plan may not create a locked room', async (t) => {
   const f = await fixture(t, { storedPlan: 'enterprise' });
   const stranger = await f.signIn('stranger@example.com');
