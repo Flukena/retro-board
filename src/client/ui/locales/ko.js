@@ -128,6 +128,7 @@ export default Object.freeze({
   "myBoards.deleteTitlePoker": "플래닝 포커 방 영구 삭제",
   "myBoards.deleteBodyPoker": "이 플래닝 포커 방의 모든 내용이 모두에게서 삭제됩니다. 접속 중인 사람은 연결이 끊깁니다. 되돌릴 수 없습니다.",
   "myBoards.deletePrompt": "확인하려면 보드 코드 {code}을(를) 입력하세요.",
+  "myBoards.deletePromptPoker": "확인하려면 방 코드 {code}을(를) 입력하세요.",
   "myBoards.error.signIn": "세션이 만료되었습니다. 다시 로그인하세요.",
   "myBoards.error.gone": "이 보드는 더 이상 없어서 목록에서 제거했습니다.",
   "myBoards.error.locked": "비밀번호로 보호된 보드는 여기에서 이름을 바꿀 수 없습니다.",

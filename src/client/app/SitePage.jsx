@@ -28,14 +28,16 @@ export function SiteLinks({ current = null }) {
   );
 }
 
-export default function SitePage({ labelledBy, className = '', children }) {
+export default function SitePage({ labelledBy, className = '', homeLink = true, children }) {
   useLang();
   return (
     <div className="rb-legal">
       <header className="rb-legal__bar">
-        <a className="rb-legal__home" href="/">
-          <ArrowLeft size={ICON_SIZE_PX} aria-hidden="true" />{t('legal.home')}
-        </a>
+        {homeLink && (
+          <a className="rb-legal__home" href="/">
+            <ArrowLeft size={ICON_SIZE_PX} aria-hidden="true" />{t('legal.home')}
+          </a>
+        )}
         <LanguagePicker />
       </header>
       <main className={`rb-legal__doc ${className}`.trim()} aria-labelledby={labelledBy}>{children}</main>

@@ -128,6 +128,7 @@ export default Object.freeze({
   "myBoards.deleteTitlePoker": "プランニングポーカーのルームを完全に削除",
   "myBoards.deleteBodyPoker": "このプランニングポーカーのルームのすべての内容が全員に対して削除されます。参加中の人は切断されます。元に戻せません。",
   "myBoards.deletePrompt": "確認のためボードコード {code} を入力してください。",
+  "myBoards.deletePromptPoker": "確認のためルームコード {code} を入力してください。",
   "myBoards.error.signIn": "セッションが終了しました。もう一度ログインしてください。",
   "myBoards.error.gone": "このボードは存在しないため、一覧から削除しました。",
   "myBoards.error.locked": "パスワード保護されたボードはここでは名前を変更できません。",

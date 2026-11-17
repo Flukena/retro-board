@@ -128,6 +128,7 @@ export default Object.freeze({
   "myBoards.deleteTitlePoker": "Planning-Poker-Raum endgültig löschen",
   "myBoards.deleteBodyPoker": "Alles in diesem Planning-Poker-Raum wird für alle gelöscht. Wer gerade darin ist, wird getrennt. Das lässt sich nicht rückgängig machen.",
   "myBoards.deletePrompt": "Gib zur Bestätigung den Board-Code {code} ein.",
+  "myBoards.deletePromptPoker": "Gib zur Bestätigung den Raum-Code {code} ein.",
   "myBoards.error.signIn": "Deine Sitzung ist abgelaufen. Bitte melde dich erneut an.",
   "myBoards.error.gone": "Dieses Board existiert nicht mehr und wurde aus der Liste entfernt.",
   "myBoards.error.locked": "Passwortgeschützte Boards können hier nicht umbenannt werden.",

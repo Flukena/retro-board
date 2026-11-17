@@ -16,7 +16,7 @@ test('UI primitives preserve native button and accessibility contracts', async (
     appType: 'custom',
   });
   try {
-    const { Button, MenuItem, Divider, Surface, IconButton, ChoiceChip, portalToBody } = await server.ssrLoadModule('/src/client/ui/UiPrimitives.jsx');
+    const { Button, ButtonLink, MenuItem, Divider, Surface, IconButton, ChoiceChip, portalToBody } = await server.ssrLoadModule('/src/client/ui/UiPrimitives.jsx');
     await context.test('floating content remains renderable without a browser document', () => {
       const content = portalToBody(createElement('p', { role: 'status' }, TEST_LABEL));
       assert.equal(renderToStaticMarkup(content), `<p role="status">${TEST_LABEL}</p>`);
@@ -34,6 +34,10 @@ test('UI primitives preserve native button and accessibility contracts', async (
       button.props.onClick();
       assert.equal(clicks, 1);
       assert.equal(Button({}).props['aria-disabled'], undefined);
+    });
+    await context.test('button links navigate like links and look like the matching button', () => {
+      const html = renderToStaticMarkup(createElement(ButtonLink, { variant: BUTTON_VARIANT.PRIMARY, href: '/', className: TEST_EXTRA_CLASS }, TEST_LABEL));
+      assert.equal(html, `<a class="rb-btn rb-btn--primary ${TEST_EXTRA_CLASS}" href="/">${TEST_LABEL}</a>`);
     });
     await context.test('icon buttons retain real disabled and choice chips report selection', () => {
       const handler = () => {};

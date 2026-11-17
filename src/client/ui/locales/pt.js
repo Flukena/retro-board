@@ -128,6 +128,7 @@ export default Object.freeze({
   "myBoards.deleteTitlePoker": "Excluir sala de Planning Poker permanentemente",
   "myBoards.deleteBodyPoker": "Tudo nesta sala de Planning Poker será excluído para todos. Quem estiver nela será desconectado. Não é possível desfazer.",
   "myBoards.deletePrompt": "Digite o código do quadro {code} para confirmar.",
+  "myBoards.deletePromptPoker": "Digite o código da sala {code} para confirmar.",
   "myBoards.error.signIn": "Sua sessão terminou. Faça login novamente.",
   "myBoards.error.gone": "Esse quadro não existe mais, por isso foi removido da lista.",
   "myBoards.error.locked": "Quadros protegidos por senha não podem ser renomeados aqui.",

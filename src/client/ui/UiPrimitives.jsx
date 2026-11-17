@@ -20,6 +20,11 @@ export function Button({ variant = BUTTON_VARIANT.DEFAULT, disabledLook, classNa
   );
 }
 
+/** A navigation link that looks like a Button of the same variant. */
+export function ButtonLink({ variant = BUTTON_VARIANT.DEFAULT, className, children, ...rest }) {
+  return <a className={[buttonClass(variant), className].filter(Boolean).join(' ')} {...rest}>{children}</a>;
+}
+
 export function MenuItem({ icon, label, variant = MENU_ITEM_VARIANT.DEFAULT, checked, disabled, onClick, checkIcon }) {
   return (
     <button

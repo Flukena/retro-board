@@ -17,8 +17,8 @@ const DELETE_ICON_SIZE_PX = 20;
 const KIND_KEYS = Object.freeze({ [ROOM_KIND.BOARD]: 'myBoards.kind.board', [ROOM_KIND.POKER]: 'poker.title' });
 // Delete copy names what is being deleted: a board or a Planning Poker room.
 export const DELETE_COPY_KEYS = Object.freeze({
-  [ROOM_KIND.BOARD]: Object.freeze({ title: 'myBoards.deleteTitle', body: 'myBoards.deleteBody' }),
-  [ROOM_KIND.POKER]: Object.freeze({ title: 'myBoards.deleteTitlePoker', body: 'myBoards.deleteBodyPoker' }),
+  [ROOM_KIND.BOARD]: Object.freeze({ title: 'myBoards.deleteTitle', body: 'myBoards.deleteBody', prompt: 'myBoards.deletePrompt' }),
+  [ROOM_KIND.POKER]: Object.freeze({ title: 'myBoards.deleteTitlePoker', body: 'myBoards.deleteBodyPoker', prompt: 'myBoards.deletePromptPoker' }),
 });
 const ERROR_KEYS = Object.freeze({
   [MY_BOARDS_ERROR.SIGN_IN]: 'myBoards.error.signIn',
@@ -130,7 +130,7 @@ export default function MyBoardsDialog({ onClose }) {
           icon={<Trash2 size={DELETE_ICON_SIZE_PX} color="var(--danger)" aria-hidden="true" />}
           title={t(DELETE_COPY_KEYS[deleting.kind].title)}
           body={t(DELETE_COPY_KEYS[deleting.kind].body)}
-          prompt={t('myBoards.deletePrompt', { code: deleting.code })}
+          prompt={t(DELETE_COPY_KEYS[deleting.kind].prompt, { code: deleting.code })}
           expected={deleting.code}
           cancelLabel={t('common.cancel')}
           confirmLabel={t('common.delete')}

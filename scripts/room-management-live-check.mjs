@@ -87,6 +87,12 @@ const boardRows = (page) => page.locator('.rb-my-boards__row');
 const rowOf = (page, code) => boardRows(page).filter({ hasText: code });
 const topBarTitle = (page) => page.locator('.rb-topbar-title');
 const deletedHeading = (page, lang, key) => page.getByRole('heading', { name: label(lang, key), exact: true });
+
+/** The deleted screen shows its heading and exactly one link home. */
+async function expectDeletedScreen(page, lang, key) {
+  await deletedHeading(page, lang, key).waitFor();
+  assert.equal(await page.locator('a[href="/"]').count(), 1, `${lang} deleted screen has one home link`);
+}
 const guestNote = (page, lang) => page.getByText(label(lang, 'landing.guestNote', { hours: GUEST_ROOM_RETENTION_HOURS }), { exact: true });
 
 async function expectSignedIn(page, name) {
@@ -172,9 +178,10 @@ async function createPoker(page, baseUrl, name) {
 }
 
 /** Deletes `code` from an open My boards dialog through the type-to-confirm step; screenshots the confirm step. */
-async function deleteFromMyBoards(page, lang, { code, titleKey, shotName, report }) {
+async function deleteFromMyBoards(page, lang, { code, titleKey, promptKey, shotName, report }) {
   await rowOf(page, code).getByRole('button', { name: label(lang, 'common.delete'), exact: true }).click();
   const confirm = page.getByRole('dialog', { name: label(lang, titleKey), exact: true });
+  await confirm.getByText(label(lang, promptKey, { code }), { exact: true }).waitFor();
   await confirm.getByRole('textbox').fill(code);
   await assertDialogOnTop(confirm, { landing: true });
   await shot(page, shotName, report);
@@ -293,9 +300,9 @@ async function renameAndDeleteSteps({ a, report, state }) {
     return { undoPresses: presses };
   });
   await step(report, '4a. A deletes the board while B is in it: deleted screen (th, en), link not found, gone from the list', async () => {
-    await deleteFromMyBoards(a, 'en', { code: codeOf(state.boardUrl), titleKey: 'myBoards.deleteTitle', shotName: 'delete-confirm-en.png', report });
-    await deletedHeading(bGuest, 'th', 'roomDeleted.title.board').waitFor();
-    await deletedHeading(aBoard, 'en', 'roomDeleted.title.board').waitFor();
+    await deleteFromMyBoards(a, 'en', { code: codeOf(state.boardUrl), titleKey: 'myBoards.deleteTitle', promptKey: 'myBoards.deletePrompt', shotName: 'delete-confirm-en.png', report });
+    await expectDeletedScreen(bGuest, 'th', 'roomDeleted.title.board');
+    await expectDeletedScreen(aBoard, 'en', 'roomDeleted.title.board');
     await shot(bGuest, 'deleted-board-th.png', report);
     await shot(aBoard, 'deleted-board-en.png', report);
     await openLanding(bGuest, new URL('/', state.boardUrl).href);
@@ -313,8 +320,8 @@ async function renameAndDeleteSteps({ a, report, state }) {
     const dialog = await openMyBoards(a, 'th');
     await assertDialogOnTop(dialog, { landing: true });
     await shot(a, 'my-boards-th.png', report);
-    await deleteFromMyBoards(a, 'th', { code: codeOf(state.pokerUrl), titleKey: 'myBoards.deleteTitlePoker', shotName: 'delete-confirm-poker-th.png', report });
-    await deletedHeading(bGuest, 'th', 'roomDeleted.title.poker').waitFor();
+    await deleteFromMyBoards(a, 'th', { code: codeOf(state.pokerUrl), titleKey: 'myBoards.deleteTitlePoker', promptKey: 'myBoards.deletePromptPoker', shotName: 'delete-confirm-poker-th.png', report });
+    await expectDeletedScreen(bGuest, 'th', 'roomDeleted.title.poker');
     await shot(bGuest, 'deleted-poker-th.png', report);
     await myBoardsDialog(a, 'th').getByText(label('th', 'myBoards.empty'), { exact: true }).waitFor();
     await setLanguage(a, 'en');
@@ -358,9 +365,9 @@ async function lockedSteps({ a, report, baseUrl, state }) {
   });
   await step(report, '4c. A deletes the locked board while B is in it: deleted screen replaces the locked board', async () => {
     await openMyBoards(a, 'en');
-    await deleteFromMyBoards(a, 'en', { code: codeOf(state.lockedUrl), titleKey: 'myBoards.deleteTitle', shotName: 'delete-confirm-locked-en.png', report });
-    await deletedHeading(bGuest, 'th', 'roomDeleted.title.board').waitFor();
-    await deletedHeading(aBoard, 'en', 'roomDeleted.title.board').waitFor();
+    await deleteFromMyBoards(a, 'en', { code: codeOf(state.lockedUrl), titleKey: 'myBoards.deleteTitle', promptKey: 'myBoards.deletePrompt', shotName: 'delete-confirm-locked-en.png', report });
+    await expectDeletedScreen(bGuest, 'th', 'roomDeleted.title.board');
+    await expectDeletedScreen(aBoard, 'en', 'roomDeleted.title.board');
     await shot(bGuest, 'deleted-locked-th.png', report);
     assert.deepEqual(await listedCodes(a, 'en'), [codeOf(state.keeperUrl)]);
   });

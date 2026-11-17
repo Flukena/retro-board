@@ -1,6 +1,8 @@
 import React, { useEffect, useId, useSyncExternalStore } from 'react';
 import { t } from '../ui/i18n.js';
 import SitePage from '../app/SitePage.jsx';
+import { ButtonLink } from '../ui/UiPrimitives.jsx';
+import { BUTTON_VARIANT } from '../ui/ui-variants.js';
 import { ROOM_KIND, forgetRecent } from '../app/router.js';
 import { forgetWhenDeleted, pageRoomDeleted } from './room-deleted.js';
 
@@ -10,10 +12,10 @@ const TITLE_KEYS = Object.freeze({ [ROOM_KIND.BOARD]: 'roomDeleted.title.board',
 export function RoomDeletedScreen({ kind }) {
   const titleId = useId();
   return (
-    <SitePage labelledBy={titleId}>
+    <SitePage labelledBy={titleId} homeLink={false}>
       <h1 id={titleId} className="rb-legal__title">{t(TITLE_KEYS[kind])}</h1>
       <p className="rb-template__lede">{t('roomDeleted.body')}</p>
-      <a href="/">{t('room.bootstrap.home')}</a>
+      <p><ButtonLink variant={BUTTON_VARIANT.PRIMARY} href="/">{t('room.bootstrap.home')}</ButtonLink></p>
     </SitePage>
   );
 }

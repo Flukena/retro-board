@@ -40,7 +40,9 @@ test('a deleted room replaces the plain board, the locked board and Poker in Tha
         assert.ok(!html.includes(view.marker), `${view.marker} is replaced`);
         assert.ok(html.includes(t(view.titleKey)));
         assert.ok(html.includes(t('roomDeleted.body')));
-        assert.match(html, /<a [^>]*href="\/"[^>]*>/, 'a link home');
+        const homeLinks = html.match(/<a [^>]*href="\/"[^>]*>/g) || [];
+        assert.equal(homeLinks.length, 1, 'exactly one link home');
+        assert.match(homeLinks[0], /class="rb-btn rb-btn--primary"/, 'the home link uses the primary button style');
         assert.doesNotMatch(html, /roomDeleted\./, 'every string is translated');
       }
     }

@@ -128,6 +128,7 @@ export default Object.freeze({
   "myBoards.deleteTitlePoker": "Xóa vĩnh viễn phòng Planning Poker",
   "myBoards.deleteBodyPoker": "Mọi nội dung trong phòng Planning Poker này sẽ bị xóa với tất cả mọi người. Ai đang ở trong phòng sẽ bị ngắt kết nối. Không thể hoàn tác.",
   "myBoards.deletePrompt": "Nhập mã bảng {code} để xác nhận.",
+  "myBoards.deletePromptPoker": "Nhập mã phòng {code} để xác nhận.",
   "myBoards.error.signIn": "Phiên của bạn đã kết thúc. Vui lòng đăng nhập lại.",
   "myBoards.error.gone": "Bảng này không còn tồn tại nên đã được gỡ khỏi danh sách.",
   "myBoards.error.locked": "Không thể đổi tên bảng được bảo vệ bằng mật khẩu tại đây.",
