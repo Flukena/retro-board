@@ -3,7 +3,7 @@ import { portalToBody } from '../ui/UiPrimitives.jsx';
 import { useReducedMotion } from '../ui/usePresence.js';
 import { t } from '../ui/i18n.js';
 import { FLOAT_DURATION_MS, REACTION_LOOK } from './reaction-timeline.js';
-import { addReaction, liveReactions, nextExpiryInMs, reactionEntry } from './reaction-feed.js';
+import { addReaction, liveReactions, nextExpiryInMs, reactionEntry, withoutMotion } from './reaction-feed.js';
 import { fitCanvas, paintFireworks } from './fireworks-paint.js';
 import './reactions.css';
 
@@ -66,6 +66,9 @@ function useReactionFeed(channel) {
     const now = Date.now();
     setEntries((current) => addReaction(current, reactionEntry(event, { reducedMotion, now }), now));
   }), [channel, reducedMotion]);
+  useEffect(() => {
+    if (reducedMotion) setEntries(withoutMotion);
+  }, [reducedMotion]);
   useEffect(() => {
     const waitMs = nextExpiryInMs(entries, Date.now());
     if (waitMs === null) return undefined;

@@ -5,19 +5,24 @@ export const FIREWORKS_REACTION = '🎆';
 export const BOARD_REACTIONS = Object.freeze([FIREWORKS_REACTION, '👏', '❤️', '😂', '🔥', '👍']);
 // Planning Poker rooms use `reaction`; a distinct field keeps the two shapes apart.
 export const BOARD_REACTION_FIELD = 'boardReaction';
+// About one reaction per second per person (owner decision). Senders hold to it, and every page enforces it again
+// on what it plays, because a modified client can skip its own limit.
+export const REACTION_SEND_INTERVAL_MS = 1000;
 
 const isPlainObject = (value) => value !== null && typeof value === 'object'
   && Object.getPrototypeOf(value) === Object.prototype;
 const isPositiveSafeInteger = (value) => Number.isSafeInteger(value) && value > 0;
-const isPositiveTime = (value) => typeof value === 'number' && Number.isFinite(value) && value > 0;
 
-/** The presence value for one reaction: `seq` grows with every send, `at` is the sender's clock in ms. */
-export function boardReaction(emoji, seq, at) {
-  if (!BOARD_REACTIONS.includes(emoji) || !isPositiveSafeInteger(seq) || !isPositiveTime(at)) return null;
-  return Object.freeze({ emoji, seq, at });
+/**
+ * The presence value for one reaction. `seq` grows with every send, so each send is a new presence state. No sender
+ * clock is published: machines' clocks disagree, and playback never depends on them.
+ */
+export function boardReaction(emoji, seq) {
+  if (!BOARD_REACTIONS.includes(emoji) || !isPositiveSafeInteger(seq)) return null;
+  return Object.freeze({ emoji, seq });
 }
 
-/** A peer's presence field as a reaction, or null when it is anything else. */
+/** A peer's presence field as a reaction, or null when it is anything else. Unknown keys are ignored. */
 export function decodeBoardReaction(raw) {
-  return isPlainObject(raw) ? boardReaction(raw.emoji, raw.seq, raw.at) : null;
+  return isPlainObject(raw) ? boardReaction(raw.emoji, raw.seq) : null;
 }

@@ -2,20 +2,21 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as Y from 'yjs';
 import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate } from 'y-protocols/awareness';
-import { BOARD_REACTION_FIELD, boardReaction } from '../../domain/board-reactions.js';
+import { BOARD_REACTION_FIELD, REACTION_SEND_INTERVAL_MS, boardReaction } from '../../domain/board-reactions.js';
 import { DISPLAY_NAME_MAX_LENGTH } from '../../domain/security-boundaries.js';
-import { REACTION_SEND_INTERVAL_MS } from './reaction-rate-limiter.js';
 import { REACTION_CLEAR_MS, createReactionChannel } from './reaction-channel.js';
 
 const START_MS = 1_700_000_000_000;
 const RELAY = 'relay';
+const BYPASS_UPDATES = 20;
+// How much later than the send its own local play would read the clock, were it read twice.
+const LOCAL_PLAY_DELAY_MS = 5;
 
-/** One page: a doc, its awareness, and a clock the test moves. */
-function page(t, name) {
+/** One page: a doc, its awareness, and a clock the test moves (pass one clock to pages that share time). */
+function page(t, name, clock = { now: START_MS }) {
   const doc = new Y.Doc();
   const awareness = new Awareness(doc);
   awareness.setLocalStateField('user', { userId: `id-${name}`, name });
-  const clock = { now: START_MS };
   t.after(() => { awareness.destroy(); doc.destroy(); });
   return { doc, awareness, clock, open: () => createReactionChannel(awareness, { now: () => clock.now }) };
 }
@@ -78,8 +79,9 @@ test('B sends a float and A sees it with B’s name', (t) => {
 
 test('sends inside the interval are dropped; the next one after it goes out with the next seq', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
-  const a = page(t, 'Ada');
-  const b = page(t, 'Bee');
+  const clock = { now: START_MS };
+  const a = page(t, 'Ada', clock);
+  const b = page(t, 'Bee', clock);
   link(a, b);
   introduce(a, b);
   const channelA = a.open();
@@ -92,6 +94,42 @@ test('sends inside the interval are dropped; the next one after it goes out with
   assert.equal(channelA.cooldownMs(), 0);
   assert.equal(channelA.send('🔥'), true);
   assert.deepEqual(atB.map(({ emoji, seq }) => `${emoji}${seq}`), ['👍1', '🔥2']);
+});
+
+test('a peer that bypasses send() and rewrites its presence 20 times at once plays once on the other page', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const clock = { now: START_MS };
+  const mallory = page(t, 'Mallory', clock);
+  const b = page(t, 'Bee', clock);
+  link(mallory, b);
+  introduce(mallory, b);
+  const atB = record(b.open());
+  // A modified client writes the field directly, with whatever timestamp it likes.
+  const write = (seq) => mallory.awareness.setLocalStateField(BOARD_REACTION_FIELD, { emoji: '🎆', seq, at: clock.now });
+  for (let seq = 1; seq <= BYPASS_UPDATES; seq += 1) write(seq);
+  assert.equal(atB.length, 1, `${BYPASS_UPDATES} immediate updates`);
+  clock.now += REACTION_SEND_INTERVAL_MS;
+  write(BYPASS_UPDATES + 1);
+  assert.equal(atB.length, 2, 'one more an interval later');
+});
+
+test("a page's own send at the interval edge still shows locally: one clock reading serves the send limit and the play", (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const clock = { now: START_MS };
+  const a = page(t, 'Ada', clock);
+  // Registered before the channel, so it runs between the first send and that send's local play: time passes there
+  // once (a slow frame), as if the play read the clock again.
+  let delayFirstPlay = true;
+  a.awareness.on('change', () => {
+    if (delayFirstPlay) clock.now += LOCAL_PLAY_DELAY_MS;
+    delayFirstPlay = false;
+  });
+  const channel = a.open();
+  const seen = record(channel);
+  assert.equal(channel.send('👏'), true);
+  clock.now = START_MS + REACTION_SEND_INTERVAL_MS;
+  assert.equal(channel.send('🔥'), true, 'exactly one interval after the first send');
+  assert.deepEqual(seen.map(({ emoji }) => emoji), ['👏', '🔥'], 'both show on the sender too');
 });
 
 test('the field is cleared after it has had time to reach every peer', (t) => {
@@ -109,8 +147,9 @@ test('the field is cleared after it has had time to reach every peer', (t) => {
 
 test('a peer who joins while a reaction is live does not replay it, but plays the next one', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
-  const a = page(t, 'Ada');
-  const late = page(t, 'Late');
+  const clock = { now: START_MS };
+  const a = page(t, 'Ada', clock);
+  const late = page(t, 'Late', clock);
   const channelA = a.open();
   channelA.send('🎆');
   const atLate = record(late.open());
@@ -140,8 +179,9 @@ test('only whitelisted emoji are sent, and nothing reaches the board document or
 
 test('the sender name is trimmed and bounded; a missing name is empty for the UI to replace', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
-  const a = page(t, 'Ada');
-  const b = page(t, 'Bee');
+  const clock = { now: START_MS };
+  const a = page(t, 'Ada', clock);
+  const b = page(t, 'Bee', clock);
   link(a, b);
   introduce(a, b);
   const atB = record(b.open());
@@ -166,6 +206,6 @@ test('destroy stops delivery, cancels the clear timer and leaves no reaction beh
   a.clock.now += REACTION_SEND_INTERVAL_MS;
   assert.equal(channel.send('👍'), false);
   t.mock.timers.tick(REACTION_CLEAR_MS);
-  a.awareness.setLocalStateField(BOARD_REACTION_FIELD, boardReaction('👍', 99, a.clock.now));
+  a.awareness.setLocalStateField(BOARD_REACTION_FIELD, boardReaction('👍', 99));
   assert.equal(seen.length, 1, 'no delivery after destroy');
 });

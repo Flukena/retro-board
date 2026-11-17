@@ -13,7 +13,7 @@ export const reactionLabel = (emoji) => (emoji === FIREWORKS_REACTION
 /** The six reactions. While `cooling`, clicks still reach `onSend`; the channel's rate limit drops them. */
 export function ReactionMenu({ cooling, onSend }) {
   return (
-    <Surface className="rb-reaction-picker" role="group" aria-label={t('reaction.picker')}>
+    <Surface className="rb-reaction-picker" role="group" aria-label={t('reaction.picker')} data-board-shortcuts="off">
       {BOARD_REACTIONS.map((emoji) => (
         <Button key={emoji} className="rb-reaction-picker__emoji" aria-label={reactionLabel(emoji)}
           title={reactionLabel(emoji)} disabledLook={cooling} onClick={() => onSend(emoji)}>
@@ -59,7 +59,7 @@ export function ReactionPicker({ channel }) {
     startCooldown(channel.cooldownMs());
   };
   return (
-    <div ref={rootRef} className="rb-reaction-dock" data-board-shortcuts="off">
+    <div ref={rootRef} className="rb-reaction-dock">
       {open && <ReactionMenu cooling={cooling} onSend={send} />}
       <ReactionToggle open={open} onToggle={() => setOpen((value) => !value)} />
     </div>

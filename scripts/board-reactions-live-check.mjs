@@ -9,7 +9,7 @@
  */
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
-import { REACTION_SEND_INTERVAL_MS } from '../src/client/reactions/reaction-rate-limiter.js';
+import { BOARD_REACTIONS, REACTION_SEND_INTERVAL_MS } from '../src/domain/board-reactions.js';
 import { FIREWORKS_DURATION_MS, FLOAT_DURATION_MS } from '../src/client/reactions/reaction-timeline.js';
 import {
   CANVAS_SELECTOR, FAKE_GOOGLE_DECISION, REDO_KEY, SYNC_TIMEOUT_MS, UNDO_KEY, VIEWPORT, addSharedSticky,
@@ -42,17 +42,30 @@ const SETTLE_MS = 400;
 // Screenshots wait until the bursts have spread out a little; the first frame is a dot per burst.
 const MID_SHOW_DELAY_MS = 350;
 const FIRST_PAINT_TIMEOUT_MS = 1000;
+// Turning on reduced motion mid-show must stop the fireworks at once, far sooner than their natural end.
+const MOTION_STOP_TIMEOUT_MS = 500;
 const STICKY_PX = Object.freeze({ x: 520, y: 380 });
 const EMPTY_CANVAS_PX = Object.freeze({ x: 760, y: 640 });
+// Empty board in every layout viewport: right of the phone rail, under the top bar, left of the sticky.
+const LAYOUT_EMPTY_PX = Object.freeze({ x: 200, y: 180 });
 const ALPHA_CHANNEL_OFFSET = 3;
 const RGBA_STRIDE = 4;
+// `phone` layouts dock the selection toolbar above the bottom row and give the open picker that row.
 const LAYOUT_VIEWPORTS = Object.freeze([
-  { name: 'desktop-short', width: 1280, height: 600 },
-  { name: 'phone-390', width: 390, height: 844 },
-  { name: 'phone-360', width: 360, height: 740 },
-  { name: 'phone-landscape', width: 740, height: 360 },
+  { name: 'desktop-short', width: 1280, height: 600, phone: false },
+  { name: 'phone-390', width: 390, height: 844, phone: true },
+  { name: 'phone-360', width: 360, height: 740, phone: true },
+  { name: 'phone-320', width: 320, height: 568, phone: true },
+  { name: 'phone-landscape', width: 740, height: 360, phone: true },
+  { name: 'phone-landscape-short', width: 568, height: 320, phone: true },
 ]);
-const CHROME_SELECTORS = Object.freeze(['.rb-zoom-controls', '.rb-minimap', '.rb-tool-dock__body', '.rb-selection-toolbar']);
+const ZOOM_SELECTOR = '.rb-zoom-controls';
+const PICKER_SELECTOR = '.rb-reaction-picker';
+const SELECTION_TOOLBAR_SELECTOR = '.rb-selection-toolbar';
+const CHROME_SELECTORS = Object.freeze([ZOOM_SELECTOR, '.rb-minimap', '.rb-tool-dock__body', SELECTION_TOOLBAR_SELECTOR]);
+// The narrowest phone, where the open picker shows only part of the row and must be scrolled by touch.
+const TOUCH_SCROLL_VIEWPORT = LAYOUT_VIEWPORTS.find(({ name }) => name === 'phone-320');
+const LAST_REACTION = BOARD_REACTIONS.at(-1);
 const stamp = Date.now();
 const STICKY_TEXT = `reaction-undo-${stamp}`;
 const password = `reactions-${randomBytes(9).toString('base64url')}`;
@@ -121,25 +134,43 @@ async function visibleBox(page, selector) {
   return locator.boundingBox();
 }
 
-/** True when every emoji button of the open picker is the topmost element at its centre. */
-const pickerOnTop = (page) => page.evaluate(() => [...document.querySelectorAll('.rb-reaction-picker__emoji')].every((button) => {
-  const box = button.getBoundingClientRect();
-  return button.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
-}));
+/**
+ * The open picker's emoji buttons whose centre is inside its scroll area, as `{ emoji, x, y, onTop }`. On narrow
+ * phones the picker scrolls sideways, so buttons scrolled out of it are left out.
+ */
+const shownPickerButtons = (page) => page.evaluate((selector) => {
+  const picker = document.querySelector(selector);
+  // The scroll area is the client box: inside the border, where scrolled content is clipped.
+  const scrollLeft = picker.getBoundingClientRect().left + picker.clientLeft;
+  const scrollRight = scrollLeft + picker.clientWidth;
+  return [...picker.querySelectorAll('button')].map((button) => {
+    const box = button.getBoundingClientRect();
+    return { button, x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  }).filter(({ x }) => x > scrollLeft && x < scrollRight).map(({ button, x, y }) => ({
+    emoji: button.textContent, x, y, onTop: button.contains(document.elementFromPoint(x, y)),
+  }));
+}, PICKER_SELECTOR);
 
-/** The pill and its open picker stay inside the viewport and clear of every bottom/rail chrome box. */
+/** True when at least one emoji is shown and every shown one is the topmost element at its centre. */
+async function pickerOnTop(page) {
+  const shown = await shownPickerButtons(page);
+  return shown.length > 0 && shown.every(({ onTop }) => onTop);
+}
+
+/** The pill and its open picker stay inside the viewport, clear of the rail, zoom bar, minimap and selection toolbar. */
 async function checkPlacement(page, viewport) {
   const dock = await visibleBox(page, DOCK_SELECTOR);
   if (!dock) throw new Error(`${viewport.name}: reaction pill not visible`);
-  const picker = await visibleBox(page, '.rb-reaction-picker');
+  const picker = await visibleBox(page, PICKER_SELECTOR);
   const inside = (box) => box.x >= 0 && box.y >= 0 && box.x + box.width <= viewport.width && box.y + box.height <= viewport.height;
   if (!inside(dock) || (picker && !inside(picker))) throw new Error(`${viewport.name}: pill or picker leaves the viewport`);
   const overlaps = [];
   for (const selector of CHROME_SELECTORS) {
     const box = await visibleBox(page, selector);
-    if (box && intersects(dock, box)) overlaps.push(selector);
+    if (box && intersects(dock, box)) overlaps.push(`pill/${selector}`);
+    if (box && picker && intersects(picker, box)) overlaps.push(`picker/${selector}`);
   }
-  if (overlaps.length) throw new Error(`${viewport.name}: pill overlaps ${overlaps.join(', ')}`);
+  if (overlaps.length) throw new Error(`${viewport.name}: overlaps ${overlaps.join(', ')}`);
   if (picker && !await pickerOnTop(page)) throw new Error(`${viewport.name}: another element covers the open picker`);
   return { dock, picker };
 }
@@ -238,9 +269,21 @@ async function undoStep({ a, b, report }) {
   });
 }
 
+/** B is watching A's fireworks when it turns on reduced motion; returns how long the show took to stop. */
+async function stopShowMidway(a, b) {
+  await waitForCooldown();
+  await react(a, 'en', FIREWORKS);
+  await b.locator(FIREWORKS_SELECTOR).waitFor({ state: 'attached', timeout: SYNC_TIMEOUT_MS });
+  await waitForPaint(b);
+  const switchedAt = Date.now();
+  await b.emulateMedia({ reducedMotion: 'reduce' });
+  await b.locator(FIREWORKS_SELECTOR).waitFor({ state: 'detached', timeout: MOTION_STOP_TIMEOUT_MS });
+  return Date.now() - switchedAt;
+}
+
 async function reducedMotionStep({ a, b, report }) {
-  await step(report, `${mode}: with reduced motion B gets a still, non-flashing badge instead of particles`, async () => {
-    await b.emulateMedia({ reducedMotion: 'reduce' });
+  await step(report, `${mode}: reduced motion stops a running show at once, then B gets still, non-flashing badges`, async () => {
+    const stoppedAfterMs = await stopShowMidway(a, b);
     await waitForCooldown();
     await react(a, 'en', FIREWORKS);
     const still = b.locator(STILL_SELECTOR).filter({ hasText: NAME_A });
@@ -254,24 +297,93 @@ async function reducedMotionStep({ a, b, report }) {
     await b.emulateMedia({ reducedMotion: 'no-preference' });
     if (canvases !== 0 || animation !== 'none') throw new Error(`B drew ${canvases} canvases, animation ${animation}`);
     if (first.x !== second.x || first.y !== second.y) throw new Error('the still badge moved');
-    return { animation, canvases, box: first };
+    return { stoppedAfterMs, animation, canvases, box: first };
   });
 }
 
+/** Closes the open picker; on a phone the zoom controls it displaced must come back. */
+async function closePicker(page, viewport) {
+  await page.getByRole('button', { name: LABELS.en.open, exact: true }).click();
+  await page.locator(PICKER_SELECTOR).waitFor({ state: 'detached' });
+  if (viewport.phone && !await page.locator(ZOOM_SELECTOR).isVisible()) {
+    throw new Error(`${viewport.name}: zoom controls did not return after the picker closed`);
+  }
+}
+
+/** Opens the picker in `viewport`, checks its placement and captures it; `selected` puts the selection toolbar up first. */
+async function placementWith(page, viewport, selected, report) {
+  await page.locator(CANVAS_SELECTOR).click({ position: LAYOUT_EMPTY_PX });
+  if (selected) {
+    await page.keyboard.press('ControlOrMeta+a');
+    await page.locator(SELECTION_TOOLBAR_SELECTOR).first().waitFor();
+  }
+  await openPicker(page, 'en');
+  const placement = await checkPlacement(page, viewport);
+  await snap(page, `${mode}-layout-${viewport.name}${selected ? '-selected' : ''}-en.png`, report);
+  await closePicker(page, viewport);
+  return placement;
+}
+
 async function layoutStep({ a, report }) {
-  await step(report, `${mode}: the pill stays clear of the rail, zoom bar, minimap and selection toolbar`, async () => {
+  await step(report, `${mode}: the pill and open picker stay clear of the rail, zoom bar, minimap and selection toolbar`, async () => {
     const results = {};
-    await a.locator(CANVAS_SELECTOR).click({ position: EMPTY_CANVAS_PX });
-    await a.keyboard.press('ControlOrMeta+a');
     for (const viewport of LAYOUT_VIEWPORTS) {
       await a.setViewportSize({ width: viewport.width, height: viewport.height });
       await sleep(SETTLE_MS);
-      await openPicker(a, 'en');
-      results[viewport.name] = await checkPlacement(a, viewport);
-      await snap(a, `${mode}-layout-${viewport.name}-en.png`, report);
+      results[viewport.name] = {
+        idle: await placementWith(a, viewport, false, report),
+        selected: await placementWith(a, viewport, true, report),
+      };
     }
+    await a.locator(CANVAS_SELECTOR).click({ position: LAYOUT_EMPTY_PX });
     await a.setViewportSize(VIEWPORT);
     return results;
+  });
+}
+
+/** A one-finger tap through the browser's touch input, not a mouse click. */
+async function touchTap(cdp, { x, y }) {
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+}
+
+/** Swipes the open picker to its end with a touch gesture; returns the button the finger can now reach last. */
+async function swipePickerToEnd(page, cdp) {
+  const picker = page.locator(PICKER_SELECTOR);
+  const box = await picker.boundingBox();
+  const scrollWidth = await picker.evaluate((node) => node.scrollWidth);
+  // A negative distance moves the content left, bringing the row's end into view.
+  await cdp.send('Input.synthesizeScrollGesture', {
+    x: box.x + box.width / 2, y: box.y + box.height / 2, xDistance: -scrollWidth, yDistance: 0, gestureSourceType: 'touch',
+  });
+  return (await shownPickerButtons(page)).at(-1);
+}
+
+async function touchScrollStep({ a, b, report }) {
+  await step(report, `${mode}: on a 320 px phone a touch swipe reaches the last emoji and a tap on it sends`, async () => {
+    const viewport = TOUCH_SCROLL_VIEWPORT;
+    await a.setViewportSize({ width: viewport.width, height: viewport.height });
+    await sleep(SETTLE_MS);
+    await a.locator(CANVAS_SELECTOR).click({ position: LAYOUT_EMPTY_PX });
+    await openPicker(a, 'en');
+    const before = (await shownPickerButtons(a)).map(({ emoji }) => emoji);
+    if (before.includes(LAST_REACTION)) throw new Error(`${viewport.name}: the whole row fits, so nothing to scroll`);
+    const cdp = await a.context().newCDPSession(a);
+    try {
+      await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true });
+      const last = await swipePickerToEnd(a, cdp);
+      await snap(a, `${mode}-touch-scroll-${viewport.name}-en.png`, report);
+      if (last?.emoji !== LAST_REACTION || !last.onTop) throw new Error(`after the swipe the row ends at ${JSON.stringify(last)}`);
+      await waitForCooldown();
+      await touchTap(cdp, last);
+      await b.locator(FLOAT_SELECTOR).filter({ hasText: NAME_A }).filter({ hasText: LAST_REACTION }).waitFor({ timeout: SYNC_TIMEOUT_MS });
+      return { shownBefore: before, reached: last.emoji };
+    } finally {
+      await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: false });
+      await cdp.detach();
+      await a.locator(CANVAS_SELECTOR).click({ position: LAYOUT_EMPTY_PX });
+      await a.setViewportSize(VIEWPORT);
+    }
   });
 }
 
@@ -309,6 +421,7 @@ await runLiveCheck('board-reactions-live-check.mjs', async (context) => {
   await undoStep(context);
   await reducedMotionStep(context);
   await layoutStep(context);
+  await touchScrollStep(context);
   await drawingStep(context);
   await errorsStep(context);
 }, mode === MODE.LOCKED ? { setup: lockedSetup } : {});

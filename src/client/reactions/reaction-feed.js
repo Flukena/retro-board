@@ -23,6 +23,9 @@ export function reactionEntry({ clientId, seq, emoji, name }, { reducedMotion, n
   });
 }
 
+/** What may stay on screen once reduced motion is on: running fireworks and floats stop at once; still badges stay. */
+export const withoutMotion = (entries) => Object.freeze(entries.filter((entry) => entry.look === REACTION_LOOK.STILL));
+
 export const liveReactions = (entries, now) => entries.filter((entry) => entry.endsAt > now);
 
 /** The live entries plus `entry`, keeping each look within its cap by dropping its oldest. */

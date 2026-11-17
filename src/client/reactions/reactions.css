@@ -1,4 +1,6 @@
-/* Board reactions: the 🎉 pill under the left tool rail, its picker, and the effects layer above the board. */
+/* Board reactions: the 🎉 pill under the left tool rail, its picker, and the effects layer above the board.
+   The picker opens beside the pill, in its row: the rail is above the pill and the docked selection toolbar sits
+   above the bottom row on phones, so the open picker never covers either. */
 
 /* The rail leaves room at the bottom for the pill instead of running behind it. */
 .rb-tool-dock:has(.rb-reaction-dock) {
@@ -26,8 +28,8 @@
 
 .rb-reaction-picker {
   position: absolute;
-  left: 0;
-  bottom: calc(100% + var(--space-2));
+  left: calc(100% + var(--space-2));
+  bottom: 0;
   display: flex;
   gap: var(--space-1);
   padding: var(--space-1);
@@ -118,6 +120,24 @@
     left: var(--rb-mobile-left-px);
     bottom: var(--rb-mobile-bottom-px);
     width: var(--rb-mobile-rail-width-px);
+  }
+
+  /* On a phone the open picker takes the rest of the bottom row, scrolling when narrower than six emoji; the zoom
+     controls and minimap step aside while it is open, as they do for the drawing toolbar. */
+  .rb-reaction-picker {
+    left: calc(100% + var(--rb-mobile-gap-px));
+    max-width: calc(100vw - var(--rb-mobile-canvas-left-px) - var(--rb-mobile-right-px));
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+
+  .rb-reaction-picker > * {
+    flex-shrink: 0;
+  }
+
+  :root:has(.rb-reaction-picker) .rb-zoom-controls,
+  :root:has(.rb-reaction-picker) .rb-minimap {
+    display: none;
   }
 
   /* The phone drawing toolbar and the inline editor take the bottom row. */

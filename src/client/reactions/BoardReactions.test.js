@@ -23,6 +23,8 @@ test('the 🎉 pill renders closed with a translated label in Thai and English',
       assert.match(html, /aria-expanded="false"/);
       assert.ok(html.includes('🎉'));
       assert.doesNotMatch(html, /rb-reaction-picker"/, 'the menu starts closed');
+      // Clicking the board does not take focus from the 🎉 button, so it must not switch board shortcuts off.
+      assert.doesNotMatch(html, /data-board-shortcuts/, 'board shortcuts keep working after the button is used');
       assert.notEqual(t('reaction.open'), 'reaction.open');
     }
   });
@@ -36,6 +38,7 @@ test('the menu offers the six reactions with translated labels and sends the cli
       const menu = ReactionMenu({ cooling: false, onSend: (emoji) => sent.push(emoji) });
       const html = renderToStaticMarkup(menu);
       assert.ok(html.includes(`aria-label="${escapeHtml(t('reaction.picker'))}"`));
+      assert.match(html, /^<div[^>]*data-board-shortcuts="off"/, 'keys typed inside the open menu stay out of the board');
       assert.ok(html.includes(`aria-label="${escapeHtml(t('reaction.fireworks'))}"`), `${lang}: fireworks label`);
       for (const emoji of BOARD_REACTIONS.slice(1)) assert.ok(html.includes(escapeHtml(t('reaction.send', { emoji }))));
       buttonsOf(menu).forEach((button) => button.props.onClick());

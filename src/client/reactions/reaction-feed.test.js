@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { FIREWORKS_DURATION_MS, MAX_SPARKS_PER_SHOW, REACTION_LOOK } from './reaction-timeline.js';
 import {
-  MAX_ACTIVE_BY_LOOK, MAX_ACTIVE_SPARKS, addReaction, liveReactions, nextExpiryInMs, reactionEntry,
+  MAX_ACTIVE_BY_LOOK, MAX_ACTIVE_SPARKS, addReaction, liveReactions, nextExpiryInMs, reactionEntry, withoutMotion,
 } from './reaction-feed.js';
 
 const NOW_MS = 1_700_000_000_000;
@@ -63,4 +63,14 @@ test('adding also drops anything already finished', () => {
   const old = reactionEntry(event(1, 1), MOTION);
   const later = reactionEntry(event(1, 2), { ...MOTION, now: old.endsAt + 1 });
   assert.deepEqual(addReaction([old], later, old.endsAt + 1).map((entry) => entry.key), [later.key]);
+});
+
+test('turning on reduced motion mid-show removes running fireworks and floats at once, keeping still badges', () => {
+  let entries = [];
+  entries = addReaction(entries, reactionEntry(event(1, 1, '🎆'), MOTION), NOW_MS);
+  entries = addReaction(entries, reactionEntry(event(2, 1, '👏'), MOTION), NOW_MS);
+  const still = reactionEntry(event(3, 1, '❤️'), { ...MOTION, reducedMotion: true });
+  entries = addReaction(entries, still, NOW_MS);
+  assert.deepEqual(withoutMotion(entries).map(({ key }) => key), [still.key]);
+  assert.ok(Object.isFrozen(withoutMotion(entries)));
 });

@@ -1,31 +1,33 @@
-import { BOARD_REACTION_FIELD, decodeBoardReaction } from '../../domain/board-reactions.js';
+import { BOARD_REACTION_FIELD, REACTION_SEND_INTERVAL_MS, decodeBoardReaction } from '../../domain/board-reactions.js';
+import { IntervalLimiter } from '../../domain/interval-limiter.js';
 
-// Sender clocks are compared with ours, so the window is generous: the same 10 s that cursors tolerate. Sequence
-// numbers and the first-sight baseline below are what stop replays; this only drops sends that arrive very late,
-// such as messages queued while this tab was frozen in the background.
-export const REACTION_STALE_MS = 10_000;
+// Every sender together plays at most this many reactions per window on this page, so a peer cycling through many
+// presence identities cannot flood the screen. Twelve matches the most floats shown at once.
+export const MAX_PLAYS_PER_ADMISSION_WINDOW = 12;
+export const REACTION_ADMISSION_WINDOW_MS = 1000;
 const NO_REACTION_SEQ = 0;
 
 const reactionOf = (states, clientId) => states.get(clientId)?.[BOARD_REACTION_FIELD];
 
 /**
- * Decides which presence reactions to play, each exactly once. Per sender it keeps the highest seq seen. Whatever a
- * sender carries when this page first sees it (joining, or the sender reconnecting) counts as already seen.
+ * Decides which presence reactions this page plays. Per sender it keeps the highest seq seen: a higher seq is consumed
+ * whether or not it plays, so nothing replays later. Whatever a sender carries when this page first sees it (joining,
+ * or the sender reconnecting) counts as already seen. Playback is limited on this page's own clock, never a sender's:
+ * one play per sender per send interval, and a shared budget across all senders.
  */
 export class ReactionReceiver {
   #lastSeq = new Map();
-  #staleMs;
-
-  constructor(staleMs = REACTION_STALE_MS) {
-    this.#staleMs = staleMs;
-  }
+  // Senders that played within the last interval. Kept across leave/rejoin so reconnecting cannot skip the wait;
+  // only real plays add entries, so the shared budget bounds its size.
+  #cooldowns = new Map();
+  #admission = new IntervalLimiter(REACTION_ADMISSION_WINDOW_MS, MAX_PLAYS_PER_ADMISSION_WINDOW);
 
   /** Every state present when the page starts listening counts as already seen. */
   seed(states) {
     states.forEach((state, clientId) => this.#baseline(clientId, state?.[BOARD_REACTION_FIELD]));
   }
 
-  /** Applies one awareness `change`; returns the reactions to play as `{ clientId, reaction, state }`. */
+  /** Applies one awareness `change` at this page's time `now`; returns the plays as `{ clientId, reaction, state }`. */
   receive({ added, updated, removed }, states, now) {
     removed.forEach((clientId) => this.#lastSeq.delete(clientId));
     const plays = [];
@@ -35,8 +37,8 @@ export class ReactionReceiver {
         this.#baseline(clientId, raw);
         continue;
       }
-      const reaction = this.#accept(clientId, raw, now);
-      if (reaction) plays.push({ clientId, reaction, state: states.get(clientId) });
+      const reaction = this.#consume(clientId, raw);
+      if (reaction && this.#admit(clientId, now)) plays.push({ clientId, reaction, state: states.get(clientId) });
     }
     return plays;
   }
@@ -45,10 +47,27 @@ export class ReactionReceiver {
     this.#lastSeq.set(clientId, decodeBoardReaction(raw)?.seq ?? NO_REACTION_SEQ);
   }
 
-  #accept(clientId, raw, now) {
+  /** The sender's next reaction, if `raw` is one; its seq is used up either way. */
+  #consume(clientId, raw) {
     const reaction = decodeBoardReaction(raw);
     if (!reaction || reaction.seq <= this.#lastSeq.get(clientId)) return null;
     this.#lastSeq.set(clientId, reaction.seq);
-    return now - reaction.at > this.#staleMs ? null : reaction;
+    return reaction;
+  }
+
+  /** The sender's own wait first, so one busy sender cannot spend the shared budget; then the budget. */
+  #admit(clientId, now) {
+    this.#forgetCooledDown(now);
+    const cooldown = this.#cooldowns.get(clientId) ?? new IntervalLimiter(REACTION_SEND_INTERVAL_MS);
+    if (cooldown.remainingMs(now) > 0 || !this.#admission.tryTake(now)) return false;
+    cooldown.tryTake(now);
+    this.#cooldowns.set(clientId, cooldown);
+    return true;
+  }
+
+  #forgetCooledDown(now) {
+    this.#cooldowns.forEach((cooldown, clientId) => {
+      if (cooldown.remainingMs(now) === 0) this.#cooldowns.delete(clientId);
+    });
   }
 }

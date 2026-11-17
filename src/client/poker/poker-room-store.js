@@ -4,6 +4,7 @@
 import { normalizeResultParticipants } from '../../domain/vote-results.js';
 import { readVoteResultParticipants } from '../../domain/vote-result-participants.js';
 import { decodePokerRoom, nextStoryId } from '../../domain/poker-schema.js';
+import { IntervalLimiter } from '../../domain/interval-limiter.js';
 import {
   POKER_REACTION_COOLDOWN_MS, POKER_REACTION_FIELD, POKER_REACTION_TTL_MS, activeReactions, pokerReaction,
 } from '../../domain/poker-reactions.js';
@@ -51,15 +52,16 @@ export function createPokerRoomStore({ doc, awareness, undoManager }, { userId, 
   // One reaction at a time per participant: a new one replaces the old, and
   // the sender clears it after the TTL so peers never keep a stale emoji.
   let reactionCount = 0;
-  let lastReactionAt = -Infinity;
+  const reactionCooldown = new IntervalLimiter(POKER_REACTION_COOLDOWN_MS);
   let clearReactionTimer = null;
   const react = (toUserId, emoji) => {
     const at = now();
-    if (at - lastReactionAt < POKER_REACTION_COOLDOWN_MS) return;
+    if (reactionCooldown.remainingMs(at) > 0) return;
     reactionCount += 1;
     const reaction = pokerReaction(toUserId, emoji, String(reactionCount));
+    // An invalid reaction does not start the cooldown.
     if (!reaction) return;
-    lastReactionAt = at;
+    reactionCooldown.tryTake(at);
     clearTimer(clearReactionTimer);
     awareness.setLocalStateField(POKER_REACTION_FIELD, reaction);
     clearReactionTimer = setTimer(() => awareness.setLocalStateField(POKER_REACTION_FIELD, null), POKER_REACTION_TTL_MS);
