@@ -8,7 +8,7 @@ import { BUTTON_VARIANT } from '../ui/ui-variants.js';
 import { TOAST_BOTTOM_PX, Z } from '../chrome/chrome-layout.js';
 import { t, useLang } from '../ui/i18n.js';
 import { ROOM_PASSWORD_MIN_LENGTH } from '../../domain/room-lock-contract.js';
-import { boardTitleWriter } from '../app/board-title-writer.js';
+import { readBoardTitle, requestBoardRename } from '../app/board-title-requests.js';
 import { getRoomKey } from './lock-session.js';
 import { changeRoomPassword } from './change-password.js';
 import { rotateRoom } from './rotate-room.js';
@@ -139,15 +139,14 @@ function OwnerDialog({ spec, onClose }) {
 }
 
 /** Renames the open board inside its encrypted state; closes once the board accepted the title. */
-export function RenameBoardDialog({ writer, onClose }) {
-  if (!writer) return null;
-  const save = (raw) => { if (writer.rename(raw)) onClose(); };
-  return portalToBody(<BoardTitleDialog initialTitle={writer.title} onCancel={onClose} onSave={save} />);
+export function RenameBoardDialog({ initialTitle, rename, onClose }) {
+  const save = (raw) => { if (rename(raw)) onClose(); };
+  return portalToBody(<BoardTitleDialog initialTitle={initialTitle} onCancel={onClose} onSave={save} />);
 }
 
 function RenameBoard({ onClose }) {
-  const writer = useSyncExternalStore(boardTitleWriter.subscribe, boardTitleWriter.getSnapshot, () => null);
-  return <RenameBoardDialog writer={writer} onClose={onClose} />;
+  const [initialTitle] = useState(readBoardTitle);
+  return <RenameBoardDialog initialTitle={initialTitle} rename={requestBoardRename} onClose={onClose} />;
 }
 
 export function RoomLockNoticeView({ messageKey }) {

@@ -112,8 +112,8 @@ test('rename opens on the board title and closes only after the board accepted t
   await withModules(async ({ dialogs: { RenameBoardDialog }, i18n: { setLang, t } }) => {
     const renamed = [];
     let closed = 0;
-    const writer = { title: 'Sprint 12', rename: (raw) => { renamed.push(raw); return raw.trim() === 'Sprint 13'; } };
-    const element = RenameBoardDialog({ writer, onClose: () => { closed += 1; } });
+    const rename = (raw) => { renamed.push(raw); return raw.trim() === 'Sprint 13'; };
+    const element = RenameBoardDialog({ initialTitle: 'Sprint 12', rename, onClose: () => { closed += 1; } });
     for (const language of LANGUAGES) {
       setLang(language);
       const html = renderToStaticMarkup(element);
@@ -125,6 +125,5 @@ test('rename opens on the board title and closes only after the board accepted t
     element.props.onSave(' Sprint 13 ');
     assert.deepEqual(renamed, ['rejected', ' Sprint 13 ']);
     assert.equal(closed, 1);
-    assert.equal(RenameBoardDialog({ writer: null, onClose: noop }), null, 'no open board: nothing to rename');
   });
 });

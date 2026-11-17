@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { boardTitleToSeed } from '../../domain/board-title.js';
 import { t } from '../ui/i18n.js';
-import { boardTitleWriter, boardTitleWriterFor } from './board-title-writer.js';
+import { boardTitleEvents, serveBoardTitle } from './board-title-requests.js';
 
 // Names the room with the title its creator typed on the landing page.
 // Reads the synced room state first so an existing title is never overwritten.
@@ -29,5 +29,5 @@ export function useBoardTitle({ storage, liveStorage, title, pendingTitle, patch
   }, [storage, liveStorage, pendingTitle, patchMeta]);
 
   useEffect(() => { document.title = documentTitleFor(title); }, [title]);
-  useEffect(() => boardTitleWriter.publish(boardTitleWriterFor({ title, patchMeta })), [title, patchMeta]);
+  useEffect(() => serveBoardTitle(boardTitleEvents, { title, patchMeta }), [title, patchMeta]);
 }

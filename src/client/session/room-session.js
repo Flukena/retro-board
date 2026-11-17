@@ -10,7 +10,7 @@ import { pageRoomDeleted } from './room-deleted.js';
 // a request URL, header, log message, error, or window property.
 
 const ROOM_SESSION_REJECTED_STATUSES = Object.freeze([401, 404]);
-// A renewal answered 404 for the room this page holds: the room was deleted.
+// An exchange answered 404 for the private room this page already holds: the room was deleted.
 const ROOM_GONE_STATUS = 404;
 const BOARD_CODE_RE = /^[A-Za-z0-9_-]{3,32}$/;
 const BOARD_TOKEN_RE = /^[A-Za-z0-9_-]{8,64}$/;
@@ -401,6 +401,12 @@ const roomSessionPath = (handle, authKey, renewal) => (
   renewal && handle && authKey !== null ? `/rooms/${handle}${ROOM_SESSION_RENEWAL_SUFFIX}` : '/api/room-session'
 );
 
+// A first visit's 404 is an invalid or unknown link; a renewal or re-unlock 404 for the active room means it was deleted.
+const markDeletedIfGone = (publicWall, code, token, error) => {
+  const heldRoom = !publicWall && activeSession !== null && sameCredentials(activeCredentials, code, token);
+  if (heldRoom && error?.httpStatus === ROOM_GONE_STATUS) pageRoomDeleted.mark();
+};
+
 const exchangeSession = async (code, token, { expectedHandle = null, replacedHandle = null, authKey = null, renewal = false } = {}) => {
   const publicWall = code === null && token === null;
   if (!publicWall && (!BOARD_CODE_RE.test(code || '') || !BOARD_TOKEN_RE.test(token || ''))) {
@@ -445,6 +451,9 @@ const exchangeSession = async (code, token, { expectedHandle = null, replacedHan
   sessionRequest = { code, token, authKey, path, promise };
   try {
     return await promise;
+  } catch (error) {
+    markDeletedIfGone(publicWall, code, token, error);
+    throw error;
   } finally {
     if (sessionRequest?.promise === promise) sessionRequest = null;
   }
@@ -480,7 +489,6 @@ export async function refreshActiveRoomSession() {
       renewal: true,
     });
   } catch (error) {
-    if (!isPublicRoomSession() && error.httpStatus === ROOM_GONE_STATUS) pageRoomDeleted.mark();
     if (pageRoomDeleted.isDeleted()) throw error;
     setSessionHealth(isReauthRequiredError(error) ? ROOM_SESSION_HEALTH.REAUTH_REQUIRED : ROOM_SESSION_HEALTH.LOST);
     if (isPublicRoomSession() && ROOM_SESSION_REJECTED_STATUSES.includes(error.httpStatus)) {

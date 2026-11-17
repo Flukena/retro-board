@@ -2,7 +2,7 @@
 // establishRoomSession() has set the room cookie (see PokerBootstrap).
 // Unlike storage-bridge.js it has no import-time side effects.
 import * as Y from 'yjs';
-import { getActiveRoomSession, getRoomWebSocketBaseUrl } from '../session/room-session.js';
+import { getActiveRoomSession, getRoomWebSocketBaseUrl, refreshActiveRoomSession } from '../session/room-session.js';
 import { attachClientSync } from '../session/client-sync.js';
 import { PlainRoomProvider } from '../session/plain-room-provider.js';
 import { sendOnlyLocalAwareness } from '../session/awareness-transport.js';
@@ -15,6 +15,7 @@ export function openPokerRoom({ browser = window, Provider = PlainRoomProvider }
   // The room name is the opaque session handle, never the link capability.
   const provider = new Provider(getRoomWebSocketBaseUrl(), session.roomHandle, doc, {
     connect: false,
+    probeSession: refreshActiveRoomSession,
     // Binds the relay connection to this awareness identity (not a credential).
     params: { awarenessId: String(doc.clientID) },
   });

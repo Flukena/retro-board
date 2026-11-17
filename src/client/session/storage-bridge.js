@@ -55,6 +55,7 @@ import {
   getActiveRoomSession,
   getRelayHttpBaseUrl,
   getRoomWebSocketBaseUrl,
+  refreshActiveRoomSession,
   roomFetch,
 } from './room-session.js';
 import { COMMENT_MAX_LEN, isSafeId, normalizeComment } from '../../domain/comment-schema.js';
@@ -162,6 +163,8 @@ let provider = null;
 if (['board', 'public'].includes(route.kind)) {
   provider = createRoomProvider({
     wsBaseUrl: WS_URL, roomHandle: ROOM, ydoc, roomKey,
+    // The Public Wall keeps its own recovery; only a private board checks for deletion after refused upgrades.
+    probeSession: route.kind === 'board' ? refreshActiveRoomSession : null,
     // Bind the relay connection to this one Yjs awareness identity. The ID is
     // not a credential; it lets the server distinguish our own state from
     // y-websocket's legitimate BroadcastChannel/snapshot echoes.
