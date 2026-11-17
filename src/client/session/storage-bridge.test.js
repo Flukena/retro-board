@@ -259,6 +259,36 @@ test('the Public Wall gets no reaction channel, so it neither shows nor plays re
   }, { publicWall: true });
 });
 
+test('retro boards, plain or locked, share a card-writing timer that never enters undo', async () => {
+  for (const locked of [false, true]) {
+    await withStorage(async (browser) => {
+      const { storage } = browser;
+      const timer = storage.writingTimer;
+      assert.equal(timer.start(3), true, `locked=${locked}`);
+      assert.equal(timer.view().label, '03:00');
+      assert.equal(storage.canUndo(), false, 'starting the timer leaves nothing to undo');
+      assert.equal(storage.addItem(VALID_ITEM), true);
+      storage.stopUndoCapture?.();
+      assert.equal(timer.extend(), true);
+      assert.equal(storage.undo(), true, 'undo takes back the sticky, not the +1');
+      assert.equal(browser.__rbYItems.has(VALID_ITEM.id), false);
+      assert.equal(timer.view().phase, 'running');
+      assert.equal(timer.view().label, '04:00');
+      assert.equal(storage.redo(), true);
+      assert.equal(browser.__rbYItems.has(VALID_ITEM.id), true);
+      assert.equal(timer.stop(), true);
+      assert.equal(storage.undo(), true, 'the sticky is still the only step');
+      assert.equal(timer.view().phase, 'idle', 'undo never brings a stopped timer back');
+    }, { locked });
+  }
+});
+
+test('the Public Wall gets no card-writing timer', async () => {
+  await withStorage(async (browser) => {
+    assert.equal(browser.storage.writingTimer, undefined);
+  }, { publicWall: true });
+});
+
 test('offline local changes expose status and guard unload until a socket sync', async () => {
   await withStorage(async (browser) => {
     const provider = browser.__rbProvider;

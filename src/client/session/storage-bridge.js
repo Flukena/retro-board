@@ -38,6 +38,7 @@ import { planVoteFinalization } from '../../domain/vote-finalization.js';
 import * as Y from 'yjs';
 import { createDrawingPreviews } from './drawing-previews.js';
 import { createReactionChannel } from '../reactions/reaction-channel.js';
+import { createWritingTimerStore } from '../writing-timer/writing-timer-store.js';
 import { attachClientSync } from './client-sync.js';
 import { SYNC_STATE } from './sync-status.js';
 import { PublicCreationGuard, PUBLIC_CREATION_LIMIT_EVENT } from './public-creation-guard.js';
@@ -1457,9 +1458,12 @@ if (provider) {
   ydoc.on('destroy', () => previews.destroy());
 }
 
-// Emoji reactions are for retro boards only: the Public Wall gets no channel, so it neither shows nor plays them.
+// Emoji reactions and the card-writing timer are for retro boards only: the Public Wall gets neither.
 if (provider && route.kind === 'board') {
   const reactions = createReactionChannel(provider.awareness);
   window.storage.boardReactions = reactions;
   ydoc.on('destroy', () => reactions.destroy());
+  const writingTimer = createWritingTimerStore({ doc: ydoc, isLive: () => provider.synced });
+  window.storage.writingTimer = writingTimer;
+  ydoc.on('destroy', () => writingTimer.destroy());
 }

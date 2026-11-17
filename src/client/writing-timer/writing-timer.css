@@ -1,0 +1,142 @@
+/* The card-writing countdown at the bottom centre, in the row of the 🎉 pill and the zoom bar on desktop. */
+.rb-writing-timer,
+.rb-writing-timer-start {
+  position: fixed;
+  z-index: var(--writing-timer-layer);
+  left: 50%;
+  translate: -50% 0;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + var(--rb-dock-inset-px) + var(--rb-writing-timer-lift-px, 0px));
+}
+
+/* An open 🎉 picker runs along that row from the left, so the countdown steps up a row rather than sit under it. */
+:root:has(.rb-reaction-picker) {
+  --rb-writing-timer-lift-px: calc(var(--writing-timer-height) + var(--space-2));
+}
+
+.rb-writing-timer {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--writing-timer-height);
+  padding: 0 var(--space-2) 0 var(--space-3);
+  border: var(--writing-timer-border-width) solid var(--tool-section-border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-panel);
+  color: var(--text);
+  box-shadow: var(--shadow-card);
+  white-space: nowrap;
+}
+
+.rb-writing-timer__time {
+  min-width: var(--writing-timer-time-min-width);
+  font: 700 var(--writing-timer-font-size) var(--font-display);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.rb-writing-timer--urgent {
+  animation: rb-pulse var(--writing-timer-pulse);
+}
+
+.rb-writing-timer--urgent .rb-writing-timer__time {
+  color: var(--danger);
+}
+
+.rb-writing-timer[data-phase="timesUp"] {
+  padding: 0 var(--space-3);
+  border-color: var(--danger);
+  background: var(--danger);
+  color: var(--danger-fg);
+}
+
+.rb-writing-timer-start__toggle.rb-writing-timer-start__toggle {
+  width: var(--writing-timer-height);
+  height: var(--writing-timer-height);
+  border: var(--writing-timer-border-width) solid var(--tool-section-border);
+  border-radius: var(--radius-pill);
+  background: var(--tool-section-bg);
+  box-shadow: var(--tool-frame-shadow);
+}
+
+.rb-writing-timer-setup {
+  position: absolute;
+  bottom: calc(100% + var(--space-2));
+  left: 50%;
+  translate: -50% 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-radius: var(--radius-md);
+  white-space: nowrap;
+}
+
+.rb-writing-timer-setup__presets,
+.rb-writing-timer-setup__custom {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.rb-writing-timer-setup__number {
+  width: var(--writing-timer-number-width);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rb-writing-timer--urgent {
+    animation: none;
+  }
+}
+
+@media (max-width: 767px), (max-width: 1024px) and (pointer: coarse) {
+  /* Bottom centre on a phone is the zoom bar, so the countdown takes the row above it, and steps above a docked
+     selection toolbar when one is up. */
+  :root {
+    --rb-mobile-writing-timer-bottom-px: var(--rb-mobile-selection-bottom-px);
+  }
+
+  :root:has(.rb-selection-toolbar) {
+    --rb-mobile-writing-timer-bottom-px: calc(var(--rb-mobile-selection-bottom-px) + var(--rb-mobile-selection-height-px) + var(--rb-mobile-gap-px));
+  }
+
+  .rb-writing-timer,
+  .rb-writing-timer-start {
+    left: var(--rb-mobile-canvas-left-px);
+    bottom: var(--rb-mobile-writing-timer-bottom-px);
+    translate: none;
+  }
+
+  /* The countdown centres over the board, right of the rail, which reaches this row on short phones; the admin's
+     start button keeps to the rail's side, clear of the minimap in the row's other corner. */
+  .rb-writing-timer {
+    right: var(--rb-mobile-right-px);
+    width: fit-content;
+    margin-inline: auto;
+  }
+
+  .rb-writing-timer-setup {
+    box-sizing: border-box;
+    left: 0;
+    translate: none;
+    max-width: calc(100vw - var(--rb-mobile-canvas-left-px) - var(--rb-mobile-right-px));
+  }
+
+  .rb-writing-timer-setup__presets {
+    flex-wrap: wrap;
+  }
+
+  /* While the countdown or the setup shows, the minimap in that row's corner steps aside. */
+  :root:has(.rb-writing-timer) .rb-minimap,
+  :root:has(.rb-writing-timer-setup) .rb-minimap {
+    display: none;
+  }
+
+  /* The phone drawing toolbar and the inline editor (with its keyboard) take the bottom of the screen. */
+  :root:has(.rb-drawing-toolbar) .rb-writing-timer,
+  :root:has(.rb-drawing-toolbar) .rb-writing-timer-start,
+  :root:has(.rb-mobile-editor__input:focus) .rb-writing-timer,
+  :root:has(.rb-mobile-editor__input:focus) .rb-writing-timer-start {
+    display: none;
+  }
+}
