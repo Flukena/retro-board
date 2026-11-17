@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import WebSocket from 'ws';
 import { tempRoot } from '../test-support/relay-harness.mjs';
 import { pausedPost } from '../test-support/paused-request.mjs';
+import { HOOK_PRELOAD, hookOf } from '../test-support/relay-hook-client.mjs';
 import {
   ORIGIN, PASSWORD, createNormalRoom, exchange, lockedRelay, post, signIn,
 } from '../test-support/locked-room-harness.mjs';
@@ -23,10 +24,6 @@ const { LeveldbPersistence } = require('y-leveldb');
 const syncProtocol = require('y-protocols/sync');
 const encoding = require('lib0/encoding');
 
-const HOOK_URL = new URL('../test-support/room-deletion-hook.mjs', import.meta.url).href;
-const HOOK_PRELOAD = `import ${JSON.stringify(HOOK_URL)};`;
-const HOOK_PORT_RE = /\[deletion-hook\] port (\d+)/;
-const WAIT_MS = 5_000;
 const POLL_MS = 10;
 // Well under the 10 s drain timeout and ws's 30 s close-handshake timeout: an uncooperative peer cannot stall delete.
 const PROMPT_DELETE_MS = 3_000;
@@ -43,18 +40,6 @@ const BYTE_MASK = 0xff;
 const ROOM_LOCK = await createRoomLock(PASSWORD);
 
 const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
-
-async function hookOf(relay) {
-  const deadline = Date.now() + WAIT_MS;
-  let match = relay.output().match(HOOK_PORT_RE);
-  while (!match) {
-    if (Date.now() > deadline) throw new Error(`no deletion hook\n${relay.output()}`);
-    await sleep(POLL_MS);
-    match = relay.output().match(HOOK_PORT_RE);
-  }
-  const call = async (action, docName) => (await fetch(`http://127.0.0.1:${match[1]}/${action}?doc=${encodeURIComponent(docName)}`, { method: 'POST' })).json();
-  return { call };
-}
 
 const startDeletable = (t, options = {}) => lockedRelay(t, options.env, { preload: HOOK_PRELOAD, root: options.root });
 

@@ -40,8 +40,8 @@ const ROOMS = '/api/account/rooms';
 const TITLE = 'Sprint 42 retro';
 const MISSING_CODE = 'Nope2345';
 const STATUS = Object.freeze({
-  OK: 200, NO_CONTENT: 204, BAD_REQUEST: 400, UNAUTHORIZED: 401, FORBIDDEN: 403, NOT_FOUND: 404, CONFLICT: 409,
-  TOO_MANY: 429, UNAVAILABLE: 503,
+  OK: 200, NO_CONTENT: 204, BAD_REQUEST: 400, UNAUTHORIZED: 401, FORBIDDEN: 403, NOT_FOUND: 404, METHOD_NOT_ALLOWED: 405,
+  CONFLICT: 409, TOO_MANY: 429, UNAVAILABLE: 503,
 });
 // Headers that legitimately differ between any two responses.
 const VOLATILE_HEADERS = new Set(['date', 'keep-alive', 'connection']);
@@ -97,9 +97,10 @@ async function startRoutes(t) {
     oauth: OAUTH, accountKey, sessions, store, ledger: new FlowLedger(), allowedOrigins: [BOARD_ORIGIN], allowInsecureHttp: false,
     maxCookieHeaderBytes: MAX_COOKIE_HEADER_BYTES, fetchImpl: null, rejectionCounters: { increment() {} }, accountRooms,
   });
+  const lifecycle = { unavailable: false };
   const server = http.createServer((req, res) => {
     const { pathname } = new URL(req.url, 'http://localhost');
-    if (!routes.handle(req, res, pathname, { prefixed: false, clientIp: '203.0.113.1', unavailable: () => false })) {
+    if (!routes.handle(req, res, pathname, { prefixed: false, clientIp: '203.0.113.1', unavailable: () => lifecycle.unavailable })) {
       res.writeHead(418);
       res.end();
     }
@@ -115,7 +116,7 @@ async function startRoutes(t) {
     const room = await registry.createRoom(owner);
     return { ...room, docName: registry.registeredDocForCapability(room.code, room.token) };
   };
-  return { base, registry, store, sessions, ports, signIn, createRoom };
+  return { base, registry, store, sessions, ports, signIn, createRoom, lifecycle };
 }
 
 const get = (ctx, path, { cookie, origin } = {}) => fetch(`${ctx.base}${path}`, {
@@ -193,7 +194,7 @@ test('writes need an allowed Origin, and the preflight answers like the account 
     assert.equal((await rename(ctx, room.code, cookie, TITLE, { origin })).status, STATUS.FORBIDDEN);
     assert.equal((await remove(ctx, room.code, cookie, room.code, { origin })).status, STATUS.FORBIDDEN);
   }
-  assert.equal((await get(ctx, titlePath(room.code), { cookie })).status, 405);
+  assert.equal((await get(ctx, titlePath(room.code), { cookie })).status, STATUS.METHOD_NOT_ALLOWED);
   assert.deepEqual(ctx.ports.writes, []);
   assert.deepEqual(ctx.ports.deletes, []);
 });
@@ -302,6 +303,18 @@ test('a stopped account store answers 503 instead of acting', async (t) => {
   assert.equal((await rename(ctx, room.code, cookie)).status, STATUS.UNAVAILABLE);
   assert.equal((await remove(ctx, room.code, cookie)).status, STATUS.UNAVAILABLE);
   assert.equal((await get(ctx, ROOMS, { cookie })).status, STATUS.UNAVAILABLE);
+  assert.deepEqual(ctx.ports.writes, []);
+  assert.deepEqual(ctx.ports.deletes, []);
+});
+
+test('a relay that is shutting down or failed answers 503 on every room route', async (t) => {
+  const ctx = await startRoutes(t);
+  const { account, cookie } = await ctx.signIn(OWNER_PROFILE);
+  const room = await ctx.createRoom(ownedBoard(account));
+  ctx.lifecycle.unavailable = true;
+  assert.equal((await get(ctx, ROOMS, { cookie })).status, STATUS.UNAVAILABLE);
+  assert.equal((await rename(ctx, room.code, cookie)).status, STATUS.UNAVAILABLE);
+  assert.equal((await remove(ctx, room.code, cookie)).status, STATUS.UNAVAILABLE);
   assert.deepEqual(ctx.ports.writes, []);
   assert.deepEqual(ctx.ports.deletes, []);
 });

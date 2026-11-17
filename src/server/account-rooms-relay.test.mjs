@@ -5,15 +5,13 @@ import WebSocket from 'ws';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import { ORIGIN, PASSWORD, exchange, lockedRelay, post, signIn } from '../test-support/locked-room-harness.mjs';
+import { HOOK_PRELOAD, hookOf } from '../test-support/relay-hook-client.mjs';
 import { createRoomLock } from '../client/room-lock/e2e-crypto.js';
 import { ROOM_KIND, ROOM_OWNER_META, ROOM_PATH_PREFIX, decodeOwnerRecord } from '../domain/room-ownership.js';
 
 const require = createRequire(import.meta.url);
 const { LeveldbPersistence } = require('y-leveldb');
 
-const HOOK_URL = new URL('../test-support/room-deletion-hook.mjs', import.meta.url).href;
-const HOOK_PRELOAD = `import ${JSON.stringify(HOOK_URL)};`;
-const HOOK_PORT_RE = /\[deletion-hook\] port (\d+)/;
 const WAIT_MS = 5_000;
 const POLL_MS = 10;
 const TITLE = 'Sprint 42 retro';
@@ -36,15 +34,10 @@ async function until(read, reached = Boolean, label = 'condition') {
   return value;
 }
 
-async function hookOf(relay) {
-  const [, port] = await until(() => relay.output().match(HOOK_PORT_RE), Boolean, 'the relay hook');
-  return (action, docName = '') => fetch(`http://127.0.0.1:${port}/${action}?doc=${encodeURIComponent(docName)}`, { method: 'POST' })
-    .then((response) => response.json());
-}
-
 async function hookedRelay(t, { env = {}, root = null } = {}) {
   const relayEnv = await lockedRelay(t, env, { preload: HOOK_PRELOAD, root });
-  return { ...relayEnv, hook: await hookOf(relayEnv.relay) };
+  const { call } = await hookOf(relayEnv.relay);
+  return { ...relayEnv, hook: call };
 }
 
 async function createOwnedRoom({ relay }, cookie, body = {}) {
