@@ -102,5 +102,5 @@ Never internal disk, repo trees, `/tmp` or scratchpad. Chosen volume unmounted �
 4. Define verifiable success criteria; multi-step work gets a brief plan with checks.
 
 ## Reviews
-Every review (Claude or Codex, whoever wrote the code) checks every rule in Code shape, Tests, Logging and disk writes, Data location and Karpathy guidelines, plus repo style and failure-path tests. Each violation is a finding. End the review with a `RULE CONFORMANCE` section: one line per rule, PASS / FAIL → finding / N/A.
+Every review (Claude or Codex, whoever wrote the code) checks every rule in Code shape, Tests, Logging and disk writes, Data location and Karpathy guidelines, plus repo style and failure-path tests. Each violation is a finding. End the review with a `RULE CONFORMANCE` section: one line per section (Code shape, Tests, Logging and disk writes, Data location, Karpathy guidelines, repo style, failure-path tests) saying PASS or N/A, plus one line per failed rule (FAIL → finding). A re-review round lists only the rules that failed in the round before or that the new diff touches.
 <!-- SHARED_RULES_END -->
