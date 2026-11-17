@@ -14,10 +14,10 @@ export function TypeToConfirmView({
   const matches = typedConfirmationMatches(typed, expected);
   const submit = () => { if (matches && !busy) onConfirm(typed); };
   return (
-    <ModalShell size={MODAL_SIZE.SM} layer={layer} labelledBy={`${id}-title`} onDismiss={onCancel} dismissDisabled={busy}>
+    <ModalShell size={MODAL_SIZE.SM} layer={layer} labelledBy={`${id}-dialog-title`} onDismiss={onCancel} dismissDisabled={busy}>
       <div className="rb-dialog__heading">
         {icon}
-        <div id={`${id}-title`} className="rb-dialog__title">{title}</div>
+        <div id={`${id}-dialog-title`} className="rb-dialog__title">{title}</div>
       </div>
       <div className="rb-dialog__body">{body}</div>
       <label htmlFor={`${id}-input`} className="rb-dialog__body">{prompt}</label>

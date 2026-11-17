@@ -98,8 +98,8 @@ function MyBoardsBody({ state, now, signInUrl, onRetry, onAskRename, onAskDelete
 export function MyBoardsView({ onClose, ...bodyProps }) {
   const id = useId();
   return (
-    <ModalShell size={MODAL_SIZE.MD} labelledBy={`${id}-title`} onDismiss={onClose}>
-      <div id={`${id}-title`} className="rb-dialog__title rb-my-boards__title">{t('account.myBoards')}</div>
+    <ModalShell size={MODAL_SIZE.MD} labelledBy={`${id}-dialog-title`} onDismiss={onClose}>
+      <div id={`${id}-dialog-title`} className="rb-dialog__title rb-my-boards__title">{t('account.myBoards')}</div>
       <MyBoardsBody {...bodyProps} />
     </ModalShell>
   );

@@ -14,8 +14,8 @@ export function BoardTitleDialog({ initialTitle, busy = false, layer = MODAL_LAY
   const canSave = !busy && renameTitleFrom(name) !== null;
   const save = () => { if (canSave) onSave(name); };
   return (
-    <ModalShell size={MODAL_SIZE.SM} layer={layer} labelledBy={`${id}-title`} onDismiss={onCancel} dismissDisabled={busy}>
-      <label id={`${id}-title`} htmlFor={`${id}-input`} className="rb-dialog__title">{t('myBoards.renameTitle')}</label>
+    <ModalShell size={MODAL_SIZE.SM} layer={layer} labelledBy={`${id}-dialog-title`} onDismiss={onCancel} dismissDisabled={busy}>
+      <label id={`${id}-dialog-title`} htmlFor={`${id}-input`} className="rb-dialog__title">{t('myBoards.renameTitle')}</label>
       <input id={`${id}-input`} autoFocus className="rb-input rb-dialog__input" value={name} disabled={busy}
         maxLength={BOARD_TITLE_MAX_LENGTH} placeholder={t('myBoards.renamePlaceholder')}
         onChange={(event) => setName(event.target.value)} onKeyDown={(event) => { if (isEnterKey(event)) save(); }} />
