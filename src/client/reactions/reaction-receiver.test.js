@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { BOARD_REACTION_FIELD, REACTION_SEND_INTERVAL_MS, boardReaction } from '../../domain/board-reactions.js';
-import { MAX_PLAYS_PER_ADMISSION_WINDOW, REACTION_ADMISSION_WINDOW_MS, ReactionReceiver } from './reaction-receiver.js';
+import {
+  MAX_PLAYS_PER_ADMISSION_WINDOW, REACTION_ADMISSION_WINDOW_MS, REACTION_PLAY_INTERVAL_MS, ReactionReceiver,
+} from './reaction-receiver.js';
 
 // The receiver's own clock (monotonic page time); senders' clocks never reach it.
 const NOW_MS = 500_000;
@@ -12,6 +14,8 @@ const NO_CHANGE = Object.freeze({ added: [], updated: [], removed: [] });
 const BYPASS_UPDATES = 20;
 const SENDER_CLOCK_BEHIND_MS = 11_000;
 const SENDER_CLOCK_AHEAD_MS = 60_000;
+// Two sends a full interval apart, the second arriving early after relay coalescing or network jitter.
+const JITTERED_ARRIVAL_GAP_MS = 850;
 
 const stateWith = (emoji, seq) => ({ user: { name: 'Ada' }, [BOARD_REACTION_FIELD]: boardReaction(emoji, seq) });
 const idle = () => ({ user: { name: 'Ada' } });
@@ -48,6 +52,17 @@ test('the next send an interval later plays again; an older seq never replays', 
   assert.deepEqual(react(page, A, '👏', 4, NOW_MS + 2 * REACTION_SEND_INTERVAL_MS), []);
 });
 
+test('the play interval stays below the send interval, so jitter between honest sends is tolerated', () => {
+  assert.ok(REACTION_PLAY_INTERVAL_MS > 0);
+  assert.ok(REACTION_PLAY_INTERVAL_MS < REACTION_SEND_INTERVAL_MS);
+});
+
+test('two honest sends arriving 850 ms apart both play', () => {
+  const page = receiverWith(A);
+  assert.equal(react(page, A, '👏', 1, NOW_MS).length, 1);
+  assert.deepEqual(emojis(react(page, A, '🔥', 2, NOW_MS + JITTERED_ARRIVAL_GAP_MS)), [`${A}:🔥:2`]);
+});
+
 test('a peer that bypasses send() is held to one play per interval on this page, and skipped seqs never replay', () => {
   const page = receiverWith(A);
   let played = 0;
@@ -68,7 +83,7 @@ test('a sender that leaves and returns inside its cooldown does not play early',
   page.states.set(A, idle());
   page.receiver.receive(change({ added: [A] }), page.states, NOW_MS + 2);
   assert.deepEqual(react(page, A, '🎆', 2, NOW_MS + 3), [], 'still cooling down after rejoining');
-  assert.equal(react(page, A, '🎆', 3, NOW_MS + REACTION_SEND_INTERVAL_MS).length, 1);
+  assert.equal(react(page, A, '🎆', 3, NOW_MS + REACTION_PLAY_INTERVAL_MS).length, 1);
 });
 
 test('many senders at once (or one peer churning identities) play at most the shared budget per window', () => {

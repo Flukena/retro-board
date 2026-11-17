@@ -1,10 +1,14 @@
-import { BOARD_REACTION_FIELD, REACTION_SEND_INTERVAL_MS, decodeBoardReaction } from '../../domain/board-reactions.js';
+import { BOARD_REACTION_FIELD, decodeBoardReaction } from '../../domain/board-reactions.js';
 import { IntervalLimiter } from '../../domain/interval-limiter.js';
 
 // Every sender together plays at most this many reactions per window on this page, so a peer cycling through many
 // presence identities cannot flood the screen. Twelve matches the most floats shown at once.
 export const MAX_PLAYS_PER_ADMISSION_WINDOW = 12;
 export const REACTION_ADMISSION_WINDOW_MS = 1000;
+// Each sender plays at most once per this interval on this page. It stays below REACTION_SEND_INTERVAL_MS so two
+// honest sends a second apart still both play when relay coalescing or network jitter brings them closer; a peer that
+// skips its own limit is held to 1.25 a second, and the shared budget above still applies.
+export const REACTION_PLAY_INTERVAL_MS = 800;
 const NO_REACTION_SEQ = 0;
 
 const reactionOf = (states, clientId) => states.get(clientId)?.[BOARD_REACTION_FIELD];
@@ -13,7 +17,7 @@ const reactionOf = (states, clientId) => states.get(clientId)?.[BOARD_REACTION_F
  * Decides which presence reactions this page plays. Per sender it keeps the highest seq seen: a higher seq is consumed
  * whether or not it plays, so nothing replays later. Whatever a sender carries when this page first sees it (joining,
  * or the sender reconnecting) counts as already seen. Playback is limited on this page's own clock, never a sender's:
- * one play per sender per send interval, and a shared budget across all senders.
+ * one play per sender per play interval, and a shared budget across all senders.
  */
 export class ReactionReceiver {
   #lastSeq = new Map();
@@ -58,7 +62,7 @@ export class ReactionReceiver {
   /** The sender's own wait first, so one busy sender cannot spend the shared budget; then the budget. */
   #admit(clientId, now) {
     this.#forgetCooledDown(now);
-    const cooldown = this.#cooldowns.get(clientId) ?? new IntervalLimiter(REACTION_SEND_INTERVAL_MS);
+    const cooldown = this.#cooldowns.get(clientId) ?? new IntervalLimiter(REACTION_PLAY_INTERVAL_MS);
     if (cooldown.remainingMs(now) > 0 || !this.#admission.tryTake(now)) return false;
     cooldown.tryTake(now);
     this.#cooldowns.set(clientId, cooldown);
