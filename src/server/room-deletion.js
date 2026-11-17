@@ -1,8 +1,9 @@
 import { join } from 'node:path';
 import { ROOM_DELETED_CLOSE_CODE, ROOM_DELETED_REASON } from '../domain/room-ownership.js';
 import { ROOM_HANDLE_RE } from './relay-config.js';
+import { UNREGISTER_OPERATION } from './relay-room-registry.js';
 import { roomLogId } from './relay-log-id.js';
-import { STORAGE_FAILURE_CODE, metaBatch, storageOperationError } from './relay-storage.js';
+import { STORAGE_FAILURE_CODE, metaBatch, metaBatchAcross, storageOperationError } from './relay-storage.js';
 import { roomHandleOfImageFile } from './relay-uploads.js';
 
 /** Relay document holding the deletion journal. It lives outside every room, so clearing a room never clears it. */
@@ -41,8 +42,12 @@ export class DeletionJournal {
     this.#log = log;
   }
 
-  async put(docName, entry) {
-    await metaBatch(this.#ldb, DELETION_JOURNAL_DOC, [{ type: PUT_OPERATION, key: journalKey(docName), value: entry }], { durable: true });
+  /** Writes the entry and `roomOps` (meta operations on the room itself) in one fsynced atomic batch. */
+  async put(docName, entry, roomOps = []) {
+    await metaBatchAcross(this.#ldb, [
+      { docName: DELETION_JOURNAL_DOC, ops: [{ type: PUT_OPERATION, key: journalKey(docName), value: entry }] },
+      { docName, ops: roomOps },
+    ], { durable: true });
   }
 
   async remove(docName) {
@@ -84,7 +89,7 @@ export function createRoomFileRemover({ io, uploadsDir, reconcileUploadUsage }) 
 
 /**
  * The one crash-safe way a room is deleted, shared by owner deletion, guest expiry and idle retirement.
- * Ports: fence (RoomFence), journal (DeletionJournal), registry (unregisterDurably, unpublish, clearRoomStorage,
+ * Ports: fence (RoomFence), journal (DeletionJournal), registry (unpublish, clearRoomStorage,
  * roomHandleForDoc), plainRooms.retire(docName, code, reason) and e2eRooms.retireRoom(docName, code, reason) (each
  * closes its sockets in the same tick, then settles once its in-flight work has landed), files(handle) → count,
  * onStorageFailure(error). `pending`: the journal as loaded at startup, before the registry hydrated.
@@ -166,10 +171,12 @@ export class RoomDeletion {
     return running;
   }
 
+  // Journal entry and marker removal land in one atomic batch: a crash or a rollback never finds a journaled room
+  // that still carries its registration marker, nor an unregistered room with no journal entry to finish it.
   async #start(docName, handle) {
-    await this.#journal.put(docName, { v: JOURNAL_VERSION, handle, startedAt: this.#now() });
+    const entry = { v: JOURNAL_VERSION, handle, startedAt: this.#now() };
+    await this.#journal.put(docName, entry, [UNREGISTER_OPERATION]);
     this.#pending.set(docName, handle);
-    await this.#registry.unregisterDurably(docName);
     return this.#finish(docName);
   }
 

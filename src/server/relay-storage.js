@@ -83,8 +83,11 @@ export const metaBatchBytes = (docName, ops) => ops
 // by getMeta (~560, ~577). `_transact` resolves null on any error and a
 // successful batch resolves undefined, so only null means failure. The error
 // message is fixed: keys can carry email addresses.
-export async function metaBatch(ldb, docName, ops, { durable = false } = {}) {
-  const operations = ops.map((operation) => levelMetaOperation(docName, operation));
+export const metaBatch = (ldb, docName, ops, options) => metaBatchAcross(ldb, [{ docName, ops }], options);
+
+// Same as metaBatch, but one atomic batch spans the meta keys of several documents: `writes` is [{ docName, ops }].
+export async function metaBatchAcross(ldb, writes, { durable = false } = {}) {
+  const operations = writes.flatMap(({ docName, ops }) => ops.map((operation) => levelMetaOperation(docName, operation)));
   const options = durable ? DURABLE_WRITE_OPTIONS : undefined;
   const result = await ldb._transact((db) => db.batch(operations, options));
   if (result === null) throw storageOperationError(DURABLE_META_BATCH_FAILURE);

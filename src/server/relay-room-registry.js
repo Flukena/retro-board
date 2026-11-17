@@ -63,6 +63,11 @@ const LOCK_OWNER_MISMATCH_MESSAGE = 'a locked room is a board owned by its lock 
 const INVALID_OWNER_LOG = '[yjs] room has an unreadable owner record';
 const PUT_OPERATION = 'put';
 const DELETE_OPERATION = 'del';
+/**
+ * Deletion step: the meta operation that removes a room's registration marker. The deletion journal writes it in the
+ * same atomic batch as its entry, so no relay (this one or an older release) ever sees a journaled room as registered.
+ */
+export const UNREGISTER_OPERATION = Object.freeze({ type: DELETE_OPERATION, key: ROOM_REGISTRATION_META });
 const ROLLBACK_FAILED_LOG = '[yjs] incomplete room rollback failed';
 
 export const canonicalDocName = (code, token) => `${DOCUMENT_PREFIX}board-${code}-${token}`;
@@ -356,11 +361,6 @@ export class RoomRegistry extends EventEmitter {
       this.reportStorageFailure(error);
       this.#log.error(ROLLBACK_FAILED_LOG, { docName: roomLogId(docName), err: error.message });
     }
-  }
-
-  /** Deletion step: durably removes the registration marker, so a crash from here on leaves the room unservable. */
-  async unregisterDurably(docName) {
-    await this.#persistence.durableMetaBatch(docName, [{ type: DELETE_OPERATION, key: ROOM_REGISTRATION_META }]);
   }
 
   /** Deletion step: drops every in-memory trace of the room at once, so nothing can look it up. Returns its handle. */

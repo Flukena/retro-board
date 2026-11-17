@@ -59,6 +59,13 @@ Work dir: `/Volumes/ssd-fluke/BaseData/retro-board/room-management-<date>/`.
 
 ## Rollback
 
+Before rolling back, confirm the new relay has been up for at least one
+maintenance tick (1 minute) and that its log since the last start has no
+`[yjs] room deletion recovery failed` line. This check catches failed
+recoveries only: a deletion still waiting on in-flight work logs nothing.
+A pending deletion is safe under the old relay anyway (see below); the
+check only keeps its rows from sitting on disk longer than needed.
+
 Put `image: miro-release-yjs:e2e-c23f18c` and
 `image: miro-release-web:e2e-c23f18c` in `deploy.yml`, then run the same
 command from step 5. Web and yjs are replaced together, so the old relay
@@ -71,7 +78,14 @@ Effect while the old relay runs:
   protects owned rooms, and it never runs the guest sweep.
 - The `retro-relay-deletions` document is a new LevelDB document the old relay
   does not read; leave it in place.
-- Rooms deleted meanwhile stay deleted; restore only from a backup.
+- Rooms deleted before the rollback stay deleted: a deletion writes its
+  journal entry and removes the room's registration marker in one fsynced
+  batch, and the old relay registers a room only by that marker. A deletion
+  still pending (a crash before it finished) is quarantined by the old relay
+  (`[yjs] quarantined incomplete room`); its rows and files stay on disk
+  until the new relay is back and its recovery finishes the deletion. This
+  holds only while `YJS_ALLOW_LEGACY_ROOMS` stays off, as in production.
+  Restore deleted rooms only from a backup.
 - Guest rooms created meanwhile fall back to the 60-day rule.
 
 ## Deployment record

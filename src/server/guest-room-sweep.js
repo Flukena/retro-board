@@ -37,8 +37,8 @@ export class GuestRoomSweep {
     if (publicWall || this.#running || now < this.#nextSweepAt) return null;
     this.#running = true;
     try {
-      const candidates = guestRoomCandidates(roomRows(this.#ports), now, this.#retentionMs);
-      const summary = await retireCandidates(this.#ports, candidates);
+      const select = (rows) => guestRoomCandidates(rows, now, this.#retentionMs);
+      const summary = await retireCandidates(this.#ports, select(roomRows(this.#ports)), select);
       this.#nextSweepAt = now + this.#intervalMs;
       if (summary.retired > 0) log.log(GUEST_SWEEP_LOG, summary);
       return summary;

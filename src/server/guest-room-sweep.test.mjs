@@ -21,9 +21,10 @@ const OWNER_RECORDS = {
 
 // rooms: { label, owner: guest|owned|orphaned|legacy, connections? } all created at T0.
 function fixture(rooms, { publicWall = false, deleteRoom, timing } = {}) {
+  const activity = new Map(rooms.map(({ label }) => [docOf(label), { createdAt: T0, lastSessionAt: null, lastActiveAt: null }]));
   const registry = {
     registeredRoomsByHandle: new Map(rooms.map(({ label }) => [handleOf(label), docOf(label)])),
-    activity: { get: () => ({ createdAt: T0, lastSessionAt: null, lastActiveAt: null }) },
+    activity: { get: (docName) => activity.get(docName) },
     ownershipOf: (docName) => {
       const { owner } = rooms.find(({ label }) => docOf(label) === docName);
       return { retention: retentionClass(OWNER_RECORDS[owner]) };
@@ -37,7 +38,7 @@ function fixture(rooms, { publicWall = false, deleteRoom, timing } = {}) {
     log: { log: (...args) => logs.push(args), error() {} },
     deleteRoom: deleteRoom ?? (async (docName) => { retiredDocs.push(docName); return { deleted: true, files: FILES_PER_ROOM }; }),
   }, timing);
-  return { sweep, retiredDocs, logs };
+  return { sweep, retiredDocs, logs, activity };
 }
 
 test('a guest room is retired once idle past 24 h, and not before', async () => {
@@ -109,4 +110,19 @@ test('a configured timing retires sooner and sweeps again after its own interval
   assert.equal(await f.sweep.tick(T0 + timing.retentionMs + timing.intervalMs - 1), null);
   assert.deepEqual(await f.sweep.tick(T0 + timing.retentionMs + timing.intervalMs), { retired: 1, files: FILES_PER_ROOM });
   assert.deepEqual(f.retiredDocs, [docOf('guest')]);
+});
+
+test('a guest room visited and left after the candidates were chosen is kept', async () => {
+  const now = T0 + OLD_AGE_MS;
+  const retiredDocs = [];
+  let f;
+  const deleteRoom = async (docName) => {
+    retiredDocs.push(docName);
+    // The visit opened and closed while this deletion ran: only its activity time shows it.
+    f.activity.set(docOf('second'), { createdAt: T0, lastSessionAt: now, lastActiveAt: now });
+    return { deleted: true, files: FILES_PER_ROOM };
+  };
+  f = fixture([{ label: 'first', owner: 'guest' }, { label: 'second', owner: 'guest' }], { deleteRoom });
+  assert.deepEqual(await f.sweep.tick(now), { retired: 1, files: FILES_PER_ROOM });
+  assert.deepEqual(retiredDocs, [docOf('first')]);
 });

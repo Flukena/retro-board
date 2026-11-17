@@ -336,17 +336,6 @@ test('registry clearRoomStorage failure latches and rejects', async () => {
   assert.deepEqual(failures, [error]);
 });
 
-test('registry unregisterDurably deletes only the registration marker, in a durable batch', async () => {
-  const { registry, instance, metadata, trace } = await registryFixture();
-  const room = await registry.createRoom();
-  const docName = registry.registeredDocForCapability(room.code, room.token);
-  trace.length = 0;
-  await instance.unregisterDurably(docName);
-  assert.deepEqual(trace, [DURABLE_STEP_LABEL]);
-  assert.equal(metadata.has(`${docName}:${REGISTRATION_KEY}`), false);
-  assert.ok(metadata.has(`${docName}:${HANDLE_KEY}`), 'the rest of the room stays until it is cleared');
-});
-
 test('registry publishLock of an unpublished room is ignored, so a late commit cannot re-publish it', async () => {
   const { registry, instance } = await registryFixture();
   const room = await registry.createRoom();

@@ -6,7 +6,7 @@ import { mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { checkedStorage, durableMetaBatch } from './relay-storage.js';
-import { RoomRegistry } from './relay-room-registry.js';
+import { RoomRegistry, UNREGISTER_OPERATION, isCommittedRegistration } from './relay-room-registry.js';
 import { RoomFence } from './room-fence.js';
 import {
   DELETION_JOURNAL_DOC, DeletionJournal, RoomDeletion, createRoomFileRemover,
@@ -49,13 +49,7 @@ async function openRelay(root, inject = {}) {
   const trace = [];
   const persistence = {
     ...storage,
-    durableMetaBatch: async (docName, ops) => {
-      if (ops.some((op) => op.key === MARKER_META && op.type === 'del')) {
-        trace.push('unregister');
-        if (inject.unregister) await inject.unregister();
-      }
-      await durableMetaBatch(ldb, docName, ops);
-    },
+    durableMetaBatch: (docName, ops) => durableMetaBatch(ldb, docName, ops),
     clearDocument: async (docName) => {
       trace.push('clear');
       if (inject.clear) await inject.clear(docName, ldb);
@@ -71,7 +65,11 @@ async function openRelay(root, inject = {}) {
   await registry.hydrate(NO_USAGE, new Set(pending.keys()));
   const tracedJournal = {
     load: () => journal.load(),
-    put: async (...args) => { trace.push('journal:put'); await journal.put(...args); },
+    put: async (...args) => {
+      trace.push('journal:put');
+      await journal.put(...args);
+      if (inject.afterJournalPut) await inject.afterJournalPut();
+    },
     remove: async (...args) => { trace.push('journal:remove'); await journal.remove(...args); },
   };
   const fence = new RoomFence();
@@ -138,7 +136,7 @@ test('delete fences at once, then journals, unmarks, closes, drains, clears, rem
   assert.equal(relay.fence.enter(room.docName), null, 'fenced in the same tick');
   assert.deepEqual(await deleting, { deleted: true, files: 2 });
   assert.deepEqual(relay.trace, [
-    'journal:put', 'unregister', `plain:${DELETED_CLOSE}`, `e2e:${DELETED_CLOSE}`, 'clear', 'files', 'journal:remove',
+    'journal:put', `plain:${DELETED_CLOSE}`, `e2e:${DELETED_CLOSE}`, 'clear', 'files', 'journal:remove',
   ]);
   assert.equal(relay.reconciled.count, 1);
   await assertGone(relay, room);
@@ -158,6 +156,17 @@ test('the journal entry records the handle and start time, and exists while the 
   await relay.deletion.deleteRoom(room.docName);
   assert.deepEqual(seen, new Map([[room.docName, { v: 1, handle: room.handle, startedAt: STARTED_AT }]]));
   assert.equal(await relay.storage.getMeta(room.docName, MARKER_META), undefined);
+});
+
+test('the journal put writes the entry and removes only the room\'s registration marker, in one batch', async (t) => {
+  const relay = await openRelay(await withRoot(t));
+  t.after(relay.close);
+  const room = await seedRoom(relay);
+  const entry = { v: 1, handle: room.handle, startedAt: STARTED_AT };
+  await relay.journal.put(room.docName, entry, [UNREGISTER_OPERATION]);
+  assert.deepEqual(await relay.journal.load(), new Map([[room.docName, entry]]));
+  assert.equal(await relay.storage.getMeta(room.docName, MARKER_META), undefined);
+  assert.equal(await relay.storage.getMeta(room.docName, HANDLE_META), room.handle, 'the rest of the room stays until it is cleared');
 });
 
 test('a missing room answers 404 and journals nothing', async (t) => {
@@ -194,7 +203,7 @@ test('a held entry past the drain timeout answers 503, keeps journal and fence, 
 });
 
 const CRASH_POINTS = [
-  ['after the journal put', { unregister: async () => { throw injected(); } }],
+  ['right after the journal put', { afterJournalPut: async () => { throw injected(); } }],
   ['during clear', {
     clear: async (docName, ldb) => {
       await durableMetaBatch(ldb, docName, [{ type: 'del', key: HANDLE_META }]);
@@ -208,12 +217,21 @@ const CRASH_POINTS = [
   })()],
 ];
 
+// The rollback guarantee: every release, including those before the deletion journal, registers a room only by its
+// committed marker. So a room with a journal entry must never still carry one, or a rollback would serve it again.
+async function assertNoCommittedMarkerOnceJournaled(relay, docName) {
+  assert.equal((await relay.journal.load()).has(docName), true, 'the deletion is journaled');
+  const marker = await relay.storage.getMeta(docName, MARKER_META);
+  assert.equal(isCommittedRegistration(marker), false, 'a journaled room carries no committed registration marker');
+}
+
 for (const [point, inject] of CRASH_POINTS) {
   test(`a crash ${point} leaves the room unservable, and recovery at the next start removes rows, files and journal`, async (t) => {
     const root = await withRoot(t);
     const first = await openRelay(root, inject);
     const room = await seedRoom(first);
     await assert.rejects(first.deletion.deleteRoom(room.docName), /injected crash/);
+    await assertNoCommittedMarkerOnceJournaled(first, room.docName);
     await first.close();
 
     const second = await openRelay(root);
@@ -227,7 +245,7 @@ for (const [point, inject] of CRASH_POINTS) {
 
 test('a crash during recovery is finished by the recovery after the next start', async (t) => {
   const root = await withRoot(t);
-  const first = await openRelay(root, { unregister: async () => { throw injected(); } });
+  const first = await openRelay(root, { afterJournalPut: async () => { throw injected(); } });
   const room = await seedRoom(first);
   await assert.rejects(first.deletion.deleteRoom(room.docName));
   await first.close();
@@ -246,7 +264,7 @@ test('a crash during recovery is finished by the recovery after the next start',
 
 test('one journaled room that cannot finish does not stop recovery of the others', async (t) => {
   const root = await withRoot(t);
-  const first = await openRelay(root, { unregister: async () => { throw injected(); } });
+  const first = await openRelay(root, { afterJournalPut: async () => { throw injected(); } });
   const stuck = await seedRoom(first);
   const other = await seedRoom(first);
   await assert.rejects(first.deletion.deleteRoom(stuck.docName));
@@ -269,7 +287,7 @@ function stall() {
 test('a teardown stalled in hydration answers 503 within the drain timeout, does not block other entries, and resumes later', { timeout: STALL_TEST_TIMEOUT_MS }, async (t) => {
   const hydration = stall();
   const root = await withRoot(t);
-  const first = await openRelay(root, { unregister: async () => { throw injected(); } });
+  const first = await openRelay(root, { afterJournalPut: async () => { throw injected(); } });
   const stuck = await seedRoom(first);
   const other = await seedRoom(first);
   await assert.rejects(first.deletion.deleteRoom(stuck.docName));

@@ -4,27 +4,38 @@ import { roomLogId } from './relay-log-id.js';
 const SWEEP_LOG = '[yjs] idle room sweep';
 const ROOM_FAILED_LOG = '[yjs] idle room retirement failed';
 
-// Rows in the same shape the maintainer console previews, keyed back to documents.
-export function roomRows({ registry, docs, connections }) {
-  return [...registry.registeredRoomsByHandle].map(([handle, docName]) => ({
+// One room's row, read now; null once the room is no longer registered.
+function roomRow({ registry, docs, connections }, handle, docName) {
+  const ownership = registry.ownershipOf(docName);
+  if (!ownership) return null;
+  return {
     handle,
     docName,
     ...registry.activity.get(docName),
     connections: connections.get(docName) ?? 0,
     resident: docs.has(docName),
-    retention: registry.ownershipOf(docName).retention,
-  }));
+    retention: ownership.retention,
+  };
+}
+
+// Rows in the same shape the maintainer console previews, keyed back to documents.
+export function roomRows(context) {
+  return [...context.registry.registeredRoomsByHandle].map(([handle, docName]) => roomRow(context, handle, docName));
 }
 
 /**
  * Retires the given candidate rows through the shared deleter, one room at a time; a room that fails or times out is
- * logged and left for the deletion journal, and the walk goes on. A room opened since the candidates were chosen stays.
+ * logged and left for the deletion journal, and the walk goes on. `select(rows)` is the rule that chose the candidates:
+ * each room's row is read again and re-checked against it right before the deleter fences it, so a room visited,
+ * opened or re-classed since the candidates were chosen stays.
  */
-export async function retireCandidates({ docs, connections, deleteRoom, log }, candidates) {
+export async function retireCandidates(context, candidates, select) {
+  const { deleteRoom, log } = context;
   let retired = 0;
   let files = 0;
-  for (const { docName } of candidates) {
-    if (docs.has(docName) || (connections.get(docName) ?? 0) > 0) continue;
+  for (const { handle, docName } of candidates) {
+    const row = roomRow(context, handle, docName);
+    if (!row || select([row]).length === 0) continue;
     try {
       const result = await deleteRoom(docName);
       if (!result.deleted) continue;
@@ -46,7 +57,7 @@ export async function retireIdleRooms(context) {
   const { publicWall, log, now = Date.now() } = context;
   if (publicWall) return { retired: 0, unknownAge: 0, files: 0 };
   const { idle, unknownAge } = idleRoomCandidates(roomRows(context), now);
-  const { retired, files } = await retireCandidates(context, idle);
+  const { retired, files } = await retireCandidates(context, idle, (rows) => idleRoomCandidates(rows, now).idle);
   const result = { retired, unknownAge: unknownAge.length, files };
   log.log(SWEEP_LOG, result);
   return result;

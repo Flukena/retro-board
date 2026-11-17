@@ -33,7 +33,7 @@ function fixture(rooms, { publicWall = false, failing = new Set(), timedOut = ne
       return { deleted: true, files: FILES_PER_ROOM };
     },
   };
-  return { context, retiredDocs, errors };
+  return { context, retiredDocs, errors, activity };
 }
 
 const daysAgo = (days) => NOW - days * DAY_MS;
@@ -81,6 +81,20 @@ test('a room opened after the candidates were chosen is kept', async () => {
   f.context.deleteRoom = async (docName) => {
     const result = await remove(docName);
     f.context.docs.set(docOf('second'), {});
+    return result;
+  };
+  const result = await retireIdleRooms(f.context);
+  assert.equal(result.retired, 1);
+  assert.deepEqual(f.retiredDocs, [docOf('first')]);
+});
+
+test('a room visited and left after the candidates were chosen is kept', async () => {
+  const f = fixture([{ label: 'first', createdAt: daysAgo(OLD_DAYS) }, { label: 'second', createdAt: daysAgo(OLD_DAYS) }]);
+  const remove = f.context.deleteRoom;
+  f.context.deleteRoom = async (docName) => {
+    const result = await remove(docName);
+    // The visit opened and closed while the first deletion ran: only its activity time shows it.
+    f.activity.set(docOf('second'), { ...f.activity.get(docOf('second')), lastSessionAt: NOW, lastActiveAt: NOW });
     return result;
   };
   const result = await retireIdleRooms(f.context);
