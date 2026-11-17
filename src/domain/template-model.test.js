@@ -126,3 +126,12 @@ test('reveal zooms out to fit a template larger than the viewport at the current
   assert.ok((bounds.x + bounds.w) * next.zoom + next.x <= viewportSize.w);
   assert.ok((bounds.y + bounds.h) * next.zoom + next.y <= viewportSize.h);
 });
+
+test('thumbnail corner radius shrinks with the zone scale and never exceeds a pill', () => {
+  const zones = [zone('large', 0, 0, 400, 200), zone('sliver', 0, 0, 400, 20)];
+  const [large, sliver] = templateThumbnail(zones, 100, 60, 0, 24);
+  const scale = large.w / 400;
+  assert.equal(large.r, 24 * scale);
+  assert.equal(sliver.r, sliver.h / 2);
+  assert.equal(templateThumbnail(zones, 100, 60, 0)[0].r, 0);
+});

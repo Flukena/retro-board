@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { withChromeModule } from '../../test-support/chrome-test-helper.js';
+import { ZONE_RADIUS_PX } from '../board/card-look.js';
 import { PALETTE } from '../ui/palette.js';
 
 test('thumbnail SVG hides decorative rectangles and uses palette fill/border including fallback', async () => {
@@ -49,5 +50,17 @@ test('thumbnail SVG rectangles have positive numeric dimensions and fit inside t
       assert.equal(rect.w, undefined);
       assert.equal(rect.h, undefined);
     }
+  });
+});
+
+test('thumbnail zones are rounded from the board zone radius token value, scaled down', async () => {
+  await withChromeModule('/src/client/templates/TemplateThumbnail.jsx', ({ TemplateThumbnail }) => {
+    const zones = [{ x: 0, y: 0, w: 480, h: 320, color: 0 }];
+    const html = renderToStaticMarkup(React.createElement(TemplateThumbnail, { zones }));
+    const attrs = svgAttributes(html.match(/<rect[^>]*>/)[0]);
+    const scale = Number(attrs.width) / 480;
+    assert.ok(Number(attrs.rx) > 0);
+    assert.ok(Math.abs(Number(attrs.rx) - ZONE_RADIUS_PX * scale) < 1e-9);
+    assert.equal(attrs.ry, attrs.rx);
   });
 });

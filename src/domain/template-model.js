@@ -30,7 +30,10 @@ export const templateBounds = (zones) => {
   };
 };
 
-export const templateThumbnail = (zones, boxW, boxH, paddingPx) => {
+const HALF = 1 / CENTRE_DIVISOR;
+
+// cornerRadiusPx is the full-size zone radius; it shrinks with the zone and never exceeds a pill.
+export const templateThumbnail = (zones, boxW, boxH, paddingPx, cornerRadiusPx = 0) => {
   const bounds = templateBounds(zones);
   if (!bounds || bounds.w <= 0 || bounds.h <= 0) return [];
   const availableW = boxW - paddingPx * CENTRE_DIVISOR;
@@ -43,6 +46,7 @@ export const templateThumbnail = (zones, boxW, boxH, paddingPx) => {
     x: offsetX + (zone.x - bounds.x) * scale,
     y: offsetY + (zone.y - bounds.y) * scale,
     w: zone.w * scale, h: zone.h * scale, color: zone.color,
+    r: Math.min(cornerRadiusPx * scale, Math.min(zone.w, zone.h) * scale * HALF),
   }));
 };
 

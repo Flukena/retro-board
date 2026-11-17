@@ -13,9 +13,10 @@
   font-family: var(--font-ui);
 }
 .rb-surface.rb-selection-toolbar {
-  background: var(--tool-frame-bg);
-  border-color: var(--tool-frame-border);
-  box-shadow: var(--tool-frame-shadow);
+  background: var(--bg-panel);
+  border-color: var(--border);
+  box-shadow: var(--shadow-pop);
+  color: var(--text);
 }
 .rb-selection-toolbar[data-toolbar-overflow="true"] { overflow-x: auto; }
 .rb-selection-toolbar > * { flex-shrink: 0; }
