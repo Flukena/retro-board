@@ -4,6 +4,7 @@ import * as Y from 'yjs';
 import { createServer } from 'vite';
 import { createZoneHeaderActions } from '../board/zone-header-actions.js';
 import { PLAYER_PRESENCE_STALE_MS } from './player-cursors.js';
+import { REACTION_CLEAR_MS } from '../reactions/reaction-channel.js';
 import { createRoomLock } from '../room-lock/e2e-crypto.js';
 import { fakeLockedRelay, LOCKED_TEST_CODE, LOCKED_TEST_HANDLE, LOCKED_TEST_TOKEN } from '../../test-support/fake-locked-relay.js';
 
@@ -210,6 +211,52 @@ test('an unlocked room uses the encrypted provider, tracks delivery, and clears 
     browser.dispatchEvent(new CustomEvent(ROOM_KEY_CHANGED_EVENT, { detail: { keyEpoch: LOCKED_EPOCH + 1, epochChanged: true } }));
     assert.equal(browser.storage.canUndo(), false);
   }, { locked: true });
+});
+
+/** Sends one reaction through the room's channel and returns what its own subscriber heard. */
+function sendOwnReaction(reactions, emoji) {
+  const heard = [];
+  const unsubscribe = reactions.subscribe((event) => heard.push(event.emoji));
+  const sent = reactions.send(emoji);
+  unsubscribe();
+  return { sent, heard };
+}
+
+/** Tracks timers of exactly `delayMs` that are scheduled and neither fired nor cleared yet; `restore` unhooks it. */
+function trackTimers(delayMs) {
+  const pending = new Set();
+  const { setTimeout: realSetTimeout, clearTimeout: realClearTimeout } = globalThis;
+  globalThis.setTimeout = (callback, ms, ...args) => {
+    const handle = realSetTimeout((...callArgs) => { pending.delete(handle); callback(...callArgs); }, ms, ...args);
+    if (ms === delayMs) pending.add(handle);
+    return handle;
+  };
+  globalThis.clearTimeout = (handle) => { pending.delete(handle); realClearTimeout(handle); };
+  return { pending, restore: () => Object.assign(globalThis, { setTimeout: realSetTimeout, clearTimeout: realClearTimeout }) };
+}
+
+test('retro boards, plain or locked, get a reaction channel that stops with the board document', async () => {
+  for (const locked of [false, true]) {
+    await withStorage(async (browser) => {
+      const reactions = browser.storage.boardReactions;
+      const clearTimers = trackTimers(REACTION_CLEAR_MS);
+      try {
+        assert.deepEqual(sendOwnReaction(reactions, '👏'), { sent: true, heard: ['👏'] }, `locked=${locked}`);
+        assert.equal(clearTimers.pending.size, 1, 'the sent reaction is scheduled to leave presence');
+        browser.__rbYDoc.destroy();
+        assert.equal(clearTimers.pending.size, 0, 'destroying the board leaves nothing scheduled');
+      } finally {
+        clearTimers.restore();
+      }
+      assert.deepEqual(sendOwnReaction(reactions, '🔥'), { sent: false, heard: [] }, 'a destroyed board sends nothing');
+    }, { locked });
+  }
+});
+
+test('the Public Wall gets no reaction channel, so it neither shows nor plays reactions', async () => {
+  await withStorage(async (browser) => {
+    assert.equal(browser.storage.boardReactions, undefined);
+  }, { publicWall: true });
 });
 
 test('offline local changes expose status and guard unload until a socket sync', async () => {

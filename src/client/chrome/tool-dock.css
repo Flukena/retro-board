@@ -20,7 +20,7 @@
   align-items: stretch;
   gap: var(--space-1);
   padding: var(--rb-dock-padding);
-  max-height: calc(100dvh - var(--rb-dock-top-px) - var(--rb-dock-inset-px) - env(safe-area-inset-bottom, 0px));
+  max-height: calc(100dvh - var(--rb-dock-top-px) - var(--rb-dock-inset-px) - env(safe-area-inset-bottom, 0px) - var(--rb-dock-bottom-reserve-px, 0px));
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;

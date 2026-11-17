@@ -10,6 +10,7 @@ import {
 import { t } from '../ui/i18n.js';
 import { TemplateThumbnail } from '../templates/TemplateThumbnail.jsx';
 import { BOARD_SHORTCUTS } from '../board/board-shortcuts.js';
+import { BoardReactions } from '../reactions/BoardReactions.jsx';
 import './tool-dock.css';
 
 export const TOOL_ID = Object.freeze({ SELECT: 'select', TEXT: 'text', ZONE: 'zone', IMAGE: 'image', DRAW: 'draw' });
@@ -165,6 +166,7 @@ export function ToolDock({
         ))}
       </div>
       <PlacementHint creationMode={creationMode} />
+      <BoardReactions />
       {templatesOpen && (
         <TemplatePopover
           rows={rows}

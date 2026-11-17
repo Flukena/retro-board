@@ -28,7 +28,7 @@ export function schedulePresence(open, reducedMotion, notify, scheduler = browse
   return () => { if (job !== undefined) scheduler.cancel(job); };
 }
 
-function useReducedMotion() {
+export function useReducedMotion() {
   const [reduced, setReduced] = useState(() => globalThis.matchMedia?.(REDUCED_MOTION_QUERY).matches ?? false);
   useEffect(() => {
     const media = globalThis.matchMedia?.(REDUCED_MOTION_QUERY);

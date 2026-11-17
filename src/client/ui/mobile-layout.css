@@ -142,7 +142,7 @@
 
   .rb-tool-dock__body {
     padding: var(--rb-mobile-rail-padding-px);
-    max-height: calc(100dvh - var(--rb-mobile-canvas-top-px) - var(--rb-mobile-bottom-px));
+    max-height: calc(100dvh - var(--rb-mobile-canvas-top-px) - var(--rb-mobile-bottom-px) - var(--rb-dock-bottom-reserve-px, 0px));
     overflow-y: auto;
     gap: 0;
   }

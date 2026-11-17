@@ -37,6 +37,7 @@ import { readCanonicalVotes } from '../../domain/canonical-votes.js';
 import { planVoteFinalization } from '../../domain/vote-finalization.js';
 import * as Y from 'yjs';
 import { createDrawingPreviews } from './drawing-previews.js';
+import { createReactionChannel } from '../reactions/reaction-channel.js';
 import { attachClientSync } from './client-sync.js';
 import { SYNC_STATE } from './sync-status.js';
 import { PublicCreationGuard, PUBLIC_CREATION_LIMIT_EVENT } from './public-creation-guard.js';
@@ -1454,4 +1455,11 @@ if (provider) {
   const previews = createDrawingPreviews(ydoc, provider.awareness);
   window.storage.drawingPreviews = previews;
   ydoc.on('destroy', () => previews.destroy());
+}
+
+// Emoji reactions are for retro boards only: the Public Wall gets no channel, so it neither shows nor plays them.
+if (provider && route.kind === 'board') {
+  const reactions = createReactionChannel(provider.awareness);
+  window.storage.boardReactions = reactions;
+  ydoc.on('destroy', () => reactions.destroy());
 }

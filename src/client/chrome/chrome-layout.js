@@ -58,6 +58,8 @@ export const Z = Object.freeze({
   DOCK: 40,
   TOP_CENTER_STACK: 49,
   TOPBAR: 50,
+  // Reaction effects: over the board and its chrome, under popovers, modals and toasts; never takes pointer input.
+  REACTION_OVERLAY: 55,
   POPOVER_BACKDROP: 59,
   POPOVER: 60,
   MODAL: 100,

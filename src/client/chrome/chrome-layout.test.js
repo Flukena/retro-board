@@ -18,7 +18,7 @@ test('toolbar anchor clears the topbar and preserves anchors above the minimum',
 
 test('chrome layers preserve ordering and distinct integer levels', () => {
   const ascending = [Z.GRID, Z.CANVAS, Z.SELECTION_TOOLBAR, Z.CURSOR_LAYER, Z.DOCK,
-    Z.TOP_CENTER_STACK, Z.TOPBAR, Z.POPOVER_BACKDROP, Z.POPOVER, Z.MODAL, Z.MODAL_RAISED, Z.TOAST];
+    Z.TOP_CENTER_STACK, Z.TOPBAR, Z.REACTION_OVERLAY, Z.POPOVER_BACKDROP, Z.POPOVER, Z.MODAL, Z.MODAL_RAISED, Z.TOAST];
   for (let index = 1; index < ascending.length; index += 1) assert.ok(ascending[index] > ascending[index - 1]);
   assert.ok(Z.TOOLBAR_POPOVER > Z.TOOLBAR_POPOVER_BACKDROP);
   assert.ok(Z.TOOLBAR_POPOVER_BACKDROP > Z.SELECTION_TOOLBAR);
