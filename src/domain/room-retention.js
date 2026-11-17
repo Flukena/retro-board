@@ -1,12 +1,13 @@
+import { RETENTION_CLASS } from './room-ownership.js';
+
 // Which rooms the owner may retire as unused. Shared by the maintainer console
 // preview and the relay, so the list shown is the list deleted.
 export const IDLE_ROOM_RETENTION_DAYS = 60;
 export const MILLISECONDS_PER_DAY = 86_400_000;
 export const IDLE_ROOM_RETENTION_MS = IDLE_ROOM_RETENTION_DAYS * MILLISECONDS_PER_DAY;
 
-import { RETENTION_CLASS } from './room-ownership.js';
-
-export const GUEST_ROOM_RETENTION_MS = 24 * 60 * 60 * 1000;
+// Rooms created without signing in (owner decision 2026-11-11).
+export const GUEST_ROOM_RETENTION_MS = MILLISECONDS_PER_DAY;
 
 const knownTime = (value) => (Number.isSafeInteger(value) && value > 0 ? value : null);
 
