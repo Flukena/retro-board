@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ROOM_KIND } from '../../domain/room-ownership.js';
 import {
+  CARD_ACTIVITY,
   CARD_THUMBNAIL,
   RENAME_ACTION,
   WORKSPACE_SORT,
+  cardActivityOf,
   cardThumbnailOf,
   renameActionOf,
   roomNameOf,
@@ -134,4 +136,17 @@ test('time sorts are deterministic with missing or invalid dates, missing sorts 
   for (const [sort, expected] of Object.entries(orders)) {
     for (const input of shuffles) assert.deepEqual(codes(visibleRooms(input, { sort, locale: 'en' })), expected);
   }
+});
+
+test('card activity shows the last activity, else the creation time, else nothing', () => {
+  assert.deepEqual(cardActivityOf(room({ createdAt: 100, lastActiveAt: 900 })), { kind: CARD_ACTIVITY.LAST_ACTIVE, at: 900 });
+  for (const missing of [null, undefined, 0, -5, Number.NaN, Number.POSITIVE_INFINITY, '900']) {
+    assert.deepEqual(cardActivityOf(room({ createdAt: 100, lastActiveAt: missing })), { kind: CARD_ACTIVITY.CREATED, at: 100 }, String(missing));
+    assert.equal(cardActivityOf(room({ createdAt: missing, lastActiveAt: missing })), null, String(missing));
+  }
+});
+
+test('a zero activity time sorts like a missing one, falling back to createdAt', () => {
+  const rooms = [room({ code: 'zero', createdAt: 500, lastActiveAt: 0 }), room({ code: 'mid', createdAt: 100, lastActiveAt: 300 })];
+  assert.deepEqual(codes(visibleRooms(rooms, { sort: WORKSPACE_SORT.RECENT, locale: 'en' })), ['zero', 'mid']);
 });

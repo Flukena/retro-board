@@ -10,23 +10,13 @@ import { formatRelativeTime } from '../ui/relative-time.js';
 import { ROOM_KIND } from '../../domain/room-ownership.js';
 import { signInHref } from './account-api.js';
 import { MY_BOARDS_ERROR, MY_BOARDS_STATUS, createMyBoardsController } from './my-boards-controller.js';
+import { DELETE_COPY_KEYS } from '../workspace/room-delete-copy.js';
+import { ROOM_ERROR_KEYS as ERROR_KEYS } from '../workspace/room-error-copy.js';
 import './my-boards.css';
 
 const BADGE_ICON_SIZE_PX = 12;
 const DELETE_ICON_SIZE_PX = 20;
 const KIND_KEYS = Object.freeze({ [ROOM_KIND.BOARD]: 'myBoards.kind.board', [ROOM_KIND.POKER]: 'poker.title' });
-// Delete copy names what is being deleted: a board or a Planning Poker room.
-export const DELETE_COPY_KEYS = Object.freeze({
-  [ROOM_KIND.BOARD]: Object.freeze({ title: 'myBoards.deleteTitle', body: 'myBoards.deleteBody', prompt: 'myBoards.deletePrompt' }),
-  [ROOM_KIND.POKER]: Object.freeze({ title: 'myBoards.deleteTitlePoker', body: 'myBoards.deleteBodyPoker', prompt: 'myBoards.deletePromptPoker' }),
-});
-const ERROR_KEYS = Object.freeze({
-  [MY_BOARDS_ERROR.SIGN_IN]: 'myBoards.error.signIn',
-  [MY_BOARDS_ERROR.GONE]: 'myBoards.error.gone',
-  [MY_BOARDS_ERROR.LOCKED]: 'myBoards.error.locked',
-  [MY_BOARDS_ERROR.RATE_LIMITED]: 'myBoards.error.rateLimited',
-  [MY_BOARDS_ERROR.UNAVAILABLE]: 'account.failed',
-});
 
 const isKnownTime = (value) => Number.isFinite(value) && value > 0;
 
