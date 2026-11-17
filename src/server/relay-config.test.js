@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { envInt, envBool, readRelayConfig, syncResponseLimits } from './relay-config.js';
+import { envInt, envBool, readGuestSweepTiming, readRelayConfig, syncResponseLimits } from './relay-config.js';
+import { GUEST_ROOM_RETENTION_MS, GUEST_SWEEP_INTERVAL_MS } from '../domain/room-retention.js';
 
 const REPO_URL = new URL('../../', import.meta.url);
 const MIN_VALUE = 2;
@@ -111,4 +112,23 @@ test('sync response limits preserve private defaults when assembled outside the 
   assert.equal(limits.room.messagesPerSecond, 8);
   assert.equal(limits.global.maxMessages, 128);
   assert.equal(limits.global.messagesPerSecond, 32);
+});
+
+const GUEST_TIMING_ENV = Object.freeze({ YJS_GUEST_ROOM_RETENTION_MS: '20000', YJS_GUEST_SWEEP_INTERVAL_MS: '1000' });
+const DEFAULT_GUEST_TIMING = Object.freeze({ retentionMs: GUEST_ROOM_RETENTION_MS, intervalMs: GUEST_SWEEP_INTERVAL_MS });
+
+test('guest expiry overrides are ignored unless the relay runs in insecure dev mode', () => {
+  assert.deepEqual(readGuestSweepTiming(GUEST_TIMING_ENV, { allowInsecureHttp: false }), DEFAULT_GUEST_TIMING);
+  assert.deepEqual(readGuestSweepTiming(GUEST_TIMING_ENV), DEFAULT_GUEST_TIMING);
+  assert.deepEqual(readGuestSweepTiming({ YJS_GUEST_ROOM_RETENTION_MS: 'not a number' }, { allowInsecureHttp: false }), DEFAULT_GUEST_TIMING);
+});
+
+test('insecure dev mode honours guest expiry overrides that only shorten the defaults', () => {
+  assert.deepEqual(readGuestSweepTiming(GUEST_TIMING_ENV, { allowInsecureHttp: true }), { retentionMs: 20_000, intervalMs: 1_000 });
+  assert.deepEqual(readGuestSweepTiming({}, { allowInsecureHttp: true }), DEFAULT_GUEST_TIMING);
+  for (const env of [
+    { YJS_GUEST_ROOM_RETENTION_MS: String(GUEST_ROOM_RETENTION_MS + 1) },
+    { YJS_GUEST_SWEEP_INTERVAL_MS: String(GUEST_SWEEP_INTERVAL_MS + 1) },
+    { YJS_GUEST_ROOM_RETENTION_MS: '999' },
+  ]) assert.throws(() => readGuestSweepTiming(env, { allowInsecureHttp: true }), /must be an integer between/);
 });

@@ -70,6 +70,18 @@ test('a guest room is idle only after strictly more than 24 hours', () => {
   assert.deepEqual(handles(guestRoomCandidates(rooms, NOW)), ['over']);
 });
 
+test('a shorter guest retention makes a guest room a candidate sooner, and leaves kept rooms alone', () => {
+  const shortRetentionMs = HOUR_MS;
+  const rooms = [
+    guestRoom('over', { createdAt: NOW - shortRetentionMs - 1 }),
+    guestRoom('within', { createdAt: NOW - shortRetentionMs }),
+    room('kept', { retention: 'kept', createdAt: NOW - 2 * shortRetentionMs }),
+  ];
+  assert.deepEqual(handles(guestRoomCandidates(rooms, NOW, shortRetentionMs)), ['over']);
+  assert.deepEqual(handles(idleRoomCandidates(rooms, NOW, { guestRetentionMs: shortRetentionMs }).idle), ['over']);
+  assert.deepEqual(handles(guestRoomCandidates(rooms, NOW)), [], 'the default stays 24 h');
+});
+
 test('a kept room idle 25 hours is not a candidate, and a missing retention field means kept', () => {
   const rooms = [
     room('legacy', { createdAt: NOW - 25 * HOUR_MS }),

@@ -20,7 +20,7 @@ const OWNER_RECORDS = {
 };
 
 // rooms: { label, owner: guest|owned|orphaned|legacy, connections? } all created at T0.
-function fixture(rooms, { publicWall = false, deleteRoom } = {}) {
+function fixture(rooms, { publicWall = false, deleteRoom, timing } = {}) {
   const registry = {
     registeredRoomsByHandle: new Map(rooms.map(({ label }) => [handleOf(label), docOf(label)])),
     activity: { get: () => ({ createdAt: T0, lastSessionAt: null, lastActiveAt: null }) },
@@ -36,7 +36,7 @@ function fixture(rooms, { publicWall = false, deleteRoom } = {}) {
     connections: new Map(rooms.filter((r) => r.connections).map(({ label, connections }) => [docOf(label), connections])),
     log: { log: (...args) => logs.push(args), error() {} },
     deleteRoom: deleteRoom ?? (async (docName) => { retiredDocs.push(docName); return { deleted: true, files: FILES_PER_ROOM }; }),
-  });
+  }, timing);
   return { sweep, retiredDocs, logs };
 }
 
@@ -100,4 +100,13 @@ test('logs one summary line, and only when a room was retired', async () => {
   await f.sweep.tick(T0 + GUEST_ROOM_RETENTION_MS + GUEST_SWEEP_INTERVAL_MS);
   assert.equal(f.logs.length, 1);
   assert.deepEqual(f.logs[0][1], { retired: 1, files: FILES_PER_ROOM });
+});
+
+test('a configured timing retires sooner and sweeps again after its own interval', async () => {
+  const timing = { retentionMs: 1_000, intervalMs: 2_000 };
+  const f = fixture([{ label: 'guest', owner: 'guest' }], { timing });
+  assert.deepEqual(await f.sweep.tick(T0 + timing.retentionMs), { retired: 0, files: 0 });
+  assert.equal(await f.sweep.tick(T0 + timing.retentionMs + timing.intervalMs - 1), null);
+  assert.deepEqual(await f.sweep.tick(T0 + timing.retentionMs + timing.intervalMs), { retired: 1, files: FILES_PER_ROOM });
+  assert.deepEqual(f.retiredDocs, [docOf('guest')]);
 });

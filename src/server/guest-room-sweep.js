@@ -1,24 +1,29 @@
-import { guestRoomCandidates, GUEST_SWEEP_INTERVAL_MS } from '../domain/room-retention.js';
+import { guestRoomCandidates, GUEST_ROOM_RETENTION_MS, GUEST_SWEEP_INTERVAL_MS } from '../domain/room-retention.js';
 import { retireCandidates, retireIdleRooms, roomRows } from './room-retirement.js';
 
 const GUEST_SWEEP_LOG = '[yjs] guest room sweep';
 const GUEST_SWEEP_FAILED_LOG = '[yjs] guest room sweep failed';
 
 /**
- * Retires idle guest rooms (and only those) at most once per GUEST_SWEEP_INTERVAL_MS, driven by the relay's existing
+ * Retires idle guest rooms (and only those) at most once per sweep interval, driven by the relay's existing
  * maintenance tick. Single-flight; a no-op on the Public Wall relay. Owned, orphaned, legacy and Public Wall rooms are
  * never swept here; their 60-day retirement stays operator-triggered through retireIdle().
  * Deletion-journal recovery is not repeated here: it already runs on the maintenance tick and at startup, so the
  * summary carries no `recovered` field.
  * Ports (same as retireIdleRooms): registry, docs, connections, publicWall, log, deleteRoom(docName).
+ * Timing defaults to 24 h retention and an hourly sweep; only a dev relay passes shorter values (readGuestSweepTiming).
  */
 export class GuestRoomSweep {
   #ports;
+  #retentionMs;
+  #intervalMs;
   #running = false;
   #nextSweepAt = 0;
 
-  constructor(ports) {
+  constructor(ports, { retentionMs = GUEST_ROOM_RETENTION_MS, intervalMs = GUEST_SWEEP_INTERVAL_MS } = {}) {
     this.#ports = ports;
+    this.#retentionMs = retentionMs;
+    this.#intervalMs = intervalMs;
   }
 
   /** The maintainer's on-demand retirement of every idle class. */
@@ -32,9 +37,9 @@ export class GuestRoomSweep {
     if (publicWall || this.#running || now < this.#nextSweepAt) return null;
     this.#running = true;
     try {
-      const candidates = guestRoomCandidates(roomRows(this.#ports), now);
+      const candidates = guestRoomCandidates(roomRows(this.#ports), now, this.#retentionMs);
       const summary = await retireCandidates(this.#ports, candidates);
-      this.#nextSweepAt = now + GUEST_SWEEP_INTERVAL_MS;
+      this.#nextSweepAt = now + this.#intervalMs;
       if (summary.retired > 0) log.log(GUEST_SWEEP_LOG, summary);
       return summary;
     } catch (error) {

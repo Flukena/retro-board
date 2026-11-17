@@ -1,5 +1,6 @@
 import { IMAGE_MAX_BYTES } from '../domain/security-boundaries.js';
 import { RELAY_DEFAULT_MAX_DOCUMENT_BYTES, RELAY_DEFAULT_MAX_WS_MESSAGE_BYTES } from '../domain/e2e-limits.js';
+import { GUEST_ROOM_RETENTION_MS, GUEST_SWEEP_INTERVAL_MS } from '../domain/room-retention.js';
 
 export const MILLISECONDS_PER_SECOND = 1_000;
 export const MILLISECONDS_PER_MINUTE = 60_000;
@@ -79,6 +80,21 @@ export const envBool = (name, fallback = false, env = process.env) => {
   throw new Error(`${name} must be one of: 1, 0, true, false, yes, no`);
 };
 
+const MIN_GUEST_SWEEP_TIMING_MS = MILLISECONDS_PER_SECOND;
+
+/**
+ * Guest room expiry timing for GuestRoomSweep. YJS_GUEST_ROOM_RETENTION_MS and YJS_GUEST_SWEEP_INTERVAL_MS exist for
+ * live checks: they are read only on an insecure dev relay (YJS_ALLOW_INSECURE_HTTP) and may only shorten the
+ * defaults; any other relay ignores them.
+ */
+export const readGuestSweepTiming = (env = process.env, { allowInsecureHttp = false } = {}) => {
+  if (!allowInsecureHttp) return Object.freeze({ retentionMs: GUEST_ROOM_RETENTION_MS, intervalMs: GUEST_SWEEP_INTERVAL_MS });
+  const shorterMs = (name, fallback) => envInt(name, fallback, { min: MIN_GUEST_SWEEP_TIMING_MS, max: fallback }, env);
+  return Object.freeze({
+    retentionMs: shorterMs('YJS_GUEST_ROOM_RETENTION_MS', GUEST_ROOM_RETENTION_MS),
+    intervalMs: shorterMs('YJS_GUEST_SWEEP_INTERVAL_MS', GUEST_SWEEP_INTERVAL_MS),
+  });
+};
 
 // Read explicitly at startup; importing this module never inspects the environment.
 export const readRelayConfig = (env = process.env) => {
