@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -75,4 +76,11 @@ test('template guides and the not-found page render fully translated in both lan
     assert.doesNotMatch(markup, UNTRANSLATED, lang);
     assert.match(markup, /href="\/"/);
   });
+});
+
+test('feature cards take the shared landing card padding: no later stylesheet overrides the class', () => {
+  const pokerCss = readFileSync(new URL('../poker/poker.css', import.meta.url), 'utf8');
+  assert.doesNotMatch(pokerCss, /\.rb-landing__feature\s*\{/);
+  const landingCss = readFileSync(new URL('./landing.css', import.meta.url), 'utf8');
+  assert.match(landingCss, /\.rb-landing__feature,[^{]*\{\s*padding: var\(--landing-card-padding\);/);
 });

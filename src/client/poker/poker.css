@@ -388,12 +388,6 @@
   box-shadow: var(--poker-card-glow);
   transform: translateY(var(--poker-card-selected-lift)) scale(var(--poker-card-selected-scale));
 }
-.rb-landing__feature {
-  max-width: var(--landing-content-max-width);
-  margin: var(--space-8) auto 0;
-  padding: 0 var(--landing-hero-padding);
-  box-sizing: border-box;
-}
 
 @media (max-width: 760px) {
   .rb-poker__body { grid-template-columns: 1fr; }
