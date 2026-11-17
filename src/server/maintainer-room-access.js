@@ -9,7 +9,7 @@ export function createMaintainerRoomLinks({ registry, boardOrigin, publicWall = 
     const docName = registry.registeredRoomsByHandle.get(handle);
     if (!docName || registry.isLocked(docName)) return null;
     if (publicWall) return new URL(PUBLIC_PATH, boardOrigin).href;
-    const link = roomLink(docName, ROOM_KIND.BOARD);
+    const link = roomLink(docName, registry.ownershipOf(docName)?.kind ?? ROOM_KIND.BOARD);
     return link && new URL(link, boardOrigin).href;
   };
 }

@@ -6,8 +6,8 @@ export const RELAY_TITLE_ORIGIN = 'relay-title';
 export const TITLE_WRITE_STATUS = Object.freeze({ OK: 200, NOT_FOUND: 404, UNAVAILABLE: 503 });
 /** Storage reads of non-resident rooms in flight at once, across every list request. */
 export const MAX_CONCURRENT_TITLE_READS = 4;
-/** How long a renamed idle room waits for other fence holders (an upgrade mid-attach) before it stays loaded. */
-export const TITLE_UNLOAD_WAIT_MS = 5_000;
+/** A renamed idle room waits for other fence holders without limit; this only re-arms the fence wait. */
+export const TITLE_UNLOAD_RECHECK_MS = 60_000;
 const META_MAP = 'meta';
 const TITLE_KEY = 'title';
 
@@ -44,7 +44,7 @@ function boundedRunner(limit) {
 
 /**
  * Title of a room for a list: read live from a resident doc, otherwise from storage into a throwaway doc that is never
- * registered. Null when it has none or cannot be read (a delete may clear its rows mid-list).
+ * registered. Null when it has none (a room cleared mid-list reads as empty); a storage failure rejects.
  * Ports: docs, roomReady (doc → hydration promise), readStoredDoc(docName) → Y.Doc built from persistence.
  */
 export function createRoomTitleReader({ docs, roomReady, readStoredDoc, limit = MAX_CONCURRENT_TITLE_READS }) {
@@ -58,31 +58,26 @@ export function createRoomTitleReader({ docs, roomReady, readStoredDoc, limit = 
     }
   });
   return async (docName) => {
-    try {
-      const resident = docs.get(docName);
-      if (!resident) return await readStored(docName);
-      await roomReady.get(resident);
-      return titleOf(resident);
-    } catch {
-      return null;
-    }
+    const resident = docs.get(docName);
+    if (!resident) return readStored(docName);
+    await roomReady.get(resident);
+    return titleOf(resident);
   };
 }
 
 /**
  * Renames a room on its one live document, through the same getYDoc + roomReady path an upgrade uses, so a rename can
  * never race a first connection onto a second copy. Ports: docs, getYDoc, roomReady, fence (RoomFence), refusal(doc,
- * docName) → an Error when the relay will not serve the room, or null; storeWriteOf(doc) → the promise (true once
- * stored, false on failure) of the last store write the doc's update queued.
+ * docName) → an Error when the relay will not serve the room, or null; admitsColdRoom() → the relay's active-room
+ * admission an upgrade of a cold room uses; storeWriteOf(doc) → the promise (true once stored, false on failure) of
+ * the last store write the doc's update queued.
  */
-export function createRoomTitleWriter({ docs, getYDoc, roomReady, fence, refusal, storeWriteOf }) {
+export function createRoomTitleWriter({ docs, getYDoc, roomReady, fence, refusal, admitsColdRoom, storeWriteOf }) {
   // A doc loaded only for the rename is unloaded once nobody else holds the room: an upgrade that took the same doc
   // while it hydrated holds a fence entry until its socket is attached, and then owns the doc's lifecycle.
+  // A long holder (a slow upload) only delays the unload: it runs when the last holder releases.
   const unloadWhenIdle = async (docName, doc) => {
-    const deadline = Date.now() + TITLE_UNLOAD_WAIT_MS;
-    while (fence.held(docName)) {
-      if (!(await fence.drained(docName, Math.max(0, deadline - Date.now())))) return;
-    }
+    while (fence.held(docName) && docs.get(docName) === doc) await fence.drained(docName, TITLE_UNLOAD_RECHECK_MS);
     unloadUnattachedDoc({ docs, roomReady }, docName, doc);
   };
 
@@ -101,6 +96,8 @@ export function createRoomTitleWriter({ docs, getYDoc, roomReady, fence, refusal
     /** Resolves a TITLE_WRITE_STATUS once the update is stored (not fsynced, like every Yjs edit) or refused. */
     async write(docName, title) {
       if (!isBoardTitle(title)) throw new TypeError('invalid board title');
+      // Same admission as an upgrade, in the same tick as getYDoc: a rename never loads a room past the cap.
+      if (!docs.has(docName) && !admitsColdRoom()) return TITLE_WRITE_STATUS.UNAVAILABLE;
       const leave = fence.enter(docName);
       if (!leave) return TITLE_WRITE_STATUS.NOT_FOUND;
       const doc = getYDoc(docName, true);

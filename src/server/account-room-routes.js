@@ -1,6 +1,7 @@
 import { isBoardTitle } from '../domain/board-title.js';
 import { RETRY_AFTER_SHORT_SECONDS } from './relay-config.js';
 import { readJsonBody, sendIfWritable, sendJson } from './relay-http.js';
+import { STORAGE_FAILURE_CODE } from './relay-storage.js';
 import { takeTrafficTokens, trafficBucketFor } from './relay-rate-bucket.js';
 import { roomCodeOf, roomLink } from './room-links.js';
 import { orphanAccountRooms } from './room-orphaning.js';
@@ -70,7 +71,14 @@ export function createAccountRoomRoutes({
   async function list(_req, res, { account, unauthorized }) {
     if (!takeToken(account.id)) { tooManyRequests(res); return; }
     if (!(await stillSignedIn(account))) { unauthorized(); return; }
-    const rooms = await Promise.all(registry.roomsOwnedBy(account.id).map(entryOf));
+    let rooms;
+    try {
+      rooms = await Promise.all(registry.roomsOwnedBy(account.id).map(entryOf));
+    } catch (error) {
+      // Latched like any storage failure; the dispatcher answers 503.
+      if (error.code === STORAGE_FAILURE_CODE) onStorageFailure(error);
+      throw error;
+    }
     sendJson(res, HTTP.OK, { rooms: rooms.filter(Boolean).sort(newestFirst) });
   }
 

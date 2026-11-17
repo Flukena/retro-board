@@ -6,6 +6,7 @@ import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import { ORIGIN, PASSWORD, exchange, lockedRelay, post, signIn } from '../test-support/locked-room-harness.mjs';
 import { HOOK_PRELOAD, hookOf } from '../test-support/relay-hook-client.mjs';
+import { STORAGE_FAILURE_LOG } from './relay-lifecycle.js';
 import { createRoomLock } from '../client/room-lock/e2e-crypto.js';
 import { ROOM_KIND, ROOM_OWNER_META, ROOM_PATH_PREFIX, decodeOwnerRecord } from '../domain/room-ownership.js';
 
@@ -65,6 +66,12 @@ function openPeer(t, relay, session) {
   t.after(() => { provider.destroy(); doc.destroy(); });
   return { doc, provider, synced: until(() => provider.synced, Boolean, 'peer sync') };
 }
+
+const upgradeStatus = (ws) => new Promise((resolve, reject) => {
+  ws.once('unexpected-response', (_req, response) => { response.resume(); resolve(response.statusCode); });
+  ws.once('open', () => { ws.close(); reject(new Error('upgrade unexpectedly succeeded')); });
+  ws.once('error', () => { /* unexpected-response is authoritative */ });
+});
 
 const peerTitle = (peer) => peer.doc.getMap('meta').get('title');
 
@@ -160,6 +167,31 @@ test('a rename whose store write fails answers 503', async (t) => {
   const room = await createOwnedRoom(env, cookie);
   await env.hook('fail-store');
   assert.equal((await rename(env.relay, room.code, cookie)).status, STATUS.UNAVAILABLE);
+});
+
+test('a list whose stored title cannot be read answers 503, never a room without a title', async (t) => {
+  const env = await hookedRelay(t);
+  const cookie = await signIn(env);
+  await createOwnedRoom(env, cookie);
+  await env.hook('fail-read');
+  const response = await fetch(`${env.relay.url}${ROOMS}`, { headers: { cookie } });
+  assert.equal(response.status, STATUS.UNAVAILABLE);
+  await until(() => env.relay.output().includes(STORAGE_FAILURE_LOG), Boolean, 'the storage failure latch');
+});
+
+test('at the active-room cap a cold rename answers 503 and lets no second room in', async (t) => {
+  const env = await hookedRelay(t, { env: { YJS_MAX_ACTIVE_ROOMS: '1' } });
+  const cookie = await signIn(env);
+  const busy = await roomSession(env, await createOwnedRoom(env, cookie));
+  const cold = await roomSession(env, await createOwnedRoom(env, cookie));
+  await openPeer(t, env.relay, busy).synced;
+  assert.equal((await rename(env.relay, cold.code, cookie)).status, STATUS.UNAVAILABLE, env.relay.output());
+  assert.equal((await env.hook('state', cold.docName)).resident, false);
+  const refused = await upgradeStatus(new WebSocket(`${env.relay.wsUrl}/rooms/${cold.handle}`, {
+    origin: ORIGIN, headers: { cookie: cold.cookie },
+  }));
+  assert.equal(refused, STATUS.UNAVAILABLE);
+  assert.equal((await rename(env.relay, busy.code, cookie)).status, STATUS.OK, 'the resident room already holds its slot');
 });
 
 test('the list links a Poker room under /p/ and a locked room under /b/ with no title', async (t) => {

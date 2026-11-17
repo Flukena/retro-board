@@ -10,7 +10,7 @@ import { createAuthRoutes } from './auth-routes.js';
 import { AccountStore } from './account-store.js';
 import { ACCOUNT_SESSION_TTL_MS, AccountSessions } from './auth-session.js';
 import { FlowLedger } from './auth-google.js';
-import { checkedStorage, durableMetaBatch } from './relay-storage.js';
+import { STORAGE_FAILURE_CODE, checkedStorage, durableMetaBatch, storageOperationError } from './relay-storage.js';
 import { RoomRegistry } from './relay-room-registry.js';
 import { lockRecord } from './room-lock-fixtures.mjs';
 import { pausedPost } from '../test-support/paused-request.mjs';
@@ -72,7 +72,7 @@ async function openRegistry(dir) {
 /** Records every title write and delete; their answers can be swapped per test. */
 function roomPorts() {
   const ports = {
-    titles: new Map(), writes: [], deletes: [],
+    titles: new Map(), writes: [], deletes: [], storageFailures: [],
     writeResult: TITLE_WRITE_STATUS.OK, deleteResult: () => Promise.resolve({ deleted: true, files: 0 }),
   };
   ports.readTitle = async (docName) => ports.titles.get(docName) ?? null;
@@ -90,8 +90,8 @@ async function startRoutes(t) {
   const sessions = new AccountSessions({ signingKey: accountKey, allowInsecureHttp: false, maxCookieHeaderBytes: MAX_COOKIE_HEADER_BYTES });
   const ports = roomPorts();
   const accountRooms = createAccountRoomRoutes({
-    registry, store, maxBodyBytes: MAX_BODY_BYTES, log: QUIET,
-    readTitle: ports.readTitle, writeTitle: ports.writeTitle, deleteRoom: ports.deleteRoom,
+    registry, store, maxBodyBytes: MAX_BODY_BYTES, log: QUIET, onStorageFailure: (error) => ports.storageFailures.push(error.code),
+    readTitle: (docName) => ports.readTitle(docName), writeTitle: ports.writeTitle, deleteRoom: ports.deleteRoom,
   });
   const routes = createAuthRoutes({
     oauth: OAUTH, accountKey, sessions, store, ledger: new FlowLedger(), allowedOrigins: [BOARD_ORIGIN], allowInsecureHttp: false,
@@ -317,6 +317,15 @@ test('a relay that is shutting down or failed answers 503 on every room route', 
   assert.equal((await remove(ctx, room.code, cookie)).status, STATUS.UNAVAILABLE);
   assert.deepEqual(ctx.ports.writes, []);
   assert.deepEqual(ctx.ports.deletes, []);
+});
+
+test('a storage failure while reading titles answers 503 and is latched, never listed as a room without a title', async (t) => {
+  const ctx = await startRoutes(t);
+  const { account, cookie } = await ctx.signIn(OWNER_PROFILE);
+  await ctx.createRoom(ownedBoard(account));
+  ctx.ports.readTitle = async () => { throw storageOperationError('getYDoc failed'); };
+  assert.equal((await get(ctx, ROOMS, { cookie })).status, STATUS.UNAVAILABLE);
+  assert.deepEqual(ctx.ports.storageFailures, [STORAGE_FAILURE_CODE]);
 });
 
 // Resolves once the request has been authenticated: the relay is then waiting for the rest of the body.

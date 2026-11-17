@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as Y from 'yjs';
 import { RoomFence } from './room-fence.js';
+import { STORAGE_FAILURE_CODE, storageOperationError } from './relay-storage.js';
 import {
   MAX_CONCURRENT_TITLE_READS, RELAY_TITLE_ORIGIN, TITLE_WRITE_STATUS, createRoomTitleReader, createRoomTitleWriter,
 } from './room-title-writer.js';
@@ -43,9 +44,9 @@ function relayRooms({ stored = new Map(), storeResult = () => Promise.resolve(tr
   return { docs, roomReady, storeWrites, getYDoc, hydrations, origins, stored };
 }
 
-function writerFor(rooms, { fence = new RoomFence(), refusal = NO_REFUSAL } = {}) {
+function writerFor(rooms, { fence = new RoomFence(), refusal = NO_REFUSAL, admitsColdRoom = () => true } = {}) {
   const writer = createRoomTitleWriter({
-    docs: rooms.docs, getYDoc: rooms.getYDoc, roomReady: rooms.roomReady, fence, refusal,
+    docs: rooms.docs, getYDoc: rooms.getYDoc, roomReady: rooms.roomReady, fence, refusal, admitsColdRoom,
     storeWriteOf: (doc) => rooms.storeWrites.get(doc),
   });
   return { writer, fence };
@@ -195,16 +196,19 @@ test('the reader reads a resident room live and a cold room from storage without
   assert.equal(rooms.docs.has(cold), false);
 });
 
-test('the reader answers null for a missing, invalid or unreadable title', async () => {
+test('the reader answers null for a missing or invalid title', async () => {
   const titles = new Map([['none', undefined], ['blank', '  '], ['number', 42]]);
   const read = createRoomTitleReader({
-    docs: new Map(), roomReady: new WeakMap(),
-    readStoredDoc: async (docName) => {
-      if (docName === 'broken') throw new Error('rows cleared');
-      return storedDoc(titles.get(docName));
-    },
+    docs: new Map(), roomReady: new WeakMap(), readStoredDoc: async (docName) => storedDoc(titles.get(docName)),
   });
-  for (const docName of ['none', 'blank', 'number', 'broken']) assert.equal(await read(docName), null, docName);
+  for (const docName of titles.keys()) assert.equal(await read(docName), null, docName);
+});
+
+test('a storage failure while reading a title is never turned into a missing title', async () => {
+  const read = createRoomTitleReader({
+    docs: new Map(), roomReady: new WeakMap(), readStoredDoc: async () => { throw storageOperationError('getYDoc failed'); },
+  });
+  await assert.rejects(read('cold'), { code: STORAGE_FAILURE_CODE });
 });
 
 test('the reader keeps at most MAX_CONCURRENT_TITLE_READS storage reads in flight', async () => {
@@ -223,4 +227,39 @@ test('the reader keeps at most MAX_CONCURRENT_TITLE_READS storage reads in fligh
   const reads = Array.from({ length: MAX_CONCURRENT_TITLE_READS * 3 }, (_, index) => read(`room-${index}`));
   assert.deepEqual(new Set(await Promise.all(reads)), new Set(['t']));
   assert.equal(peak, MAX_CONCURRENT_TITLE_READS);
+});
+
+test('a cold room is not loaded when the relay is at its active-room capacity', async () => {
+  const rooms = relayRooms();
+  const { writer, fence } = writerFor(rooms, { admitsColdRoom: () => false });
+  assert.equal(await writer.write(DOC, TITLE), TITLE_WRITE_STATUS.UNAVAILABLE);
+  assert.equal(rooms.docs.has(DOC), false);
+  assert.equal(fence.held(DOC), false);
+});
+
+test('a resident room is renamed even at capacity: it already holds its slot', async () => {
+  const rooms = relayRooms();
+  const doc = rooms.getYDoc(DOC);
+  doc.conns.set({}, new Set());
+  rooms.hydrations.get(DOC)();
+  const { writer } = writerFor(rooms, { admitsColdRoom: () => false });
+  assert.equal(await writer.write(DOC, TITLE), TITLE_WRITE_STATUS.OK);
+});
+
+test('an idle renamed doc is unloaded when the last other holder releases, however long it held on', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const rooms = relayRooms();
+  const { writer, fence } = writerFor(rooms);
+  const upload = fence.enter(DOC);
+  const result = writer.write(DOC, TITLE);
+  await Promise.resolve();
+  rooms.hydrations.get(DOC)();
+  assert.equal(await result, TITLE_WRITE_STATUS.OK);
+  const LONG_HOLD_MS = 10 * 60_000;
+  t.mock.timers.tick(LONG_HOLD_MS);
+  for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+  assert.equal(rooms.docs.has(DOC), true, 'still held by the other holder');
+  upload();
+  for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+  assert.equal(rooms.docs.has(DOC), false);
 });

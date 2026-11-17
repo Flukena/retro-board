@@ -49,11 +49,13 @@ async function barrier(reached) {
   return true;
 }
 
+// /hold stalls a room's document read; after /fail-read every document read fails as on a disk error (null).
 const held = new Map();
+let failRead = false;
 const getYDoc = LeveldbPersistence.prototype.getYDoc;
 LeveldbPersistence.prototype.getYDoc = async function stallableGetYDoc(docName) {
   await held.get(docName)?.promise;
-  return getYDoc.call(this, docName);
+  return failRead ? null : getYDoc.call(this, docName);
 };
 
 // After /fail-store every Yjs update write fails the way a disk error does (y-leveldb resolves null).
@@ -107,6 +109,7 @@ const ACTIONS = new Map([
   ['/state', (docName) => ({ resident: docs.has(docName) })],
   ['/entries', (docName) => ({ entries: entries.get(docName) ?? 0 })],
   ['/fail-store', () => { failStore = true; return {}; }],
+  ['/fail-read', () => { failRead = true; return {}; }],
   ['/hold-create', () => { creation.armed = true; return {}; }],
   ['/create-held', async () => ({ held: await barrier(() => creation.entered) })],
   ['/release-create', () => { creation.release?.(); return {}; }],

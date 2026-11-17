@@ -519,8 +519,7 @@ const scheduleRoomCompaction = (docName, { remeasure = false } = {}) => {
   return compaction;
 };
 
-// The last store write each doc queued (true once stored): a relay rename awaits its own.
-const storeWrites = new WeakMap();
+const storeWrites = new WeakMap(); // the last store write each doc queued (true once stored); a relay rename awaits its own
 const queueStoreUpdate = (docName, update, ydoc) => {
   const estimatedBytes = update.byteLength + STORE_OPERATION_OVERHEAD_BYTES;
   const churn = persistenceChurnFor(docName);
@@ -1041,7 +1040,8 @@ const roomSessionRoutes = createRoomSessionRoutes({
 });
 const plainRoomRefusal = (doc, docName) => (shuttingDown && new Error('shutting down')) || storageFailure
   || (capacityRejectedDocs.has(doc) && new Error('active document capacity reached')) || (isRoomBlocked(docName) && new Error('room unavailable')) || null;
-const titleWriter = createRoomTitleWriter({ docs, getYDoc, roomReady, fence: roomFence, refusal: plainRoomRefusal, storeWriteOf: (doc) => storeWrites.get(doc) });
+const hasActiveRoomCapacity = () => docs.size + e2eRelay.activeRooms() < MAX_ACTIVE_ROOMS; // the one cold-room admission: upgrades and renames
+const titleWriter = createRoomTitleWriter({ docs, getYDoc, roomReady, fence: roomFence, refusal: plainRoomRefusal, admitsColdRoom: hasActiveRoomCapacity, storeWriteOf: (doc) => storeWrites.get(doc) });
 const accountRooms = createAccountRoomRoutes({
   registry: roomRegistry, store: accountStore, maxBodyBytes: MAX_API_BODY_BYTES, onStorageFailure: markStorageFailure,
   deleteRoom: (docName) => roomDeletion.deleteRoom(docName), readTitle: createRoomTitleReader({ docs, roomReady, readStoredDoc: checkedGetYDoc }),
@@ -1357,7 +1357,7 @@ server.on('upgrade', (req, socket, head) => {
   }
   const e2e = Boolean(roomTarget?.e2e);
   const coldRoom = e2e ? e2eRelay.connectionsFor(docName) === 0 : !docs.has(docName);
-  if (coldRoom && docs.size + e2eRelay.activeRooms() >= MAX_ACTIVE_ROOMS) {
+  if (coldRoom && !hasActiveRoomCapacity()) {
     rejectUpgrade(socket, 503);
     return;
   }
