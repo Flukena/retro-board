@@ -9,7 +9,7 @@ export const LEGAL_PATH = Object.freeze({
 });
 
 // Shown on both pages; update together with any change to the wording.
-export const LEGAL_EFFECTIVE_DATE_ISO = '2026-11-08';
+export const LEGAL_EFFECTIVE_DATE_ISO = '2026-11-18';
 
 // Owner-provided address people can write to about their data or these terms.
 export const LEGAL_CONTACT_EMAIL = 's.theerasuwanajak@gmail.com';

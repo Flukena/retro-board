@@ -226,11 +226,31 @@ is non-empty and the relay is not the Public Wall relay.
 - **Logs.** Callback failures are counted by error code in the periodic
   rejection summary. Tokens, codes, cookies, query strings, emails and names
   are never logged.
-- **Accounts do not change room capability rules.** Room access is still the
-  link and its session cookie. Signing in grants no access to any room, and the
-  plan only gates account features (today: both plans may create locked rooms).
-  Deleting an account removes its record and indexes; rooms it created stay
-  under the normal retention rules and have no manager afterwards.
+- **Accounts and room access.** Room access is still the link and its session
+  cookie, with one exception: signing in grants access to the rooms the account
+  owns. "My boards" (`GET /api/account/rooms`) hands out working links, so
+  anyone who takes over the Google account or its `rb_account` cookie can open
+  every normal room that account owns. Locked rooms still need their password.
+  The plan only gates account features (today: both plans may create locked
+  rooms).
+- **Ownership is not revealed.** Rename (`POST /api/account/rooms/<code>/title`)
+  and delete (`.../delete`, body must repeat the code as `confirmCode`) answer
+  404 for a room the account does not own, a room that does not exist and the
+  Public Wall alike. Codes are never accepted without the account cookie. Both
+  actions are rate limited per account (30 per minute) and re-check the cookie
+  generation when admitted.
+- **Owner delete is final for the live system.** The room is closed (socket
+  close code 4004), its rows and uploads are removed, and a durable tombstone
+  in the `retro-relay-deletions` document makes a crash finish the job on
+  restart instead of resurrecting the room. Backups keep the room until they
+  rotate out.
+- **Guest-room expiry.** A room created without signing in, from this release
+  on, is deleted 24 h after its last use. Legacy rooms, owned rooms, orphaned
+  rooms (their account was deleted) and the Public Wall are never swept
+  automatically; their 60-day retirement stays operator-triggered.
+- **Account deletion.** Deleting an account removes its record and indexes. Its
+  rooms are marked orphaned: they keep the 60-day rule, are never treated as
+  guest rooms, and have no manager afterwards.
 
 ## Password-protected (encrypted) boards
 

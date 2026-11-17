@@ -65,6 +65,31 @@ client-written snapshot as room meta keys `e2e-head`, `e2e-snapshot`
 - Image `src` is `/rooms/<handle>/e2e-blobs/<uuid>`; blobs are opaque and
   belong to one epoch.
 
+## Room ownership and retention
+
+Each room created by this release has one meta record `retro-room-owner-v1`:
+`{ v: 1, kind: 'board'|'poker', accountId: string|null, createdAt }`, written
+durably before the registration marker. The relay derives an in-memory
+`accountId -> rooms` index from it at hydrate; there is no separate index key.
+For a locked room the owner falls back to `lock.ownerAccountId`. Retention
+classes:
+
+- **Guest:** `accountId: null` and no `orphanedAt`. Deleted 24 h after last use
+  by the hourly sweep.
+- **Owned:** an `accountId`. Kept while used; idle past 60 days is retired only
+  when the operator triggers it.
+- **Orphaned:** `accountId: null` with `orphanedAt` (the account was deleted).
+  Treated like owned.
+- **Legacy:** no owner record (every room before this release). Treated like
+  owned. A legacy room must never become a guest room.
+- The Public Wall is never owned, listed, renamed, deleted or swept.
+
+Deletion is one shared routine (owner delete, guest sweep, operator
+retirement). It first writes a tombstone `deletion:<docName>` to the
+`retro-relay-deletions` document, closes every socket, then removes rows and
+uploads, then clears the tombstone. Startup and the maintenance tick finish any
+tombstone left by a crash, so a deleted room is never served again.
+
 ## Poker room
 
 A registered relay room opened at `/p/<code>#<token>` instead of `/b/`. The

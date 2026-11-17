@@ -112,6 +112,21 @@ writing to the restored copy.
   `YJS_MAX_DOCUMENT_BYTES` (both 32 MiB by default). If it is lower, the largest
   encrypted snapshots are refused with a rate rejection.
 
+## Room management
+
+- **Guest sweep.** The relay retires guest rooms (created without signing in
+  from this release on) 24 h after last use, checked hourly on the maintenance
+  tick. It never touches legacy, owned, orphaned or Public Wall rooms; their
+  60-day retirement stays operator-triggered. A deleted room's tombstone lives
+  in the LevelDB document `retro-relay-deletions` and is cleared when its files
+  are gone.
+- **Room count.** Count rooms before the deploy and again right after. The two
+  must be equal: nothing existing may be retired by the release. A drop means
+  stop and roll back.
+- **No new routes.** The tunnel and nginx need no change; the delete route is a
+  POST under `/api/account/rooms`.
+- See `docs/plans/2026-11-12-room-management-rollout.md`.
+
 ## Release gate
 
 Run these checks from a clean release checkout:
