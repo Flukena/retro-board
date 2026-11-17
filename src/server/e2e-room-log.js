@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { metaBatch, metaBatchBytes, storageOperationError } from './relay-storage.js';
 import { LONGEST_CANONICAL_DOC_NAME } from './relay-room-registry.js';
 import { ROOM_LOCK_META, decodeLockRecord, encodeLockRecord } from './room-lock-record.js';
+import { UNFENCED } from './room-fence.js';
 import {
   E2E_MAX_LOG_ENTRIES, E2E_SNAPSHOT_RESERVATION_OVERHEAD_BYTES, e2eMaxSnapshotCiphertextBytes,
 } from '../domain/e2e-limits.js';
@@ -18,6 +19,8 @@ export const E2E_CORRUPT = 'E2E_CORRUPT';
 export const E2E_BLOB_DUPLICATE = 'E2E_BLOB_DUPLICATE';
 /** The writer's socket was admitted at a key epoch the room has left: it must re-unlock, never be acknowledged. */
 export const E2E_EPOCH_STALE = 'E2E_EPOCH_STALE';
+/** The room is being deleted: its fence refuses every new op. */
+export const E2E_ROOM_DELETED = 'E2E_ROOM_DELETED';
 export const MAX_PENDING_OPS_PER_ROOM = 256;
 export const MAX_FREEZE_TTL_MS = 120_000;
 export const E2E_BLOB_GRACE_MS = 86_400_000;
@@ -86,12 +89,14 @@ export class E2ERoomLog {
   #onBlobsRetired;
   #onError;
   #maxLogEntries;
+  #fence;
   #rooms = new Map();
 
   constructor({
     ldb, maxRoomBytes, reserveStore, hasCapacity = () => true, now = Date.now,
     setTimer = setTimeout, clearTimer = clearTimeout,
     onResume = noop, deleteStagedBlobs = noop, onBlobsRetired = noop, onError = noop, maxLogEntries = E2E_MAX_LOG_ENTRIES,
+    fence = UNFENCED,
   }) {
     this.#ldb = ldb;
     this.#maxRoomBytes = maxRoomBytes;
@@ -105,6 +110,7 @@ export class E2ERoomLog {
     this.#onBlobsRetired = onBlobsRetired;
     this.#onError = onError;
     this.#maxLogEntries = maxLogEntries;
+    this.#fence = fence;
   }
 
   /** Largest snapshot ciphertext this log accepts; its reservation fits a `maxRoomBytes` pending-store cap. */
@@ -122,6 +128,18 @@ export class E2ERoomLog {
   #evictIfIdle(docName, room) {
     const idle = room.pending === 0 && !room.frozen && room.listeners.size === 0 && room.pendingStagedCleanup.size === 0;
     if (room.forgetRequested && idle && this.#rooms.get(docName) === room) this.#rooms.delete(docName);
+  }
+
+  /**
+   * Deletion: cancels the freeze timer and settles once every op queued so far has finished; the fence already refuses
+   * new ones. Then drops the room's memory. Storage is cleared by the deleter afterwards.
+   */
+  async retire(docName) {
+    const room = this.#rooms.get(docName);
+    if (!room) return;
+    if (room.frozen) this.#clearTimer(room.frozen.timer);
+    await room.tail;
+    if (this.#rooms.get(docName) === room) this.#rooms.delete(docName);
   }
 
   /** Rooms whose state is held in memory: every room opened since startup that was not forgotten. */
@@ -262,7 +280,7 @@ export class E2ERoomLog {
   // Internal chain op: expiry must never be refused because the admission queue is full.
   #expireFreeze(docName, rotationId) {
     this.#enqueue(docName, (room) => this.#releaseInChain(docName, room, rotationId, undefined), { internal: true })
-      .catch(this.#onError);
+      .catch((error) => { if (error.code !== E2E_ROOM_DELETED) this.#onError(error); });
   }
 
   async mutateLock(docName, { verify, expectedRevision, next }) {
@@ -380,12 +398,15 @@ export class E2ERoomLog {
   }
 
   #enqueue(docName, task, { internal = false } = {}) {
+    const leave = this.#fence.enter(docName);
+    if (!leave) return Promise.reject(codedError(E2E_ROOM_DELETED, 'room is being deleted'));
     let room = this.#rooms.get(docName);
     if (!room) {
       room = newRoom();
       this.#rooms.set(docName, room);
     }
     if (!internal && room.pending >= MAX_PENDING_OPS_PER_ROOM) {
+      leave();
       return Promise.reject(codedError(E2E_BUSY, 'too many queued operations for this room'));
     }
     room.pending += 1;
@@ -393,6 +414,7 @@ export class E2ERoomLog {
     const run = owner.tail.then(() => task(owner));
     owner.tail = run.then(noop, noop);
     return run.finally(() => {
+      leave();
       owner.pending -= 1;
       this.#evictIfIdle(docName, owner);
     });

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { once } from 'node:events';
 import { Readable, Writable, PassThrough } from 'node:stream';
 import { readRelayConfig } from './relay-config.js';
+import { RoomFence } from './room-fence.js';
 import { createUploadState, scanUploadUsage, createRelayUploads, createImageReadBudgets, matchesMagicBytes, UPLOAD_STORAGE_FAILURE_EVENT, e2eBlobFilename, isStoredImageFilename, parseE2EBlobFilename, roomHandleOfImageFile } from './relay-uploads.js';
 import { IMAGE_MAX_BYTES, IMAGE_SOURCE_MAX_DIMENSION, GIF_MAX_FRAMES, GIF_MAX_TOTAL_FRAME_PIXELS } from '../domain/security-boundaries.js';
 
@@ -49,7 +50,7 @@ const uploadRequest = (bytes = PNG, headers = {}) => Object.assign(Readable.from
   headers: { origin: ORIGIN, 'content-type': 'image/png', 'content-length': String(bytes.length), ...headers },
 });
 
-const setup = async (t, env = {}, storage = { async setMeta() {} }, strictRasterValidation = false) => {
+const setup = async (t, env = {}, storage = { async setMeta() {} }, strictRasterValidation = false, fence = undefined) => {
   const root = await mkdtemp(join(tmpdir(), 'relay-uploads-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const config = readRelayConfig({ YJS_UPLOADS_DIR: root, YJS_MAX_UPLOAD_BYTES: String(MAX_UPLOAD_BYTES), ...env });
@@ -58,7 +59,7 @@ const setup = async (t, env = {}, storage = { async setMeta() {} }, strictRaster
   const roomUploadUsage = new Map([[DOC_NAME, room]]);
   const imageReads = createImageReadBudgets(config);
   const uploads = createRelayUploads({ config, state, roomUploadUsage, imageReads, storage,
-    allowedOrigins: [ORIGIN], allowInsecureHttp: false, strictRasterValidation });
+    allowedOrigins: [ORIGIN], allowInsecureHttp: false, strictRasterValidation, fence });
   return { root, config, state, room, roomUploadUsage, imageReads, uploads };
 };
 
@@ -368,4 +369,36 @@ test('the usage scan counts encrypted blob files toward their room and the globa
   assert.equal(usage.files, 2);
   assert.equal(usage.bytes, blobBytes + PNG.length);
   assert.deepEqual(usage.roomsByHandle.get(ROOM_HANDLE), { bytes: blobBytes + PNG.length, files: 2 });
+});
+
+test('an upload to a room being deleted is refused 404 before anything is reserved or written', async (t) => {
+  const fence = new RoomFence();
+  const { uploads, state, root } = await setup(t, {}, undefined, false, fence);
+  fence.fence(DOC_NAME);
+  const res = await sendUpload(uploads);
+  assert.equal(res.status, 404);
+  assert.deepEqual(await readdir(root), []);
+  assert.equal(state.active, 0);
+});
+
+test('an upload holds a fence entry until its usage is persisted; fenced mid-stream it publishes nothing and answers 404', async (t) => {
+  const fence = new RoomFence();
+  const writes = [];
+  const { uploads, root, state } = await setup(t, {}, { async setMeta(...record) { writes.push(record); } }, false, fence);
+  const body = new PassThrough();
+  const req = Object.assign(body, { headers: { origin: ORIGIN, 'content-type': 'image/png', 'content-length': String(PNG.length) } });
+  const res = new Response();
+  const finished = once(res, 'finish');
+  const uploading = uploads.handleUpload(req, res, CLIENT_IP, DOC_NAME, ROOM_HANDLE);
+  body.write(PNG.subarray(0, 4));
+  fence.fence(DOC_NAME);
+  assert.equal(await fence.drained(DOC_NAME, 0), false, 'the streaming upload holds an entry');
+  body.end(PNG.subarray(4));
+  await uploading;
+  await finished;
+  assert.equal(res.status, 404);
+  assert.deepEqual(await readdir(root), [], 'no file and no temp file remain');
+  assert.deepEqual(writes, [], 'no usage row is written');
+  assert.equal(await fence.drained(DOC_NAME, 0), true);
+  assert.equal(state.active, 0);
 });

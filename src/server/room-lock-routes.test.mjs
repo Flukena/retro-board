@@ -17,6 +17,8 @@ import { KEY_ROTATED_CLOSE_CODE, createRoomLockRoutes } from './room-lock-routes
 import { MAX_COMMIT_HEADER_BYTES } from './room-lock-commit-body.js';
 import { createNextRoomKey, createRoomLock, rewrapRoomLock } from '../client/room-lock/e2e-crypto.js';
 import { encodeBase64Url } from '../domain/room-lock-contract.js';
+import { RoomFence } from './room-fence.js';
+import { DeletionJournal, RoomDeletion } from './room-deletion.js';
 
 const require = createRequire(import.meta.url);
 const Y = require('yjs');
@@ -64,7 +66,9 @@ async function fixture(t, { maxBodyBytes = MAX_BODY_BYTES } = {}) {
   const flaky = { failWrites: false, getMeta: (...a) => ldb.getMeta(...a), getMetas: (...a) => ldb.getMetas(...a), _transact: (fn) => (flaky.failWrites ? Promise.resolve(null) : ldb._transact(fn)) };
   const timers = [];
   const staged = [];
+  const fence = new RoomFence();
   const roomLog = new E2ERoomLog({
+    fence,
     ldb: flaky, maxRoomBytes: MAX_ROOM_BYTES, reserveStore: () => () => {}, hasCapacity: () => true,
     setTimer: (fn, ms) => { const timer = { fn, ms }; timers.push(timer); return timer; }, clearTimer() {},
     deleteStagedBlobs: (doc, rotationId) => staged.push(rotationId),
@@ -76,7 +80,7 @@ async function fixture(t, { maxBodyBytes = MAX_BODY_BYTES } = {}) {
     blobStore: { settleStaged: async (...args) => { settled.calls.push(args); if (settled.fail) throw new Error('disk gone'); } },
     closeRoom: (doc, code, reason) => closed.push({ doc, code, reason }), verifier, accountSessions, accountStore,
     config: { allowedOrigins: [ORIGIN], allowInsecureHttp: false, maxApiBodyBytes: maxBodyBytes },
-    unavailable: () => false, onStorageFailure() {},
+    unavailable: () => false, onStorageFailure() {}, fence,
   });
   const server = http.createServer((req, res) => {
     if (!routes.handle(req, res, req.url, { clientIp: IP, hasQueryOrFragment: false })) { res.writeHead(STATUS.NOT_FOUND); res.end(); }
@@ -109,7 +113,7 @@ async function fixture(t, { maxBodyBytes = MAX_BODY_BYTES } = {}) {
     });
   };
   const storedLock = async (room) => decodeLockRecord(await ldb.getMeta(room.docName, ROOM_LOCK_META));
-  return { directory, settled, base, registry, roomLog, verifier, ldb, flaky, timers, staged, closed, signIn, createRoom, postJson, postCommit, storedLock };
+  return { directory, settled, base, registry, roomLog, verifier, ldb, flaky, timers, staged, closed, signIn, createRoom, postJson, postCommit, storedLock, fence };
 }
 
 async function lockedRoom(t) {
@@ -450,4 +454,83 @@ test('a crash after the durable commit batch and before publish reopens to one c
   const blobs = Object.fromEntries(state.blobs.map((entry) => [entry.id, entry]));
   assert.ok(blobs[oldBlob].retiredAt !== undefined);
   assert.equal(blobs[keptBlob].stagedFor, null);
+});
+
+const HELD_POLL_MS = 5;
+const SPLIT_AT_BYTES = 8;
+
+/** Sends the headers and the first bytes of a body, holding the rest until `finish()`. */
+function pausedPost(f, path, headers, body) {
+  const request = http.request(`${f.base}${path}`, { method: 'POST', headers: { origin: ORIGIN, 'content-length': body.length, ...headers } });
+  const status = new Promise((resolve, reject) => {
+    request.on('response', (response) => { response.resume(); resolve(response.statusCode); });
+    request.on('error', reject);
+  });
+  request.write(body.subarray(0, SPLIT_AT_BYTES));
+  return { status, finish: () => request.end(body.subarray(SPLIT_AT_BYTES)) };
+}
+
+// Resolves once some operation holds a fence entry on the room (the paused route has been admitted).
+async function entryHeld(fence, docName) {
+  const deadline = Date.now() + EARLY_RESPONSE_MS;
+  while (await fence.drained(docName, 0)) {
+    if (Date.now() > deadline) throw new Error('no entry was taken');
+    await new Promise((resolve) => { setTimeout(resolve, HELD_POLL_MS); });
+  }
+}
+
+const deleterOf = (f) => new RoomDeletion({
+  fence: f.fence, journal: new DeletionJournal(f.ldb), registry: f.registry,
+  plainRooms: { retire: async () => {} }, e2eRooms: { retireRoom: (docName) => f.roomLog.retire(docName) },
+  files: async () => 0, onStorageFailure() {}, log: { error() {}, warn() {} },
+});
+
+async function assertDeletedWithoutLock(f, deleting) {
+  assert.deepEqual(await deleting, { deleted: true, files: 0 });
+  assert.equal(f.registry.isLocked(f.room.docName), false, 'no lock was re-published');
+  assert.equal(f.registry.lockFor(f.room.docName), null);
+  assert.equal((await f.ldb.getMetas(f.room.docName)).size, 0, 'no row remains');
+}
+
+test('a password change paused during a delete answers 404, re-publishes no lock, and leaves no row', async (t) => {
+  const f = await lockedRoom(t);
+  const change = await rewrapRoomLock({ currentPassword: PASSWORD, lock: ROOM_LOCK.lock, newPassword: NEXT_PASSWORD });
+  const body = Buffer.from(JSON.stringify({ oldAuthKey: change.oldAuthKey, expectedRevision: 0, lock: change.lock }));
+  const paused = pausedPost(f, `/api/rooms/${f.room.handle}/lock/password`, { cookie: f.owner.cookie, 'content-type': 'application/json' }, body);
+  await entryHeld(f.fence, f.room.docName);
+  const deleting = deleterOf(f).deleteRoom(f.room.docName);
+  paused.finish();
+  assert.equal(await paused.status, STATUS.NOT_FOUND);
+  await assertDeletedWithoutLock(f, deleting);
+});
+
+test('a rotation commit paused during a delete answers 404, re-publishes no lock, and leaves no row', async (t) => {
+  const f = await lockedRoom(t);
+  const rotation = await begin(f);
+  const json = Buffer.from(JSON.stringify(commitHeader(rotation)));
+  const prefix = Buffer.alloc(HEADER_LENGTH_BYTES);
+  prefix.writeUInt32BE(json.length);
+  const body = Buffer.concat([prefix, json, Buffer.from(SNAPSHOT)]);
+  const paused = pausedPost(f, `/api/rooms/${f.room.handle}/lock/rotate/commit`, { cookie: f.owner.cookie, 'content-type': 'application/octet-stream' }, body);
+  await entryHeld(f.fence, f.room.docName);
+  const deleting = deleterOf(f).deleteRoom(f.room.docName);
+  paused.finish();
+  assert.equal(await paused.status, STATUS.NOT_FOUND);
+  await assertDeletedWithoutLock(f, deleting);
+  assert.deepEqual(f.closed, [], 'no key-rotated close was sent for a deleted room');
+});
+
+test('a commit already queued when the delete starts lands, but the route answers 404 and does not re-publish', async (t) => {
+  const f = await lockedRoom(t);
+  const rotation = await begin(f);
+  const verify = f.verifier.check.bind(f.verifier);
+  let deleting = null;
+  // The delete starts while the commit is inside the log chain, verifying the password.
+  f.verifier.check = (...args) => {
+    deleting ??= deleterOf(f).deleteRoom(f.room.docName);
+    return verify(...args);
+  };
+  const response = await f.postCommit(f.room, commitHeader(rotation), SNAPSHOT, f.owner.cookie);
+  assert.equal(response.status, STATUS.NOT_FOUND);
+  await assertDeletedWithoutLock(f, deleting);
 });

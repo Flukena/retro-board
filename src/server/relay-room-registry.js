@@ -85,6 +85,7 @@ const randomBoardCode = () => {
   for (const byte of bytes) code += BOARD_CODE_ALPHABET[byte % BOARD_CODE_ALPHABET.length];
   return code;
 };
+const isAbsent = (value) => value === undefined || value === null;
 const randomRoomCredential = () => randomBytes(ROOM_CREDENTIAL_RANDOM_BYTES).toString(RANDOM_ENCODING);
 const emptyUsage = () => ({ bytes: 0, files: 0 });
 const activeUsage = ({ bytes, files }) => ({ bytes, files, reservedBytes: 0, active: 0 });
@@ -168,10 +169,11 @@ export class RoomRegistry extends EventEmitter {
     return handle;
   }
 
-  async hydrate(initialUploadUsage) {
+  /** `deleting`: rooms in the deletion journal. They are never registered; the deleter finishes them. */
+  async hydrate(initialUploadUsage, deleting = new Set()) {
     this.existingDocNames = new Set(await this.#persistence.getAllDocNames());
     const tokenized = [...this.existingDocNames].filter((name) => (
-      name.startsWith(DOCUMENT_PREFIX) && TOKENIZED_ROOM_RE.test(name.slice(DOCUMENT_PREFIX.length))
+      name.startsWith(DOCUMENT_PREFIX) && TOKENIZED_ROOM_RE.test(name.slice(DOCUMENT_PREFIX.length)) && !deleting.has(name)
     ));
     for (const name of tokenized) await this.hydrateRoom(name, initialUploadUsage);
     this.#persistence.measureDatabase();
@@ -210,12 +212,16 @@ export class RoomRegistry extends EventEmitter {
     this.roomUploadUsage.set(docName, activeUsage(usage));
   }
 
-  // An interrupted locked creation: the lock landed but the marker did not. A committed room's lock is never dropped.
+  // An interrupted creation: the lock or owner record landed but the marker did not. Only those records are dropped:
+  // the document itself is kept, because YJS_ALLOW_LEGACY_ROOMS can still serve a markerless tokenized document, and a
+  // leftover guest record would make such a document expire in 24 h if it were ever registered again.
   async #dropOrphanLock(docName, marker) {
-    if (isCommittedRegistration(marker)) return;
-    const raw = await this.#persistence.getMeta(docName, ROOM_LOCK_META);
-    if (raw === undefined || raw === null || typeof this.#persistence.durableMetaBatch !== 'function') return;
-    await this.#persistence.durableMetaBatch(docName, [{ type: DELETE_OPERATION, key: ROOM_LOCK_META }]);
+    if (isCommittedRegistration(marker) || typeof this.#persistence.durableMetaBatch !== 'function') return;
+    const keys = [ROOM_LOCK_META, ROOM_OWNER_META];
+    const present = [];
+    for (const key of keys) if (!isAbsent(await this.#persistence.getMeta(docName, key))) present.push(key);
+    if (present.length === 0) return;
+    await this.#persistence.durableMetaBatch(docName, present.map((key) => ({ type: DELETE_OPERATION, key })));
   }
 
   // null = unlocked room, CORRUPT_LOCK = committed record that cannot be read (managed but never served).
@@ -235,7 +241,7 @@ export class RoomRegistry extends EventEmitter {
   // null = no record (a legacy room or the Public Wall). An unreadable record is kept, never read as a guest room.
   async #readOwner(docName) {
     const raw = await this.#persistence.getMeta(docName, ROOM_OWNER_META);
-    if (raw === undefined || raw === null) return null;
+    if (isAbsent(raw)) return null;
     const record = decodeOwnerRecord(raw);
     if (!record) this.#log.warn(INVALID_OWNER_LOG, { docName: roomLogId(docName) });
     return record;
@@ -270,10 +276,12 @@ export class RoomRegistry extends EventEmitter {
 
   isLocked(docName) { return this.locksByDoc.has(docName); }
 
-  // Memory only: the caller has already written the record in its own durable batch.
+  // Memory only: the caller has already written the record in its own durable batch. A room unpublished meanwhile
+  // (being deleted) is never re-published.
   publishLock(docName, record) {
     const lock = decodeLockRecord(record);
     if (!lock) throw new TypeError(INVALID_LOCK_ARGUMENT_MESSAGE);
+    if (!this.registeredDocs.has(docName)) return;
     this.locksByDoc.set(docName, lock);
   }
 
@@ -350,10 +358,13 @@ export class RoomRegistry extends EventEmitter {
     }
   }
 
-  // Unpublish synchronously, before the first await, so no session, upgrade or
-  // upload can reach the room while its storage is cleared. Callers check that
-  // the room is not loaded or connected in the same tick. Returns the handle.
-  async retireRoom(docName) {
+  /** Deletion step: durably removes the registration marker, so a crash from here on leaves the room unservable. */
+  async unregisterDurably(docName) {
+    await this.#persistence.durableMetaBatch(docName, [{ type: DELETE_OPERATION, key: ROOM_REGISTRATION_META }]);
+  }
+
+  /** Deletion step: drops every in-memory trace of the room at once, so nothing can look it up. Returns its handle. */
+  unpublish(docName) {
     const handle = this.registeredRoomHandlesByDoc.get(docName);
     if (!handle) return null;
     this.registeredDocs.delete(docName);
@@ -365,15 +376,20 @@ export class RoomRegistry extends EventEmitter {
     this.#owners.forget(docName);
     this.existingDocNames.delete(docName);
     this.activity.forget(docName);
+    return handle;
+  }
+
+  /** Deletion step: removes every row of an unpublished room. A failure latches the storage failure. */
+  async clearRoomStorage(docName) {
     try {
-      // A flush already in flight must land before the clear, not after it.
+      // An activity flush already in flight must land before the clear, not after it.
       await this.activity.flush();
       await this.#persistence.clearDocument(docName);
     } catch (error) {
       this.reportStorageFailure(error);
       throw error;
     }
-    return handle;
+    this.#persistence.measureDatabase();
   }
 
   // Validates the creation request before anything is reserved; returns the lock and owner records to write.

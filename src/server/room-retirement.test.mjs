@@ -9,10 +9,9 @@ const OLD_DAYS = 61;
 const RECENT_DAYS = 59;
 const handleOf = (label) => label.padEnd(32, 'x');
 const docOf = (label) => `yjs/board-${label}-abcdefgh12345678`;
-const imageOf = (label) => `${handleOf(label)}.0a1b.png`;
-const QUIET = { log() {} };
+const FILES_PER_ROOM = 2;
 
-function fixture(rooms, { files = [], publicWall = false } = {}) {
+function fixture(rooms, { publicWall = false, failing = new Set(), timedOut = new Set() } = {}) {
   const activity = new Map(rooms.map(({ label, createdAt }) => [docOf(label), { createdAt, lastSessionAt: null, lastActiveAt: null }]));
   const retention = new Map(rooms.map(({ label, guest }) => [docOf(label), guest ? RETENTION_CLASS.GUEST : RETENTION_CLASS.KEPT]));
   const retiredDocs = [];
@@ -20,28 +19,21 @@ function fixture(rooms, { files = [], publicWall = false } = {}) {
     registeredRoomsByHandle: new Map(rooms.map(({ label }) => [handleOf(label), docOf(label)])),
     activity: { get: (docName) => activity.get(docName) },
     ownershipOf: (docName) => ({ retention: retention.get(docName) }),
-    async retireRoom(docName) {
-      retiredDocs.push(docName);
-      const handle = [...this.registeredRoomsByHandle].find(([, name]) => name === docName)[0];
-      this.registeredRoomsByHandle.delete(handle);
-      return handle;
-    },
   };
-  const remaining = new Set(files);
-  const io = {
-    async readdir() { return [...remaining].map((name) => ({ name, isFile: () => true })); },
-    async unlink(path) { remaining.delete(path.split('/').at(-1)); },
-  };
-  let reconciled = 0;
+  const errors = [];
   const context = {
-    registry, io, publicWall, log: QUIET, now: NOW, uploadsDir: '/uploads',
+    registry, publicWall, now: NOW,
+    log: { log() {}, error: (...args) => errors.push(args) },
     docs: new Map(rooms.filter((r) => r.resident).map(({ label }) => [docOf(label), {}])),
     connections: new Map(rooms.filter((r) => r.connections).map(({ label, connections }) => [docOf(label), connections])),
-    blockedRooms: new Map(rooms.map(({ label }) => [docOf(label), NOW])),
-    roomPersistenceChurn: new Map(rooms.map(({ label }) => [docOf(label), {}])),
-    reconcileUploadUsage: async () => { reconciled += 1; },
+    async deleteRoom(docName) {
+      if (failing.has(docName)) throw new Error('disk gone');
+      if (timedOut.has(docName)) return { deleted: false, status: 503 };
+      retiredDocs.push(docName);
+      return { deleted: true, files: FILES_PER_ROOM };
+    },
   };
-  return { context, retiredDocs, remaining, get reconciled() { return reconciled; } };
+  return { context, retiredDocs, errors };
 }
 
 const daysAgo = (days) => NOW - days * DAY_MS;
@@ -58,42 +50,38 @@ test('a guest room idle past a day is retired; a kept room idle as long is not',
   assert.deepEqual(f.retiredDocs, [docOf('guest')]);
 });
 
-test('retires only rooms idle past sixty days, with their images and per-room state', async () => {
+test('retires only rooms idle past sixty days, through the deleter, and counts their files', async () => {
   const f = fixture([
     { label: 'old', createdAt: daysAgo(OLD_DAYS) },
     { label: 'recent', createdAt: daysAgo(RECENT_DAYS) },
     { label: 'live', createdAt: daysAgo(OLD_DAYS), connections: 2 },
     { label: 'loaded', createdAt: daysAgo(OLD_DAYS), resident: true },
     { label: 'legacy', createdAt: null },
-  ], { files: [imageOf('old'), imageOf('recent'), 'legacy-upload.png'] });
+  ]);
   const result = await retireIdleRooms(f.context);
-  assert.deepEqual(result, { retired: 1, unknownAge: 1, files: 1 });
+  assert.deepEqual(result, { retired: 1, unknownAge: 1, files: FILES_PER_ROOM });
   assert.deepEqual(f.retiredDocs, [docOf('old')]);
-  assert.deepEqual([...f.remaining].sort(), [imageOf('recent'), 'legacy-upload.png'].sort());
-  assert.equal(f.context.blockedRooms.has(docOf('old')), false);
-  assert.equal(f.context.roomPersistenceChurn.has(docOf('old')), false);
-  assert.equal(f.context.blockedRooms.has(docOf('recent')), true);
-  assert.equal(f.reconciled, 1);
 });
 
-test('retirement also deletes the room\'s encrypted blob files and leaves other rooms\' blobs', async () => {
-  const blobOf = (label) => `${handleOf(label)}.123e4567-e89b-12d3-a456-426614174000.e2e`;
+test('one room that fails or times out does not stop the sweep, and is not counted as retired', async () => {
   const f = fixture([
-    { label: 'old', createdAt: daysAgo(OLD_DAYS) },
-    { label: 'recent', createdAt: daysAgo(RECENT_DAYS) },
-  ], { files: [blobOf('old'), imageOf('old'), blobOf('recent')] });
+    { label: 'broken', createdAt: daysAgo(OLD_DAYS) },
+    { label: 'busy', createdAt: daysAgo(OLD_DAYS) },
+    { label: 'fine', createdAt: daysAgo(OLD_DAYS) },
+  ], { failing: new Set([docOf('broken')]), timedOut: new Set([docOf('busy')]) });
   const result = await retireIdleRooms(f.context);
-  assert.deepEqual(result, { retired: 1, unknownAge: 0, files: 2 });
-  assert.deepEqual([...f.remaining], [blobOf('recent')]);
+  assert.deepEqual(result, { retired: 1, unknownAge: 0, files: FILES_PER_ROOM });
+  assert.deepEqual(f.retiredDocs, [docOf('fine')]);
+  assert.equal(f.errors.length, 1, 'the failure is logged');
 });
 
 test('a room opened after the candidates were chosen is kept', async () => {
   const f = fixture([{ label: 'first', createdAt: daysAgo(OLD_DAYS) }, { label: 'second', createdAt: daysAgo(OLD_DAYS) }]);
-  const retire = f.context.registry.retireRoom.bind(f.context.registry);
-  f.context.registry.retireRoom = async (docName) => {
-    const handle = await retire(docName);
+  const remove = f.context.deleteRoom;
+  f.context.deleteRoom = async (docName) => {
+    const result = await remove(docName);
     f.context.docs.set(docOf('second'), {});
-    return handle;
+    return result;
   };
   const result = await retireIdleRooms(f.context);
   assert.equal(result.retired, 1);
@@ -104,15 +92,4 @@ test('the Public Wall relay never retires anything', async () => {
   const f = fixture([{ label: 'wall', createdAt: daysAgo(OLD_DAYS * 10) }], { publicWall: true });
   assert.deepEqual(await retireIdleRooms(f.context), { retired: 0, unknownAge: 0, files: 0 });
   assert.deepEqual(f.retiredDocs, []);
-});
-
-test('every retired room, and only those, is handed to forgetRoom so encrypted-room memory goes too', async () => {
-  const f = fixture([
-    { label: 'old', createdAt: daysAgo(OLD_DAYS) },
-    { label: 'recent', createdAt: daysAgo(RECENT_DAYS) },
-    { label: 'live', createdAt: daysAgo(OLD_DAYS), connections: 1 },
-  ]);
-  const forgotten = [];
-  await retireIdleRooms({ ...f.context, forgetRoom: (docName) => forgotten.push(docName) });
-  assert.deepEqual(forgotten, [docOf('old')]);
 });

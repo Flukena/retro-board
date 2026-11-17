@@ -49,6 +49,10 @@ import { CORRUPT_LOCK } from './src/server/room-lock-record.js';
 import { createRoomSessionRoutes } from './src/server/room-session-routes.js';
 import { createRoomLockRoutes } from './src/server/room-lock-routes.js';
 import { retireIdleRooms } from './src/server/room-retirement.js';
+import { RoomFence } from './src/server/room-fence.js';
+import { DeletionJournal, RoomDeletion, createRoomFileRemover } from './src/server/room-deletion.js';
+import { createPlainRoomTeardown } from './src/server/plain-room-teardown.js';
+import { createPlainUpgrades } from './src/server/plain-upgrade.js';
 import { admitPublicAction, registerPublicQuotaClient, notifyPublicQuota } from './src/server/public-action-limit.js';
 
 // yjs, y-leveldb, and y-websocket must all resolve to the SAME yjs module
@@ -263,7 +267,11 @@ const roomRegistry = new RoomRegistry({
   persistence: registryPersistence, Y, maxRooms: MAX_REGISTERED_ROOMS,
   maxDatabaseBytes: MAX_DB_BYTES, signingKey: SESSION_SIGNING_KEY,
 });
-await roomRegistry.hydrate(initialUploadUsage);
+// Rooms in the deletion journal are fenced and never registered; recovery below finishes them.
+const roomFence = new RoomFence();
+const deletionJournal = new DeletionJournal(ldb);
+const journaledDeletions = await deletionJournal.load();
+await roomRegistry.hydrate(initialUploadUsage, new Set(journaledDeletions.keys()));
 const publicWall = PUBLIC_WALL ? new RelayPublicWall(await provisionPublicWall(roomRegistry)) : null;
 const publicHistory = PUBLIC_WALL ? new PublicWallHistory(DB_DIR, Y) : null;
 const { registeredDocs, registeredRoomsByHandle, roomUploadUsage, existingDocNames } = roomRegistry;
@@ -712,13 +720,13 @@ setPersistence({
   // (bin/utils.js:205), so the rejection would go unhandled.
   writeState: async (docName) => {
     try {
-      const churn = persistenceChurnFor(docName);
+      const churn = roomPersistenceChurn.get(docName);
       // Every update is already durable through storeUpdate. Do not force a
       // full-room merge merely because the last peer disconnected: repeated
       // connect/disconnect would otherwise be an unbounded CPU amplifier.
       // If a threshold-triggered merge is already running, wait before the
       // library destroys its Y.Doc so our completion path cannot race it.
-      if (churn.compactionPromise) await churn.compactionPromise;
+      if (churn?.compactionPromise) await churn.compactionPromise;
     }
     catch (err) {
       markStorageFailure(err);
@@ -876,7 +884,7 @@ const imageReadRoomBuckets = imageReads.roomBuckets;
 const uploads = createRelayUploads({
   config: relayConfig, state: uploadState, roomUploadUsage, imageReads,
   storage: { setMeta: checkedSetMeta },
-  allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, strictRasterValidation: PUBLIC_WALL,
+  allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, strictRasterValidation: PUBLIC_WALL, fence: roomFence,
 });
 uploadState.events.on(UPLOAD_STORAGE_FAILURE_EVENT, markStorageFailure);
 const e2eBlobStore = new E2EBlobStore({ uploadsDir: UPLOADS_DIR, admission: uploads.admission, roomUploadUsage });
@@ -1039,7 +1047,7 @@ const roomSessionRoutes = createRoomSessionRoutes({
   registry: roomRegistry, sessions: roomSessions, verifier: roomLockVerifier, accountSessions, accountStore,
   buckets: { takeCreateToken, takeSessionExchangeToken, failureAttemptAvailable, recordSessionFailure },
   config: { allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, sessionTtlMs: ROOM_SESSION_TTL_MS, maxApiBodyBytes: MAX_API_BODY_BYTES },
-  unavailable: () => shuttingDown || Boolean(storageFailure), onStorageFailure: markStorageFailure,
+  unavailable: () => shuttingDown || Boolean(storageFailure), onStorageFailure: markStorageFailure, fence: roomFence,
 });
 const authRoutes = createAuthRoutes({
   oauth: enabledOAuthConfig(process.env, { allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, publicWall: PUBLIC_WALL, log: console }),
@@ -1060,8 +1068,7 @@ const maintainer = await startMaintainer(process.env, () => maintainerSnapshot({
   pendingStoreOps, pendingStoreBytes, activeDocumentBytes,
   limits: { databaseBytes: MAX_DB_BYTES, uploadBytes: MAX_UPLOAD_STORAGE_BYTES, activeDocumentBytes: MAX_ACTIVE_DOCUMENT_BYTES, pendingStoreBytes: MAX_PENDING_STORE_BYTES, pendingStoreOps: MAX_PENDING_STORE_OPS },
 }), { registry: roomRegistry, boardOrigin: ALLOWED_ORIGINS[0], publicWall: PUBLIC_WALL }, () => retireIdleRooms({
-  registry: roomRegistry, docs, connections: wsTraffic.connectionsByRoom, blockedRooms, roomPersistenceChurn,
-  publicWall: PUBLIC_WALL, uploadsDir: UPLOADS_DIR, io: fs.promises, reconcileUploadUsage, log: console, forgetRoom: e2eRelay.retireRoom,
+  registry: roomRegistry, docs, connections: wsTraffic.connectionsByRoom, publicWall: PUBLIC_WALL, log: console, deleteRoom: (docName) => roomDeletion.deleteRoom(docName),
 }), accountStore);
 maintenance.on(MAINTENANCE_STORAGE_FAILURE_EVENT, markStorageFailure);
 const runMaintenance = () => maintenance.run({
@@ -1073,7 +1080,7 @@ const runMaintenance = () => maintenance.run({
   storage: { measureDatabase: registryPersistence.measureDatabase, reconcileUploadUsage },
   e2eBlobs,
 });
-const maintenanceTimer = setInterval(() => { roomLockVerifier.sweep(); runMaintenance(); }, MAINTENANCE_INTERVAL_MS);
+const maintenanceTimer = setInterval(() => { roomLockVerifier.sweep(); runMaintenance(); void roomDeletion.recover(); }, MAINTENANCE_INTERVAL_MS);
 maintenanceTimer.unref();
 
 const server = http.createServer({ maxHeaderSize: MAX_HEADER_BYTES }, (req, res) => {
@@ -1162,7 +1169,7 @@ roomRegistry.activity.watch(wss, (error) => roomRegistry.reportStorageFailure(er
 const e2eRoomLog = new E2ERoomLog({
   ldb, maxRoomBytes: MAX_DOCUMENT_BYTES, reserveStore: registryPersistence.reserveStore, hasCapacity: registryPersistence.hasCapacity,
   onError: markStorageFailure, deleteStagedBlobs: (_docName, rotationId) => e2eBlobStore.deleteStaged(rotationId),
-  onBlobsRetired: (docName) => e2eBlobStore.trackRetired(docName),
+  onBlobsRetired: (docName) => e2eBlobStore.trackRetired(docName), fence: roomFence,
 });
 const e2eRelay = createE2ERelay({
   traffic: wsTraffic, maxRoomBytes: MAX_DOCUMENT_BYTES, maxAppendBytes: RL_MAX_BYTES, onStorageFailure: markStorageFailure, touch: (docName) => roomRegistry.activity.touch(docName),
@@ -1170,12 +1177,22 @@ const e2eRelay = createE2ERelay({
 });
 const e2eBlobs = createE2EBlobs({
   config: relayConfig, allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, uploads, store: e2eBlobStore,
-  roomLog: e2eRoomLog, registry: roomRegistry, onStorageFailure: markStorageFailure,
+  roomLog: e2eRoomLog, registry: roomRegistry, onStorageFailure: markStorageFailure, fence: roomFence,
 });
 const roomLockRoutes = createRoomLockRoutes({
   registry: roomRegistry, roomLog: e2eRoomLog, blobStore: e2eBlobStore, closeRoom: e2eRelay.closeRoom, verifier: roomLockVerifier, accountSessions, accountStore,
   config: { allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, maxApiBodyBytes: MAX_API_BODY_BYTES },
-  unavailable: () => shuttingDown || Boolean(storageFailure), onStorageFailure: markStorageFailure,
+  unavailable: () => shuttingDown || Boolean(storageFailure), onStorageFailure: markStorageFailure, fence: roomFence,
+});
+const roomDeletion = new RoomDeletion({
+  fence: roomFence, journal: deletionJournal, registry: roomRegistry, pending: journaledDeletions, onStorageFailure: markStorageFailure,
+  plainRooms: createPlainRoomTeardown({ docs, roomReady, roomPersistenceChurn, blockedRooms }), e2eRooms: e2eRelay,
+  files: createRoomFileRemover({ io: fs.promises, uploadsDir: UPLOADS_DIR, reconcileUploadUsage }),
+});
+const plainUpgrades = createPlainUpgrades({
+  docs, getYDoc, roomReady, wss, fence: roomFence, reject: rejectUpgrade, timeoutMs: UPGRADE_TIMEOUT_MS,
+  refusal: (doc, docName) => (shuttingDown && new Error('shutting down')) || storageFailure
+    || (capacityRejectedDocs.has(doc) && new Error('active document capacity reached')) || (isRoomBlocked(docName) && new Error('room unavailable')) || null,
 });
 roomRegistry.activity.watch(e2eRelay.wss, (error) => roomRegistry.reportStorageFailure(error));
 wss.on('connection', (conn, req) => {
@@ -1220,7 +1237,7 @@ wss.on('connection', (conn, req) => {
   const [parseYjsMessage] = parsers;
   conn.off('message', parseYjsMessage);
   conn.on('message', (data) => {
-    if (limited) return;
+    if (limited || roomFence.isFenced(docName)) return;
     const size = data?.byteLength ?? data?.length ?? 0;
     if (!meter.admitIngress(size)
         || pendingStoreOps >= MAX_PENDING_STORE_OPS
@@ -1353,8 +1370,11 @@ server.on('upgrade', (req, socket, head) => {
     rejectUpgrade(socket, 429);
     return;
   }
-  const reservation = wsTraffic.reserve(clientIp, docName);
+  // Taken in the same tick as the room lookup and held until attach: a room being deleted answers like a missing one.
+  const leave = roomFence.enter(docName);
+  const reservation = leave ? wsTraffic.reserve(clientIp, docName) : { status: 404 };
   if (reservation.status) {
+    leave?.();
     rejectUpgrade(socket, reservation.status);
     return;
   }
@@ -1369,59 +1389,11 @@ server.on('upgrade', (req, socket, head) => {
   };
   if (e2e) {
     e2eRelay.handleUpgrade(req, socket, head);
+    leave();
     return;
   }
-  const upgradeTimer = setTimeout(() => {
-    if (!socket.destroyed) socket.destroy();
-  }, UPGRADE_TIMEOUT_MS);
-  upgradeTimer.unref();
-  // Use the same canonical name passed to setupWSConnection, so hydration and
-  // the client attachment cannot diverge between bare and /yjs-prefixed paths.
-  // getYDoc creates the room (running bindState) if this is the first client;
-  // awaiting its hydration keeps the sync protocol from answering with an
-  // empty doc. Rooms already in memory resolve immediately.
-  const hadDoc = docs.has(docName);
-  const doc = getYDoc(docName, true);
-  const createdForUpgrade = !hadDoc && docs.get(docName) === doc;
-  // `handleUpgrade` returns normally when it rejects a malformed handshake,
-  // without invoking its callback. Retire a room created for such an upgrade
-  // when the raw socket closes; a successful upgrade removes this listener
-  // before normal WebSocket connection lifecycle handling takes over.
-  const cleanupUnattachedUpgrade = () => {
-    if (createdForUpgrade && docs.get(docName) === doc && doc.conns.size === 0) {
-      docs.delete(docName);
-      roomReady.delete(doc);
-      doc.destroy();
-    }
-  };
-  if (createdForUpgrade) socket.once('close', cleanupUnattachedUpgrade);
-  Promise.resolve(roomReady.get(doc))
-    .then(() => {
-      if (socket.destroyed) throw new Error('socket closed');
-      if (shuttingDown) throw new Error('shutting down');
-      if (storageFailure) throw storageFailure;
-      if (capacityRejectedDocs.has(doc)) throw new Error('active document capacity reached');
-      if (isRoomBlocked(docName)) throw new Error('room unavailable');
-      wss.handleUpgrade(req, socket, head, (ws) => {
-        clearTimeout(upgradeTimer);
-        socket.off('close', cleanupUnattachedUpgrade);
-        wss.emit('connection', ws, req);
-      });
-    })
-    .catch((err) => {
-      clearTimeout(upgradeTimer);
-      socket.off('close', cleanupUnattachedUpgrade);
-      // A rejected first upgrade has no closeConn call to retire its room.
-      // Match both identity and zero connections so an existing/replaced room,
-      // or one another upgrade successfully attached to, is never destroyed.
-      if (createdForUpgrade && docs.get(docName) === doc && doc.conns.size === 0) {
-        docs.delete(docName);
-        roomReady.delete(doc);
-        doc.destroy();
-      }
-      console.error('[yjs] upgrade failed', { docName: roomLogId(docName), err: err.message });
-      if (!socket.destroyed) rejectUpgrade(socket, 503);
-    });
+  // Same canonical name as setupWSConnection, so hydration and the attachment cannot diverge between path forms.
+  plainUpgrades.attach(req, socket, head, docName, leave);
 });
 
 // Graceful drain. Without this, `docker stop` kills the process while
@@ -1457,6 +1429,7 @@ process.on('SIGTERM', () => { shutdown('SIGTERM'); });
 process.on('SIGINT', () => { shutdown('SIGINT'); });
 process.on(UNHANDLED_REJECTION_EVENT, (err) => { lifecycle.fatal(UNHANDLED_REJECTION_EVENT, err); });
 process.on(UNCAUGHT_EXCEPTION_EVENT, (err) => { lifecycle.fatal(UNCAUGHT_EXCEPTION_EVENT, err); });
+await roomDeletion.recover();
 if (await e2eBlobs.reconcileOrphans() > 0) await reconcileUploadUsage();
 server.listen(PORT, HOST, () => {
   const address = server.address();

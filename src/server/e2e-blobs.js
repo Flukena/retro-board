@@ -8,7 +8,8 @@ import { acceptCredentialOrigin, sendJson } from './relay-http.js';
 import { RETRY_AFTER_SHORT_SECONDS } from './relay-config.js';
 import { roomLogId } from './relay-log-id.js';
 import { ROOM_CAPACITY_CODE } from './relay-room-registry.js';
-import { E2E_BLOB_DUPLICATE, E2E_BUSY, E2E_FROZEN, E2E_QUOTA, E2E_ROTATION_STALE } from './e2e-room-log.js';
+import { E2E_BLOB_DUPLICATE, E2E_BUSY, E2E_FROZEN, E2E_QUOTA, E2E_ROOM_DELETED, E2E_ROTATION_STALE } from './e2e-room-log.js';
+import { UNFENCED } from './room-fence.js';
 import { inventoryKey } from './e2e-blob-store.js';
 import { e2eBlobFilename } from './relay-uploads.js';
 
@@ -38,6 +39,7 @@ const STATUS_FOR_ERROR = new Map([
   [E2E_QUOTA, HTTP.TOO_LARGE],
   [E2E_BUSY, HTTP.RATE_LIMITED],
   [ROOM_CAPACITY_CODE, HTTP.RATE_LIMITED],
+  [E2E_ROOM_DELETED, HTTP.NOT_FOUND],
 ]);
 
 const codedError = (code, message) => Object.assign(new Error(message), { code });
@@ -52,10 +54,12 @@ const finish = (res, status, headers) => {
 /**
  * Encrypted image blobs: HTTP upload and download, expiry of old-epoch blobs, and the startup orphan sweep.
  * Ports: uploads (createRelayUploads: admission, streamImage), store (E2EBlobStore), roomLog (E2ERoomLog),
- * registry (lockFor, isLocked, roomHandleForDoc, locksByDoc), onStorageFailure(error).
+ * registry (lockFor, isLocked, roomHandleForDoc, locksByDoc), onStorageFailure(error), fence (RoomFence): an upload holds
+ * an entry on its room from admission until its inventory entry is written or rolled back.
  */
 export function createE2EBlobs({
   config, allowedOrigins, allowInsecureHttp, uploads, store, roomLog, registry, onStorageFailure, logger = console, now = Date.now,
+  fence = UNFENCED,
 }) {
   const { admission } = uploads;
   const { MAX_UPLOAD_BYTES, REQUEST_TIMEOUT_MS } = config;
@@ -125,6 +129,23 @@ export function createE2EBlobs({
 
   const handleUpload = async (req, res, clientIp, docName, handle) => {
     if (!acceptCredentialOrigin(req, res, allowedOrigins, allowInsecureHttp)) return;
+    const leave = fence.enter(docName);
+    if (!leave) { finish(res, HTTP.NOT_FOUND); return; }
+    try {
+      await admitUpload(req, res, clientIp, docName, handle);
+    } finally {
+      leave();
+    }
+  };
+
+  // A room fenced while the body streamed is being deleted: nothing is published (its deleter waits for this entry).
+  const publishUnlessDeleted = async (docName, tempPath, handle, id) => {
+    if (!fence.isFenced(docName)) return store.publish(tempPath, handle, id);
+    await store.discardTemp(tempPath);
+    return null;
+  };
+
+  const admitUpload = async (req, res, clientIp, docName, handle) => {
     if (!admission.takeUploadToken(clientIp)) { finish(res, HTTP.RATE_LIMITED); return; }
     const headers = readHeaders(req, res);
     if (!headers) return;
@@ -137,8 +158,9 @@ export function createE2EBlobs({
     deadline.unref();
     try {
       await writeBody(req, upload);
-      const published = await store.publish(upload.tempPath, handle, headers.id);
-      respond(res, published ? await inventoryBlob({ docName, handle, ...headers, total: upload.total, epoch: lock.keyEpoch }) : HTTP.CONFLICT, headers.id);
+      const published = await publishUnlessDeleted(docName, upload.tempPath, handle, headers.id);
+      if (published === null) respond(res, HTTP.NOT_FOUND);
+      else respond(res, published ? await inventoryBlob({ docName, handle, ...headers, total: upload.total, epoch: lock.keyEpoch }) : HTTP.CONFLICT, headers.id);
     } catch (error) {
       await store.discardTemp(upload.tempPath);
       if (!res.destroyed) respond(res, failureStatus(error, upload.timedOut));

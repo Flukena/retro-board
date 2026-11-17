@@ -17,6 +17,7 @@ import { PLAN } from '../domain/plan-entitlements.js';
 import { ROOM_SESSION_RENEWAL_SUFFIX } from '../domain/room-lock-contract.js';
 import { RIGHT_KEY, WRONG_KEY, lockRecord } from './room-lock-fixtures.mjs';
 import { RETENTION_CLASS, ROOM_KIND } from '../domain/room-ownership.js';
+import { RoomFence } from './room-fence.js';
 
 const require = createRequire(import.meta.url);
 const Y = require('yjs');
@@ -41,13 +42,14 @@ const FORBIDDEN = 403;
 const CONFLICT = 409;
 const TOO_MANY = 429;
 const UNAVAILABLE = 503;
+const HELD_WAIT_MS = 2_000;
 
 const lockParams = () => {
   const { salt, kdf, verifier, wrappedDek, wrapIv } = lockRecord();
   return { salt, kdf, verifier, wrappedDek, wrapIv };
 };
 
-async function fixture(t, { storedPlan } = {}) {
+async function fixture(t, { storedPlan, accountGate = null } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'room-session-routes-'));
   const ldb = new LeveldbPersistence(directory);
   t.after(async () => { await ldb.destroy(); await rm(directory, { recursive: true, force: true }); });
@@ -69,16 +71,22 @@ async function fixture(t, { storedPlan } = {}) {
   const accountSessions = new AccountSessions({ signingKey: randomBytes(KEY_BYTES), allowInsecureHttp: false, maxCookieHeaderBytes: COOKIE_HEADER_BYTES });
   const realStore = new AccountStore({ ldb, getMeta: storage.getMeta, hasCapacity: () => true });
   // Stands in for a plan value the entitlement table does not know (setPlan refuses to store one).
-  const accountStore = storedPlan === undefined ? realStore : {
+  const accountStore = storedPlan === undefined && !accountGate ? realStore : {
     upsertFromGoogle: (profile) => realStore.upsertFromGoogle(profile),
-    get: async (id) => ({ ...(await realStore.get(id)), plan: storedPlan }),
+    setPlan: (...args) => realStore.setPlan(...args),
+    get: async (id) => {
+      const account = await realStore.get(id);
+      if (accountGate?.held) await accountGate.held;
+      return storedPlan === undefined ? account : { ...account, plan: storedPlan };
+    },
   };
+  const fence = new RoomFence();
   const failures = [];
   const routes = createRoomSessionRoutes({
     registry, sessions, verifier: new RoomLockVerifier(), accountSessions, accountStore,
     buckets: { takeCreateToken: () => 0, takeSessionExchangeToken: () => true, failureAttemptAvailable: () => true, recordSessionFailure: () => failures.push(1) },
     config: { allowedOrigins: [ORIGIN], allowInsecureHttp: false, sessionTtlMs: TTL_MS, maxApiBodyBytes: MAX_BODY_BYTES },
-    unavailable: () => false, onStorageFailure() {},
+    unavailable: () => false, onStorageFailure() {}, fence,
   });
   const server = http.createServer((req, res) => {
     if (req.url === '/api/rooms') void routes.handleCreateRoom(req, res, IP);
@@ -99,7 +107,7 @@ async function fixture(t, { storedPlan } = {}) {
     const cookie = accountSessions.createCookie(account.id, account.sessionGeneration, '/api').split(';')[0];
     return { account, cookie };
   };
-  return { registry, sessions, accountStore, post, signIn, signingKey, base, failures };
+  return { registry, sessions, accountStore, post, signIn, signingKey, base, failures, fence };
 }
 
 async function lockedRoom(f, owner) {
@@ -397,4 +405,37 @@ test('the owned-room limit is a 409 with owned-room-limit', async (t) => {
   const response = await f.post('/api/rooms', {}, owner.cookie);
   assert.equal(response.status, CONFLICT);
   assert.deepEqual(await response.json(), { error: 'owned-room-limit' });
+});
+
+test('a room being deleted answers the exchange 404 exactly like a missing room', async (t) => {
+  const f = await fixture(t);
+  const room = await (await f.post('/api/rooms', {})).json();
+  f.fence.fence(f.registry.registeredDocForCapability(room.code, room.token));
+  const response = await f.post('/api/room-session', room);
+  assert.equal(response.status, NOT_FOUND);
+  assert.equal(response.headers.get('set-cookie'), null);
+  assert.equal(f.failures.length, 1, 'charged like any failed lookup');
+});
+
+test('a locked exchange whose room starts deleting while the account is read answers 404 and issues no cookie', async (t) => {
+  let open;
+  const accountGate = { held: null };
+  const f = await fixture(t, { accountGate });
+  const owner = await f.signIn('owner@example.com', PLAN.PRO);
+  const room = await lockedRoom(f, owner);
+  const docName = f.registry.registeredDocForCapability(room.code, room.token);
+  accountGate.held = new Promise((resolve) => { open = resolve; });
+  const exchanging = f.post('/api/room-session', { ...room, authKey: RIGHT_KEY }, owner.cookie);
+  const deadline = Date.now() + HELD_WAIT_MS;
+  while (await f.fence.drained(docName, 0)) {
+    assert.ok(Date.now() < deadline, 'the exchange never took an entry');
+    await new Promise((resolve) => { setImmediate(resolve); });
+  }
+  f.fence.fence(docName);
+  f.registry.unpublish(docName);
+  open();
+  const response = await exchanging;
+  assert.equal(response.status, NOT_FOUND);
+  assert.equal(response.headers.get('set-cookie'), null);
+  assert.equal(await f.fence.drained(docName, 0), true, 'the exchange released its entry');
 });

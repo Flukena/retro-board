@@ -16,6 +16,8 @@ import { ROOM_LOCK_META, encodeLockRecord } from './room-lock-record.js';
 import { lockRecord } from './room-lock-fixtures.mjs';
 import { KEY_ROTATED_CLOSE_CODE, KEY_ROTATED_REASON } from '../domain/room-lock-contract.js';
 import { sharedReservations } from '../test-support/store-reservations.mjs';
+import { RoomFence } from './room-fence.js';
+import { ROOM_DELETED_CLOSE_CODE, ROOM_DELETED_REASON } from '../domain/room-ownership.js';
 
 const require = createRequire(import.meta.url);
 const { LeveldbPersistence } = require('y-leveldb');
@@ -46,7 +48,7 @@ const generousConfig = (env = {}) => readRelayConfig({
 
 async function fixture(t, {
   config = generousConfig(), expiresAt = null, keyEpoch = EPOCH, prepare = () => {}, maxRoomBytes = MAX_ROOM_BYTES, maxAppendBytes = MAX_FRAME_BYTES,
-  reserveStore = () => () => {},
+  reserveStore = () => () => {}, fence = undefined,
 } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'e2e-relay-protocol-'));
   const ldb = new LeveldbPersistence(dir);
@@ -54,7 +56,7 @@ async function fixture(t, {
   prepare(ldb);
   const failures = [];
   const touched = [];
-  const roomLog = new E2ERoomLog({ ldb, maxRoomBytes, reserveStore, onError: (error) => failures.push(error) });
+  const roomLog = new E2ERoomLog({ ldb, maxRoomBytes, reserveStore, onError: (error) => failures.push(error), fence });
   const relay = createE2ERelay({
     roomLog, traffic: new RelayWsTraffic(config, { log: quietLogger }), maxRoomBytes, maxAppendBytes,
     touch: (docName) => touched.push(docName), onStorageFailure: (error) => failures.push(error), logger: quietLogger,
@@ -382,4 +384,33 @@ test('the slow-consumer limit is checked after the fan-out a delayed write produ
   resume();
   assert.deepEqual(await within(peer.closed), { code: POLICY_CLOSE_CODE, reason: 'slow consumer' });
   await writer.until(() => writer.has(E2E_FRAME.ACK));
+});
+
+test('retiring a room closes its sockets 4004, and a log op the fence refuses closes 4004 without a storage failure', async (t) => {
+  const fence = new RoomFence();
+  const f = await fixture(t, { fence });
+  const [watcher, writer] = [await Client.join(f), await Client.join(f)];
+  fence.fence(DOC);
+  writer.append(5, bytes(4));
+  assert.equal((await within(writer.closed)).code, ROOM_DELETED_CLOSE_CODE);
+  await f.relay.retireRoom(DOC, ROOM_DELETED_CLOSE_CODE, ROOM_DELETED_REASON);
+  assert.deepEqual(await within(watcher.closed), { code: ROOM_DELETED_CLOSE_CODE, reason: ROOM_DELETED_REASON });
+  assert.deepEqual(f.failures, []);
+});
+
+test('a member still mid-handshake when its room is retired is closed 4004 and never joins', async (t) => {
+  const f = await fixture(t);
+  const upgrade = f.relay.wss.handleUpgrade.bind(f.relay.wss);
+  let attach = null;
+  // The handshake completes on the wire, but the relay's attach callback is held: the member is counted, not connected.
+  f.relay.wss.handleUpgrade = (req, socket, head, callback) => upgrade(req, socket, head, (ws) => { attach = () => callback(ws); });
+  const ws = new WebSocket(f.url);
+  const member = new Client(ws);
+  await once(ws, 'open');
+  await waitUntil(() => attach !== null);
+  assert.equal(f.relay.connectionsFor(DOC), 1);
+  await f.relay.retireRoom(DOC, ROOM_DELETED_CLOSE_CODE, ROOM_DELETED_REASON);
+  attach();
+  assert.equal((await within(member.closed)).code, ROOM_DELETED_CLOSE_CODE);
+  assert.equal(member.has(E2E_FRAME.SYNCED), false, 'no replay reached the member');
 });

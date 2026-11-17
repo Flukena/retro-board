@@ -8,6 +8,7 @@ import { acceptCredentialOrigin, readJsonBody, sendIfWritable, sendJson } from '
 import { RETRY_AFTER_LONG_SECONDS, RETRY_AFTER_SHORT_SECONDS } from './relay-config.js';
 import { CORRUPT_LOCK, ROOM_LOCK_VERSION } from './room-lock-record.js';
 import { OWNED_ROOM_LIMIT_CODE } from './room-owner-index.js';
+import { UNFENCED } from './room-fence.js';
 
 const HTTP = Object.freeze({
   OK: 200, CREATED: 201, BAD_REQUEST: 400, UNAUTHORIZED: 401, FORBIDDEN: 403, NOT_FOUND: 404,
@@ -34,11 +35,12 @@ function parseCreateBody(body) {
 
 /**
  * Room creation and session exchange. ctx: registry, sessions (RoomSessions), verifier (RoomLockVerifier),
- * accountSessions, accountStore, buckets (rate limiters), config, unavailable() getter, onStorageFailure.
+ * accountSessions, accountStore, buckets (rate limiters), config, unavailable() getter, onStorageFailure,
+ * fence (RoomFence): an exchange holds an entry on its room from the lookup to the answer.
  * @returns {{ handle: Function, handleCreateRoom: Function, handleRoomSession: Function }}
  */
 export function createRoomSessionRoutes(ctx) {
-  const { registry, sessions, verifier, buckets, config } = ctx;
+  const { registry, sessions, verifier, buckets, config, fence = UNFENCED } = ctx;
 
   const preamble = (req, res) => {
     if (!acceptCredentialOrigin(req, res, config.allowedOrigins, config.allowInsecureHttp)) return false;
@@ -136,6 +138,8 @@ export function createRoomSessionRoutes(ctx) {
     if (verdict === 'wrong') { sendIfWritable(res, HTTP.FORBIDDEN); return; }
     if (verdict !== 'ok') { sendIfWritable(res, HTTP.TOO_MANY, { 'retry-after': String(verdict.limited) }); return; }
     const account = await accountOf(req);
+    // The room may have started deleting while the account was read: never mint a cookie for it.
+    if (fence.isFenced(docName)) { sendIfWritable(res, HTTP.NOT_FOUND); return; }
     const { roomHandle, expiresAt, cookie } = issueSession(docName, prefixed, lock.keyEpoch);
     sendJson(res, HTTP.OK, {
       roomHandle, expiresAt,
@@ -162,18 +166,28 @@ export function createRoomSessionRoutes(ctx) {
     // A present but non-string authKey is a malformed request, not a failed capability guess.
     if (wellFormed && hasAuthKeyField && typeof body[AUTH_KEY_FIELD] !== 'string') { sendIfWritable(res, HTTP.BAD_REQUEST); return; }
     const docName = wellFormed ? registry.registeredDocForCapability(body.code, body.token) : null;
-    if (!docName) { refuseFailedLookup(res, clientIp, HTTP.NOT_FOUND); return; }
-    if (!buckets.takeSessionExchangeToken(clientIp)) {
+    // Taken in the same tick as the lookup: a room being deleted answers exactly like a missing one.
+    const leave = docName ? fence.enter(docName) : null;
+    if (!leave) { refuseFailedLookup(res, clientIp, HTTP.NOT_FOUND); return; }
+    try {
+      await exchange(req, res, { clientIp, prefixed, renewalHandle }, docName, body, hasAuthKeyField);
+    } finally {
+      leave();
+    }
+  };
+
+  const exchange = async (req, res, request, docName, body, hasAuthKeyField) => {
+    if (!buckets.takeSessionExchangeToken(request.clientIp)) {
       sendIfWritable(res, HTTP.TOO_MANY, { 'retry-after': RETRY_AFTER_SHORT_SECONDS });
       return;
     }
     if (!registry.isLocked(docName)) {
       if (hasAuthKeyField) sendIfWritable(res, HTTP.BAD_REQUEST);
-      else exchangeNormal(res, docName, prefixed);
+      else exchangeNormal(res, docName, request.prefixed);
       return;
     }
     try {
-      await exchangeLocked(req, res, { clientIp, prefixed, renewalHandle }, docName, hasAuthKeyField ? body.authKey : undefined);
+      await exchangeLocked(req, res, request, docName, hasAuthKeyField ? body.authKey : undefined);
     } catch (err) {
       if (err.code === 'STORAGE_FAILURE') ctx.onStorageFailure(err);
       sendIfWritable(res, HTTP.UNAVAILABLE);

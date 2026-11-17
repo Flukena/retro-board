@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { ROOM_ACTIVITY_META } from './src/server/room-activity.js';
 import { ROOM_HANDLE_RE, STORE_OPERATION_OVERHEAD_BYTES } from './src/server/relay-config.js';
 import { RoomRegistry, REGISTRY_STORAGE_FAILURE_EVENT, databaseCapacityError } from './src/server/relay-room-registry.js';
+import { lockRecord } from './src/server/room-lock-fixtures.mjs';
 import { MAX_OWNED_ROOMS_PER_ACCOUNT, RETENTION_CLASS, ROOM_KIND, ROOM_OWNER_META, encodeOwnerRecord } from './src/domain/room-ownership.js';
 
 const require = createRequire(import.meta.url);
@@ -34,6 +35,7 @@ const SERVER_UNAVAILABLE_CODE = 'SERVER_UNAVAILABLE';
 const ROOM_HANDLE_CHARACTERS = 32;
 const HANDLE = 'H'.repeat(ROOM_HANDLE_CHARACTERS);
 const QUIET_LOGGER = { warn() {}, error() {} };
+const LATE_LOCK_RECORD = lockRecord();
 
 async function registryFixture(options = {}) {
   const trace = [];
@@ -101,7 +103,7 @@ async function registryFixture(options = {}) {
   const instance = new RoomRegistry({ persistence, Y, maxRooms: options.maxRooms ?? CAPACITY_COUNT,
     maxDatabaseBytes: maxBytes, signingKey: Buffer.alloc(REGISTRY_TEST_SIGNING_KEY_BYTES), log: QUIET_LOGGER });
   instance.on(REGISTRY_STORAGE_FAILURE_EVENT, (error) => failures.push(error));
-  await instance.hydrate(options.usage || { complete: true, roomsByHandle: new Map() });
+  await instance.hydrate(options.usage || { complete: true, roomsByHandle: new Map() }, options.deleting);
   const registry = {
     createRoom: (...args) => instance.createRoom(...args),
     registeredDocForCapability: (...args) => instance.registeredDocForCapability(...args),
@@ -297,40 +299,69 @@ test('registry unavailable service precedes capacity and performs no persistence
   assert.deepEqual(trace, []);
 });
 
-test('registry retire unpublishes the room before clearing its storage', async () => {
+test('registry unpublish removes the room from memory in the same call, and clearRoomStorage wipes its storage', async () => {
   const { registry, instance, metadata, trace } = await registryFixture();
   const room = await registry.createRoom();
   const kept = await registry.createRoom();
   const docName = registry.registeredDocForCapability(room.code, room.token);
   const handle = registry.roomHandleForDoc(docName);
   trace.length = 0;
-  const retiring = instance.retireRoom(docName);
-  // Unpublished in the same tick, before any storage work completes.
+  assert.equal(instance.unpublish(docName), handle);
+  assert.deepEqual(trace, [], 'unpublishing touches no storage');
   assert.equal(registry.registeredDocForCapability(room.code, room.token), null);
   assert.equal(registry.registeredRoomsByHandle.has(handle), false);
   assert.equal(registry.roomUploadUsage.has(docName), false);
   assert.equal(instance.existingDocNames.has(docName), false);
   assert.equal(instance.registeredDocDigests.has(docName), false);
-  assert.equal(await retiring, handle);
+  await instance.clearRoomStorage(docName);
   assert.ok(trace.includes(ROLLBACK_STEP_LABEL));
   assert.equal([...metadata.keys()].some((key) => key.startsWith(`${docName}:`)), false);
   assert.ok(registry.registeredDocForCapability(kept.code, kept.token));
   assert.equal(registry.registeredDocs.size, 1);
 });
 
-test('registry retire of an unknown room does nothing', async () => {
+test('registry unpublish of an unknown room returns null and does no work', async () => {
   const { instance, trace } = await registryFixture();
-  assert.equal(await instance.retireRoom(DOC_NAME), null);
+  assert.equal(instance.unpublish(DOC_NAME), null);
   assert.deepEqual(trace, []);
 });
 
-test('registry retire storage failure latches and rejects', async () => {
+test('registry clearRoomStorage failure latches and rejects', async () => {
   const error = Object.assign(new Error('clear failed'), { code: STORAGE_FAILURE_CODE });
   const { registry, instance, failures } = await registryFixture({ cleanupError: error });
   const room = await registry.createRoom();
   const docName = registry.registeredDocForCapability(room.code, room.token);
-  await assert.rejects(instance.retireRoom(docName), error);
+  instance.unpublish(docName);
+  await assert.rejects(instance.clearRoomStorage(docName), error);
   assert.deepEqual(failures, [error]);
+});
+
+test('registry unregisterDurably deletes only the registration marker, in a durable batch', async () => {
+  const { registry, instance, metadata, trace } = await registryFixture();
+  const room = await registry.createRoom();
+  const docName = registry.registeredDocForCapability(room.code, room.token);
+  trace.length = 0;
+  await instance.unregisterDurably(docName);
+  assert.deepEqual(trace, [DURABLE_STEP_LABEL]);
+  assert.equal(metadata.has(`${docName}:${REGISTRATION_KEY}`), false);
+  assert.ok(metadata.has(`${docName}:${HANDLE_KEY}`), 'the rest of the room stays until it is cleared');
+});
+
+test('registry publishLock of an unpublished room is ignored, so a late commit cannot re-publish it', async () => {
+  const { registry, instance } = await registryFixture();
+  const room = await registry.createRoom();
+  const docName = registry.registeredDocForCapability(room.code, room.token);
+  instance.unpublish(docName);
+  instance.publishLock(docName, LATE_LOCK_RECORD);
+  assert.equal(instance.isLocked(docName), false);
+});
+
+test('hydrate never registers a room that is being deleted', async () => {
+  const metadata = new Map([[`${DOC_NAME}:${REGISTRATION_KEY}`, 1], [`${DOC_NAME}:${HANDLE_KEY}`, HANDLE]]);
+  const persistenceNames = [DOC_NAME];
+  const { instance, trace } = await registryFixture({ metadata, names: persistenceNames, deleting: new Set([DOC_NAME]) });
+  assert.equal(instance.registeredDocs.has(DOC_NAME), false);
+  assert.equal(trace.some((step) => step.startsWith('read:')), false, 'not even its marker is read');
 });
 
 const ownedBy = (accountId, kind = ROOM_KIND.BOARD) => ({ kind, accountId });
@@ -429,12 +460,11 @@ test('a failed owned create releases its reservation, so the last slot is still 
   assertReservationsReleased(registry);
 });
 
-test('retiring an owned room removes it from the owner index at once', async () => {
+test('unpublishing an owned room removes it from the owner index at once', async () => {
   const { registry, instance } = await registryFixture();
   const room = await registry.createRoom({ owner: ownedBy(OWNER_ACCOUNT) });
   const docName = registry.registeredDocForCapability(room.code, room.token);
-  const retiring = instance.retireRoom(docName);
+  instance.unpublish(docName);
   assert.deepEqual(instance.roomsOwnedBy(OWNER_ACCOUNT), []);
   assert.equal(instance.ownershipOf(docName), null);
-  await retiring;
 });

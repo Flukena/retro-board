@@ -19,6 +19,7 @@ const MAX_ROOMS = 10;
 const UNLIMITED = Number.MAX_SAFE_INTEGER;
 const QUIET = { warn() {}, error() {} };
 const NO_USAGE = { complete: true, roomsByHandle: new Map() };
+const GUEST_RECORD = { v: 1, kind: 'board', accountId: null, createdAt: 1_800_000_000_000 };
 
 async function openFixture(dir, wrap = (persistence) => persistence) {
   const ldb = new LeveldbPersistence(dir);
@@ -68,7 +69,8 @@ test('a locked room keeps its lock across a reopen and normal rooms have no lock
     const second = await openFixture(dir);
     assert.deepEqual(second.registry.lockFor(lockedDoc), decodeLockRecord(lockRecord()));
     assert.equal(second.registry.isLocked(normalDoc), false);
-    await second.registry.retireRoom(lockedDoc);
+    second.registry.unpublish(lockedDoc);
+    await second.registry.clearRoomStorage(lockedDoc);
     assert.equal(second.registry.lockFor(lockedDoc), null);
     await second.ldb.destroy();
   });
@@ -225,6 +227,25 @@ test('hydration deletes the lock key of an interrupted creation and leaves the r
   });
 });
 
+// A guest record left on an unreachable document would make it expire in 24 h if that document were ever registered again.
+test('hydration drops the owner record of an interrupted creation along with its lock, and keeps the document', async () => {
+  await withDir(async (dir) => {
+    const first = await openFixture(dir);
+    await first.registry.createRoom();
+    await first.storage.storeUpdate(LOCK_DOC, first.registry.seedUpdate());
+    await durableMetaBatch(first.ldb, LOCK_DOC, [{ type: 'put', key: ROOM_OWNER_META, value: GUEST_RECORD }]);
+    await first.ldb.destroy();
+    opened.delete(first.ldb);
+
+    const second = await openFixture(dir);
+    assert.equal(second.registry.registeredDocs.has(LOCK_DOC), false);
+    assert.equal(await second.storage.getMeta(LOCK_DOC, ROOM_OWNER_META), undefined);
+    const kept = await second.storage.getYDoc(LOCK_DOC);
+    assert.equal(kept.getMap('meta').get('__roomRegistered'), 1, 'the quarantined document itself is kept');
+    kept.destroy();
+  });
+});
+
 test('a corrupt committed lock keeps the room managed, locked and retirable with its data intact', async () => {
   await withDir(async (dir) => {
     const first = await openFixture(dir);
@@ -242,7 +263,8 @@ test('a corrupt committed lock keeps the room managed, locked and retirable with
     assert.ok(second.registry.roomUploadUsage.has(docName));
     assert.deepEqual(await second.storage.getMeta(docName, ROOM_LOCK_META), { v: 9 });
     assert.ok(await second.storage.getMeta(docName, 'retro-room-handle-v1'));
-    assert.ok(await second.registry.retireRoom(docName));
+    assert.ok(second.registry.unpublish(docName));
+    await second.registry.clearRoomStorage(docName);
     assert.equal(second.registry.lockFor(docName), null);
   });
 });

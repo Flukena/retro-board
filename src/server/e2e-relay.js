@@ -4,7 +4,10 @@ import {
 } from '../domain/e2e-envelope.js';
 import { E2E_SNAPSHOT_MIN_INTERVAL_MS } from '../domain/e2e-limits.js';
 import { KEY_ROTATED_CLOSE_CODE, KEY_ROTATED_REASON } from '../domain/room-lock-contract.js';
-import { E2E_BUSY, E2E_CORRUPT, E2E_EPOCH_STALE, E2E_FROZEN, E2E_QUOTA, E2E_STALE_SNAPSHOT } from './e2e-room-log.js';
+import { ROOM_DELETED_CLOSE_CODE, ROOM_DELETED_REASON } from '../domain/room-ownership.js';
+import {
+  E2E_BUSY, E2E_CORRUPT, E2E_EPOCH_STALE, E2E_FROZEN, E2E_QUOTA, E2E_ROOM_DELETED, E2E_STALE_SNAPSHOT,
+} from './e2e-room-log.js';
 import { closeWebSocket } from './relay-lifecycle.js';
 import { roomLogId } from './relay-log-id.js';
 import { ROOM_CAPACITY_CODE } from './relay-room-registry.js';
@@ -20,12 +23,10 @@ const REPLAY_DRAIN_POLL_MS = 10;
 const WS_OPEN_STATE = 1;
 const UNSUPPORTED_DATA_CLOSE_CODE = 1003;
 const SERVER_ERROR_CLOSE_CODE = 1011;
-const GOING_AWAY_CLOSE_CODE = 1001;
 const MALFORMED_REASON = 'malformed frame';
 const RATE_LIMIT_REASON = 'rate-limit';
 const SLOW_CONSUMER_REASON = 'slow consumer';
 const UNAVAILABLE_REASON = 'room unavailable';
-const RETIRED_REASON = 'room retired';
 const NO_CLIENT_REF = 0;
 const OPEN_LOG = '[yjs] e2e conn open';
 const ERROR_LOG = '[yjs] e2e conn error';
@@ -242,6 +243,11 @@ class E2EConnection {
   }
 
   #fail(error) {
+    // The room's fence refused the op: it is being deleted, which is not a storage failure.
+    if (error?.code === E2E_ROOM_DELETED) {
+      safeClose(this.#ws, ROOM_DELETED_CLOSE_CODE, ROOM_DELETED_REASON);
+      return;
+    }
     if (error?.code === E2E_CORRUPT) this.#deps.logger.warn(CORRUPT_LOG, { docName: roomLogId(this.#docName) });
     else this.#deps.onStorageFailure(error);
     safeClose(this.#ws, SERVER_ERROR_CLOSE_CODE, UNAVAILABLE_REASON);
@@ -301,13 +307,18 @@ export function createE2ERelay({
       const { docName, clientIp, expiresAt, keyEpoch } = req.wsSecurityContext;
       let room = rooms.get(docName);
       if (!room) {
-        room = { members: 0, connections: new Set() };
+        // `retired` holds the close of a room being deleted, for members whose handshake is still completing.
+        room = { members: 0, connections: new Set(), retired: null };
         rooms.set(docName, room);
       }
       room.members += 1;
       const joined = room;
       socket.once('close', () => leave(docName, joined));
       wss.handleUpgrade(req, socket, head, (ws) => {
+        if (joined.retired) {
+          safeClose(ws, joined.retired.code, joined.retired.reason);
+          return;
+        }
         const connection = new E2EConnection(ws, { docName, keyEpoch }, joined, deps);
         joined.connections.add(connection);
         closeOnSessionExpiry(ws, expiresAt);
@@ -316,10 +327,15 @@ export function createE2ERelay({
       });
     },
     closeRoom,
-    /** Retirement: no socket may outlive the room, and the log drops its memory of it. */
-    retireRoom(docName) {
-      closeRoom(docName, GOING_AWAY_CLOSE_CODE, RETIRED_REASON);
-      roomLog.forget(docName);
+    /**
+     * Deletion: closes every socket of the room now, members still mid-handshake included, then settles once the log
+     * has finished the ops queued before the room's fence; the log drops its memory of the room.
+     */
+    retireRoom(docName, code, reason) {
+      const room = rooms.get(docName);
+      if (room) room.retired = { code, reason };
+      closeRoom(docName, code, reason);
+      return roomLog.retire(docName);
     },
     connectionsFor: (docName) => rooms.get(docName)?.members ?? 0,
     activeRooms: () => rooms.size,

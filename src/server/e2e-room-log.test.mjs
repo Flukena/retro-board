@@ -7,8 +7,9 @@ import { join } from 'node:path';
 import {
   E2ERoomLog, E2E_BUSY, E2E_CORRUPT, E2E_EPOCH_STALE, E2E_FROZEN, E2E_LOCK_MISMATCH, E2E_QUOTA, E2E_ROTATION_STALE, E2E_STALE_SNAPSHOT,
   MAX_PENDING_OPS_PER_ROOM, MAX_FREEZE_TTL_MS, E2E_BLOB_GRACE_MS, E2E_MAX_LOG_ENTRIES, verifySnapshotDigest,
-  E2E_SNAPSHOT_RESERVATION_OVERHEAD_BYTES, measureSnapshotReservationOverheadBytes,
+  E2E_SNAPSHOT_RESERVATION_OVERHEAD_BYTES, measureSnapshotReservationOverheadBytes, E2E_ROOM_DELETED,
 } from './e2e-room-log.js';
+import { RoomFence } from './room-fence.js';
 import { ROOM_LOCK_META, decodeLockRecord, encodeLockRecord } from './room-lock-record.js';
 import { metaBatchBytes } from './relay-storage.js';
 import { lockRecord, START_MS } from './room-lock-fixtures.mjs';
@@ -678,3 +679,44 @@ test('expiredBlobs is read-only and removeBlobs drops exactly the given entries'
   await log.removeBlobs(DOC, ['old', 'unknown']);
   assert.deepEqual((await make().blobs(DOC)).map((b) => b.id), ['new']);
 }));
+
+test('every op holds a fence entry while it runs, and a fenced room refuses new ops without touching storage', async () => {
+  const fence = new RoomFence();
+  await withLog(async ({ log, ldb }) => {
+    let releaseVerify;
+    const verifying = new Promise((resolve) => { releaseVerify = resolve; });
+    const mutation = log.mutateLock(DOC, { verify: () => verifying.then(() => true), expectedRevision: 0, next: (current) => current });
+    fence.fence(DOC);
+    assert.equal(await fence.drained(DOC, 0), false, 'the queued op holds an entry');
+    await rejectsWith(log.append(DOC, bytesOf(2), EPOCH), E2E_ROOM_DELETED);
+    await rejectsWith(log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve }), E2E_ROOM_DELETED);
+    releaseVerify();
+    await mutation;
+    assert.equal(await fence.drained(DOC, 0), true);
+    assert.deepEqual(await e2eKeys(ldb), []);
+  }, { fence });
+});
+
+test('retire cancels the freeze timer, waits for queued ops, and leaves a fenced expiry silent', async () => {
+  const fence = new RoomFence();
+  const errors = [];
+  await withLog(async ({ log, timers }) => {
+    const { rotationId } = await log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: approve });
+    let releaseVerify;
+    const verifying = new Promise((resolve) => { releaseVerify = resolve; });
+    // A failed owner abort keeps the freeze, so only retire can cancel its timer.
+    const queued = rejectsWith(log.release(DOC, rotationId, { verify: () => verifying.then(() => false) }), E2E_LOCK_MISMATCH);
+    fence.fence(DOC);
+    let retired = false;
+    const retiring = log.retire(DOC).then(() => { retired = true; });
+    await new Promise((resolve) => { setImmediate(resolve); });
+    assert.equal(retired, false, 'a queued op is still running');
+    releaseVerify();
+    await Promise.all([queued, retiring]);
+    assert.equal(timers[0].cleared, true);
+    timers[0].fn();
+    await new Promise((resolve) => { setImmediate(resolve); });
+    assert.deepEqual(errors, [], 'a refused expiry is not a storage failure');
+    assert.deepEqual(log.loadedDocNames(), []);
+  }, { fence, onError: (error) => errors.push(error) });
+});

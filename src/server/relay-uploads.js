@@ -9,6 +9,7 @@ import { evictOldestBucket, refillTokens, createTrafficBucket, trafficBucketFor,
 import { acceptCredentialOrigin } from './relay-http.js';
 import { roomLogId } from './relay-log-id.js';
 import { ROOM_UPLOAD_USAGE_META } from './relay-room-registry.js';
+import { UNFENCED } from './room-fence.js';
 import { IMAGE_MAX_BYTES, inspectRasterImageBlob, imageInfoIsWithinLimits } from '../domain/security-boundaries.js';
 
 export { ROOM_UPLOAD_USAGE_META } from './relay-room-registry.js';
@@ -54,6 +55,7 @@ export const roomHandleOfImageFile = (name) => (
 );
 const PRIVATE_UPLOAD_FILE_MODE = 0o600;
 export const UPLOAD_STORAGE_FAILURE_EVENT = 'storageFailure';
+const ROOM_DELETED_CODE = 'ROOM_DELETED';
 
 const startsWithSignature = (buf, signature) => (
   buf.length >= signature.length && buf.subarray(0, signature.length).equals(signature)
@@ -161,7 +163,8 @@ export const createImageReadBudgets = (config) => {
   return { take, ipBuckets: imageReadIpBuckets, roomBuckets: imageReadRoomBuckets };
 };
 
-export const createRelayUploads = ({ config, state, roomUploadUsage, imageReads, storage, allowedOrigins, allowInsecureHttp, strictRasterValidation = false }) => {
+/** fence (RoomFence): an upload holds an entry on its room from admission until its usage is persisted. */
+export const createRelayUploads = ({ config, state, roomUploadUsage, imageReads, storage, allowedOrigins, allowInsecureHttp, strictRasterValidation = false, fence = UNFENCED }) => {
   const {
     UPLOADS_DIR, UPLOAD_RL_MAX, UPLOAD_RL_REFILL_PER_SEC, MAX_BUCKETS,
     MAX_UPLOAD_BYTES, MAX_ACTIVE_UPLOADS, MAX_ACTIVE_UPLOADS_PER_IP,
@@ -302,6 +305,8 @@ export const createRelayUploads = ({ config, state, roomUploadUsage, imageReads,
     const { room } = reservation;
     await pipeline(req, transfer.meter, fs.createWriteStream(transfer.tempPath, { flags: 'wx', mode: PRIVATE_UPLOAD_FILE_MODE }));
     await validateUploadImage(transfer, contentType);
+    // A room fenced while this streamed is being deleted: publish nothing (its deleter waits for this entry).
+    if (fence.isFenced(docName)) throw uploadError(ROOM_DELETED_CODE, 'room is being deleted');
     // Reservations cover publication; rename remains atomic within the upload directory.
     await fs.promises.rename(transfer.tempPath, transfer.finalPath);
     transfer.published = true;
@@ -344,7 +349,8 @@ export const createRelayUploads = ({ config, state, roomUploadUsage, imageReads,
       if (cleanupErr.code !== 'ENOENT') console.warn('[yjs] upload temp cleanup failed', { err: cleanupErr.message });
     }
     if (res.destroyed || req.destroyed && transfer.timedOut) return;
-    if (err.code === 'UPLOAD_TOO_LARGE') res.writeHead(413);
+    if (err.code === ROOM_DELETED_CODE) res.writeHead(404);
+    else if (err.code === 'UPLOAD_TOO_LARGE') res.writeHead(413);
     else if (err.code === 'INVALID_IMAGE') res.writeHead(422, { 'content-type': 'text/plain' });
     else if (err.code === 'UPLOAD_TIMEOUT' || transfer.timedOut) res.writeHead(408);
     else {
@@ -356,6 +362,16 @@ export const createRelayUploads = ({ config, state, roomUploadUsage, imageReads,
 
   const handleUpload = async (req, res, clientIp, docName, roomHandle) => {
     if (!acceptCredentialOrigin(req, res, allowedOrigins, allowInsecureHttp)) return;
+    const leave = fence.enter(docName);
+    if (!leave) { res.writeHead(404); res.end(); return; }
+    try {
+      await admitUpload(req, res, clientIp, docName, roomHandle);
+    } finally {
+      leave();
+    }
+  };
+
+  const admitUpload = async (req, res, clientIp, docName, roomHandle) => {
     if (!takeUploadToken(clientIp)) { res.writeHead(429); res.end(); return; }
     const headers = uploadHeaders(req, res);
     if (!headers) return;

@@ -3,12 +3,13 @@ import {
 } from '../domain/room-lock-contract.js';
 import { authenticateAccount } from './auth-session.js';
 import {
-  E2E_BUSY, E2E_CORRUPT, E2E_FROZEN, E2E_LOCK_MISMATCH, E2E_QUOTA, E2E_ROTATION_STALE, MAX_FREEZE_TTL_MS,
+  E2E_BUSY, E2E_CORRUPT, E2E_FROZEN, E2E_LOCK_MISMATCH, E2E_QUOTA, E2E_ROOM_DELETED, E2E_ROTATION_STALE, MAX_FREEZE_TTL_MS,
 } from './e2e-room-log.js';
 import { acceptCredentialOrigin, readJsonBody, sendIfWritable, sendJson } from './relay-http.js';
 import { isBlobId, readCommitBody } from './room-lock-commit-body.js';
 import { RETRY_AFTER_SHORT_SECONDS } from './relay-config.js';
 import { CORRUPT_LOCK } from './room-lock-record.js';
+import { UNFENCED } from './room-fence.js';
 
 export { KEY_ROTATED_CLOSE_CODE, KEY_ROTATED_REASON };
 export const MAX_PASSWORD_BODY_BYTES = 1024;
@@ -26,6 +27,7 @@ const ABORT_KEYS = ['oldAuthKey', 'rotationId'];
 
 const bad = () => Object.assign(new Error('bad request'), { status: HTTP.BAD_REQUEST });
 const conflict = () => Object.assign(new Error('conflict'), { status: HTTP.CONFLICT });
+const notFound = () => Object.assign(new Error('not found'), { status: HTTP.NOT_FOUND });
 
 /**
  * Verifies `oldAuthKey` against whatever record the log holds at that moment, with the wrong-password limits.
@@ -59,11 +61,16 @@ const requireKeys = (body, keys) => {
  * Owner-only lock routes: password change and barrier-based key rotation (begin / commit / abort).
  * ctx: registry, roomLog (E2ERoomLog), blobStore (settleStaged), closeRoom(docName, code, reason), verifier (RoomLockVerifier),
  * accountSessions, accountStore, config { allowedOrigins, allowInsecureHttp, maxApiBodyBytes },
- * unavailable() getter, onStorageFailure(error).
+ * unavailable() getter, onStorageFailure(error), fence (RoomFence): each request holds an entry on its room throughout.
  * @returns {{ handle: (req, res, routePath: string, options: { clientIp: string, hasQueryOrFragment: boolean }) => boolean }}
  */
 export function createRoomLockRoutes(ctx) {
-  const { registry, roomLog, verifier, config } = ctx;
+  const { registry, roomLog, verifier, config, fence = UNFENCED } = ctx;
+
+  // A room fenced while the request ran is being deleted: its lock is never re-published and it answers 404.
+  const assertNotDeleted = (docName) => {
+    if (fence.isFenced(docName)) throw notFound();
+  };
 
   const changePassword = async (req, { docName }, clientIp) => {
     const body = await readJsonBody(req, MAX_PASSWORD_BODY_BYTES);
@@ -74,6 +81,7 @@ export function createRoomLockRoutes(ctx) {
     const updated = await roomLog.mutateLock(docName, {
       verify: attempt.verify, expectedRevision: body.expectedRevision, next: (current) => ({ ...current, ...params }),
     }).catch((error) => { throw Object.assign(error, { attempt }); });
+    assertNotDeleted(docName);
     registry.publishLock(docName, updated);
     return { status: HTTP.OK, json: { lockRevision: updated.lockRevision } };
   };
@@ -131,6 +139,7 @@ export function createRoomLockRoutes(ctx) {
       verify: attempt.verify,
       snapshot, lockRecord, blobInventory,
     }).catch((error) => { throw Object.assign(error, { attempt }); });
+    assertNotDeleted(docName);
     registry.publishLock(docName, committed);
     ctx.closeRoom(docName, KEY_ROTATED_CLOSE_CODE, KEY_ROTATED_REASON);
     await settleStagedFiles(header.rotationId, header.keepBlobs);
@@ -152,16 +161,15 @@ export function createRoomLockRoutes(ctx) {
     if (error.code === 'BAD_JSON') return { status: HTTP.BAD_REQUEST };
     if (error.code === E2E_ROTATION_STALE || error.code === E2E_FROZEN) return { status: HTTP.CONFLICT };
     if (error.code === E2E_QUOTA) return { status: HTTP.TOO_LARGE };
+    if (error.code === E2E_ROOM_DELETED) return { status: HTTP.NOT_FOUND };
     if (error.code === E2E_BUSY) return { status: HTTP.TOO_MANY, headers: { 'retry-after': RETRY_AFTER_SHORT_SECONDS } };
     if (error.code === STORAGE_FAILURE) ctx.onStorageFailure(error);
     else if (error.code !== E2E_CORRUPT) console.error('[yjs] room lock route failed', { code: error.code || 'UNKNOWN', err: error.message });
     return { status: HTTP.UNAVAILABLE };
   };
 
-  // Resolves the target room and its owner, or answers the refusal and returns null.
-  const authorizeOwner = async (req, res, handle) => {
-    const docName = registry.registeredRoomsByHandle.get(handle);
-    if (!docName) { sendIfWritable(res, HTTP.NOT_FOUND); return null; }
+  // Resolves the owner of the target room, or answers the refusal and returns null.
+  const authorizeOwner = async (req, res, docName) => {
     const lock = registry.lockFor(docName);
     if (lock === CORRUPT_LOCK) { sendIfWritable(res, HTTP.UNAVAILABLE); return null; }
     const account = await authenticateAccount(req, ctx.accountSessions, ctx.accountStore);
@@ -171,12 +179,9 @@ export function createRoomLockRoutes(ctx) {
     return { docName, lock };
   };
 
-  const run = async (req, res, handle, action, clientIp) => {
-    if (!acceptCredentialOrigin(req, res, config.allowedOrigins, config.allowInsecureHttp)) return;
-    res.setHeader('cache-control', 'no-store');
-    if (ctx.unavailable()) { sendIfWritable(res, HTTP.UNAVAILABLE); return; }
+  const act = async (req, res, docName, action, clientIp) => {
     try {
-      const target = await authorizeOwner(req, res, handle);
+      const target = await authorizeOwner(req, res, docName);
       if (!target) return;
       const result = await ACTIONS.get(action)(req, target, clientIp);
       if (result.json) sendJson(res, result.status, result.json);
@@ -185,6 +190,21 @@ export function createRoomLockRoutes(ctx) {
       const { status, headers } = statusOf(error);
       // An early refusal leaves the request body unread; close the connection instead of draining it.
       sendIfWritable(res, status, req.complete ? headers : { ...headers, connection: 'close' });
+    }
+  };
+
+  const run = async (req, res, handle, action, clientIp) => {
+    if (!acceptCredentialOrigin(req, res, config.allowedOrigins, config.allowInsecureHttp)) return;
+    res.setHeader('cache-control', 'no-store');
+    if (ctx.unavailable()) { sendIfWritable(res, HTTP.UNAVAILABLE); return; }
+    // The entry is taken in the same tick as the lookup, so a room being deleted is never acted on.
+    const docName = registry.registeredRoomsByHandle.get(handle);
+    const leave = docName ? fence.enter(docName) : null;
+    if (!leave) { sendIfWritable(res, HTTP.NOT_FOUND); return; }
+    try {
+      await act(req, res, docName, action, clientIp);
+    } finally {
+      leave();
     }
   };
 

@@ -18,12 +18,12 @@ export const post = (relay, path, body, cookie) => fetch(`${relay.url}${path}`, 
 });
 
 /** A real relay with Google sign-in stubbed, so tests can create locked rooms. */
-export async function lockedRelay(t, env = {}, { root = null } = {}) {
+export async function lockedRelay(t, env = {}, { root = null, preload = null } = {}) {
   const stub = await startFakeGoogleOidc();
   t.after(() => stub.close());
   const relay = await startRelay(t, {
     YJS_ALLOW_INSECURE_HTTP: 'true', YJS_ALLOWED_ORIGINS: ORIGIN, GOOGLE_OAUTH_ENDPOINT_BASE: stub.url, ...GOOGLE_ENV, ...env,
-  }, { root });
+  }, { root, preload });
   return { relay, stub };
 }
 
