@@ -12,10 +12,13 @@
   color: var(--text);
   font-family: var(--font-ui);
 }
-/* Masthead and page share one centred column: a gutter, or more once the window is wider than the column. */
+/* Masthead and page share one centred column: a gutter, or more once the window is wider than the column,
+   plus the notch insets that viewport-fit=cover exposes. */
 .rb-workspace .rb-landing__masthead,
 .rb-workspace__main {
-  padding-inline: max(var(--workspace-gutter), calc((100% - var(--workspace-max-width)) / 2 + var(--workspace-gutter)));
+  --rb-workspace-inline: max(var(--workspace-gutter), calc((100% - var(--workspace-max-width)) / 2 + var(--workspace-gutter)));
+  padding-left: calc(var(--rb-workspace-inline) + env(safe-area-inset-left, 0px));
+  padding-right: calc(var(--rb-workspace-inline) + env(safe-area-inset-right, 0px));
 }
 /* Wraps instead of scrolling sideways when the account, language and create controls outgrow one row. */
 .rb-workspace .rb-landing__masthead {
