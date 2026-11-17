@@ -20,10 +20,9 @@ touches production.
 
 1. **The deploy itself** (yjs and web recreate). First gate: no step runs
    without the owner's go-ahead.
-2. **`LEGAL_EFFECTIVE_DATE_ISO`** is a placeholder `2026-11-18` in
-   `src/client/legal/legal-content.js` and its pin test in
-   `src/client/legal/LegalPage.test.js`. Re-pin both to the actual deploy date
-   before the release gate.
+2. **`LEGAL_EFFECTIVE_DATE_ISO`** is pinned to the deploy date `2026-11-17`
+   in `src/client/legal/legal-content.js` and its pin test in
+   `src/client/legal/LegalPage.test.js`.
 3. No change to `cloudflared*.yml`, `nginx.conf`, `docker-compose.prod.yml` or
    `.github/workflows/` is needed.
 
