@@ -19,6 +19,7 @@ import { createNextRoomKey, createRoomLock, rewrapRoomLock } from '../client/roo
 import { encodeBase64Url } from '../domain/room-lock-contract.js';
 import { RoomFence } from './room-fence.js';
 import { DeletionJournal, RoomDeletion } from './room-deletion.js';
+import { pausedPost } from '../test-support/paused-request.mjs';
 
 const require = createRequire(import.meta.url);
 const Y = require('yjs');
@@ -457,18 +458,6 @@ test('a crash after the durable commit batch and before publish reopens to one c
 });
 
 const HELD_POLL_MS = 5;
-const SPLIT_AT_BYTES = 8;
-
-/** Sends the headers and the first bytes of a body, holding the rest until `finish()`. */
-function pausedPost(f, path, headers, body) {
-  const request = http.request(`${f.base}${path}`, { method: 'POST', headers: { origin: ORIGIN, 'content-length': body.length, ...headers } });
-  const status = new Promise((resolve, reject) => {
-    request.on('response', (response) => { response.resume(); resolve(response.statusCode); });
-    request.on('error', reject);
-  });
-  request.write(body.subarray(0, SPLIT_AT_BYTES));
-  return { status, finish: () => request.end(body.subarray(SPLIT_AT_BYTES)) };
-}
 
 // Resolves once some operation holds a fence entry on the room (the paused route has been admitted).
 async function entryHeld(fence, docName) {
@@ -496,7 +485,9 @@ test('a password change paused during a delete answers 404, re-publishes no lock
   const f = await lockedRoom(t);
   const change = await rewrapRoomLock({ currentPassword: PASSWORD, lock: ROOM_LOCK.lock, newPassword: NEXT_PASSWORD });
   const body = Buffer.from(JSON.stringify({ oldAuthKey: change.oldAuthKey, expectedRevision: 0, lock: change.lock }));
-  const paused = pausedPost(f, `/api/rooms/${f.room.handle}/lock/password`, { cookie: f.owner.cookie, 'content-type': 'application/json' }, body);
+  const paused = pausedPost(`${f.base}/api/rooms/${f.room.handle}/lock/password`, {
+    headers: { origin: ORIGIN, cookie: f.owner.cookie, 'content-type': 'application/json' }, body,
+  });
   await entryHeld(f.fence, f.room.docName);
   const deleting = deleterOf(f).deleteRoom(f.room.docName);
   paused.finish();
@@ -511,7 +502,9 @@ test('a rotation commit paused during a delete answers 404, re-publishes no lock
   const prefix = Buffer.alloc(HEADER_LENGTH_BYTES);
   prefix.writeUInt32BE(json.length);
   const body = Buffer.concat([prefix, json, Buffer.from(SNAPSHOT)]);
-  const paused = pausedPost(f, `/api/rooms/${f.room.handle}/lock/rotate/commit`, { cookie: f.owner.cookie, 'content-type': 'application/octet-stream' }, body);
+  const paused = pausedPost(`${f.base}/api/rooms/${f.room.handle}/lock/rotate/commit`, {
+    headers: { origin: ORIGIN, cookie: f.owner.cookie, 'content-type': 'application/octet-stream' }, body,
+  });
   await entryHeld(f.fence, f.room.docName);
   const deleting = deleterOf(f).deleteRoom(f.room.docName);
   paused.finish();

@@ -102,6 +102,7 @@ export class RoomDeletion {
   #drainTimeoutMs;
   #pending = new Map();
   #running = new Map();
+  #teardowns = new Map();
   #recovering = null;
 
   constructor({
@@ -146,20 +147,14 @@ export class RoomDeletion {
     return this.#recovering;
   }
 
+  // Every entry runs on its own, each bounded by the drain timeout, so one stalled room never holds up the rest.
   async #recoverAll() {
-    let recovered = 0;
-    let files = 0;
-    for (const docName of [...this.#pending.keys()]) {
-      try {
-        const result = await this.deleteRoom(docName);
-        if (!result.deleted) continue;
-        recovered += 1;
-        files += result.files;
-      } catch (error) {
-        this.#log.error(RECOVERY_FAILED_LOG, { docName: roomLogId(docName), err: error.message });
-      }
-    }
-    return { recovered, files };
+    const results = await Promise.all([...this.#pending.keys()].map((docName) => this.deleteRoom(docName).catch((error) => {
+      this.#log.error(RECOVERY_FAILED_LOG, { docName: roomLogId(docName), err: error.message });
+      return DRAIN_TIMED_OUT;
+    })));
+    const done = results.filter((result) => result.deleted);
+    return { recovered: done.length, files: done.reduce((sum, result) => sum + result.files, 0) };
   }
 
   #track(docName, run) {
@@ -178,19 +173,41 @@ export class RoomDeletion {
     return this.#finish(docName);
   }
 
-  // Steps 4–11; recovery re-runs exactly these, so each one is safe to repeat.
+  // Steps 4–11; recovery re-runs exactly these, so each one is safe to repeat. A teardown still outstanding from an
+  // earlier attempt is awaited again, never started twice.
   async #finish(docName) {
     const handle = this.#pending.get(docName);
     this.#registry.unpublish(docName);
-    const plain = this.#plainRooms.retire(docName, ROOM_DELETED_CLOSE_CODE, ROOM_DELETED_REASON);
-    const e2e = this.#e2eRooms.retireRoom(docName, ROOM_DELETED_CLOSE_CODE, ROOM_DELETED_REASON);
-    await Promise.all([plain, e2e]);
-    if (!(await this.#fence.drained(docName, this.#drainTimeoutMs))) return DRAIN_TIMED_OUT;
+    if (!this.#teardowns.has(docName)) this.#teardowns.set(docName, this.#tearDown(docName));
+    if (!(await this.#drained(docName))) return DRAIN_TIMED_OUT;
     await this.#registry.clearRoomStorage(docName);
     const files = handle ? await this.#files(handle) : 0;
     await this.#journal.remove(docName);
+    this.#teardowns.delete(docName);
     this.#pending.delete(docName);
     this.#fence.lift(docName);
     return { deleted: true, files };
+  }
+
+  // Both close their sockets in this tick, then settle once hydration, compaction and the log tail have landed.
+  #tearDown(docName) {
+    const plain = this.#plainRooms.retire(docName, ROOM_DELETED_CLOSE_CODE, ROOM_DELETED_REASON);
+    const e2e = this.#e2eRooms.retireRoom(docName, ROOM_DELETED_CLOSE_CODE, ROOM_DELETED_REASON);
+    return Promise.all([plain, e2e]);
+  }
+
+  // One timeout bounds the whole wait: the teardown and every fence entry. False keeps the journal and the fence.
+  async #drained(docName) {
+    let timer;
+    const expired = new Promise((resolve) => {
+      timer = setTimeout(() => resolve(false), this.#drainTimeoutMs);
+      timer.unref();
+    });
+    const drained = this.#teardowns.get(docName).then(() => this.#fence.drained(docName, this.#drainTimeoutMs));
+    try {
+      return await Promise.race([drained, expired]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 }

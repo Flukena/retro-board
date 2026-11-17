@@ -4,12 +4,15 @@ import http from 'node:http';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { DeletionJournal, RoomDeletion } from '../server/room-deletion.js';
+import { RoomFence } from '../server/room-fence.js';
 
 const require = createRequire(import.meta.url);
 const { LeveldbPersistence } = require('y-leveldb');
 const { docs } = await import(pathToFileURL(require.resolve('y-websocket/bin/utils')).href);
 const OK = 200;
 const NOT_FOUND = 404;
+const BARRIER_TIMEOUT_MS = 5_000;
+const BARRIER_POLL_MS = 5;
 
 let deletion = null;
 const recover = RoomDeletion.prototype.recover;
@@ -17,6 +20,33 @@ RoomDeletion.prototype.recover = function captureDeleter() {
   deletion ??= this;
   return recover.call(this);
 };
+
+// Barriers: how many fence entries each room holds right now, and the relay's fence itself.
+let fence = null;
+const entries = new Map();
+const enter = RoomFence.prototype.enter;
+RoomFence.prototype.enter = function countedEnter(docName) {
+  fence ??= this;
+  const release = enter.call(this, docName);
+  if (!release) return release;
+  entries.set(docName, (entries.get(docName) ?? 0) + 1);
+  let released = false;
+  return () => {
+    if (!released) entries.set(docName, entries.get(docName) - 1);
+    released = true;
+    release();
+  };
+};
+
+// Resolves true once `reached()` holds, false after BARRIER_TIMEOUT_MS.
+async function barrier(reached) {
+  const deadline = Date.now() + BARRIER_TIMEOUT_MS;
+  while (!reached()) {
+    if (Date.now() > deadline) return false;
+    await new Promise((resolve) => { setTimeout(resolve, BARRIER_POLL_MS); });
+  }
+  return true;
+}
 
 const held = new Map();
 const getYDoc = LeveldbPersistence.prototype.getYDoc;
@@ -49,6 +79,8 @@ const ACTIONS = new Map([
   ['/hold', hold],
   ['/release', release],
   ['/state', (docName) => ({ resident: docs.has(docName) })],
+  ['/entered', async (docName) => ({ entered: await barrier(() => (entries.get(docName) ?? 0) > 0) })],
+  ['/fenced', async (docName) => ({ fenced: await barrier(() => fence?.isFenced(docName)) })],
 ]);
 
 const server = http.createServer(async (req, res) => {

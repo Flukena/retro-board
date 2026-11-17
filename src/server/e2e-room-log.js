@@ -131,14 +131,15 @@ export class E2ERoomLog {
   }
 
   /**
-   * Deletion: cancels the freeze timer and settles once every op queued so far has finished; the fence already refuses
-   * new ones. Then drops the room's memory. Storage is cleared by the deleter afterwards.
+   * Deletion: settles once every op queued so far has finished (the fence already refuses new ones), then cancels the
+   * freeze timer and drops the room's memory. Storage is cleared by the deleter afterwards. Never rejects.
    */
   async retire(docName) {
     const room = this.#rooms.get(docName);
     if (!room) return;
-    if (room.frozen) this.#clearTimer(room.frozen.timer);
     await room.tail;
+    // Cancelled after the drain: a freeze admitted before the fence may have installed its timer meanwhile.
+    if (room.frozen) this.#clearTimer(room.frozen.timer);
     if (this.#rooms.get(docName) === room) this.#rooms.delete(docName);
   }
 

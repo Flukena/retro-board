@@ -12,6 +12,8 @@ import {
   DELETION_JOURNAL_DOC, DeletionJournal, RoomDeletion, createRoomFileRemover,
 } from './room-deletion.js';
 import { ROOM_DELETED_CLOSE_CODE, ROOM_DELETED_REASON, ROOM_KIND } from '../domain/room-ownership.js';
+import { E2ERoomLog, E2E_LOCK_MISMATCH } from './e2e-room-log.js';
+import { lockRecord } from './room-lock-fixtures.mjs';
 
 const require = createRequire(import.meta.url);
 const Y = require('yjs');
@@ -79,8 +81,8 @@ async function openRelay(root, inject = {}) {
   const failures = [];
   const deletion = new RoomDeletion({
     fence, journal: tracedJournal, registry, pending,
-    plainRooms: { retire: async (docName, code, reason) => { trace.push(`plain:${code}:${reason}`); } },
-    e2eRooms: { retireRoom: async (docName, code, reason) => { trace.push(`e2e:${code}:${reason}`); } },
+    plainRooms: inject.plainRooms ?? { retire: async (docName, code, reason) => { trace.push(`plain:${code}:${reason}`); } },
+    e2eRooms: inject.e2eRooms ?? { retireRoom: async (docName, code, reason) => { trace.push(`e2e:${code}:${reason}`); } },
     files: createRoomFileRemover({ io, uploadsDir, reconcileUploadUsage: async () => { reconciled.count += 1; } }),
     onStorageFailure: (error) => failures.push(error), log: QUIET, drainTimeoutMs: inject.drainTimeoutMs,
     now: () => STARTED_AT,
@@ -90,8 +92,8 @@ async function openRelay(root, inject = {}) {
 }
 
 /** A guest room with extra rows (an update and an encrypted-log key) and one image and one blob file. */
-async function seedRoom(relay) {
-  const room = await relay.registry.createRoom({ owner: GUEST });
+async function seedRoom(relay, creation = { owner: GUEST }) {
+  const room = await relay.registry.createRoom(creation);
   const docName = relay.registry.registeredDocForCapability(room.code, room.token);
   const handle = relay.registry.roomHandleForDoc(docName);
   const extra = new Y.Doc();
@@ -254,4 +256,54 @@ test('one journaled room that cannot finish does not stop recovery of the others
   assert.deepEqual(await second.deletion.recover(), { recovered: 1, files: 2 });
   assert.equal((await second.journal.load()).has(stuck.docName), true);
   assert.equal((await second.journal.load()).has(other.docName), false);
+});
+
+function stall() {
+  let release;
+  const promise = new Promise((resolve) => { release = resolve; });
+  return { promise, release };
+}
+
+test('a teardown stalled in hydration answers 503 within the drain timeout, does not block other entries, and resumes later', async (t) => {
+  const hydration = stall();
+  const root = await withRoot(t);
+  const first = await openRelay(root, { unregister: async () => { throw injected(); } });
+  const stuck = await seedRoom(first);
+  const other = await seedRoom(first);
+  await assert.rejects(first.deletion.deleteRoom(stuck.docName));
+  await assert.rejects(first.deletion.deleteRoom(other.docName));
+  await first.close();
+
+  let retires = 0;
+  const plainRooms = { retire: (docName) => { retires += Number(docName === stuck.docName); return docName === stuck.docName ? hydration.promise : Promise.resolve(); } };
+  const second = await openRelay(root, { drainTimeoutMs: SHORT_DRAIN_MS, plainRooms });
+  t.after(second.close);
+  assert.deepEqual(await second.deletion.recover(), { recovered: 1, files: 2 }, 'the other entry finished');
+  assert.equal(second.fence.isFenced(stuck.docName), true);
+  assert.equal((await second.journal.load()).has(stuck.docName), true);
+  assert.ok((await second.ldb.getMetas(stuck.docName)).size > 0, 'nothing is cleared while hydration is outstanding');
+  assert.deepEqual(await second.deletion.deleteRoom(stuck.docName), { deleted: false, status: 503 }, 'still outstanding on the next try');
+  hydration.release();
+  assert.deepEqual(await second.deletion.recover(), { recovered: 1, files: 2 });
+  assert.equal(retires, 1, 'the outstanding teardown is awaited again, never started twice');
+  await assertGone(second, stuck);
+});
+
+test('a stalled encrypted-log op answers 503 within the drain timeout and the room finishes once it lands', async (t) => {
+  let log = null;
+  const relay = await openRelay(await withRoot(t), {
+    drainTimeoutMs: SHORT_DRAIN_MS, e2eRooms: { retireRoom: (docName) => log.retire(docName) },
+  });
+  t.after(relay.close);
+  log = new E2ERoomLog({ ldb: relay.ldb, maxRoomBytes: UNLIMITED, reserveStore: () => () => {}, fence: relay.fence });
+  const room = await seedRoom(relay, { lock: lockRecord() });
+  const verifying = stall();
+  // Admitted before the delete, then held inside the room's log chain while it verifies the password.
+  const stalled = log.mutateLock(room.docName, { verify: () => verifying.promise, expectedRevision: 0, next: (current) => current });
+  assert.deepEqual(await relay.deletion.deleteRoom(room.docName), { deleted: false, status: 503 });
+  assert.ok((await relay.ldb.getMetas(room.docName)).size > 0, 'nothing is cleared while the op is in flight');
+  verifying.release(false);
+  await assert.rejects(stalled, (error) => error.code === E2E_LOCK_MISMATCH);
+  assert.deepEqual(await relay.deletion.recover(), { recovered: 1, files: 2 });
+  await assertGone(relay, room);
 });

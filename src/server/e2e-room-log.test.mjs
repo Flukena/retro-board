@@ -720,3 +720,20 @@ test('retire cancels the freeze timer, waits for queued ops, and leaves a fenced
     assert.deepEqual(log.loadedDocNames(), []);
   }, { fence, onError: (error) => errors.push(error) });
 });
+
+test('a rotation begin admitted before the fence and still verifying when retire starts leaves no freeze timer behind', async () => {
+  const fence = new RoomFence();
+  await withLog(async ({ log, timers }) => {
+    let releaseVerify;
+    const verifying = new Promise((resolve) => { releaseVerify = resolve; });
+    const begin = log.freeze(DOC, FREEZE_TTL_MS, { expectedRevision: 0, verify: () => verifying.then(() => true) });
+    fence.fence(DOC);
+    const retiring = log.retire(DOC);
+    releaseVerify();
+    await begin;
+    await retiring;
+    assert.equal(timers.length, 1, 'the freeze installed its timer after retire began');
+    assert.equal(timers[0].cleared, true, 'retire cancelled the late timer');
+    assert.deepEqual(log.loadedDocNames(), []);
+  }, { fence });
+});

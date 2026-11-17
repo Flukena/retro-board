@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import http from 'node:http';
 import net from 'node:net';
 import { once } from 'node:events';
 import { createRequire } from 'node:module';
@@ -9,6 +8,7 @@ import { readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import WebSocket from 'ws';
 import { tempRoot } from '../test-support/relay-harness.mjs';
+import { pausedPost } from '../test-support/paused-request.mjs';
 import {
   ORIGIN, PASSWORD, createNormalRoom, exchange, lockedRelay, post, signIn,
 } from '../test-support/locked-room-harness.mjs';
@@ -33,7 +33,6 @@ const PROMPT_DELETE_MS = 3_000;
 const STATUS = Object.freeze({ OK: 200, NOT_FOUND: 404, SWITCHING: 101 });
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLttAAAAABJRU5ErkJggg==', 'base64');
 const BLOB_BYTES = 64;
-const SPLIT_AT_BYTES = 8;
 const MESSAGE_SYNC = 0;
 const WS_BINARY_FIN = 0x82;
 const WS_MASK_BIT = 0x80;
@@ -76,17 +75,6 @@ async function lockedRoomWithOwner(env) {
 }
 
 const uploadHeaders = (room, extra) => ({ origin: ORIGIN, cookie: room.cookie, ...extra });
-
-/** Sends the headers and the first bytes of a body, holding the rest until `finish()`. */
-function pausedUpload(relay, path, headers, body) {
-  const request = http.request(`${relay.url}${path}`, { method: 'POST', headers: { ...headers, 'content-length': body.length } });
-  const status = new Promise((resolve, reject) => {
-    request.on('response', (response) => { response.resume(); resolve(response.statusCode); });
-    request.on('error', reject);
-  });
-  request.write(body.subarray(0, SPLIT_AT_BYTES));
-  return { status, finish: () => request.end(body.subarray(SPLIT_AT_BYTES)) };
-}
 
 // Rows and journal are read from the stopped relay's database.
 async function assertNoRows(relay, docName) {
@@ -147,13 +135,21 @@ test('a paused image upload and a paused staged blob upload during delete answer
   assert.equal(begin.status, STATUS.OK);
   const { rotationId } = await begin.json();
 
-  const image = pausedUpload(relay, `/rooms/${plain.handle}/upload`, uploadHeaders(plain, { 'content-type': 'image/png' }), PNG);
-  const blob = pausedUpload(relay, `/rooms/${locked.handle}/e2e-blobs`, uploadHeaders(locked, {
-    'content-type': 'application/octet-stream', [E2E_BLOB_ID_HEADER]: randomUUID(), [E2E_BLOB_STAGE_HEADER]: rotationId,
-  }), randomBytes(BLOB_BYTES));
-  await sleep(POLL_MS * 10);
+  const image = pausedPost(`${relay.url}/rooms/${plain.handle}/upload`, {
+    headers: uploadHeaders(plain, { 'content-type': 'image/png' }), body: PNG,
+  });
+  const blob = pausedPost(`${relay.url}/rooms/${locked.handle}/e2e-blobs`, {
+    headers: uploadHeaders(locked, {
+      'content-type': 'application/octet-stream', [E2E_BLOB_ID_HEADER]: randomUUID(), [E2E_BLOB_STAGE_HEADER]: rotationId,
+    }),
+    body: randomBytes(BLOB_BYTES),
+  });
+  // Both uploads were admitted (each holds its room's fence entry) before either delete starts.
+  assert.deepEqual(await hook.call('entered', plain.docName), { entered: true });
+  assert.deepEqual(await hook.call('entered', locked.docName), { entered: true });
   const deletions = [hook.call('delete', plain.docName), hook.call('delete', locked.docName)];
-  await sleep(POLL_MS * 10);
+  assert.deepEqual(await hook.call('fenced', plain.docName), { fenced: true });
+  assert.deepEqual(await hook.call('fenced', locked.docName), { fenced: true });
   image.finish();
   blob.finish();
   assert.deepEqual(await Promise.all([image.status, blob.status]), [STATUS.NOT_FOUND, STATUS.NOT_FOUND]);
@@ -169,10 +165,11 @@ test('an upgrade stalled in hydration during delete is refused, and no doc is le
   await hook.call('hold', room.docName);
   const stalled = plainSocket(relay, room);
   const refused = upgradeStatus(stalled);
-  await sleep(POLL_MS * 10);
+  // The upgrade was admitted (it holds the room's fence entry until attach) and created the doc it waits on.
+  assert.deepEqual(await hook.call('entered', room.docName), { entered: true });
   assert.deepEqual(await hook.call('state', room.docName), { resident: true }, 'the upgrade created the doc and waits');
   const deleting = hook.call('delete', room.docName);
-  await sleep(POLL_MS * 10);
+  assert.deepEqual(await hook.call('fenced', room.docName), { fenced: true });
   await hook.call('release', room.docName);
   assert.equal(await refused, STATUS.NOT_FOUND);
   assert.deepEqual(await deleting, { deleted: true, files: 0 });
