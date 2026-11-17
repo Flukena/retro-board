@@ -4,6 +4,10 @@ export const IDLE_ROOM_RETENTION_DAYS = 60;
 export const MILLISECONDS_PER_DAY = 86_400_000;
 export const IDLE_ROOM_RETENTION_MS = IDLE_ROOM_RETENTION_DAYS * MILLISECONDS_PER_DAY;
 
+import { RETENTION_CLASS } from './room-ownership.js';
+
+export const GUEST_ROOM_RETENTION_MS = 24 * 60 * 60 * 1000;
+
 const knownTime = (value) => (Number.isSafeInteger(value) && value > 0 ? value : null);
 
 // Latest recorded use of a room, or null when nothing was ever recorded.
@@ -13,15 +17,24 @@ export function lastRoomUseAt(room) {
   return times.length ? Math.max(...times) : null;
 }
 
+const retentionMs = (room) => (room.retention === RETENTION_CLASS.GUEST ? GUEST_ROOM_RETENTION_MS : IDLE_ROOM_RETENTION_MS);
+const isInUse = (room) => room.connections > 0 || room.resident;
+
 // Rooms with no recorded time are never guessed old: they are reported apart.
+// A row without a retention field is a kept room.
 export function idleRoomCandidates(rooms, now) {
   const idle = [];
   const unknownAge = [];
   for (const room of rooms) {
-    if (room.connections > 0 || room.resident) continue;
+    if (isInUse(room)) continue;
     const lastUse = lastRoomUseAt(room);
     if (lastUse === null) unknownAge.push(room);
-    else if (now - lastUse > IDLE_ROOM_RETENTION_MS) idle.push(room);
+    else if (now - lastUse > retentionMs(room)) idle.push(room);
   }
   return { idle, unknownAge };
 }
+
+// Guest rooms past their 24 h retention; the only rooms the automatic sweep retires.
+export const guestRoomCandidates = (rooms, now) => idleRoomCandidates(
+  rooms.filter((room) => room.retention === RETENTION_CLASS.GUEST), now,
+).idle;

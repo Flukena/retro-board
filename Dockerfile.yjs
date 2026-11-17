@@ -41,7 +41,7 @@ COPY --chown=node:node \
     src/domain/vote-ownership.js src/domain/vote-ranking.js src/domain/vote-result-participants.js \
     src/domain/vote-results.js src/domain/vote-session-lifecycle.js src/domain/vote-timing.js \
     src/domain/voting-results.js src/domain/z-order.js src/domain/zone-actions.js \
-    src/domain/room-retention.js src/domain/zone-title.js src/domain/plan-entitlements.js src/domain/auth-errors.js \
+    src/domain/room-retention.js src/domain/room-ownership.js src/domain/zone-title.js src/domain/plan-entitlements.js src/domain/auth-errors.js \
     src/domain/account-identity.js src/domain/room-lock-contract.js src/domain/vote-expiry.js src/domain/e2e-envelope.js src/domain/e2e-limits.js \
     ./src/domain/
 
