@@ -1,6 +1,6 @@
-import React, { useEffect, useId, useMemo, useState, useSyncExternalStore } from 'react';
+import React, { useId, useMemo, useState, useSyncExternalStore } from 'react';
 import { Lock } from 'lucide-react';
-import { fetchAccount } from '../account/account-api.js';
+import { useAccountSession } from '../account/use-account-session.js';
 import { Button } from '../ui/UiPrimitives.jsx';
 import { BUTTON_VARIANT } from '../ui/ui-variants.js';
 import { t } from '../ui/i18n.js';
@@ -59,17 +59,12 @@ export function CreateLockedRoomOption({ open, onToggle, formId, ...formProps })
 
 /** Offers a password-protected board to entitled, signed-in users only; renders nothing until that is known. */
 export default function CreateLockedRoom({ boardName, createBoard, creating }) {
-  const [account, setAccount] = useState(null);
+  const account = useAccountSession();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const controller = useMemo(() => createLockedRoomController(), []);
   const formId = useId();
   const { busy, failed } = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
-  useEffect(() => {
-    let live = true;
-    fetchAccount().then((session) => { if (live) setAccount(session); });
-    return () => { live = false; };
-  }, []);
   if (!canOfferLockedRoom(account)) return null;
   const onSubmit = async (event) => {
     event.preventDefault();

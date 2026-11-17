@@ -562,6 +562,16 @@
   .rb-landing__start .rb-landing__description { display: none; }
 }
 
+/* ---- Guest board retention note (signed-out only) ---- */
+.rb-landing__guest-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  font-size: var(--landing-small-font-size);
+  color: var(--text-muted);
+}
+
 /* ---- Password-protected board option ---- */
 .rb-landing__lock { margin-top: var(--space-3); }
 .rb-landing__lock-form { display: grid; gap: var(--space-2); margin-top: var(--space-3); text-align: start; }

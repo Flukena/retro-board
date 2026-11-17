@@ -12,6 +12,7 @@ import { DISPLAY_NAME_MAX_LENGTH } from '../../domain/security-boundaries.js';
 import { APP_VIEWPORT_CONTENT } from '../ui/mobile-layout.js';
 import { useCreateBoard } from './use-create-board.js';
 import CreateBoardError from './CreateBoardError.jsx';
+import GuestRoomNote from './GuestRoomNote.jsx';
 import LandingGuide from './LandingGuide.jsx';
 import FormatChips from './FormatChips.jsx';
 import CreateLockedRoom from '../room-lock/CreateLockedRoom.jsx';
@@ -179,6 +180,7 @@ function StartPanel({ boardName, onNameChange, onCreate, onCreateLocked, creatin
         </Button>
       </div>
       <CreateBoardError error={error} />
+      <GuestRoomNote />
       <CreateLockedRoom boardName={boardName} createBoard={onCreateLocked} creating={creating} />
       <p className="rb-landing__chips-label">{t('landing.start.formats')}</p>
       <FormatChips onStart={onStartFormat} disabled={creating} />

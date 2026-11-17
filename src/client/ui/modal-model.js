@@ -40,3 +40,6 @@ export function templateNameCanSubmit(mode, name, initialName, zoneCount) {
   if (!trimmed) return false;
   return mode === TEMPLATE_NAME_MODE.SAVE ? zoneCount > 0 : trimmed !== initialName.trim();
 }
+
+/** Type-to-confirm: only the exact, case-sensitive text unlocks a destructive action. */
+export const typedConfirmationMatches = (typed, expected) => expected.length > 0 && typed === expected;

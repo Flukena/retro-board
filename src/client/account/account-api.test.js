@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AUTH_ERROR_CODES } from '../../domain/auth-errors.js';
 import {
-  ACCOUNT_STATUS, deleteAccount, fetchAccount, logout, logoutAll, readAuthError, signInHref,
+  ACCOUNT_STATUS, AccountRequestError, deleteAccount, deleteRoom, fetchAccount, listRooms, logout, logoutAll, readAuthError,
+  renameRoom, signInHref,
 } from './account-api.js';
 
 const BASE = 'https://retroroom.party/yjs';
@@ -66,4 +67,73 @@ test('readAuthError ignores unknown codes and strips the parameter', () => {
   replaced.length = 0;
   assert.equal(readAuthError({ location: at('?a=1'), history }), null);
   assert.equal(replaced.length, 0);
+});
+
+const ROOM = Object.freeze({
+  code: 'Ab3dEf7h', kind: 'board', locked: false, title: 'Sprint 12', link: '/b/Ab3dEf7h#tok12345tok12345', createdAt: 1, lastActiveAt: 2,
+});
+const recording = (status, body, calls) => async (url, init) => {
+  calls.push({ url, init });
+  return new Response(body === undefined ? null : JSON.stringify(body), { status });
+};
+
+test('listRooms GETs the account rooms with credentials and returns the rooms', async () => {
+  const calls = [];
+  const rooms = await listRooms({ fetchImpl: recording(200, { rooms: [ROOM] }, calls), baseUrl: BASE });
+  assert.deepEqual(rooms, [ROOM]);
+  assert.equal(calls[0].url, `${BASE}/api/account/rooms`);
+  assert.equal(calls[0].init.method, 'GET');
+  assert.equal(calls[0].init.credentials, 'include');
+  assert.equal(calls[0].init.cache, 'no-store');
+  assert.equal(calls[0].init.body, undefined);
+});
+
+test('listRooms drops entries whose link would leave the site or whose shape is wrong', async () => {
+  const bad = [
+    { ...ROOM, link: 'https://evil.example/b/x' }, { ...ROOM, link: '//evil.example/b/x' }, { ...ROOM, link: 'javascript:alert(1)' },
+    { ...ROOM, kind: 'canvas' }, { ...ROOM, code: 7 }, { ...ROOM, locked: 'no' }, null,
+  ];
+  const rooms = await listRooms({ fetchImpl: recording(200, { rooms: [...bad, ROOM] }, []), baseUrl: BASE });
+  assert.deepEqual(rooms, [ROOM]);
+  await assert.rejects(listRooms({ fetchImpl: recording(200, { rooms: 'x' }, []), baseUrl: BASE }));
+});
+
+test('renameRoom POSTs exactly { title } as JSON to the room title route', async () => {
+  const calls = [];
+  const title = await renameRoom('Ab3dEf7h', 'Retro', { fetchImpl: recording(200, { title: 'Retro' }, calls), baseUrl: BASE });
+  assert.equal(title, 'Retro');
+  assert.equal(calls[0].url, `${BASE}/api/account/rooms/Ab3dEf7h/title`);
+  assert.equal(calls[0].init.method, 'POST');
+  assert.equal(calls[0].init.credentials, 'include');
+  assert.equal(calls[0].init.headers['content-type'], 'application/json');
+  assert.deepEqual(JSON.parse(calls[0].init.body), { title: 'Retro' });
+});
+
+test('deleteRoom POSTs exactly { confirmCode } as JSON to the room delete route', async () => {
+  const calls = [];
+  await deleteRoom('Ab3dEf7h', 'Ab3dEf7h', { fetchImpl: recording(204, undefined, calls), baseUrl: BASE });
+  assert.equal(calls[0].url, `${BASE}/api/account/rooms/Ab3dEf7h/delete`);
+  assert.equal(calls[0].init.method, 'POST');
+  assert.equal(calls[0].init.headers['content-type'], 'application/json');
+  assert.deepEqual(JSON.parse(calls[0].init.body), { confirmCode: 'Ab3dEf7h' });
+});
+
+test('room requests reject with the status and the relay error code', async () => {
+  const failure = async (promise) => { try { await promise; } catch (error) { return error; } return null; };
+  const locked = await failure(renameRoom('Ab3dEf7h', 'x', { fetchImpl: recording(409, { error: 'locked-room' }, []), baseUrl: BASE }));
+  assert.ok(locked instanceof AccountRequestError);
+  assert.equal(locked.status, 409);
+  assert.equal(locked.code, 'locked-room');
+  for (const status of [401, 404, 429, 503]) {
+    const error = await failure(deleteRoom('Ab3dEf7h', 'Ab3dEf7h', { fetchImpl: recording(status, undefined, []), baseUrl: BASE }));
+    assert.equal(error.status, status);
+    assert.equal(error.code, null);
+  }
+});
+
+test('logout and friends keep sending no body', async () => {
+  const calls = [];
+  await logout({ fetchImpl: recording(204, undefined, calls), baseUrl: BASE });
+  assert.equal(calls[0].init.body, undefined);
+  assert.equal(calls[0].init.headers, undefined);
 });

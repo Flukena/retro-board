@@ -1,4 +1,5 @@
 import { isAuthErrorCode } from '../../domain/auth-errors.js';
+import { ROOM_KIND } from '../../domain/room-ownership.js';
 import { getRelayHttpBaseUrl } from '../session/room-session.js';
 
 const ACCOUNT_TIMEOUT_MS = 8000;
@@ -23,13 +24,28 @@ async function readAccountResponse(response) {
   return isAccount(account) ? { status: ACCOUNT_STATUS.SIGNED_IN, account } : { status: ACCOUNT_STATUS.UNAVAILABLE };
 }
 
-const requestInit = (method) => ({
+const METHOD = Object.freeze({ GET: 'GET', POST: 'POST' });
+const JSON_HEADERS = Object.freeze({ 'content-type': 'application/json' });
+
+// A JSON body travels only when one is given; the relay reads exactly application/json.
+const requestInit = (method, body) => ({
   method, credentials: 'include', cache: 'no-store', signal: AbortSignal.timeout(ACCOUNT_TIMEOUT_MS),
+  ...(body === undefined ? {} : { headers: { ...JSON_HEADERS }, body: JSON.stringify(body) }),
 });
+
+/** A refused account request: the HTTP status and the relay's error code, when it sent one. */
+export class AccountRequestError extends Error {
+  constructor(path, status, code) {
+    super(`account ${path} failed`);
+    this.name = 'AccountRequestError';
+    this.status = status;
+    this.code = code;
+  }
+}
 
 export async function fetchAccount({ fetchImpl = fetch, baseUrl = getRelayHttpBaseUrl() } = {}) {
   try {
-    return await readAccountResponse(await fetchImpl(`${baseUrl}${ACCOUNT_PATH}`, requestInit('GET')));
+    return await readAccountResponse(await fetchImpl(`${baseUrl}${ACCOUNT_PATH}`, requestInit(METHOD.GET)));
   } catch {
     return { status: ACCOUNT_STATUS.UNAVAILABLE };
   }
@@ -41,14 +57,52 @@ export function signInHref({ location = globalThis.location, baseUrl = getRelayH
   return `${baseUrl}${SIGN_IN_PATH}?return=${encodeURIComponent(returnTo)}`;
 }
 
-async function postAccountAction(action, { fetchImpl = fetch, baseUrl = getRelayHttpBaseUrl() } = {}) {
-  const response = await fetchImpl(`${baseUrl}${ACCOUNT_PATH}/${action}`, requestInit('POST'));
-  if (!response.ok) throw new Error(`account ${action} failed`);
+async function errorCodeOf(response) {
+  try {
+    const body = await response.json();
+    return typeof body?.error === 'string' ? body.error : null;
+  } catch {
+    return null;
+  }
 }
+
+async function accountRequest(path, method, body, { fetchImpl = fetch, baseUrl = getRelayHttpBaseUrl() } = {}) {
+  const response = await fetchImpl(`${baseUrl}${ACCOUNT_PATH}/${path}`, requestInit(method, body));
+  if (!response.ok) throw new AccountRequestError(path, response.status, await errorCodeOf(response));
+  return response;
+}
+
+const postAccountAction = async (action, options) => { await accountRequest(action, METHOD.POST, undefined, options); };
 
 export const logout = (options) => postAccountAction('logout', options);
 export const logoutAll = (options) => postAccountAction('logout-all', options);
 export const deleteAccount = (options) => postAccountAction('delete', options);
+
+const ROOMS_PATH = 'rooms';
+const ROOM_KINDS = new Set(Object.values(ROOM_KIND));
+// Open is a full page load to this link, so it must stay on this site: "/x", never "//host" or "scheme:".
+const isSiteRelative = (link) => typeof link === 'string' && link.startsWith('/') && !link.startsWith('//');
+const isRoomEntry = (room) => Boolean(room) && typeof room === 'object' && typeof room.code === 'string'
+  && ROOM_KINDS.has(room.kind) && typeof room.locked === 'boolean' && isSiteRelative(room.link);
+const roomPath = (code, action) => `${ROOMS_PATH}/${encodeURIComponent(code)}/${action}`;
+
+/** The signed-in creator's rooms, newest first, as the relay sent them. */
+export async function listRooms(options) {
+  const { rooms } = await (await accountRequest(ROOMS_PATH, METHOD.GET, undefined, options)).json();
+  if (!Array.isArray(rooms)) throw new AccountRequestError(ROOMS_PATH, HTTP_OK, null);
+  return rooms.filter(isRoomEntry);
+}
+
+/** Resolves to the stored title. */
+export async function renameRoom(code, title, options) {
+  const body = await (await accountRequest(roomPath(code, 'title'), METHOD.POST, { title }, options)).json();
+  return body.title;
+}
+
+/** The relay deletes only when confirmCode equals the room code. */
+export async function deleteRoom(code, confirmCode, options) {
+  await accountRequest(roomPath(code, 'delete'), METHOD.POST, { confirmCode }, options);
+}
 
 // Reads a sign-in failure code left by the relay, then removes it from the address bar.
 export function readAuthError({ location = globalThis.location, history = globalThis.history } = {}) {

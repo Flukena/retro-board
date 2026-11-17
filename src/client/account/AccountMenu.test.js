@@ -56,10 +56,13 @@ test('AccountMenu signed in shows name and plan, and lists the actions only when
       assert.ok(closed.includes('Ada') && closed.includes(t('account.plan.pro')));
       assert.ok(!closed.includes(t('account.signOut')));
       const open = render(mod, { session, open: true });
-      for (const key of ['account.signOut', 'account.signOutAll', 'account.delete']) assert.ok(open.includes(t(key)), key);
+      for (const key of ['account.myBoards', 'account.signOut', 'account.signOutAll', 'account.delete']) assert.ok(open.includes(t(key)), key);
       assert.ok(open.includes('ada@example.com'));
       assert.ok(!open.includes(t('account.deleteConfirm')));
       assert.ok(render(mod, { session, confirmingDelete: true }).includes(t('account.deleteConfirm')));
+      assert.ok(!closed.includes(t('myBoards.loading')));
+      const boards = render(mod, { session, showingBoards: true });
+      assert.ok(boards.includes(t('myBoards.loading')) && boards.includes('role="dialog"'));
     }
   });
 });
@@ -67,7 +70,7 @@ test('AccountMenu signed in shows name and plan, and lists the actions only when
 test('every account.* key exists in th, en and every on-demand locale', async () => {
   await withChromeModule('/src/client/account/AccountMenu.jsx', async (_mod, { t, setLang, LANGUAGE_OPTIONS }) => {
     const keys = ['signIn', 'signOut', 'signOutAll', 'delete', 'deleteConfirm', 'plan.free', 'plan.pro', 'inAppBrowser',
-      'copyLink', 'copied', 'retry', 'menu', 'failed', ...AUTH_ERROR_CODES.map((code) => `error.${code}`)].map((k) => `account.${k}`);
+      'copyLink', 'copied', 'retry', 'menu', 'failed', 'myBoards', ...AUTH_ERROR_CODES.map((code) => `error.${code}`)].map((k) => `account.${k}`);
     for (const { code } of LANGUAGE_OPTIONS) {
       await setLang(code);
       for (const key of keys) assert.notEqual(t(key), key, `${code}: ${key}`);

@@ -1,0 +1,35 @@
+.rb-my-boards__title { margin-bottom: var(--space-3); }
+.rb-my-boards__status { color: var(--text-muted); padding: var(--space-4) 0; }
+.rb-my-boards__notice { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); color: var(--warn-text); }
+.rb-my-boards__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.rb-my-boards__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
+}
+.rb-my-boards__main { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.rb-my-boards__name { font-weight: 600; overflow-wrap: anywhere; }
+.rb-my-boards__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  font-size: var(--landing-small-font-size);
+  color: var(--text-muted);
+}
+.rb-my-boards__code { font-family: var(--font-mono); }
+.rb-my-boards__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--bg-panel-2);
+}
+.rb-my-boards__actions { display: flex; gap: var(--space-2); }
+.rb-my-boards__link { text-decoration: none; display: inline-flex; align-items: center; }

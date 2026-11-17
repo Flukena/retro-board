@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pinValidity, sanitizePin, importWarningNotes } from './modal-model.js';
+import { pinValidity, sanitizePin, importWarningNotes, typedConfirmationMatches } from './modal-model.js';
 
 test('PIN accepts only four through eight digits and setting requires matching confirmation', () => {
   for (const pin of ['123', '123456789', 'abcd', '123a', '１２３４']) {
@@ -27,4 +27,12 @@ test('import warnings independently describe CSV loss and geometry repairs', () 
     { key: 'import.csv.warning', params: { votes: 7, skipped: 2 } },
     { key: 'import.geometry.warning', params: { positions: 3, zones: 4 } },
   ]);
+});
+
+test('typed confirmation matches only the exact, case-sensitive text', () => {
+  assert.equal(typedConfirmationMatches('Ab3dEf7h', 'Ab3dEf7h'), true);
+  for (const typed of ['', 'ab3def7h', 'AB3DEF7H', ' Ab3dEf7h', 'Ab3dEf7h ', 'Ab3dEf7', 'Ab3dEf7hh']) {
+    assert.equal(typedConfirmationMatches(typed, 'Ab3dEf7h'), false, JSON.stringify(typed));
+  }
+  assert.equal(typedConfirmationMatches('', ''), false);
 });
