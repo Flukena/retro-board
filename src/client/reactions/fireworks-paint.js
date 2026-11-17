@@ -1,7 +1,7 @@
 // Paints fireworks shows onto a transparent 2D canvas over the board. Motion comes from the pure physics module;
 // colours and glow strength come from theme tokens, so the show suits both the light and the dark board.
 import {
-  FIREWORKS_PALETTE_SIZE, burstAt, burstCentre, litParticles, particleAt, rocketAt,
+  FIREWORKS_PALETTE_SIZE, FULL_TURN_RAD, burstAt, burstCentre, burstMotion, litParticles, particlePoint, rocketAt,
 } from './fireworks-physics.js';
 
 // Trails are soft streaks: a 3x retina backing store would cost more than it shows.
@@ -36,7 +36,6 @@ const ROCKET_TRAIL_MS = 180;
 // Its radius is a fraction of the viewport's shorter side.
 const FLASH_RADIUS_SHARE = 0.05;
 const FLASH_DISC_COUNT = 6;
-const FULL_TURN_RAD = 2 * Math.PI;
 const NO_PARTICLES = 0;
 const ROCKET_COUNT = 1;
 
@@ -78,30 +77,37 @@ function strokeStep(context, step, alpha, radiusPx, glowAlpha) {
 }
 
 /**
- * Paints a trail of `trailMs` behind every point `pointAt(index, ms)` returns, from `startMs` (the trail never reaches
- * back before it) to `nowMs`: one path per fading step, each holding that step of every point's trail.
+ * Paints a trail of `trailMs` behind each of `count` points, from `startMs` (the trail never reaches back before it) to
+ * `nowMs`: one path per fading step, each holding that step of every point's trail. `momentAt(ms)` is what the points
+ * share at a time (computed once per step end, and each step's tail is the next step's head); `pointOf(moment, index)`
+ * places one point from it.
  */
-function paintTrails(context, { count, pointAt, startMs, nowMs, trailMs }, { colour, alpha, radiusPx, glowAlpha }) {
-  context.strokeStyle = colour;
+function paintTrails(context, { count, momentAt, pointOf, startMs, nowMs, trailMs }, paint) {
+  context.strokeStyle = paint.colour;
   let headMs = nowMs;
+  let head = momentAt(headMs);
   for (let step = 0; step < TRAIL_STEPS.length; step += 1) {
     const tailMs = Math.max(startMs, headMs - TRAIL_STEPS[step].share * trailMs);
     if (step !== HEAD_STEP && headMs === tailMs) break;
+    const tail = momentAt(tailMs);
     context.beginPath();
     for (let index = 0; index < count; index += 1) {
-      const tail = pointAt(index, tailMs);
-      const head = pointAt(index, headMs);
-      context.moveTo(tail.x, tail.y);
-      context.lineTo(head.x, head.y);
+      const from = pointOf(tail, index);
+      const to = pointOf(head, index);
+      context.moveTo(from.x, from.y);
+      context.lineTo(to.x, to.y);
     }
-    strokeStep(context, step, alpha, radiusPx, glowAlpha);
+    strokeStep(context, step, paint.alpha, paint.radiusPx, paint.glowAlpha);
     headMs = tailMs;
+    head = tail;
   }
 }
 
+const rocketPointOf = (point) => point;
+
 function paintRocket(context, shell, elapsedMs, viewport, look) {
   const trail = {
-    count: ROCKET_COUNT, pointAt: (_, ms) => rocketAt(shell, ms, viewport),
+    count: ROCKET_COUNT, momentAt: (ms) => rocketAt(shell, ms, viewport), pointOf: rocketPointOf,
     startMs: shell.launchMs, nowMs: elapsedMs, trailMs: ROCKET_TRAIL_MS,
   };
   const paint = { colour: look.glitter, alpha: OPAQUE, radiusPx: ROCKET_RADIUS_PX, glowAlpha: look.glowAlpha };
@@ -131,7 +137,8 @@ function paintShell(context, shell, elapsedMs, viewport, look) {
   if (burst.flash > 0) paintFlash(context, shell, burst.flash, viewport, look);
   const lit = litParticles(shell, burst);
   const trail = {
-    count: lit.length, pointAt: (index, ageMs) => particleAt(shell, lit[index], ageMs, viewport),
+    count: lit.length, momentAt: (ageMs) => burstMotion(shell, ageMs, viewport),
+    pointOf: (motion, index) => particlePoint(motion, lit[index]),
     startMs: 0, nowMs: burst.ageMs, trailMs: shell.trailMs,
   };
   const colour = shell.glitter ? look.glitter : look.colours[shell.colour];

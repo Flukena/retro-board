@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { REACTION_SEND_INTERVAL_MS } from '../../domain/board-reactions.js';
 import { FIREWORKS_DURATION_MS, REACTION_LOOK } from './reaction-timeline.js';
 import { MAX_PARTICLES_PER_SHOW, particleCount } from './fireworks-physics.js';
+import { REACTION_PLAY_INTERVAL_MS } from './reaction-receiver.js';
 import {
   MAX_ACTIVE_BY_LOOK, MAX_ACTIVE_PARTICLES, addReaction, liveReactions, nextExpiryInMs, reactionEntry, withoutMotion,
 } from './reaction-feed.js';
@@ -45,14 +45,15 @@ test('concurrent effects stay bounded per look, dropping the oldest, so many sen
   assert.equal(MAX_ACTIVE_PARTICLES, MAX_ACTIVE_BY_LOOK[REACTION_LOOK.FIREWORKS] * MAX_PARTICLES_PER_SHOW);
 });
 
-test('one person sending fireworks as fast as allowed never has a show cut short', () => {
+test('fireworks a sender plays as often as a page admits them are never cut before their end', () => {
   let entries = [];
-  const sends = Math.ceil(FIREWORKS_DURATION_MS / REACTION_SEND_INTERVAL_MS);
-  for (let seq = 1; seq <= sends; seq += 1) {
-    const now = NOW_MS + (seq - 1) * REACTION_SEND_INTERVAL_MS;
+  const plays = Math.ceil(FIREWORKS_DURATION_MS / REACTION_PLAY_INTERVAL_MS);
+  for (let seq = 1; seq <= plays; seq += 1) {
+    const now = NOW_MS + (seq - 1) * REACTION_PLAY_INTERVAL_MS;
     entries = addReaction(entries, reactionEntry(event(1, seq, '🎆'), { ...MOTION, now }), now);
   }
-  assert.equal(entries.length, sends, 'every running show is still on screen');
+  assert.equal(entries.length, plays, 'every running show is still on screen');
+  assert.ok(entries.every((entry) => entry.endsAt > NOW_MS + (plays - 1) * REACTION_PLAY_INTERVAL_MS));
 });
 
 test('the same key is never shown twice', () => {

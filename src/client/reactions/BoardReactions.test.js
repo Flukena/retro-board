@@ -52,6 +52,9 @@ test('the menu offers the six reactions with translated labels and sends the cli
       toggle.props.onClick();
       assert.equal(toggled, 1);
       assert.match(renderToStaticMarkup(toggle), /aria-expanded="true"/);
+      assert.match(renderToStaticMarkup(toggle), /class="[^"]*rb-btn--active[^"]*"/, 'pressed while the picker is open');
+      const closed = renderToStaticMarkup(ReactionToggle({ open: false, onToggle: () => {} }));
+      assert.doesNotMatch(closed, /rb-btn--active/, 'not pressed while the picker is closed');
     }
   });
 });

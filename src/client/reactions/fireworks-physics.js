@@ -7,9 +7,12 @@ export const FIREWORKS_SHAPE = Object.freeze({ SPHERE: 'sphere', RING: 'ring', W
 export const SHELL_COUNT_RANGE = Object.freeze([3, 5]);
 // Shells go up one after another over this window; the first goes up at once.
 export const LAUNCH_WINDOW_MS = 800;
-// Every particle and rocket one show may draw. Shows overlap (see reaction-feed.js), so this keeps a low-end phone
-// within a few hundred trail segments a frame.
-export const MAX_PARTICLES_PER_SHOW = 240;
+// Every particle and rocket one show may draw. Per frame the painter strokes each of them once per trail step plus once
+// more for the glow under the head step (fireworks-paint.js: 3 steps + 1 glow = 4 segments), in about 4 stroke calls
+// per shell, plus a 6-disc flash for each burst in its first 140 ms. With 4 shows overlapping (MAX_ACTIVE_BY_LOOK in
+// reaction-feed.js) the worst case is 4 shows x 180 x 4 = 2880 segments a frame. On a 4x CPU-throttled emulated phone
+// 4 x 180 kept the median frame at 16.7 ms; 4 x 240 doubled it.
+export const MAX_PARTICLES_PER_SHOW = 180;
 // Slots in the theme's fireworks palette (fireworks-paint.js reads one token per slot).
 export const FIREWORKS_PALETTE_SIZE = 6;
 const ROCKETS_PER_SHELL = 1;
@@ -25,21 +28,22 @@ const BOTTOM_EDGE = 1;
 const SHAPE_ROLL = Object.freeze([
   FIREWORKS_SHAPE.SPHERE, FIREWORKS_SHAPE.SPHERE, FIREWORKS_SHAPE.SPHERE, FIREWORKS_SHAPE.RING, FIREWORKS_SHAPE.WILLOW,
 ]);
-// Per shape: particle count, life, launch speed, drag (1/s), gravity, trail length and size. A sphere is filled (its
-// particles fly at the projected speeds of points on a sphere); a ring is one tilted circle; a willow is slow, heavy,
-// gold glitter with long drooping trails.
+// Per shape: particle count, life, launch speed, drag, gravity, trail length, size and tilt (vertical squash of the
+// burst). Speeds are viewport scales (the shorter side) per second. A sphere is filled (its particles fly at the
+// projected speeds of points on a sphere); a ring is one tilted circle; a willow is slow, heavy, gold glitter with long
+// drooping trails.
 const SHAPE_PHYSICS = Object.freeze({
   [FIREWORKS_SHAPE.SPHERE]: Object.freeze({
-    particles: [56, 80], lifeMs: [1000, 1150], speed: [0.62, 0.78], drag: 2.4, gravity: 0.3, trailMs: 170,
-    radiusPx: [1.3, 1.7], tilt: [1, 1], filled: true, glitter: false,
+    particleCount: [56, 80], lifeMs: [1000, 1150], speedScalePerS: [0.62, 0.78], dragPerS: 2.4,
+    gravityScalePerS2: 0.3, trailMs: 170, radiusPx: [1.3, 1.7], tiltRatio: [1, 1], filled: true, glitter: false,
   }),
   [FIREWORKS_SHAPE.RING]: Object.freeze({
-    particles: [40, 56], lifeMs: [950, 1100], speed: [0.6, 0.72], drag: 2.4, gravity: 0.26, trailMs: 130,
-    radiusPx: [1.2, 1.6], tilt: [0.45, 1], filled: false, glitter: false,
+    particleCount: [40, 56], lifeMs: [950, 1100], speedScalePerS: [0.6, 0.72], dragPerS: 2.4,
+    gravityScalePerS2: 0.26, trailMs: 130, radiusPx: [1.2, 1.6], tiltRatio: [0.45, 1], filled: false, glitter: false,
   }),
   [FIREWORKS_SHAPE.WILLOW]: Object.freeze({
-    particles: [44, 60], lifeMs: [1150, 1250], speed: [0.5, 0.62], drag: 3, gravity: 0.55, trailMs: 320,
-    radiusPx: [1, 1.3], tilt: [1, 1], filled: true, glitter: true,
+    particleCount: [44, 60], lifeMs: [1150, 1250], speedScalePerS: [0.5, 0.62], dragPerS: 3,
+    gravityScalePerS2: 0.55, trailMs: 320, radiusPx: [1, 1.3], tiltRatio: [1, 1], filled: true, glitter: true,
   }),
 });
 // The first shell launches at once, so a burst is on screen by this point of every show.
@@ -59,7 +63,7 @@ const END_RADIUS_SHRINK = 0.5;
 // The burst's flash lasts this long.
 const FLASH_MS = 140;
 const MS_PER_SECOND = 1000;
-const FULL_TURN_RAD = 2 * Math.PI;
+export const FULL_TURN_RAD = 2 * Math.PI;
 const TWINKLE_RAD_PER_MS = (FULL_TURN_RAD * TWINKLE_HZ) / MS_PER_SECOND;
 const CENTRED_OFFSET = 0.5;
 const UNIT_SPAN = 2;
@@ -75,16 +79,16 @@ function nextColour(random, previous) {
 
 /** Velocities of `count` particles spread round the burst, in viewport scales per second. */
 function burstParticles(random, physics, count) {
-  const speed = between(random, physics.speed);
-  const tilt = between(random, physics.tilt);
+  const speed = between(random, physics.speedScalePerS);
+  const tilt = between(random, physics.tiltRatio);
   const step = FULL_TURN_RAD / count;
   return Object.freeze(Array.from({ length: count }, (_, index) => {
     const angle = (index + random() - CENTRED_OFFSET) * step;
     const depth = physics.filled ? Math.sqrt(1 - (UNIT_SPAN * random() - 1) ** 2) : 1;
     const reach = speed * depth * between(random, PARTICLE_SPEED_JITTER);
     return Object.freeze({
-      vx: Math.cos(angle) * reach,
-      vy: Math.sin(angle) * reach * tilt,
+      vxScalePerS: Math.cos(angle) * reach,
+      vyScalePerS: Math.sin(angle) * reach * tilt,
       twinkle: random() < TWINKLE_SHARE,
       phase: random() * FULL_TURN_RAD,
     });
@@ -108,11 +112,11 @@ function shellAt(random, index, count, colour) {
     launchX,
     apexX: launchX + between(random, APEX_DRIFT_RANGE),
     apexY: between(random, APEX_Y_RANGE),
-    drag: physics.drag,
-    gravity: physics.gravity,
+    dragPerS: physics.dragPerS,
+    gravityScalePerS2: physics.gravityScalePerS2,
     trailMs: physics.trailMs,
     radiusPx: between(random, physics.radiusPx),
-    particles: burstParticles(random, physics, Math.min(budget, randomInt(random, physics.particles))),
+    particles: burstParticles(random, physics, Math.min(budget, randomInt(random, physics.particleCount))),
   });
 }
 
@@ -171,19 +175,32 @@ export function litParticles(shell, burst) {
 }
 
 /**
- * Where a particle is `ageMs` after its shell burst, in viewport pixels. Linear drag slows it towards a falling
- * terminal speed, so it flies out, slows down and droops: the closed form of dv/dt = gravity - drag * v.
+ * What every particle of a burst shares `ageMs` after it, in viewport pixels: the burst centre sagged by gravity, and
+ * how far a particle at one scale per second has flown. Linear drag slows the particles towards a falling terminal
+ * speed, so they fly out, slow down and droop: the closed form of dv/dt = gravity - drag * v.
  */
-export function particleAt(shell, particle, ageMs, viewport) {
+export function burstMotion(shell, ageMs, viewport) {
   const scale = scaleOf(viewport);
   const seconds = ageMs / MS_PER_SECOND;
-  const travelled = (1 - Math.exp(-shell.drag * seconds)) / shell.drag;
-  const terminal = shell.gravity / shell.drag;
+  const travelledS = (1 - Math.exp(-shell.dragPerS * seconds)) / shell.dragPerS;
+  const terminalScalePerS = shell.gravityScalePerS2 / shell.dragPerS;
   return {
-    x: shell.apexX * viewport.width + particle.vx * travelled * scale,
-    y: shell.apexY * viewport.height + (particle.vy * travelled + terminal * (seconds - travelled)) * scale,
+    x: shell.apexX * viewport.width,
+    y: shell.apexY * viewport.height + terminalScalePerS * (seconds - travelledS) * scale,
+    reachPx: travelledS * scale,
   };
 }
+
+/** Where one particle is at the moment `motion` describes, in viewport pixels. */
+export const particlePoint = (motion, particle) => ({
+  x: motion.x + particle.vxScalePerS * motion.reachPx,
+  y: motion.y + particle.vyScalePerS * motion.reachPx,
+});
+
+/** Where a particle is `ageMs` after its shell burst, in viewport pixels. */
+export const particleAt = (shell, particle, ageMs, viewport) => particlePoint(
+  burstMotion(shell, ageMs, viewport), particle,
+);
 
 /** The burst's centre in viewport pixels. */
 export const burstCentre = (shell, viewport) => ({ x: shell.apexX * viewport.width, y: shell.apexY * viewport.height });
