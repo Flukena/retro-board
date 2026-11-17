@@ -7,19 +7,24 @@ export const RENAME_ACTION = Object.freeze({ ENABLED: 'enabled', DISABLED: 'disa
 
 const EMPTY_THUMBNAIL = Object.freeze({ kind: CARD_THUMBNAIL.EMPTY, zones: Object.freeze([]) });
 
-export const roomNameOf = (room) => room.title || room.code;
+// Locked and Poker rooms never show a title: the code is their name.
+export const roomNameOf = (room) =>
+  room.locked || room.kind === ROOM_KIND.POKER ? room.code : room.title || room.code;
 
 const matchesQuery = (room, needle) =>
   roomNameOf(room).toLowerCase().includes(needle) || room.code.toLowerCase().includes(needle);
 
 const byCode = (a, b) => (a.code < b.code ? -1 : Number(a.code > b.code));
-const lastActiveOf = (room) => room.lastActiveAt ?? room.createdAt;
+const finiteOr = (value, fallback) => (Number.isFinite(value) ? value : fallback);
+const MISSING_TIME_MS = 0;
+const createdOf = (room) => finiteOr(room.createdAt, MISSING_TIME_MS);
+const lastActiveOf = (room) => finiteOr(room.lastActiveAt, createdOf(room));
 
 const comparatorFor = (sort, locale) => {
   if (sort === WORKSPACE_SORT.NAME) {
     return (a, b) => roomNameOf(a).localeCompare(roomNameOf(b), locale) || byCode(a, b);
   }
-  const timeOf = sort === WORKSPACE_SORT.CREATED ? (room) => room.createdAt : lastActiveOf;
+  const timeOf = sort === WORKSPACE_SORT.CREATED ? createdOf : lastActiveOf;
   return (a, b) => timeOf(b) - timeOf(a) || byCode(a, b);
 };
 

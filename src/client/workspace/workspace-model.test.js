@@ -108,3 +108,30 @@ test('rename: poker hidden, locked disabled, plain board enabled', () => {
   assert.equal(renameActionOf(room({ locked: true })), RENAME_ACTION.DISABLED);
   assert.equal(renameActionOf(room()), RENAME_ACTION.ENABLED);
 });
+
+test('locked and poker rooms are named, searched and name-sorted by code, never title', () => {
+  const locked = room({ code: 'lk1', locked: true, title: 'Secret' });
+  const poker = room({ code: 'pk1', kind: ROOM_KIND.POKER, title: 'Estimate' });
+  assert.equal(roomNameOf(locked), 'lk1');
+  assert.equal(roomNameOf(poker), 'pk1');
+  assert.deepEqual(visibleRooms([locked, poker], { query: 'secret', locale: 'en' }), []);
+  assert.deepEqual(visibleRooms([locked, poker], { query: 'estimate', locale: 'en' }), []);
+  const plain = room({ code: 'mm', title: 'Mid' });
+  const lockedZ = room({ code: 'aa1', locked: true, title: 'Zulu' });
+  assert.deepEqual(codes(visibleRooms([plain, lockedZ], { sort: WORKSPACE_SORT.NAME, locale: 'en' })), ['aa1', 'mm']);
+});
+
+test('time sorts are deterministic with missing or invalid dates, missing sorts oldest', () => {
+  const rooms = [
+    room({ code: 'a', createdAt: 50, lastActiveAt: null }),
+    room({ code: 'b', createdAt: 'x', lastActiveAt: undefined }),
+    room({ code: 'c', createdAt: 10, lastActiveAt: '900' }),
+    room({ code: 'd', createdAt: undefined, lastActiveAt: 70 }),
+    room({ code: 'e', createdAt: 5, lastActiveAt: 5 }),
+  ];
+  const orders = { [WORKSPACE_SORT.RECENT]: ['d', 'a', 'c', 'e', 'b'], [WORKSPACE_SORT.CREATED]: ['a', 'c', 'e', 'b', 'd'] };
+  const shuffles = [rooms, [...rooms].reverse(), [rooms[2], rooms[4], rooms[0], rooms[3], rooms[1]], [rooms[3], rooms[1], rooms[4], rooms[2], rooms[0]]];
+  for (const [sort, expected] of Object.entries(orders)) {
+    for (const input of shuffles) assert.deepEqual(codes(visibleRooms(input, { sort, locale: 'en' })), expected);
+  }
+});
