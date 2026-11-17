@@ -108,6 +108,7 @@ async function seedRoom(relay) {
 async function assertGone(relay, room) {
   assert.equal(relay.registry.registeredDocs.has(room.docName), false, 'the room is not served');
   assert.equal(relay.registry.registeredDocForCapability(room.code, room.token), null);
+  assert.equal(relay.registry.existingDocNames.has(room.docName), false, 'not even a legacy upgrade can reach it');
   assert.equal((await relay.ldb.getMetas(room.docName)).size, 0, 'no meta row remains');
   const doc = await relay.storage.getYDoc(room.docName);
   assert.equal(doc.store.clients.size, 0, 'no update row remains');

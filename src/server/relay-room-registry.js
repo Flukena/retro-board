@@ -389,6 +389,8 @@ export class RoomRegistry extends EventEmitter {
       this.reportStorageFailure(error);
       throw error;
     }
+    // A room recovered from the journal at startup was never registered, so unpublish did not drop its name.
+    this.existingDocNames.delete(docName);
     this.#persistence.measureDatabase();
   }
 

@@ -39,6 +39,8 @@ const WS_BINARY_FIN = 0x82;
 const WS_MASK_BIT = 0x80;
 const WS_SHORT_LENGTH_LIMIT = 126;
 const WS_MASK_BYTES = 4;
+const BITS_PER_BYTE = 8;
+const BYTE_MASK = 0xff;
 const ROOM_LOCK = await createRoomLock(PASSWORD);
 
 const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
@@ -183,7 +185,7 @@ function clientFrame(payload) {
   const mask = randomBytes(WS_MASK_BYTES);
   const length = payload.length < WS_SHORT_LENGTH_LIMIT
     ? Buffer.from([WS_BINARY_FIN, WS_MASK_BIT | payload.length])
-    : Buffer.concat([Buffer.from([WS_BINARY_FIN, WS_MASK_BIT | WS_SHORT_LENGTH_LIMIT]), Buffer.from([payload.length >> 8, payload.length & 0xff])]);
+    : Buffer.concat([Buffer.from([WS_BINARY_FIN, WS_MASK_BIT | WS_SHORT_LENGTH_LIMIT]), Buffer.from([payload.length >> BITS_PER_BYTE, payload.length & BYTE_MASK])]);
   return Buffer.concat([length, mask, Buffer.from(payload.map((byte, index) => byte ^ mask[index % WS_MASK_BYTES]))]);
 }
 
