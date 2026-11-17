@@ -13,17 +13,21 @@ const escapeHtml = (text) => text.replaceAll('&', '&amp;').replaceAll("'", '&#x2
 const fakeChannel = () => ({ sent: [], send(emoji) { this.sent.push(emoji); return true; }, cooldownMs: () => 0, subscribe: () => () => {} });
 const buttonsOf = (element) => React.Children.toArray(element.props.children);
 
-test('the 🎉 pill renders closed with a translated label in Thai and English', async () => {
+test('the reaction button is a compact add-reaction icon with a translated label in Thai and English', async () => {
   await withChromeModule('/src/client/reactions/ReactionPicker.jsx', ({ ReactionPicker }, { t, setLang }) => {
     for (const lang of LANGUAGES) {
       setLang(lang);
       const html = renderToStaticMarkup(React.createElement(ReactionPicker, { channel: fakeChannel() }));
       assert.match(html, /class="rb-reaction-dock"/);
-      assert.ok(html.includes(`aria-label="${escapeHtml(t('reaction.open'))}"`), `${lang}: toggle label`);
-      assert.match(html, /aria-expanded="false"/);
-      assert.ok(html.includes('🎉'));
+      const toggle = html.match(/<button[^>]*rb-reaction-toggle[^>]*>(.*?)<\/button>/)?.[0] ?? '';
+      assert.match(toggle, /class="[^"]*rb-btn--icon-sm[^"]*"/, `${lang}: sized like the zoom buttons`);
+      assert.ok(toggle.includes(`aria-label="${escapeHtml(t('reaction.open'))}"`), `${lang}: toggle label`);
+      assert.ok(toggle.includes(`title="${escapeHtml(t('reaction.open'))}"`), `${lang}: tooltip`);
+      assert.match(toggle, /<svg[^>]*lucide-smile-plus[^>]*aria-hidden="true"/, 'the add-reaction icon, hidden from screen readers');
+      assert.ok(!toggle.includes('🎉'), 'no emoji glyph on the button');
+      assert.match(toggle, /aria-expanded="false"/);
       assert.doesNotMatch(html, /rb-reaction-picker"/, 'the menu starts closed');
-      // Clicking the board does not take focus from the 🎉 button, so it must not switch board shortcuts off.
+      // Clicking the board does not take focus from the button, so it must not switch board shortcuts off.
       assert.doesNotMatch(html, /data-board-shortcuts/, 'board shortcuts keep working after the button is used');
       assert.notEqual(t('reaction.open'), 'reaction.open');
     }

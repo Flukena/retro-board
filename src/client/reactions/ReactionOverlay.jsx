@@ -4,28 +4,33 @@ import { useReducedMotion } from '../ui/usePresence.js';
 import { t } from '../ui/i18n.js';
 import { FLOAT_DURATION_MS, REACTION_LOOK } from './reaction-timeline.js';
 import { addReaction, liveReactions, nextExpiryInMs, reactionEntry, withoutMotion } from './reaction-feed.js';
-import { fitCanvas, paintFireworks } from './fireworks-paint.js';
+import {
+  animateFireworks, fireworksLook, fitCanvas, paintFireworks, showsRunning,
+} from './fireworks-paint.js';
 import './reactions.css';
 
 const NO_ENTRIES = Object.freeze([]);
 // Expire a frame after the earliest end, so the timer never fires just before it and has to re-arm.
 const EXPIRY_MARGIN_MS = 16;
 const CANVAS_CONTEXT = '2d';
+// Shows start on the wall clock (reaction-feed entries), so frames are timed on it too.
+const BROWSER_FRAMES = Object.freeze({
+  requestFrame: (callback) => requestAnimationFrame(callback),
+  cancelFrame: (frame) => cancelAnimationFrame(frame),
+  clock: () => Date.now(),
+});
+const readThemeToken = (name) => getComputedStyle(document.documentElement).getPropertyValue(name);
 
-/** One canvas for every running show; its animation frame stops when the shows change or it unmounts. */
+/** One canvas for every running show; its frames stop once the shows end, when they change, or on unmount. */
 function FireworksCanvas({ shows }) {
   const canvasRef = useRef(null);
   useEffect(() => {
     const canvas = canvasRef.current;
     const context = canvas?.getContext(CANVAS_CONTEXT);
     if (!context) return undefined;
-    let frame = 0;
-    const draw = () => {
-      paintFireworks(context, shows, Date.now(), fitCanvas(canvas, context, window));
-      frame = requestAnimationFrame(draw);
-    };
-    frame = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(frame);
+    const look = fireworksLook(readThemeToken);
+    const paint = (now) => paintFireworks(context, shows, now, fitCanvas(canvas, context, window), look);
+    return animateFireworks(paint, (now) => showsRunning(shows, now), BROWSER_FRAMES);
   }, [shows]);
   return <canvas ref={canvasRef} className="rb-reaction-fireworks" data-reaction-look={REACTION_LOOK.FIREWORKS} />;
 }

@@ -982,7 +982,7 @@ const dict = {
     'poker.players.head': 'ผู้เล่น ({count})',
     'poker.react.open': 'ส่งรีแอคชันให้ {name}',
     'poker.react.send': 'ส่ง {emoji}',
-    'reaction.open': 'ส่งอีโมจิให้ทุกคนในบอร์ด',
+    'reaction.open': 'ส่งรีแอคชันให้ทุกคน',
     'reaction.picker': 'เลือกอีโมจิ',
     'reaction.fireworks': 'จุดพลุให้ทุกคน',
     'reaction.send': 'ส่ง {emoji}',

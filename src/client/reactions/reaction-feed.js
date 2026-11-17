@@ -1,15 +1,19 @@
 // The reaction effects on screen right now. Peers' presence is untrusted, so the client send limit does not bound
 // what arrives: each look keeps at most a fixed number at once and drops the oldest.
+import { REACTION_SEND_INTERVAL_MS } from '../../domain/board-reactions.js';
 import {
-  MAX_SPARKS_PER_SHOW, REACTION_LOOK, fireworksShow, floatPlacement, lookDurationMs, reactionLook, reactionSeed,
+  FIREWORKS_DURATION_MS, REACTION_LOOK, floatPlacement, lookDurationMs, reactionLook, reactionSeed,
 } from './reaction-timeline.js';
+import { MAX_PARTICLES_PER_SHOW, fireworksShow } from './fireworks-physics.js';
 
+// A show outlasts the send interval, so one person sending as fast as allowed has this many running at once.
+const SHOWS_PER_SENDER = Math.ceil(FIREWORKS_DURATION_MS / REACTION_SEND_INTERVAL_MS);
 export const MAX_ACTIVE_BY_LOOK = Object.freeze({
-  [REACTION_LOOK.FIREWORKS]: 2,
+  [REACTION_LOOK.FIREWORKS]: SHOWS_PER_SENDER,
   [REACTION_LOOK.FLOAT]: 12,
   [REACTION_LOOK.STILL]: 4,
 });
-export const MAX_ACTIVE_SPARKS = MAX_ACTIVE_BY_LOOK[REACTION_LOOK.FIREWORKS] * MAX_SPARKS_PER_SHOW;
+export const MAX_ACTIVE_PARTICLES = MAX_ACTIVE_BY_LOOK[REACTION_LOOK.FIREWORKS] * MAX_PARTICLES_PER_SHOW;
 
 /** What to draw for one received reaction, starting `now`. */
 export function reactionEntry({ clientId, seq, emoji, name }, { reducedMotion, now }) {
@@ -18,7 +22,7 @@ export function reactionEntry({ clientId, seq, emoji, name }, { reducedMotion, n
   const fireworks = look === REACTION_LOOK.FIREWORKS;
   return Object.freeze({
     key: `${clientId}:${seq}`, emoji, name, look, startedAt: now, endsAt: now + lookDurationMs(look),
-    sparks: fireworks ? fireworksShow(seed) : null,
+    fireworks: fireworks ? fireworksShow(seed) : null,
     placement: fireworks ? null : floatPlacement(seed),
   });
 }

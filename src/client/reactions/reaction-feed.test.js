@@ -1,18 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { FIREWORKS_DURATION_MS, MAX_SPARKS_PER_SHOW, REACTION_LOOK } from './reaction-timeline.js';
+import { REACTION_SEND_INTERVAL_MS } from '../../domain/board-reactions.js';
+import { FIREWORKS_DURATION_MS, REACTION_LOOK } from './reaction-timeline.js';
+import { MAX_PARTICLES_PER_SHOW, particleCount } from './fireworks-physics.js';
 import {
-  MAX_ACTIVE_BY_LOOK, MAX_ACTIVE_SPARKS, addReaction, liveReactions, nextExpiryInMs, reactionEntry, withoutMotion,
+  MAX_ACTIVE_BY_LOOK, MAX_ACTIVE_PARTICLES, addReaction, liveReactions, nextExpiryInMs, reactionEntry, withoutMotion,
 } from './reaction-feed.js';
 
 const NOW_MS = 1_700_000_000_000;
 const MOTION = Object.freeze({ reducedMotion: false, now: NOW_MS });
 const event = (clientId, seq, emoji = '👏', name = 'Ada') => ({ clientId, seq, emoji, name });
 
-test('an entry carries what to draw: sparks for fireworks, a lane for floats and stills', () => {
+test('an entry carries what to draw: a fireworks show, or a lane for floats and stills', () => {
   const fireworks = reactionEntry(event(1, 1, '🎆'), MOTION);
   assert.equal(fireworks.look, REACTION_LOOK.FIREWORKS);
-  assert.ok(fireworks.sparks.length > 0);
+  assert.ok(fireworks.fireworks.shells.length > 0);
+  assert.equal(fireworks.placement, null);
   assert.equal(fireworks.endsAt, NOW_MS + FIREWORKS_DURATION_MS);
   const float = reactionEntry(event(1, 2, '🔥', 'บี'), MOTION);
   assert.equal(float.look, REACTION_LOOK.FLOAT);
@@ -20,7 +23,7 @@ test('an entry carries what to draw: sparks for fireworks, a lane for floats and
   assert.ok(float.placement.leftPercent > 0);
   const still = reactionEntry(event(1, 3, '🎆'), { ...MOTION, reducedMotion: true });
   assert.equal(still.look, REACTION_LOOK.STILL);
-  assert.equal(still.sparks, null, 'reduced motion never builds particles');
+  assert.equal(still.fireworks, null, 'reduced motion never builds particles');
   assert.notEqual(float.key, still.key);
 });
 
@@ -37,9 +40,19 @@ test('concurrent effects stay bounded per look, dropping the oldest, so many sen
     assert.equal(ofLook.length, MAX_ACTIVE_BY_LOOK[look], look);
     assert.equal(ofLook.at(-1).key, `${SENDERS}:${ofLook.at(-1).key.split(':')[1]}`, `${look}: newest kept`);
   }
-  const sparks = entries.reduce((sum, entry) => sum + (entry.sparks?.length ?? 0), 0);
-  assert.ok(sparks <= MAX_ACTIVE_SPARKS);
-  assert.equal(MAX_ACTIVE_SPARKS, MAX_ACTIVE_BY_LOOK[REACTION_LOOK.FIREWORKS] * MAX_SPARKS_PER_SHOW);
+  const particles = entries.reduce((sum, entry) => sum + (entry.fireworks ? particleCount(entry.fireworks) : 0), 0);
+  assert.ok(particles <= MAX_ACTIVE_PARTICLES);
+  assert.equal(MAX_ACTIVE_PARTICLES, MAX_ACTIVE_BY_LOOK[REACTION_LOOK.FIREWORKS] * MAX_PARTICLES_PER_SHOW);
+});
+
+test('one person sending fireworks as fast as allowed never has a show cut short', () => {
+  let entries = [];
+  const sends = Math.ceil(FIREWORKS_DURATION_MS / REACTION_SEND_INTERVAL_MS);
+  for (let seq = 1; seq <= sends; seq += 1) {
+    const now = NOW_MS + (seq - 1) * REACTION_SEND_INTERVAL_MS;
+    entries = addReaction(entries, reactionEntry(event(1, seq, '🎆'), { ...MOTION, now }), now);
+  }
+  assert.equal(entries.length, sends, 'every running show is still on screen');
 });
 
 test('the same key is never shown twice', () => {
@@ -52,11 +65,13 @@ test('finished effects are dropped and the next expiry is when the earliest one 
   const fireworks = reactionEntry(event(1, 1, '🎆'), MOTION);
   const float = reactionEntry(event(2, 1, '👏'), { ...MOTION, now: NOW_MS + 100 });
   const entries = addReaction(addReaction([], fireworks, NOW_MS), float, NOW_MS + 100);
-  assert.equal(nextExpiryInMs(entries, NOW_MS + 500), fireworks.endsAt - (NOW_MS + 500));
-  assert.deepEqual(liveReactions(entries, fireworks.endsAt).map((entry) => entry.key), [float.key]);
-  assert.deepEqual(liveReactions(entries, float.endsAt), []);
+  const [first, last] = [fireworks, float].sort((one, other) => one.endsAt - other.endsAt);
+  assert.ok(first.endsAt < last.endsAt);
+  assert.equal(nextExpiryInMs(entries, NOW_MS + 500), first.endsAt - (NOW_MS + 500));
+  assert.deepEqual(liveReactions(entries, first.endsAt).map((entry) => entry.key), [last.key]);
+  assert.deepEqual(liveReactions(entries, last.endsAt), []);
   assert.equal(nextExpiryInMs([], NOW_MS), null);
-  assert.equal(nextExpiryInMs(entries, float.endsAt + 1), 0, 'overdue entries expire at once');
+  assert.equal(nextExpiryInMs(entries, last.endsAt + 1), 0, 'overdue entries expire at once');
 });
 
 test('adding also drops anything already finished', () => {

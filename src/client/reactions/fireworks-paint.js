@@ -1,14 +1,44 @@
-// Paints fireworks shows onto a 2D canvas. Positions come from the pure timeline; colours from the sticky palette.
-import { PALETTE } from '../ui/palette.js';
-import { sparkAt } from './reaction-timeline.js';
+// Paints fireworks shows onto a transparent 2D canvas over the board. Motion comes from the pure physics module;
+// colours and glow strength come from theme tokens, so the show suits both the light and the dark board.
+import {
+  FIREWORKS_PALETTE_SIZE, burstAt, burstCentre, litParticles, particleAt, rocketAt,
+} from './fireworks-physics.js';
 
-// Sparks are soft streaks: a 3x retina backing store would cost more than it shows.
+// Trails are soft streaks: a 3x retina backing store would cost more than it shows.
 export const MAX_CANVAS_PIXEL_RATIO = 2;
-// Each spark is drawn as a streak from where it was this long ago to where it is now.
-const SPARK_TRAIL_MS = 90;
+// Theme tokens (theme.js) the painter reads: one colour per palette slot, the willow and rocket glitter, and how
+// strongly the glow and the burst flash add up on this theme's board.
+export const FIREWORKS_TOKENS = Object.freeze({
+  colours: Object.freeze(Array.from({ length: FIREWORKS_PALETTE_SIZE }, (_, index) => `--fireworks-${index + 1}`)),
+  glitter: '--fireworks-glitter',
+  glowAlpha: '--fireworks-glow-alpha',
+  flashAlpha: '--fireworks-flash-alpha',
+});
+// Overlapping light adds up, so dense trails glow; everything else goes back to normal painting.
+const ADDITIVE = 'lighter';
+const SOURCE_OVER = 'source-over';
 const ROUND_CAP = 'round';
 const OPAQUE = 1;
 const DIAMETER_PER_RADIUS = 2;
+// The glow pass under the brightest part of each trail is this many times wider than its core.
+const GLOW_WIDTH_RATIO = 3;
+// Trails fade from head to tail: a short bright head, then longer and fainter steps (shares of the trail length).
+// Each step is one batched path for every particle of a shell.
+const TRAIL_STEPS = Object.freeze([
+  Object.freeze({ share: 0.2, alpha: 1 }),
+  Object.freeze({ share: 0.35, alpha: 0.45 }),
+  Object.freeze({ share: 0.45, alpha: 0.15 }),
+]);
+const HEAD_STEP = 0;
+const ROCKET_RADIUS_PX = 1.3;
+const ROCKET_TRAIL_MS = 180;
+// The flash is a stack of ever smaller discs added together, so it is brightest in the middle and soft at the edge.
+// Its radius is a fraction of the viewport's shorter side.
+const FLASH_RADIUS_SHARE = 0.05;
+const FLASH_DISC_COUNT = 6;
+const FULL_TURN_RAD = 2 * Math.PI;
+const NO_PARTICLES = 0;
+const ROCKET_COUNT = 1;
 
 /** Sizes the backing store to the viewport (only when it changed) and returns the drawing size in CSS pixels. */
 export function fitCanvas(canvas, context, { innerWidth, innerHeight, devicePixelRatio = 1 }) {
@@ -23,29 +53,123 @@ export function fitCanvas(canvas, context, { innerWidth, innerHeight, devicePixe
   return { width: innerWidth, height: innerHeight };
 }
 
-function paintSpark(context, spark, elapsedMs, viewport) {
-  const head = sparkAt(spark, elapsedMs, viewport);
-  if (!head) return false;
-  const tail = sparkAt(spark, Math.max(spark.delayMs, elapsedMs - SPARK_TRAIL_MS), viewport) ?? head;
-  context.globalAlpha = head.alpha;
-  context.strokeStyle = PALETTE[spark.colour].border;
-  context.lineWidth = head.radiusPx * DIAMETER_PER_RADIUS;
-  context.beginPath();
-  context.moveTo(tail.x, tail.y);
-  context.lineTo(head.x, head.y);
-  context.stroke();
-  return true;
+/** The theme's fireworks look, read through `readToken(name)` (a CSS variable reader on the page). */
+export function fireworksLook(readToken) {
+  const read = (name) => readToken(name).trim();
+  return Object.freeze({
+    colours: Object.freeze(FIREWORKS_TOKENS.colours.map(read)),
+    glitter: read(FIREWORKS_TOKENS.glitter),
+    glowAlpha: Number(read(FIREWORKS_TOKENS.glowAlpha)),
+    flashAlpha: Number(read(FIREWORKS_TOKENS.flashAlpha)),
+  });
 }
 
-/** Clears the canvas and paints every visible spark of `shows` at `now`; returns how many sparks it drew. */
-export function paintFireworks(context, shows, now, viewport) {
+/** Strokes the current path: under the head step a faint wide glow first, then the core. */
+function strokeStep(context, step, alpha, radiusPx, glowAlpha) {
+  const width = radiusPx * DIAMETER_PER_RADIUS;
+  if (step === HEAD_STEP) {
+    context.globalAlpha = alpha * glowAlpha;
+    context.lineWidth = width * GLOW_WIDTH_RATIO;
+    context.stroke();
+  }
+  context.globalAlpha = alpha * TRAIL_STEPS[step].alpha;
+  context.lineWidth = width;
+  context.stroke();
+}
+
+/**
+ * Paints a trail of `trailMs` behind every point `pointAt(index, ms)` returns, from `startMs` (the trail never reaches
+ * back before it) to `nowMs`: one path per fading step, each holding that step of every point's trail.
+ */
+function paintTrails(context, { count, pointAt, startMs, nowMs, trailMs }, { colour, alpha, radiusPx, glowAlpha }) {
+  context.strokeStyle = colour;
+  let headMs = nowMs;
+  for (let step = 0; step < TRAIL_STEPS.length; step += 1) {
+    const tailMs = Math.max(startMs, headMs - TRAIL_STEPS[step].share * trailMs);
+    if (step !== HEAD_STEP && headMs === tailMs) break;
+    context.beginPath();
+    for (let index = 0; index < count; index += 1) {
+      const tail = pointAt(index, tailMs);
+      const head = pointAt(index, headMs);
+      context.moveTo(tail.x, tail.y);
+      context.lineTo(head.x, head.y);
+    }
+    strokeStep(context, step, alpha, radiusPx, glowAlpha);
+    headMs = tailMs;
+  }
+}
+
+function paintRocket(context, shell, elapsedMs, viewport, look) {
+  const trail = {
+    count: ROCKET_COUNT, pointAt: (_, ms) => rocketAt(shell, ms, viewport),
+    startMs: shell.launchMs, nowMs: elapsedMs, trailMs: ROCKET_TRAIL_MS,
+  };
+  const paint = { colour: look.glitter, alpha: OPAQUE, radiusPx: ROCKET_RADIUS_PX, glowAlpha: look.glowAlpha };
+  paintTrails(context, trail, paint);
+}
+
+function paintFlash(context, shell, flash, viewport, look) {
+  const { x, y } = burstCentre(shell, viewport);
+  const radius = FLASH_RADIUS_SHARE * Math.min(viewport.width, viewport.height);
+  context.fillStyle = look.glitter;
+  context.globalAlpha = (flash * look.flashAlpha) / FLASH_DISC_COUNT;
+  for (let disc = 0; disc < FLASH_DISC_COUNT; disc += 1) {
+    context.beginPath();
+    context.arc(x, y, radius * (1 - disc / FLASH_DISC_COUNT), 0, FULL_TURN_RAD);
+    context.fill();
+  }
+}
+
+/** Paints one shell (its rocket or its burst) and returns how many particles and rockets it drew. */
+function paintShell(context, shell, elapsedMs, viewport, look) {
+  if (rocketAt(shell, elapsedMs, viewport)) {
+    paintRocket(context, shell, elapsedMs, viewport, look);
+    return ROCKET_COUNT;
+  }
+  const burst = burstAt(shell, elapsedMs);
+  if (!burst) return NO_PARTICLES;
+  if (burst.flash > 0) paintFlash(context, shell, burst.flash, viewport, look);
+  const lit = litParticles(shell, burst);
+  const trail = {
+    count: lit.length, pointAt: (index, ageMs) => particleAt(shell, lit[index], ageMs, viewport),
+    startMs: 0, nowMs: burst.ageMs, trailMs: shell.trailMs,
+  };
+  const colour = shell.glitter ? look.glitter : look.colours[shell.colour];
+  paintTrails(context, trail, { colour, alpha: burst.alpha, radiusPx: burst.radiusPx, glowAlpha: look.glowAlpha });
+  return lit.length;
+}
+
+/** Clears the canvas and paints every running shell of `shows` at `now`; returns how many particles it drew. */
+export function paintFireworks(context, shows, now, viewport, look) {
   context.clearRect(0, 0, viewport.width, viewport.height);
+  context.globalCompositeOperation = ADDITIVE;
   context.lineCap = ROUND_CAP;
   let drawn = 0;
   for (const show of shows) {
     const elapsedMs = now - show.startedAt;
-    for (const spark of show.sparks) if (paintSpark(context, spark, elapsedMs, viewport)) drawn += 1;
+    for (const shell of show.fireworks.shells) drawn += paintShell(context, shell, elapsedMs, viewport, look);
   }
   context.globalAlpha = OPAQUE;
+  context.globalCompositeOperation = SOURCE_OVER;
   return drawn;
+}
+
+/** True while any of `shows` has not reached its end. */
+export const showsRunning = (shows, now) => shows.some((show) => now < show.endsAt);
+
+/**
+ * Paints a frame on every animation frame while `isRunning(now)`, then stops by itself after painting the first frame
+ * past the end (which clears the canvas). Returns a stop function for unmount.
+ */
+export function animateFireworks(paintFrame, isRunning, { requestFrame, cancelFrame, clock }) {
+  let frame = null;
+  const tick = () => {
+    const now = clock();
+    paintFrame(now);
+    frame = isRunning(now) ? requestFrame(tick) : null;
+  };
+  frame = requestFrame(tick);
+  return () => {
+    if (frame !== null) cancelFrame(frame);
+  };
 }

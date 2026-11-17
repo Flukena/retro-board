@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { SmilePlus } from 'lucide-react';
 import { Button, Surface } from '../ui/UiPrimitives.jsx';
+import { topBarButtonVariant } from '../ui/ui-variants.js';
 import { useDismiss } from '../ui/useDismiss.js';
 import { t } from '../ui/i18n.js';
+import { CHROME_ICON_SIZE_PX } from '../chrome/chrome-layout.js';
 import { BOARD_REACTIONS, FIREWORKS_REACTION } from '../../domain/board-reactions.js';
 import './reactions.css';
-
-const PICKER_GLYPH = '🎉';
 
 export const reactionLabel = (emoji) => (emoji === FIREWORKS_REACTION
   ? t('reaction.fireworks') : t('reaction.send', { emoji }));
@@ -24,12 +25,13 @@ export function ReactionMenu({ cooling, onSend }) {
   );
 }
 
+/** The add-reaction button: a chrome icon button like the zoom controls, shown pressed while the picker is open. */
 export function ReactionToggle({ open, onToggle }) {
   const label = t('reaction.open');
   return (
-    <Button className="rb-btn--pill rb-reaction-toggle" aria-label={label} title={label} aria-expanded={open}
-      onClick={onToggle}>
-      <span aria-hidden="true">{PICKER_GLYPH}</span>
+    <Button variant={topBarButtonVariant({ active: open })} className="rb-btn--icon-sm rb-reaction-toggle"
+      aria-label={label} title={label} aria-expanded={open} onClick={onToggle}>
+      <SmilePlus size={CHROME_ICON_SIZE_PX.TOOL} aria-hidden="true" />
     </Button>
   );
 }
@@ -47,7 +49,7 @@ function useCooldown() {
   return [cooling, start];
 }
 
-/** The 🎉 pill under the tool rail; it stays open for more sends until dismissed. */
+/** The add-reaction button under the tool rail and its picker, which stays open for more sends until dismissed. */
 export function ReactionPicker({ channel }) {
   const [open, setOpen] = useState(false);
   const [cooling, startCooldown] = useCooldown();
