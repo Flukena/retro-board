@@ -291,6 +291,8 @@ const MODE_INDEPENDENT_TOKENS = Object.freeze({
   '--workspace-poker-picked-layer': '1',
   '--workspace-menu-width': '236px',
   '--workspace-menu-layer': '1',
+  '--workspace-create-menu-width': '340px',
+  '--workspace-create-layer': '2',
   '--workspace-menu-hint-indent': '42px',
   '--workspace-badge-padding': '2px 10px',
   '--workspace-skeleton-bar-height': '12px',

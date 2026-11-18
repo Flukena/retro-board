@@ -3,7 +3,7 @@ import { ArrowUpRight, Lock, MoreHorizontal, Pencil, Trash2 } from 'lucide-react
 import { t } from '../ui/i18n.js';
 import { formatRelativeTime } from '../ui/relative-time.js';
 import { useDismiss } from '../ui/useDismiss.js';
-import { Divider } from '../ui/UiPrimitives.jsx';
+import { Divider, MenuItem } from '../ui/UiPrimitives.jsx';
 import { DIVIDER_ORIENTATION, MENU_ITEM_VARIANT, menuItemClass } from '../ui/ui-variants.js';
 import { TemplateThumbnail } from '../templates/TemplateThumbnail.jsx';
 import {
@@ -72,12 +72,8 @@ function MenuItemContent({ Icon, label }) {
   );
 }
 
-function MenuButton({ Icon, label, variant = MENU_ITEM_VARIANT.DEFAULT, ...rest }) {
-  return (
-    <button type="button" role="menuitem" className={menuItemClass(variant)} {...rest}>
-      <MenuItemContent Icon={Icon} label={label} />
-    </button>
-  );
+function MenuButton({ Icon, ...rest }) {
+  return <MenuItem role="menuitem" icon={<Icon size={MENU_ICON_SIZE_PX} aria-hidden="true" />} {...rest} />;
 }
 
 function CardMenu({ room, name, busy, onAskRename, onAskDelete }) {

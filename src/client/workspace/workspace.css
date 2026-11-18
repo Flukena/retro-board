@@ -32,6 +32,32 @@
 .rb-workspace .rb-landing__brand { border-radius: var(--radius-md); }
 .rb-workspace__create { display: flex; }
 
+/* ---- Create menu ---- */
+.rb-workspace-create { position: relative; display: flex; }
+.rb-workspace-create__trigger { gap: var(--space-2); min-height: var(--workspace-touch-target); }
+.rb-workspace-create__menu {
+  position: absolute;
+  inset-inline-end: 0;
+  top: calc(100% + var(--space-1));
+  z-index: var(--workspace-create-layer);
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: var(--workspace-create-menu-width);
+  max-width: calc(100vw - 2 * var(--workspace-gutter));
+}
+.rb-workspace-create__menu .rb-menu-item {
+  box-sizing: border-box;
+  min-height: var(--workspace-touch-target);
+  align-items: flex-start;
+  font-size: var(--landing-control-font-size);
+}
+.rb-workspace-create__item-title { display: block; font-weight: var(--landing-heading-font-weight); }
+.rb-workspace-create__item-desc { display: block; font-size: var(--landing-small-font-size); color: var(--text-muted); }
+.rb-workspace-create__panel { display: grid; gap: var(--space-2); padding: var(--space-3); }
+.rb-workspace-create__name { width: 100%; box-sizing: border-box; }
+.rb-workspace-create__error { margin: 0 var(--space-3) var(--space-3); color: var(--danger); font-size: var(--landing-body-font-size); }
+
 .rb-workspace__main {
   flex: 1 0 auto;
   display: flex;
@@ -321,14 +347,17 @@
   }
   .rb-workspace__field { font-size: var(--workspace-touch-field-font-size); }
 }
-/* Phones keep the logo, the account and the toggles on the first row; the create action takes the next one. */
+/* Phones keep the logo, the account, the toggles and the create button on the first row. */
 @media (max-width: 599px) {
   .rb-workspace { --workspace-gutter: var(--space-4); }
   .rb-workspace .rb-landing__masthead { gap: var(--space-2); }
   .rb-workspace .rb-landing__wordmark,
   .rb-workspace .rb-account__plan,
   .rb-workspace__sort-label { display: none; }
-  .rb-workspace__create { order: 1; }
+  /* The create trigger stays on the first row as an icon-only button beside the account. */
+  .rb-workspace-create__trigger { padding-inline: var(--space-3); }
+  .rb-workspace-create__trigger-label,
+  .rb-workspace-create__chevron { display: none; }
   .rb-workspace__main { padding-top: var(--space-6); }
   .rb-workspace__search { flex: 1 1 auto; }
   .rb-workspace__empty { padding: var(--space-6) var(--space-4); }

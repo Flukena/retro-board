@@ -73,6 +73,14 @@ test('UI primitives preserve native button and accessibility contracts', async (
       assert.equal(unchecked.props.children[2], false);
       assert.equal(MenuItem({}).props['aria-pressed'], undefined);
     });
+    await context.test('menu items pass role and other native attributes through to the button', () => {
+      const html = renderToStaticMarkup(createElement(MenuItem, {
+        label: TEST_LABEL, role: 'menuitem', 'aria-expanded': false, 'aria-describedby': 'hint',
+      }));
+      assert.match(html, /<button[^>]*role="menuitem"/);
+      assert.match(html, /aria-expanded="false"/);
+      assert.match(html, /aria-describedby="hint"/);
+    });
     await context.test('menu items omit absent icon slots and retain supplied icons', () => {
       for (const icon of [null, undefined]) {
         assert.doesNotMatch(renderToStaticMarkup(MenuItem({ icon, label: TEST_LABEL })), /rb-menu-item__icon/);
