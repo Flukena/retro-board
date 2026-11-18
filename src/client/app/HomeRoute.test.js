@@ -2,8 +2,12 @@ import React from 'react';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { createRoot } from 'react-dom/client';
+import { flushSync } from 'react-dom';
 import { withChromeModule } from '../../test-support/chrome-test-helper.js';
+import { HostIFrame, createHostDocument } from '../../test-support/host-document.js';
 import { SIGNED_IN_HINT_KEY, SIGNED_IN_HINT_VALUE } from '../account/signed-in-hint.js';
+import { HOME_HINT_CLASS } from './home-view.js';
 
 const MODULE = '/src/client/app/HomeRoute.jsx';
 
@@ -43,4 +47,87 @@ test('a visitor without the hint gets the guest landing first', async () => {
     assert.doesNotMatch(html, /rb-workspace/, String(hint));
     assert.equal(html.match(/<main\b/g).length, 1, 'one main landmark');
   }
+});
+
+// The real views need a full browser DOM. Here they are plain roots carrying their class, so the mount
+// test exercises only HomeRoute's own work: choosing the view and releasing the head script's mark.
+const VIEW_STUBS = Object.freeze({ './Landing.jsx': 'rb-landing__page', '../workspace/Workspace.jsx': 'rb-workspace' });
+const STUB_PREFIX = '\0home-view-stub:';
+const stubHomeViews = () => ({
+  name: 'stub-home-views',
+  enforce: 'pre',
+  resolveId(id, importer) {
+    return importer?.endsWith(MODULE) && Object.hasOwn(VIEW_STUBS, id) ? `${STUB_PREFIX}${VIEW_STUBS[id]}` : null;
+  },
+  load(id) {
+    if (!id.startsWith(STUB_PREFIX)) return null;
+    const className = JSON.stringify(id.slice(STUB_PREFIX.length));
+    return `import React from 'react';\nexport default function View() { return React.createElement('div', { className: ${className} }); }\n`;
+  },
+});
+
+const PAGE_LOCATION = Object.freeze({ origin: 'http://localhost:5173', hostname: 'localhost', protocol: 'http:', pathname: '/', search: '' });
+const GLOBALS = Object.freeze(['window', 'document', 'localStorage', 'fetch']);
+
+// A hinted page as public/home-hint.js leaves it: <html> marked, the hint stored, and the account request still open.
+function installHintedPage(context) {
+  const saved = GLOBALS.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]);
+  context.after(() => {
+    for (const [name, descriptor] of saved) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else delete globalThis[name];
+    }
+  });
+  const values = new Map([[SIGNED_IN_HINT_KEY, SIGNED_IN_HINT_VALUE]]);
+  const document = createHostDocument();
+  document.documentElement.classList.add(HOME_HINT_CLASS);
+  const define = (name, value) => Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
+  define('window', { HTMLIFrameElement: HostIFrame, location: PAGE_LOCATION });
+  define('document', document);
+  define('localStorage', {
+    getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, String(value)), removeItem: (key) => values.delete(key),
+  });
+  define('fetch', () => new Promise(() => {}));
+  return { document, values };
+}
+
+const viewOf = (container) => container.firstChild?.attributes.get('class');
+const isMarked = (document) => document.documentElement.classList.contains(HOME_HINT_CLASS);
+
+test('mounting releases the head script mark, and signing out shows the landing at once', async (context) => {
+  const { document, values } = installHintedPage(context);
+  await withChromeModule(MODULE, async ({ default: HomeRoute }, _i18n, { load }) => {
+    const { accountSessionStore } = await load('/src/client/account/account-session-store.js');
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    try {
+      flushSync(() => root.render(React.createElement(HomeRoute)));
+      assert.equal(viewOf(container), 'rb-workspace', 'hinted, with the account still loading');
+      assert.equal(isMarked(document), false, 'mounted, so the landing is no longer hidden');
+      flushSync(() => accountSessionStore.markSignedOut());
+      assert.equal(viewOf(container), 'rb-landing__page', 'signing out shows the landing without a reload');
+      assert.equal(isMarked(document), false, 'so the landing is visible at once, not after the CSS fallback delay');
+      assert.equal(values.has(SIGNED_IN_HINT_KEY), false, 'and the next visit is a guest visit');
+    } finally {
+      flushSync(() => root.unmount());
+    }
+  }, { plugins: [stubHomeViews()] });
+});
+
+test('mounting releases the mark even when the first view is already the landing', async (context) => {
+  const { document, values } = installHintedPage(context);
+  await withChromeModule(MODULE, async ({ default: HomeRoute }, _i18n, { load }) => {
+    const { accountSessionStore } = await load('/src/client/account/account-session-store.js');
+    accountSessionStore.markSignedOut();
+    values.set(SIGNED_IN_HINT_KEY, SIGNED_IN_HINT_VALUE);
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    try {
+      flushSync(() => root.render(React.createElement(HomeRoute)));
+      assert.equal(viewOf(container), 'rb-landing__page', 'a stale hint never outranks a known signed-out account');
+      assert.equal(isMarked(document), false);
+    } finally {
+      flushSync(() => root.unmount());
+    }
+  }, { plugins: [stubHomeViews()] });
 });

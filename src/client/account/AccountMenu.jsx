@@ -7,16 +7,14 @@ import { Toast } from '../ui/Toast.jsx';
 import { useDismiss } from '../ui/useDismiss.js';
 import { BUTTON_VARIANT, MENU_ITEM_VARIANT, SURFACE_KIND } from '../ui/ui-variants.js';
 import { TOPBAR_ICON_SIZE_PX } from '../chrome/chrome-layout.js';
-import { isLandingPath } from '../app/router.js';
 import { ACCOUNT_STATUS, signInHref } from './account-api.js';
 import { isInAppBrowser } from './in-app-browser.js';
 import { useAccountMenu } from './use-account-menu.js';
+import { myBoardsHrefFor } from './my-boards-link.js';
 import './account.css';
 
 const PLAN_KEYS = Object.freeze({ free: 'account.plan.free', pro: 'account.plan.pro' });
 const DELETE_ICON_SIZE_PX = 20;
-// My boards is the signed-in home page.
-const MY_BOARDS_PATH = '/';
 
 export function SignedOutControl({ inApp, href, onCopyLink }) {
   if (inApp) {
@@ -101,9 +99,9 @@ export function AccountMenuView({ session, inApp, href, open = false, confirming
 
 const HIDDEN_STATUSES = Object.freeze([null, ACCOUNT_STATUS.DISABLED]);
 
-// Reads the location only once signed in: the prerender renders this menu with no session and no page URL.
-const myBoardsHrefFor = (status) => (
-  status === ACCOUNT_STATUS.SIGNED_IN && !isLandingPath(location.pathname) ? MY_BOARDS_PATH : null
+// The prerender renders this menu with no session and no page URL, so the path is read only once signed in.
+const currentMyBoardsHref = (status) => (
+  status === ACCOUNT_STATUS.SIGNED_IN ? myBoardsHrefFor(status, location.pathname) : null
 );
 
 // Wrapper and toast mount only when something shows, so guests on a relay
@@ -135,7 +133,7 @@ export default function AccountMenu() {
         href={session.status === ACCOUNT_STATUS.SIGNED_OUT ? signInHref() : ''}
         open={open}
         confirmingDelete={confirmingDelete}
-        myBoardsHref={myBoardsHrefFor(session.status)}
+        myBoardsHref={currentMyBoardsHref(session.status)}
         onToggle={() => setOpen(!open)}
         onSignOut={() => void afterRun('logout')}
         onSignOutAll={() => void afterRun('logoutAll')}
