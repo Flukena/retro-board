@@ -15,5 +15,6 @@ export default function HomeRoute() {
   // React now owns the page, so the head script's hide-the-landing mark has done its job.
   useEffect(() => { document.documentElement.classList.remove(HOME_HINT_CLASS); }, []);
   if (homeViewFor({ hinted, session }) === HOME_VIEW.LANDING) return <Landing />;
-  return <Workspace createAction={<CreateMenu account={session?.account ?? null} />} />;
+  // The create menu reads the whole session: its status and the account's entitlements.
+  return <Workspace createAction={<CreateMenu account={session} />} />;
 }

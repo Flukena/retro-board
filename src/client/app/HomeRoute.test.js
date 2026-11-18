@@ -50,9 +50,15 @@ test('a visitor without the hint gets the guest landing first', async () => {
 });
 
 // The real views need a full browser DOM. Here they are plain roots carrying their class, so the mount
-// test exercises only HomeRoute's own work: choosing the view and releasing the head script's mark.
-const VIEW_STUBS = Object.freeze({ './Landing.jsx': 'rb-landing__page', '../workspace/Workspace.jsx': 'rb-workspace' });
+// test exercises only HomeRoute's own work: choosing the view, wiring the create menu and releasing the
+// head script's mark. Each stub renders the masthead action it is given and says whether the account it
+// got may be offered a locked board.
+const VIEW_STUBS = Object.freeze({
+  './Landing.jsx': 'rb-landing__page', '../workspace/Workspace.jsx': 'rb-workspace', '../workspace/CreateMenu.jsx': 'create-menu',
+});
 const STUB_PREFIX = '\0home-view-stub:';
+const LOCKED_OFFER_MODULE = '/src/client/room-lock/create-locked-room-controller.js';
+const OFFERS_LOCKED_ATTRIBUTE = 'data-offers-locked';
 const stubHomeViews = () => ({
   name: 'stub-home-views',
   enforce: 'pre',
@@ -62,15 +68,24 @@ const stubHomeViews = () => ({
   load(id) {
     if (!id.startsWith(STUB_PREFIX)) return null;
     const className = JSON.stringify(id.slice(STUB_PREFIX.length));
-    return `import React from 'react';\nexport default function View() { return React.createElement('div', { className: ${className} }); }\n`;
+    return [
+      "import React from 'react';",
+      `import { canOfferLockedRoom } from '${LOCKED_OFFER_MODULE}';`,
+      'export default function View({ createAction = null, account }) {',
+      `  return React.createElement('div', { className: ${className}, '${OFFERS_LOCKED_ATTRIBUTE}': String(canOfferLockedRoom(account)) }, createAction);`,
+      '}',
+      '',
+    ].join('\n');
   },
 });
 
 const PAGE_LOCATION = Object.freeze({ origin: 'http://localhost:5173', hostname: 'localhost', protocol: 'http:', pathname: '/', search: '' });
 const GLOBALS = Object.freeze(['window', 'document', 'localStorage', 'fetch']);
 
-// A hinted page as public/home-hint.js leaves it: <html> marked, the hint stored, and the account request still open.
-function installHintedPage(context) {
+const pendingFetch = () => new Promise(() => {});
+
+// A hinted page as public/home-hint.js leaves it: <html> marked and the hint stored; by default the account request stays open.
+function installHintedPage(context, { fetch = pendingFetch } = {}) {
   const saved = GLOBALS.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]);
   context.after(() => {
     for (const [name, descriptor] of saved) {
@@ -87,7 +102,7 @@ function installHintedPage(context) {
   define('localStorage', {
     getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, String(value)), removeItem: (key) => values.delete(key),
   });
-  define('fetch', () => new Promise(() => {}));
+  define('fetch', fetch);
   return { document, values };
 }
 
@@ -126,6 +141,29 @@ test('mounting releases the mark even when the first view is already the landing
       flushSync(() => root.render(React.createElement(HomeRoute)));
       assert.equal(viewOf(container), 'rb-landing__page', 'a stale hint never outranks a known signed-out account');
       assert.equal(isMarked(document), false);
+    } finally {
+      flushSync(() => root.unmount());
+    }
+  }, { plugins: [stubHomeViews()] });
+});
+
+const HTTP_OK = 200;
+const ENTITLED_ACCOUNT = Object.freeze({ name: 'Ada', plan: 'free', entitlements: Object.freeze({ canCreateLockedRoom: true }) });
+const answerSignedIn = async () => new Response(JSON.stringify(ENTITLED_ACCOUNT), { status: HTTP_OK });
+
+test('the create menu gets the account session, so an entitled account is offered a locked board', async (context) => {
+  const { document } = installHintedPage(context, { fetch: answerSignedIn });
+  await withChromeModule(MODULE, async ({ default: HomeRoute }, _i18n, { load }) => {
+    const { accountSessionStore } = await load('/src/client/account/account-session-store.js');
+    await accountSessionStore.load();
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    try {
+      flushSync(() => root.render(React.createElement(HomeRoute)));
+      assert.equal(viewOf(container), 'rb-workspace');
+      const menu = container.firstChild.firstChild;
+      assert.equal(menu?.attributes.get('class'), 'create-menu', 'the create menu fills the masthead action slot');
+      assert.equal(menu.attributes.get(OFFERS_LOCKED_ATTRIBUTE), 'true');
     } finally {
       flushSync(() => root.unmount());
     }
