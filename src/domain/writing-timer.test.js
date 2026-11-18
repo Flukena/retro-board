@@ -132,3 +132,22 @@ test('the page re-renders when the shown second changes, each second of Time\'s 
   assert.equal(writingTimerTickMs(page.view(ADMIN_NOW_MS + THREE_MINUTES_MS)), SECOND_MS);
   assert.equal(writingTimerTickMs(new WritingTimerClock().view(ADMIN_NOW_MS)), null);
 });
+
+const TEN_YEARS_MS = 10 * 365 * 24 * 60 * MINUTE_MS;
+
+test('a late joiner never counts longer than the run, whatever the stored stamps say', () => {
+  const writtenAt = ADMIN_NOW_MS + TEN_YEARS_MS;
+  const hostile = decodeWritingTimer({ id: 'evil', writtenAt, endsAt: writtenAt + THREE_MINUTES_MS });
+  assert.ok(hostile, 'the decoder only bounds the run');
+  const lateJoiner = pageWith(hostile, ADMIN_NOW_MS, SYNCED_LATER);
+  assert.equal(lateJoiner.view(ADMIN_NOW_MS).label, '03:00');
+  assert.equal(pageWith(hostile, ADMIN_NOW_MS, LIVE).view(ADMIN_NOW_MS).label, '03:00');
+});
+
+test('a late joiner shows nothing, and no chime, for a deadline long past', () => {
+  const writtenAt = ADMIN_NOW_MS - TEN_YEARS_MS;
+  const stale = decodeWritingTimer({ id: 'old', writtenAt, endsAt: writtenAt + THREE_MINUTES_MS });
+  const lateJoiner = pageWith(stale, ADMIN_NOW_MS, SYNCED_LATER);
+  assert.equal(lateJoiner.view(ADMIN_NOW_MS).phase, WRITING_TIMER_PHASE.IDLE);
+  assert.equal(lateJoiner.takeExpiry(ADMIN_NOW_MS), false);
+});

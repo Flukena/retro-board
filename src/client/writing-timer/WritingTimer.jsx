@@ -10,6 +10,7 @@ import {
   WRITING_TIMER_EXTEND_MINUTES, WRITING_TIMER_PHASE, WRITING_TIMER_PRESET_MINUTES, writingTimerTickMs,
 } from '../../domain/writing-timer.js';
 import { createChime } from './chime.js';
+import { watchWritingTimer } from './writing-timer-store.js';
 import '../ui/chrome-animations.css';
 import './writing-timer.css';
 
@@ -21,7 +22,7 @@ const DEFAULT_CUSTOM_MINUTES = WRITING_TIMER_PRESET_MINUTES[0];
 function useWritingTimerView(store) {
   const [view, setView] = useState(() => store.view());
   const chime = useMemo(() => createChime(), []);
-  useEffect(() => store.subscribe(() => setView(store.view())), [store]);
+  useEffect(() => watchWritingTimer(store, setView), [store]);
   useEffect(() => {
     const delayMs = writingTimerTickMs(view);
     if (delayMs === null) return undefined;

@@ -287,9 +287,10 @@ test('a board exported while the card-writing timer runs imports cleanly, round-
   const importedAt = Date.now();
   const transferModule = (server) => server.ssrLoadModule('/src/client/transfer/board-transfer.js');
   const boardOf = async (storage) => (await storage.get('boardState', true)).value;
-  // The decoded manifest's data; the archive reader also hands back an image-reading function.
+  // The decoded manifest's data; the archive reader also hands back an image-reading function, and `name` is the
+  // export's file name, which carries the second it was made in, so two exports can differ in it alone.
   const manifestData = (manifest) => Object.fromEntries(
-    Object.entries(manifest).filter(([, value]) => typeof value !== 'function'),
+    Object.entries(manifest).filter(([key, value]) => key !== 'name' && typeof value !== 'function'),
   );
   /** The export the UI downloads, read back through the import decoder, as the import dialog does. */
   const exportAndRead = async (storage, transfer) => {

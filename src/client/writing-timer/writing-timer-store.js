@@ -54,3 +54,13 @@ export function createWritingTimerStore({ doc, isLive, now = wallClock, createId
     },
   };
 }
+
+/**
+ * Hands `onView` the current view now and after every shared change; returns the unsubscribe. The read after
+ * subscribing catches a sync that landed between the caller's first read and its subscription.
+ */
+export function watchWritingTimer(store, onView) {
+  const unsubscribe = store.subscribe(() => onView(store.view()));
+  onView(store.view());
+  return unsubscribe;
+}

@@ -10,7 +10,7 @@ import {
 //   out, whoever wrote it: the admin who started it, or another admin whose +1 republishes the run on its own clock.
 // - A page that only finds the value in the initial sync (late join, reopened board) has no receipt to count from and
 //   counts to `endsAt` on its own clock, so it is off by its clock's error against the writer's. The next live write
-//   puts it right; a +1 it writes meanwhile carries its error to every page until then.
+//   puts it right; its deadline is capped at the run length from now, and one already past shows nothing. A +1 it writes meanwhile carries its error to every page until then.
 
 export const WRITING_TIMER_PRESET_MINUTES = Object.freeze([3, 5, 10]);
 export const WRITING_TIMER_EXTEND_MINUTES = 1;
@@ -58,7 +58,9 @@ export class WritingTimerClock {
     if (sameTimer(timer, this.#timer)) return;
     this.#timer = timer;
     if (!timer) return;
-    this.#deadline = live ? now + (timer.endsAt - timer.writtenAt) : timer.endsAt;
+    const runMs = timer.endsAt - timer.writtenAt;
+    // Never later than the whole run from now, so a far-future stamp cannot stretch a late joiner's countdown.
+    this.#deadline = live ? now + runMs : Math.min(timer.endsAt, now + runMs);
     this.#seenRunning = this.#deadline > now;
   }
 

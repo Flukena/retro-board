@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as Y from 'yjs';
 import { MINUTE_MS } from '../../domain/countdown.js';
 import { WRITING_TIMER_PHASE } from '../../domain/writing-timer.js';
-import { WRITING_TIMER_MAP, createWritingTimerStore } from './writing-timer-store.js';
+import { WRITING_TIMER_MAP, createWritingTimerStore, watchWritingTimer } from './writing-timer-store.js';
 
 const ADMIN_NOW_MS = 1_800_000_000_000;
 const SECOND_MS = 1000;
@@ -133,4 +133,26 @@ test("the end is reported once per page, and Time's up shows meanwhile", (t) => 
     assert.equal(one.store.takeExpiry(), false);
     assert.equal(one.store.view().phase, WRITING_TIMER_PHASE.TIMES_UP);
   }
+});
+
+test('watching shows a timer that synced after the first read and before the subscription', (t) => {
+  const admin = page(t);
+  const late = page(t, { live: false });
+  const firstRead = late.store.view();
+  admin.store.start(3);
+  Y.applyUpdate(late.doc, Y.encodeStateAsUpdate(admin.doc), RELAY);
+  const seen = [];
+  t.after(watchWritingTimer(late.store, (view) => seen.push(view)));
+  assert.equal(firstRead.phase, WRITING_TIMER_PHASE.IDLE);
+  assert.equal(seen.at(-1).phase, WRITING_TIMER_PHASE.RUNNING);
+});
+
+test('watching reports later changes and stops after unsubscribing', (t) => {
+  const admin = page(t);
+  const seen = [];
+  const stop = watchWritingTimer(admin.store, (view) => seen.push(view.phase));
+  admin.store.start(3);
+  stop();
+  admin.store.stop();
+  assert.deepEqual(seen, [WRITING_TIMER_PHASE.IDLE, WRITING_TIMER_PHASE.RUNNING]);
 });
