@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { ChevronDown, LayoutTemplate, Lock, Plus, Spade } from 'lucide-react';
 import { t } from '../ui/i18n.js';
+import { focusIfInside } from '../ui/focus-return.js';
 import { useDismiss } from '../ui/useDismiss.js';
 import { Button, Divider, MenuItem } from '../ui/UiPrimitives.jsx';
 import { BUTTON_VARIANT, DIVIDER_ORIENTATION, buttonClass } from '../ui/ui-variants.js';
@@ -128,8 +129,7 @@ export default function CreateMenu({ session }) {
   const close = () => { setOpen(false); setPanel(CREATE_PANEL.NONE); };
   // Closing unmounts the focused item, so focus returns to the trigger first.
   const dismiss = () => {
-    const root = rootRef.current;
-    if (root?.contains(root.ownerDocument.activeElement)) triggerRef.current?.focus();
+    focusIfInside(rootRef, triggerRef);
     close();
   };
   useDismiss(open, rootRef, dismiss);

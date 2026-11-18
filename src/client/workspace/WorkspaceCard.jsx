@@ -1,6 +1,7 @@
 import React, { useId, useRef } from 'react';
 import { ArrowUpRight, Lock, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 import { t } from '../ui/i18n.js';
+import { focusIfInside } from '../ui/focus-return.js';
 import { formatRelativeTime } from '../ui/relative-time.js';
 import { useDismiss } from '../ui/useDismiss.js';
 import { Divider, MenuItem, MenuLink } from '../ui/UiPrimitives.jsx';
@@ -98,8 +99,7 @@ export default function WorkspaceCard({ room, now, busy, menuOpen, onToggleMenu,
   // from the menu then records the trigger as its opener and returns focus there when it closes.
   const focusTrigger = () => triggerRef.current?.focus();
   const dismissMenu = () => {
-    const actions = actionsRef.current;
-    if (actions?.contains(actions.ownerDocument.activeElement)) focusTrigger();
+    focusIfInside(actionsRef, triggerRef);
     onToggleMenu(null);
   };
   const askRename = (target) => { focusTrigger(); onAskRename(target); };
