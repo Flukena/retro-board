@@ -261,9 +261,9 @@ const dict = {
     'common.warnDeleteDenied': 'ไม่สามารถลบรายการที่เลือกบางรายการได้',
     'common.saveFailed': 'บันทึกการเปลี่ยนแปลงไม่สำเร็จ กรุณาลองอีกครั้ง',
     'common.justNow': 'เมื่อกี้',
-    'common.minutesAgo': '{n}m ago',
-    'common.hoursAgo': '{n}h ago',
-    'common.daysAgo': '{n}d ago',
+    'common.minutesAgo': '{n} นาทีที่แล้ว',
+    'common.hoursAgo': '{n} ชม.ที่แล้ว',
+    'common.daysAgo': '{n} วันที่แล้ว',
     'common.optional': 'ตัวเลือก',
 
     // landing

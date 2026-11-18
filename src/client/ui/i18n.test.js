@@ -17,6 +17,25 @@ test('Thai vote stop and result copy uses Thai words and preserves count placeho
   }
 });
 
+// Card activity, comment and vote times on Thai pages; every placeholder is the number itself.
+const RELATIVE_TIME_KEYS = Object.freeze(['common.justNow', 'common.minutesAgo', 'common.hoursAgo', 'common.daysAgo']);
+const PLACEHOLDER_TOKEN = /\{[a-zA-Z]+\}/g;
+const LATIN_LETTER = /[A-Za-z]/;
+
+test('Thai relative times are written in Thai, apart from their number placeholder', () => {
+  const originalLang = getLang();
+  try {
+    setLang('th');
+    for (const key of RELATIVE_TIME_KEYS) {
+      const copy = t(key);
+      assert.notEqual(copy, key, `${key} has a Thai entry`);
+      assert.doesNotMatch(copy.replaceAll(PLACEHOLDER_TOKEN, ''), LATIN_LETTER, `${key}: ${copy}`);
+    }
+  } finally {
+    setLang(originalLang);
+  }
+});
+
 test('a first visit starts in English, whatever the browser language; a saved choice wins', () => {
   assert.equal(initialLanguage(null), 'en');
   assert.equal(initialLanguage('xx'), 'en', 'an unknown saved value falls back to English');
