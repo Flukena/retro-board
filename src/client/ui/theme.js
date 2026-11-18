@@ -3,7 +3,7 @@
 // 'auto' follows prefers-color-scheme and updates live.
 
 import { useEffect, useState } from 'react';
-import { GRID_PITCH_PX, MINIMAP_GRID_PITCH_PX, Z } from '../chrome/chrome-layout.js';
+import { GRID_PITCH_PX, MINIMAP_GRID_PITCH_PX, ZOOM_BUTTON_H_PX, Z } from '../chrome/chrome-layout.js';
 import {
   ZONE_AUTO_TITLE_MAX_FONT_PX, ZONE_COUNT_FONT_PX, ZONE_TITLE_LINE_HEIGHT_RATIO, ZONE_CHIP_PADDING_VERTICAL_PX,
   ZONE_CHIP_PADDING_HORIZONTAL_PX, ZONE_HEADER_INSET_PX, ZONE_HEADER_Z_INDEX, ZONE_HEADER_GAP_PX,
@@ -200,7 +200,9 @@ const MODE_INDEPENDENT_TOKENS = Object.freeze({
   '--reaction-layer': String(Z.REACTION_OVERLAY),
   // Same layer as the rail body and later in the dock, so an open picker paints over the rail on short screens.
   '--reaction-dock-layer': String(Z.DOCK),
-  '--reaction-toggle-size': '44px',
+  // The add-reaction button matches the zoom buttons; the emoji in its picker keep a full touch target.
+  '--reaction-toggle-size': `${ZOOM_BUTTON_H_PX}px`,
+  '--reaction-emoji-button-size': '44px',
   '--reaction-emoji-font-size': '22px',
   '--reaction-float-font-size': '34px',
   '--reaction-name-font-size': '12px',
@@ -470,6 +472,16 @@ export const TOKENS = defineTokens({
     '--danger-fg': '#ffffff',
     '--ok-bg': '#dcfce7',
     '--ok-text': '#166534',
+    // Fireworks add light on a transparent canvas, which washes out on white: deep colours and a soft glow and flash.
+    '--fireworks-1': '#dc2626',
+    '--fireworks-2': '#ea580c',
+    '--fireworks-3': '#db2777',
+    '--fireworks-4': '#7c3aed',
+    '--fireworks-5': '#0284c7',
+    '--fireworks-6': '#16a34a',
+    '--fireworks-glitter': '#b45309',
+    '--fireworks-glow-alpha': '0.22',
+    '--fireworks-flash-alpha': '0.3',
     ...MODE_INDEPENDENT_TOKENS,
   }, {
     ...VOTE_RESULT_TOKENS,
@@ -523,6 +535,16 @@ export const TOKENS = defineTokens({
     '--danger-fg': '#1b1814',
     '--ok-bg': '#253b26',
     '--ok-text': '#86efac',
+    // On the dark board the same additive light glows: bright colours, a strong glow and a white-hot flash.
+    '--fireworks-1': '#f87171',
+    '--fireworks-2': '#fb923c',
+    '--fireworks-3': '#f472b6',
+    '--fireworks-4': '#a78bfa',
+    '--fireworks-5': '#38bdf8',
+    '--fireworks-6': '#4ade80',
+    '--fireworks-glitter': '#fde68a',
+    '--fireworks-glow-alpha': '0.4',
+    '--fireworks-flash-alpha': '0.75',
     ...MODE_INDEPENDENT_TOKENS,
   });
 

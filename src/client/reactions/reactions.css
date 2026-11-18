@@ -1,10 +1,12 @@
-/* Board reactions: the 🎉 pill under the left tool rail, its picker, and the effects layer above the board.
-   The picker opens beside the pill, in its row: the rail is above the pill and the docked selection toolbar sits
-   above the bottom row on phones, so the open picker never covers either. */
+/* Board reactions: the add-reaction button under the left tool rail, its picker, and the effects layer above the
+   board. The button sits centred in the rail's column and the picker opens beside that column, in the button's row:
+   the rail is above the button and the docked selection toolbar sits above the bottom row on phones, so the open
+   picker never covers either. */
 
-/* The rail leaves room at the bottom for the pill instead of running behind it. */
+/* The rail leaves room at the bottom for the button instead of running behind it. */
 .rb-tool-dock:has(.rb-reaction-dock) {
-  --rb-dock-bottom-reserve-px: calc(var(--reaction-toggle-size) + var(--space-2));
+  --rb-reaction-toggle-px: var(--reaction-toggle-size);
+  --rb-dock-bottom-reserve-px: calc(var(--rb-reaction-toggle-px) + var(--space-2));
 }
 
 .rb-reaction-dock {
@@ -13,17 +15,14 @@
   left: calc(env(safe-area-inset-left, 0px) + var(--rb-dock-inset-px));
   bottom: calc(env(safe-area-inset-bottom, 0px) + var(--rb-dock-inset-px));
   width: var(--rb-dock-width-px);
+  display: flex;
+  justify-content: center;
 }
 
+/* Sized like the zoom buttons: compact on desktop, a full touch target on phones. */
 .rb-reaction-toggle.rb-reaction-toggle {
-  width: 100%;
-  height: var(--reaction-toggle-size);
-  padding: 0;
-  justify-content: center;
-  font-size: var(--reaction-emoji-font-size);
-  background: var(--tool-section-bg);
-  border-color: var(--tool-section-border);
-  box-shadow: var(--tool-frame-shadow);
+  width: var(--rb-reaction-toggle-px);
+  height: var(--rb-reaction-toggle-px);
 }
 
 .rb-reaction-picker {
@@ -38,8 +37,8 @@
 }
 
 .rb-reaction-picker__emoji.rb-reaction-picker__emoji {
-  width: var(--reaction-toggle-size);
-  height: var(--reaction-toggle-size);
+  width: var(--reaction-emoji-button-size);
+  height: var(--reaction-emoji-button-size);
   padding: 0;
   justify-content: center;
   font-size: var(--reaction-emoji-font-size);
@@ -116,6 +115,10 @@
 }
 
 @media (max-width: 767px), (max-width: 1024px) and (pointer: coarse) {
+  .rb-tool-dock:has(.rb-reaction-dock) {
+    --rb-reaction-toggle-px: var(--rb-mobile-touch-target-px);
+  }
+
   .rb-reaction-dock {
     left: var(--rb-mobile-left-px);
     bottom: var(--rb-mobile-bottom-px);

@@ -11,6 +11,7 @@ import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { BOARD_REACTIONS, REACTION_SEND_INTERVAL_MS } from '../src/domain/board-reactions.js';
 import { FIREWORKS_DURATION_MS, FLOAT_DURATION_MS } from '../src/client/reactions/reaction-timeline.js';
+import { FIRST_BURST_BY_MS } from '../src/client/reactions/fireworks-physics.js';
 import {
   CANVAS_SELECTOR, FAKE_GOOGLE_DECISION, REDO_KEY, SYNC_TIMEOUT_MS, UNDO_KEY, VIEWPORT, addSharedSticky,
   createLockedBoard, openLanding, participant, runLiveCheck, step, undoUntilHidden, unlockScreen, visitStub,
@@ -25,7 +26,7 @@ const NAME_A = 'Ada';
 const NAME_B = 'บี';
 const LABELS = Object.freeze({
   en: { open: 'Send a reaction to everyone', picker: 'Reactions', fireworks: 'Fireworks for everyone', send: 'Send' },
-  th: { open: 'ส่งอีโมจิให้ทุกคนในบอร์ด', picker: 'เลือกอีโมจิ', fireworks: 'จุดพลุให้ทุกคน', send: 'ส่ง' },
+  th: { open: 'ส่งรีแอคชันให้ทุกคน', picker: 'เลือกอีโมจิ', fireworks: 'จุดพลุให้ทุกคน', send: 'ส่ง' },
 });
 const FIREWORKS = '🎆';
 const FIREWORKS_SELECTOR = 'canvas[data-reaction-look="fireworks"]';
@@ -39,8 +40,12 @@ const SPAM_CLICKS = 12;
 const SPAM_GAP_MS = 100;
 const STILL_SAMPLE_GAP_MS = 300;
 const SETTLE_MS = 400;
-// Screenshots wait until the bursts have spread out a little; the first frame is a dot per burst.
+// Float screenshots wait until the emoji has risen a little.
 const MID_SHOW_DELAY_MS = 350;
+// Fireworks screenshots wait for the first burst to spread out; before it there are only rising rockets.
+const BURST_SPREAD_MS = 300;
+const FIREWORKS_SNAP_DELAY_MS = FIRST_BURST_BY_MS + BURST_SPREAD_MS;
+const MS_PER_SECOND = 1000;
 const FIRST_PAINT_TIMEOUT_MS = 1000;
 // Turning on reduced motion mid-show must stop the fireworks at once, far sooner than their natural end.
 const MOTION_STOP_TIMEOUT_MS = 500;
@@ -157,17 +162,17 @@ async function pickerOnTop(page) {
   return shown.length > 0 && shown.every(({ onTop }) => onTop);
 }
 
-/** The pill and its open picker stay inside the viewport, clear of the rail, zoom bar, minimap and selection toolbar. */
+/** The button and its open picker stay inside the viewport, clear of the rail, zoom bar, minimap and selection toolbar. */
 async function checkPlacement(page, viewport) {
   const dock = await visibleBox(page, DOCK_SELECTOR);
-  if (!dock) throw new Error(`${viewport.name}: reaction pill not visible`);
+  if (!dock) throw new Error(`${viewport.name}: reaction button not visible`);
   const picker = await visibleBox(page, PICKER_SELECTOR);
   const inside = (box) => box.x >= 0 && box.y >= 0 && box.x + box.width <= viewport.width && box.y + box.height <= viewport.height;
-  if (!inside(dock) || (picker && !inside(picker))) throw new Error(`${viewport.name}: pill or picker leaves the viewport`);
+  if (!inside(dock) || (picker && !inside(picker))) throw new Error(`${viewport.name}: button or picker leaves the viewport`);
   const overlaps = [];
   for (const selector of CHROME_SELECTORS) {
     const box = await visibleBox(page, selector);
-    if (box && intersects(dock, box)) overlaps.push(`pill/${selector}`);
+    if (box && intersects(dock, box)) overlaps.push(`button/${selector}`);
     if (box && picker && intersects(picker, box)) overlaps.push(`picker/${selector}`);
   }
   if (overlaps.length) throw new Error(`${viewport.name}: overlaps ${overlaps.join(', ')}`);
@@ -192,14 +197,15 @@ async function lockedSetup(browser, baseUrl, report) {
 }
 
 async function fireworksStep({ a, b, report }) {
-  await step(report, `${mode}: A sends 🎆 and B sees full-screen fireworks that end by about 2 s`, async () => {
+  const seconds = FIREWORKS_DURATION_MS / MS_PER_SECOND;
+  await step(report, `${mode}: A sends 🎆 and B sees full-screen fireworks that end by about ${seconds} s`, async () => {
     await recordDeliveries(a);
     await recordDeliveries(b);
     await react(a, 'en', FIREWORKS);
     await b.locator(FIREWORKS_SELECTOR).waitFor({ state: 'attached', timeout: SYNC_TIMEOUT_MS });
     const shownAt = Date.now();
     const firstPaintOnB = await waitForPaint(b);
-    await sleep(MID_SHOW_DELAY_MS);
+    await sleep(FIREWORKS_SNAP_DELAY_MS);
     await snap(b, `${mode}-fireworks-th.png`, report);
     await snap(a, `${mode}-fireworks-en.png`, report);
     const visibleForMs = await waitForEffectEnd(b, FIREWORKS_SELECTOR, FIREWORKS_DURATION_MS, shownAt);
@@ -325,7 +331,7 @@ async function placementWith(page, viewport, selected, report) {
 }
 
 async function layoutStep({ a, report }) {
-  await step(report, `${mode}: the pill and open picker stay clear of the rail, zoom bar, minimap and selection toolbar`, async () => {
+  await step(report, `${mode}: the button and open picker stay clear of the rail, zoom bar, minimap and selection toolbar`, async () => {
     const results = {};
     for (const viewport of LAYOUT_VIEWPORTS) {
       await a.setViewportSize({ width: viewport.width, height: viewport.height });
@@ -388,7 +394,7 @@ async function touchScrollStep({ a, b, report }) {
 }
 
 async function drawingStep({ a, report }) {
-  await step(report, `${mode}: on a phone the drawing toolbar takes the bottom row and the pill steps aside`, async () => {
+  await step(report, `${mode}: on a phone the drawing toolbar takes the bottom row and the button steps aside`, async () => {
     const phone = LAYOUT_VIEWPORTS.find((viewport) => viewport.name === 'phone-390');
     await a.setViewportSize({ width: phone.width, height: phone.height });
     await a.keyboard.press('Escape');
@@ -402,7 +408,7 @@ async function drawingStep({ a, report }) {
     await a.locator('.rb-drawing-toolbar').waitFor({ state: 'detached' });
     const back = await a.locator(DOCK_SELECTOR).isVisible();
     await a.setViewportSize(VIEWPORT);
-    if (!hidden || !back) throw new Error(`pill hidden while drawing: ${hidden}, back after: ${back}`);
+    if (!hidden || !back) throw new Error(`button hidden while drawing: ${hidden}, back after: ${back}`);
     return { hiddenWhileDrawing: hidden, visibleAfter: back };
   });
 }
