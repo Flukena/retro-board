@@ -168,6 +168,18 @@ export const createMenuItem = (menu, lang, titleKey) => menu.getByRole('menuitem
   name: new RegExp(`^${escapeRegExp(appLabel(lang, titleKey))}`),
 });
 
+export const createMenuNameField = (menu, lang) => menu.getByRole('textbox', { name: appLabel(lang, 'workspace.create.name'), exact: true });
+
+/** Creates a blank board, named when `title` is given, from the open workspace's create menu; returns its link. */
+export async function createBlankBoardFromMenu(page, lang, title = '') {
+  const menu = await openCreateMenu(page, lang);
+  await createMenuItem(menu, lang, 'workspace.create.new').click();
+  if (title) await createMenuNameField(menu, lang).fill(title);
+  await menu.getByRole('button', { name: appLabel(lang, 'workspace.create.submit'), exact: true }).click();
+  await page.waitForURL(BOARD_URL_PATTERN);
+  return page.url();
+}
+
 export const signInLink = (page, lang) => page.getByRole('link', { name: BASE_LABELS[lang].signIn, exact: true });
 /** The fake Google consent page's buttons (scripts/fake-google-oidc.mjs). */
 export const FAKE_GOOGLE_DECISION = Object.freeze({ APPROVE: '#approve', CANCEL: '#cancel' });

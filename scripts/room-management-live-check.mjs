@@ -42,7 +42,8 @@ import { MAINTENANCE_INTERVAL_MS } from '../src/server/relay-config.js';
 import { FAKE_GOOGLE_PROFILE, startFakeGoogleOidc } from './fake-google-oidc.mjs';
 import {
   BASE_LABELS, BOARD_URL_PATTERN, CANVAS_SELECTOR, FAKE_GOOGLE_DECISION, POKER_URL_PATTERN, REDO_KEY, SYNC_TIMEOUT_MS,
-  UNDO_KEY, VIEWPORT, addSharedSticky, appLabel, createLockedBoard, createMenuItem, createMenuTrigger, enter,
+  UNDO_KEY, VIEWPORT, addSharedSticky, appLabel, createBlankBoardFromMenu, createLockedBoard, createMenuItem, createMenuNameField,
+  createMenuTrigger, enter,
   escapeRegExp, openCreateMenu, openLanding, openWorkspace, participant, runLiveCheck, secondTab, shot, signInLink, step,
   undoUntilHidden, unlockScreen, visitStub, waitForTextOn, workspaceHeading,
 } from './board-live-helpers.mjs';
@@ -124,7 +125,6 @@ const topBarTitle = (page) => page.locator('.rb-topbar-title');
 const deletedHeading = (page, lang, key) => page.getByRole('heading', { name: appLabel(lang, key), exact: true });
 const landingCreate = (page, lang) => page.getByRole('button', { name: BASE_LABELS[lang].create, exact: true });
 const isFocused = (locator) => locator.evaluate((node) => node === document.activeElement);
-const blankNameField = (menu, lang) => menu.getByRole('textbox', { name: appLabel(lang, 'workspace.create.name'), exact: true });
 const templateChip = (menu, lang) => menu.getByRole('button', { name: appLabel(lang, 'tpl.start', { name: templateName(lang) }), exact: true });
 const storedHint = (page) => page.evaluate((key) => localStorage.getItem(key), SIGNED_IN_HINT_KEY);
 
@@ -217,14 +217,10 @@ async function waitForTemplateZones(page, lang) {
 // ---------- create menu ----------
 
 async function createBlankFromMenu(page, lang, title) {
-  const menu = await openCreateMenu(page, lang);
-  await createMenuItem(menu, lang, 'workspace.create.new').click();
-  await blankNameField(menu, lang).fill(title);
-  await menu.getByRole('button', { name: appLabel(lang, 'workspace.create.submit'), exact: true }).click();
-  await page.waitForURL(BOARD_URL_PATTERN);
+  const url = await createBlankBoardFromMenu(page, lang, title);
   await enter(page, lang, NAME.a);
   await waitForTitle([page], title);
-  return page.url();
+  return url;
 }
 
 /** The creator's browser lays out the starter zones once the room has synced; the card preview reads those zones. */
@@ -276,7 +272,7 @@ async function escapeReturnsFocus(page, lang, focusInside) {
 async function triggerClosesOpenPanel(page, lang) {
   const menu = await openCreateMenu(page, lang);
   await createMenuItem(menu, lang, 'workspace.create.new').click();
-  await blankNameField(menu, lang).click();
+  await createMenuNameField(menu, lang).click();
   await createMenuTrigger(page, lang).click();
   await menu.waitFor({ state: 'detached' });
   return isFocused(createMenuTrigger(page, lang));
@@ -287,9 +283,9 @@ async function focusAfterCollapsingPanel(page, lang) {
   const menu = await openCreateMenu(page, lang);
   const blank = createMenuItem(menu, lang, 'workspace.create.new');
   await blank.click();
-  await blankNameField(menu, lang).click();
+  await createMenuNameField(menu, lang).click();
   await blank.click();
-  await blankNameField(menu, lang).waitFor({ state: 'detached' });
+  await createMenuNameField(menu, lang).waitFor({ state: 'detached' });
   const focus = { onItem: await isFocused(blank), onTrigger: await isFocused(createMenuTrigger(page, lang)) };
   await page.keyboard.press('Escape');
   await menu.waitFor({ state: 'detached' });
@@ -301,7 +297,7 @@ async function createMenuFocus(page, lang) {
     escapeFromItem: await escapeReturnsFocus(page, lang, (menu) => createMenuItem(menu, lang, 'workspace.create.new').focus()),
     escapeFromNameField: await escapeReturnsFocus(page, lang, async (menu) => {
       await createMenuItem(menu, lang, 'workspace.create.new').click();
-      await blankNameField(menu, lang).focus();
+      await createMenuNameField(menu, lang).focus();
     }),
     escapeFromTemplateChip: await escapeReturnsFocus(page, lang, async (menu) => {
       await createMenuItem(menu, lang, 'workspace.create.template').click();

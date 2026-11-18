@@ -22,8 +22,8 @@
 import assert from 'node:assert/strict';
 import { FAKE_GOOGLE_PROFILE } from './fake-google-oidc.mjs';
 import {
-  BASE_LABELS, FAKE_GOOGLE_DECISION, REDO_KEY, SYNC_TIMEOUT_MS, addSharedSticky, enter, openLanding, participant, runLiveCheck,
-  shot, signInLink, step, undoUntilHidden, visitStub, waitForTextOn,
+  BASE_LABELS, FAKE_GOOGLE_DECISION, REDO_KEY, SYNC_TIMEOUT_MS, addSharedSticky, enter, openLanding, openWorkspace, participant,
+  runLiveCheck, shot, signInLink, step, undoUntilHidden, visitStub, waitForTextOn,
 } from './board-live-helpers.mjs';
 
 const BOARD_URL_PATTERN = /\/b\/[A-Za-z0-9_-]+#[A-Za-z0-9_-]+$/;
@@ -187,7 +187,8 @@ async function collaborationSteps({ a, b, report, baseUrl }) {
     return { undoPresses: presses };
   });
   await step(report, 'A is still signed in after the board session', async () => {
-    await openLanding(a, baseUrl);
+    // A signed-in person's home page is the workspace.
+    await openWorkspace(a, baseUrl);
     await expectSignedIn(a, LABELS.en.free);
   });
 }
