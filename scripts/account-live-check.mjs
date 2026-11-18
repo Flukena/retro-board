@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 /**
  * Two-context live check of optional Google sign-in against the local fake Google.
+ * Build the maintainer console once (the relay serves it from dist-maintainer/ and exits at start-up without it):
+ *   npm run maintainer:build
  * Start isolated servers first (free ports, never production ones or the repo .env):
  *   FAKE_OIDC_PORT=4455 node scripts/fake-google-oidc.mjs
  *   VITE_YJS_PORT=1250 npx vite --host localhost --port 5190 --strictPort
