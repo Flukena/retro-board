@@ -12,7 +12,7 @@ import {
 } from './workspace-model.js';
 
 // The card thumbnail band, drawn in viewBox units and stretched to the band by CSS.
-const ZONES_BOX = Object.freeze({ width: 280, height: 140, padding: 14 });
+const ZONES_VIEWBOX_UNITS = Object.freeze({ width: 280, height: 140, padding: 14 });
 const LOCK_ICON_SIZE_PX = 22;
 const MORE_ICON_SIZE_PX = 20;
 const MENU_ICON_SIZE_PX = 18;
@@ -25,7 +25,7 @@ const ACTIVITY_KEYS = Object.freeze({
 });
 
 function ZonesThumbnail({ zones }) {
-  return <TemplateThumbnail zones={zones} {...ZONES_BOX} className="rb-workspace-card__zones" />;
+  return <TemplateThumbnail zones={zones} {...ZONES_VIEWBOX_UNITS} className="rb-workspace-card__zones" />;
 }
 
 function LockedThumbnail() {

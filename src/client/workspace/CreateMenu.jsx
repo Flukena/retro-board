@@ -111,7 +111,7 @@ export function CreateMenuView({
           {panel !== CREATE_PANEL.NONE && <Divider orientation={DIVIDER_ORIENTATION.HORIZONTAL} />}
           <CreatePanel panel={panel} creating={creating} onCreate={onCreate} onStartFormat={onStartFormat}
             onCreateLocked={onCreateLocked} />
-          <CreateBoardError error={createError} className="rb-workspace-create__error" />
+          <CreateBoardError error={createError} className="rb-workspace__create-error" />
         </div>
       )}
     </>

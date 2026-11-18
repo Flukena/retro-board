@@ -32,7 +32,7 @@ const ICON_SIZE_PX = 16;
 const CTA_ICON_SIZE_PX = 18;
 const DELETE_ICON_SIZE_PX = 20;
 // The empty state sketches a blank Start · Stop · Continue board.
-const EMPTY_ART_BOX = Object.freeze({ width: 220, height: 120, padding: 16 });
+const EMPTY_ART_BOX_PX = Object.freeze({ width: 220, height: 120, padding: 16 });
 const SKELETON_KEYS = Object.freeze(Array.from({ length: WORKSPACE_SKELETON_CARDS }, (_, index) => `skeleton-${index}`));
 const SORT_OPTIONS = Object.freeze([
   { value: WORKSPACE_SORT.RECENT, labelKey: 'workspace.sort.recent' },
@@ -73,7 +73,7 @@ function SkeletonGrid() {
 function EmptyState({ canCreate, creating, createError, onCreateFirst }) {
   return (
     <section className="rb-workspace__empty" aria-labelledby={EMPTY_TITLE_ID}>
-      <TemplateThumbnail zones={starterTemplate(STARTER_FORMAT.START_STOP_CONTINUE).zones} {...EMPTY_ART_BOX}
+      <TemplateThumbnail zones={starterTemplate(STARTER_FORMAT.START_STOP_CONTINUE).zones} {...EMPTY_ART_BOX_PX}
         className="rb-workspace__empty-art" />
       <h2 id={EMPTY_TITLE_ID} className="rb-workspace__empty-title">{t('workspace.empty.title')}</h2>
       <p className="rb-workspace__empty-body">{t('workspace.empty.body')}</p>
