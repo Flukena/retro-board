@@ -851,10 +851,12 @@ async function signedOutSteps({ report, browser, baseUrl }) {
       assert.notEqual(watch.landingVisibleAt, null, 'the watcher saw the landing');
       const switchMs = watch.landingVisibleAt - watch.dcl.at;
       assert.ok(switchMs <= LANDING_SWITCH_LIMIT_MS, `the landing shows ${switchMs} ms after domcontentloaded`);
+      // Spec §5.1: the signed-out answer clears the stale hint, so the next visit is a guest visit.
+      const hintAfter = await storedHint(s);
+      assert.equal(hintAfter, null, 'the stale hint is cleared');
       // Recorded, not asserted: whether the workspace or its "session ended" notice flashed first (Task 7 M2 is parked).
       return {
-        switchMs, watch, workspaceFlashed: watch.workspaceAt !== null, sessionEndedNoticeSeen: watch.noticeAt !== null,
-        hintAfter: await storedHint(s),
+        switchMs, watch, workspaceFlashed: watch.workspaceAt !== null, sessionEndedNoticeSeen: watch.noticeAt !== null, hintAfter,
       };
     } finally {
       await s.context().close();

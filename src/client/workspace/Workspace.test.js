@@ -1,6 +1,7 @@
 import React from 'react';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { withChromeModule } from '../../test-support/chrome-test-helper.js';
 
@@ -161,6 +162,10 @@ test('ready lists one card per room with its thumbnail, name, activity and one l
       const locked = cardOf(html, LOCKED.code);
       assert.ok(locked.includes(t('workspace.badge.locked')), lang);
       assert.ok(!html.includes(LOCKED.title), `${lang}: a locked board never shows its title`);
+      // An untitled or locked board is named by its code (spec §5.2).
+      for (const [card, room] of [[untouched, UNTOUCHED], [locked, LOCKED]]) {
+        assert.match(card, new RegExp(`<h2\\b[^>]*>${room.code}</h2>`), `${lang}: ${room.code} heading`);
+      }
 
       const poker = cardOf(html, POKER.code);
       assert.ok(poker.includes(`Planning Poker · ${POKER.code}`), lang);
@@ -175,6 +180,24 @@ test('ready lists one card per room with its thumbnail, name, activity and one l
     }
     setLang('en');
   });
+});
+
+const LONG_TITLE_CHARACTERS = 120;
+const WORKSPACE_CSS = readFileSync(new URL('./workspace.css', import.meta.url), 'utf8').replaceAll(/\s+/g, ' ');
+const cssRule = (selector) => WORKSPACE_CSS.match(new RegExp(`(?:^|\\}) ?${selector.replaceAll('.', '\\.')} \\{([^}]*)\\}`))?.[1] ?? '';
+
+test('a long title stays on one line with an ellipsis and keeps the full name on hover', async () => {
+  const title = 'Retro '.repeat(LONG_TITLE_CHARACTERS / 'Retro '.length).trim();
+  await withChromeModule(MODULE, (mod) => {
+    const card = cardOf(render(mod, ready([{ ...BOARD, title }])), BOARD.code);
+    assert.ok(card.includes(`<h2 class="rb-workspace-card__title" title="${title}">${title}</h2>`), card);
+  });
+  const heading = cssRule('.rb-workspace-card__title');
+  for (const declaration of ['overflow: hidden', 'white-space: nowrap', 'text-overflow: ellipsis']) {
+    assert.ok(heading.includes(declaration), declaration);
+  }
+  // Grid and flex children grow to fit one long line unless they may shrink below it.
+  for (const selector of ['.rb-workspace-card', '.rb-workspace-card__body']) assert.match(cssRule(selector), /min-width: 0;/, selector);
 });
 
 test('a card names its options button after the room name', async () => {
