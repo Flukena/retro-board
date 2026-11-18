@@ -269,6 +269,8 @@ const MODE_INDEPENDENT_TOKENS = Object.freeze({
   '--workspace-gutter': '24px',
   '--workspace-border-width': '1px',
   '--workspace-touch-target': '44px',
+  // iOS Safari zooms into a focused field whose text is under 16px.
+  '--workspace-touch-field-font-size': '16px',
   '--workspace-heading-basis': '280px',
   '--workspace-search-width': '300px',
   '--workspace-search-icon-size': '16px',

@@ -89,7 +89,7 @@ a.rb-btn {
   transition: background 0.15s ease;
 }
 
-.rb-menu-item:hover:not(:disabled) {
+.rb-menu-item:hover:not(:disabled, [aria-disabled="true"]) {
   background: var(--bg-panel-2);
 }
 
@@ -97,7 +97,7 @@ a.rb-btn {
   color: var(--danger);
 }
 
-.rb-menu-item:disabled {
+.rb-menu-item:is(:disabled, [aria-disabled="true"]) {
   color: var(--text-faint);
   cursor: not-allowed;
 }

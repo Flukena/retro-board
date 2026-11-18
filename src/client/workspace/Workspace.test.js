@@ -194,8 +194,12 @@ test('the open card menu offers rename by rule', async () => {
       assert.ok(!board.includes(t('workspace.card.renameLocked')), lang);
 
       const locked = cardOf(open(LOCKED.code), LOCKED.code);
-      assert.match(menuItemLabelled(locked, rename).attributes, /disabled=""/, `${lang}: locked rename disabled`);
-      assert.ok(locked.includes(t('workspace.card.renameLocked')), lang);
+      const lockedRename = menuItemLabelled(locked, rename).attributes;
+      assert.match(lockedRename, /aria-disabled="true"/, `${lang}: locked rename is announced as unavailable`);
+      assert.doesNotMatch(lockedRename, /\sdisabled=""/, `${lang}: locked rename stays focusable so its hint is read`);
+      const hintId = lockedRename.match(/aria-describedby="([^"]+)"/)?.[1];
+      assert.ok(hintId, `${lang}: locked rename points at its hint`);
+      assert.ok(locked.includes(`id="${hintId}" class="rb-workspace-card__hint">${asHtml(t('workspace.card.renameLocked'))}</p>`), lang);
       assert.ok(menuItemLabelled(locked, t('workspace.card.delete')), lang);
 
       const poker = cardOf(open(POKER.code), POKER.code);

@@ -90,9 +90,11 @@ function CardMenu({ room, name, busy, onAskRename, onAskDelete }) {
       <a role="menuitem" className={menuItemClass(MENU_ITEM_VARIANT.DEFAULT)} href={room.link}>
         <MenuItemContent Icon={ArrowUpRight} label={t('myBoards.open')} />
       </a>
+      {/* A locked rename stays focusable (aria-disabled, no handler) so its hint is read out. */}
       {rename !== RENAME_ACTION.HIDDEN && (
-        <MenuButton Icon={Pencil} label={t('myBoards.rename')} disabled={busy || renameLocked}
-          aria-describedby={renameLocked ? hintId : undefined} onClick={() => onAskRename(room)} />
+        <MenuButton Icon={Pencil} label={t('myBoards.rename')} disabled={busy}
+          aria-disabled={renameLocked || undefined} aria-describedby={renameLocked ? hintId : undefined}
+          onClick={renameLocked ? undefined : () => onAskRename(room)} />
       )}
       {renameLocked && <p id={hintId} className="rb-workspace-card__hint">{t('workspace.card.renameLocked')}</p>}
       <Divider orientation={DIVIDER_ORIENTATION.HORIZONTAL} />
@@ -105,8 +107,19 @@ function CardMenu({ room, name, busy, onAskRename, onAskDelete }) {
 /** One room in the workspace grid: the whole card opens the room; the ⋯ menu holds the other actions. */
 export default function WorkspaceCard({ room, now, busy, menuOpen, onToggleMenu, onAskRename, onAskDelete }) {
   const actionsRef = useRef(null);
+  const triggerRef = useRef(null);
+  // Closing the menu unmounts the focused item, so focus moves to the ⋯ trigger first. A dialog opened
+  // from the menu then records the trigger as its opener and returns focus there when it closes.
+  const focusTrigger = () => triggerRef.current?.focus();
+  const dismissMenu = () => {
+    const actions = actionsRef.current;
+    if (actions?.contains(actions.ownerDocument.activeElement)) focusTrigger();
+    onToggleMenu(null);
+  };
+  const askRename = (target) => { focusTrigger(); onAskRename(target); };
+  const askDelete = (target) => { focusTrigger(); onAskDelete(target); };
   // Trigger and menu share one ref, so a press on the open card's ⋯ toggles instead of dismissing and reopening.
-  useDismiss(menuOpen, actionsRef, () => onToggleMenu(null));
+  useDismiss(menuOpen, actionsRef, dismissMenu);
   const thumbnail = cardThumbnailOf(room);
   const Thumbnail = THUMBNAILS[thumbnail.kind];
   const name = roomNameOf(room);
@@ -125,11 +138,12 @@ export default function WorkspaceCard({ room, now, busy, menuOpen, onToggleMenu,
         </div>
       </a>
       <div className="rb-workspace-card__actions" ref={actionsRef}>
-        <button type="button" className="rb-workspace-card__more" aria-haspopup="menu" aria-expanded={menuOpen}
-          aria-label={t('workspace.card.options', { title: name })} onClick={() => onToggleMenu(room.code)}>
+        <button type="button" ref={triggerRef} className="rb-workspace-card__more" aria-haspopup="menu"
+          aria-expanded={menuOpen} aria-label={t('workspace.card.options', { title: name })}
+          onClick={() => onToggleMenu(room.code)}>
           <MoreHorizontal size={MORE_ICON_SIZE_PX} aria-hidden="true" />
         </button>
-        {menuOpen && <CardMenu room={room} name={name} busy={busy} onAskRename={onAskRename} onAskDelete={onAskDelete} />}
+        {menuOpen && <CardMenu room={room} name={name} busy={busy} onAskRename={askRename} onAskDelete={askDelete} />}
       </div>
     </li>
   );

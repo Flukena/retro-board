@@ -311,13 +311,15 @@
 @media (prefers-reduced-motion: reduce) {
   .rb-workspace-card__bar { animation: none; }
 }
-/* Touch screens: every masthead control is a full tap target, as on the landing page. */
+/* Touch screens: every masthead control is a full tap target and the fields are large enough
+   that iOS does not zoom into them, as on the landing page. */
 @media (max-width: 767px), (max-width: 1024px) and (pointer: coarse) {
   .rb-workspace .rb-landing__masthead button {
     box-sizing: border-box;
     min-width: var(--workspace-touch-target);
     min-height: var(--workspace-touch-target);
   }
+  .rb-workspace__field { font-size: var(--workspace-touch-field-font-size); }
 }
 /* Phones keep the logo, the account and the toggles on the first row; the create action takes the next one. */
 @media (max-width: 599px) {
