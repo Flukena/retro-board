@@ -5,6 +5,7 @@ import { useDismiss } from '../ui/useDismiss.js';
 import { Button, Divider, MenuItem } from '../ui/UiPrimitives.jsx';
 import { BUTTON_VARIANT, DIVIDER_ORIENTATION, buttonClass } from '../ui/ui-variants.js';
 import { DISPLAY_NAME_MAX_LENGTH } from '../../domain/security-boundaries.js';
+import { isSignedIn } from '../account/account-api.js';
 import { useCreateBoard } from '../app/use-create-board.js';
 import CreateBoardError from '../app/CreateBoardError.jsx';
 import FormatChips from '../app/FormatChips.jsx';
@@ -81,17 +82,20 @@ export function CreateMenuView({
   open, panel, session, creating, createError, triggerRef,
   onToggle, onPanel, onCreate, onStartFormat, onCreatePoker, onCreateLocked,
 }) {
+  // A create sent before the relay confirms the account would make a guest room, so the menu waits for the answer.
+  const signedIn = isSignedIn(session);
+  const menuOpen = open && signedIn;
   const showLocked = canOfferLockedRoom(session);
   const expandedFor = (target) => panel === target;
   return (
     <>
       <button type="button" ref={triggerRef} className={`${buttonClass(BUTTON_VARIANT.PRIMARY)} rb-workspace-create__trigger`}
-        aria-haspopup="menu" aria-expanded={open} aria-label={t('workspace.create')} onClick={onToggle}>
+        aria-haspopup="menu" aria-expanded={menuOpen} aria-label={t('workspace.create')} disabled={!signedIn} onClick={onToggle}>
         <Plus size={TRIGGER_ICON_SIZE_PX} aria-hidden="true" />
         <span className="rb-workspace-create__trigger-label">{t('workspace.create')}</span>
         <ChevronDown size={TRIGGER_ICON_SIZE_PX} aria-hidden="true" className="rb-workspace-create__chevron" />
       </button>
-      {open && (
+      {menuOpen && (
         <div className="rb-surface rb-workspace-create__menu" role="menu" aria-label={t('workspace.create')}>
           <CreateItem Icon={Plus} titleKey="workspace.create.new" descKey="workspace.create.newDesc"
             disabled={creating} expanded={expandedFor(CREATE_PANEL.NEW)} onClick={() => onPanel(CREATE_PANEL.NEW)} />

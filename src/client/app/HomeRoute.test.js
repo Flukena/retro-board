@@ -35,7 +35,9 @@ test('a hinted visitor gets the workspace skeleton and never the guest landing',
   const html = await renderFirstPaint(SIGNED_IN_HINT_VALUE);
   assert.match(html, /class="rb-workspace"/);
   assert.match(html, /aria-busy="true"/, 'the list is still loading');
-  assert.match(html, /rb-workspace-create__trigger/, 'the create menu fills the masthead action slot');
+  const trigger = html.match(/<button\b[^>]*rb-workspace-create__trigger[^>]*>/)?.[0];
+  assert.ok(trigger, 'the create menu fills the masthead action slot');
+  assert.match(trigger, /\sdisabled=""/, 'creating waits for the account answer');
   assert.doesNotMatch(html, /rb-landing__page/);
   assert.equal(html.match(/<main\b/g).length, 1, 'one main landmark');
 });
@@ -51,14 +53,15 @@ test('a visitor without the hint gets the guest landing first', async () => {
 
 // The real views need a full browser DOM. Here they are plain roots carrying their class, so the mount
 // test exercises only HomeRoute's own work: choosing the view, wiring the create menu and releasing the
-// head script's mark. Each stub renders the masthead action it is given and says whether the session it
-// got may be offered a locked board.
+// head script's mark. Each stub renders the masthead action it is given, says whether the session it got
+// may be offered a locked board, and whether it was told that creating is allowed.
 const VIEW_STUBS = Object.freeze({
   './Landing.jsx': 'rb-landing__page', '../workspace/Workspace.jsx': 'rb-workspace', '../workspace/CreateMenu.jsx': 'create-menu',
 });
 const STUB_PREFIX = '\0home-view-stub:';
 const LOCKED_OFFER_MODULE = '/src/client/room-lock/create-locked-room-controller.js';
 const OFFERS_LOCKED_ATTRIBUTE = 'data-offers-locked';
+const CAN_CREATE_ATTRIBUTE = 'data-can-create';
 const stubHomeViews = () => ({
   name: 'stub-home-views',
   enforce: 'pre',
@@ -71,8 +74,9 @@ const stubHomeViews = () => ({
     return [
       "import React from 'react';",
       `import { canOfferLockedRoom } from '${LOCKED_OFFER_MODULE}';`,
-      'export default function View({ createAction = null, session }) {',
-      `  return React.createElement('div', { className: ${className}, '${OFFERS_LOCKED_ATTRIBUTE}': String(canOfferLockedRoom(session)) }, createAction);`,
+      'export default function View({ createAction = null, session, canCreate }) {',
+      `  const marks = { '${OFFERS_LOCKED_ATTRIBUTE}': String(canOfferLockedRoom(session)), '${CAN_CREATE_ATTRIBUTE}': String(canCreate) };`,
+      `  return React.createElement('div', { className: ${className}, ...marks }, createAction);`,
       '}',
       '',
     ].join('\n');
@@ -118,6 +122,7 @@ test('mounting releases the head script mark, and signing out shows the landing 
     try {
       flushSync(() => root.render(React.createElement(HomeRoute)));
       assert.equal(viewOf(container), 'rb-workspace', 'hinted, with the account still loading');
+      assert.equal(container.firstChild.attributes.get(CAN_CREATE_ATTRIBUTE), 'false', 'no create before the account answer');
       assert.equal(isMarked(document), false, 'mounted, so the landing is no longer hidden');
       flushSync(() => accountSessionStore.markSignedOut());
       assert.equal(viewOf(container), 'rb-landing__page', 'signing out shows the landing without a reload');
@@ -164,6 +169,27 @@ test('the create menu gets the account session, so an entitled account is offere
       const menu = container.firstChild.firstChild;
       assert.equal(menu?.attributes.get('class'), 'create-menu', 'the create menu fills the masthead action slot');
       assert.equal(menu.attributes.get(OFFERS_LOCKED_ATTRIBUTE), 'true');
+      assert.equal(container.firstChild.attributes.get(CAN_CREATE_ATTRIBUTE), 'true', 'a confirmed account may create');
+    } finally {
+      flushSync(() => root.unmount());
+    }
+  }, { plugins: [stubHomeViews()] });
+});
+
+const HTTP_UNAVAILABLE = 503;
+const answerUnavailable = async () => new Response(null, { status: HTTP_UNAVAILABLE });
+
+test('an unavailable relay keeps a hinted visitor on the workspace without offering to create', async (context) => {
+  const { document } = installHintedPage(context, { fetch: answerUnavailable });
+  await withChromeModule(MODULE, async ({ default: HomeRoute }, _i18n, { load }) => {
+    const { accountSessionStore } = await load('/src/client/account/account-session-store.js');
+    await accountSessionStore.load();
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    try {
+      flushSync(() => root.render(React.createElement(HomeRoute)));
+      assert.equal(viewOf(container), 'rb-workspace');
+      assert.equal(container.firstChild.attributes.get(CAN_CREATE_ATTRIBUTE), 'false');
     } finally {
       flushSync(() => root.unmount());
     }

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import Landing from './Landing.jsx';
 import Workspace from '../workspace/Workspace.jsx';
 import CreateMenu from '../workspace/CreateMenu.jsx';
+import { isSignedIn } from '../account/account-api.js';
 import { readSignedInHint } from '../account/signed-in-hint.js';
 import { useAccountSession } from '../account/use-account-session.js';
 import { HOME_HINT_CLASS, HOME_VIEW, homeViewFor } from './home-view.js';
@@ -15,6 +16,7 @@ export default function HomeRoute() {
   // React now owns the page, so the head script's hide-the-landing mark has done its job.
   useEffect(() => { document.documentElement.classList.remove(HOME_HINT_CLASS); }, []);
   if (homeViewFor({ hinted, session }) === HOME_VIEW.LANDING) return <Landing />;
-  // The create menu reads the whole session: its status and the account's entitlements.
-  return <Workspace createAction={<CreateMenu session={session} />} />;
+  // The create menu reads the whole session: its status and the account's entitlements. A hinted page
+  // shows the workspace before the account answer, and creating waits for that answer.
+  return <Workspace canCreate={isSignedIn(session)} createAction={<CreateMenu session={session} />} />;
 }

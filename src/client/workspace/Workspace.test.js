@@ -40,7 +40,7 @@ const failed = (error) => ({ status: 'failed', rooms: [], error, busyCode: null 
 const LOADING = Object.freeze({ status: 'loading', rooms: [], error: null, busyCode: null });
 
 const render = ({ WorkspaceView }, state, props = {}) => renderToStaticMarkup(React.createElement(WorkspaceView, {
-  state, query: '', sort: 'recent', now: NOW, signInUrl: SIGN_IN_URL, creating: false, createError: null,
+  state, query: '', sort: 'recent', now: NOW, signInUrl: SIGN_IN_URL, canCreate: true, creating: false, createError: null,
   onQuery: noop, onSort: noop, onRetry: noop, onCreateFirst: noop, onAskRename: noop, onAskDelete: noop,
   menuCode: null, onToggleMenu: noop, ...props,
 }));
@@ -129,6 +129,14 @@ test('the empty-state create button is disabled while creating and a create fail
     assert.match(refused, /role="alert"/);
     assert.ok(!idle.includes('role="alert"'));
     assert.ok(refused.includes(t('workspace.empty.create')));
+  });
+});
+
+test('the empty-state create button stays disabled until the account is confirmed signed in', async () => {
+  await withChromeModule(MODULE, (mod, { setLang }) => {
+    setLang('en');
+    const waiting = render(mod, ready([]), { canCreate: false });
+    assert.match(waiting, /<button[^>]*disabled=""[^>]*>(?:(?!<\/button>).)*Create your first board/);
   });
 });
 

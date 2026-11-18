@@ -14,6 +14,9 @@ export const ACCOUNT_STATUS = Object.freeze({
   DISABLED: 'disabled', SIGNED_OUT: 'signed-out', SIGNED_IN: 'signed-in', UNAVAILABLE: 'unavailable',
 });
 
+/** Only the relay's answer proves an account: a pending or unavailable session may rest on a stale hint. */
+export const isSignedIn = (session) => session?.status === ACCOUNT_STATUS.SIGNED_IN;
+
 const isAccount = (body) => Boolean(body) && typeof body === 'object' && typeof body.name === 'string' && typeof body.plan === 'string';
 
 async function readAccountResponse(response) {

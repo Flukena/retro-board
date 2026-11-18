@@ -70,14 +70,15 @@ function SkeletonGrid() {
   );
 }
 
-function EmptyState({ creating, createError, onCreateFirst }) {
+function EmptyState({ canCreate, creating, createError, onCreateFirst }) {
   return (
     <section className="rb-workspace__empty" aria-labelledby={EMPTY_TITLE_ID}>
       <TemplateThumbnail zones={starterTemplate(STARTER_FORMAT.START_STOP_CONTINUE).zones} {...EMPTY_ART_BOX}
         className="rb-workspace__empty-art" />
       <h2 id={EMPTY_TITLE_ID} className="rb-workspace__empty-title">{t('workspace.empty.title')}</h2>
       <p className="rb-workspace__empty-body">{t('workspace.empty.body')}</p>
-      <Button variant={BUTTON_VARIANT.PRIMARY} className="rb-btn--pill rb-workspace__cta" disabled={creating} onClick={onCreateFirst}>
+      <Button variant={BUTTON_VARIANT.PRIMARY} className="rb-btn--pill rb-workspace__cta" disabled={creating || !canCreate}
+        onClick={onCreateFirst}>
         <Plus size={CTA_ICON_SIZE_PX} aria-hidden="true" />{t('workspace.empty.create')}
       </Button>
       <CreateBoardError error={createError} className="rb-workspace__create-error" />
@@ -118,14 +119,14 @@ function RoomGrid({ state, query, sort, now, menuCode, onToggleMenu, onAskRename
   );
 }
 
-function WorkspaceBody({ state, signInUrl, onRetry, creating, createError, onCreateFirst, ...listProps }) {
+function WorkspaceBody({ state, signInUrl, onRetry, canCreate, creating, createError, onCreateFirst, ...listProps }) {
   if (state.status === MY_BOARDS_STATUS.LOADING) return <SkeletonGrid />;
   if (state.status === MY_BOARDS_STATUS.FAILED) return <Notice error={state.error} signInUrl={signInUrl} onRetry={onRetry} />;
   return (
     <>
       {state.error && <Notice error={state.error} signInUrl={signInUrl} />}
       {state.rooms.length === 0
-        ? <EmptyState creating={creating} createError={createError} onCreateFirst={onCreateFirst} />
+        ? <EmptyState canCreate={canCreate} creating={creating} createError={createError} onCreateFirst={onCreateFirst} />
         : <><RoomGrid state={state} {...listProps} /><OldBoardsNote /></>}
     </>
   );
@@ -133,7 +134,7 @@ function WorkspaceBody({ state, signInUrl, onRetry, creating, createError, onCre
 
 /** Stateless page body, so each state renders on its own in tests. */
 export function WorkspaceView({
-  state, query, sort, now, signInUrl, creating, createError, onQuery, onSort, onRetry, onCreateFirst,
+  state, query, sort, now, signInUrl, canCreate, creating, createError, onQuery, onSort, onRetry, onCreateFirst,
   onAskRename, onAskDelete, menuCode, onToggleMenu,
 }) {
   const hasRooms = state.status === MY_BOARDS_STATUS.READY && state.rooms.length > 0;
@@ -148,9 +149,9 @@ export function WorkspaceView({
         </div>
         {hasRooms && <Toolbar query={query} sort={sort} onQuery={onQuery} onSort={onSort} />}
       </div>
-      <WorkspaceBody state={state} signInUrl={signInUrl} onRetry={onRetry} creating={creating} createError={createError}
-        onCreateFirst={onCreateFirst} query={query} sort={sort} now={now} menuCode={menuCode} onToggleMenu={onToggleMenu}
-        onAskRename={onAskRename} onAskDelete={onAskDelete} />
+      <WorkspaceBody state={state} signInUrl={signInUrl} onRetry={onRetry} canCreate={canCreate} creating={creating}
+        createError={createError} onCreateFirst={onCreateFirst} query={query} sort={sort} now={now} menuCode={menuCode}
+        onToggleMenu={onToggleMenu} onAskRename={onAskRename} onAskDelete={onAskDelete} />
     </main>
   );
 }
@@ -182,9 +183,9 @@ function RoomDialogs({ state, renaming, deleting, onRename, onRemove, onCancelRe
 
 /**
  * "My boards" as the signed-in home page: the creator's rooms as cards with search, sort, rename and delete.
- * `createAction` fills the masthead's action slot.
+ * `createAction` fills the masthead's action slot; `canCreate` says the relay has confirmed the account.
  */
-export default function Workspace({ createAction = null }) {
+export default function Workspace({ createAction = null, canCreate = false }) {
   useLang();
   const controller = useMemo(() => createMyBoardsController(), []);
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
@@ -206,7 +207,7 @@ export default function Workspace({ createAction = null }) {
     <div className="rb-workspace">
       <SiteMasthead homeHref={HOME_PATH} BrandIcon={Sparkles} titleKey="app.title" links={WORKSPACE_LINKS}
         action={createAction && <div className="rb-workspace__create">{createAction}</div>} />
-      <WorkspaceView state={state} query={query} sort={sort} now={Date.now()}
+      <WorkspaceView state={state} query={query} sort={sort} now={Date.now()} canCreate={canCreate}
         signInUrl={state.error === MY_BOARDS_ERROR.SIGN_IN ? signInHref() : ''}
         creating={creating} createError={createError} onQuery={setQuery} onSort={setSort}
         onRetry={() => void controller.load()} onCreateFirst={() => void createBoard({})}

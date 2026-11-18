@@ -86,6 +86,23 @@ test('a create error renders CreateBoardError copy inside the menu', async () =>
   });
 });
 
+// A create sent before the relay confirms the account would make a guest room, so a hinted page waits for the answer.
+test('the create trigger is disabled and the menu stays shut until the account is confirmed signed in', async () => {
+  const unconfirmed = [null, { status: 'unavailable' }, { status: 'signed-out' }, { status: 'disabled' }];
+  await forEachLang((module) => {
+    for (const session of unconfirmed) {
+      const html = render(module, { open: true, session });
+      const trigger = html.match(/<button\b[^>]*aria-haspopup="menu"[^>]*>/)?.[0] ?? '';
+      assert.match(trigger, /\sdisabled=""/, JSON.stringify(session));
+      assert.match(trigger, /aria-expanded="false"/, JSON.stringify(session));
+      assert.doesNotMatch(html, /role="menu"/, JSON.stringify(session));
+    }
+    const confirmed = render(module, { open: true, session: signedIn(false) });
+    assert.doesNotMatch(confirmed.match(/<button\b[^>]*aria-haspopup="menu"[^>]*>/)[0], /\sdisabled=""/);
+    assert.match(confirmed, /role="menu"/);
+  });
+});
+
 test('creating disables every way to start a board', async () => {
   await forEachLang((module) => {
     const html = render(module, { open: true, creating: true });
