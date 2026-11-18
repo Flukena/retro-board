@@ -1152,6 +1152,7 @@ export default Object.freeze({
   "workspace.card.options": "{title} のオプション",
   "workspace.card.renameLocked": "ロックされたボードの名前はボード内で変更してください。",
   "workspace.card.delete": "ボードを削除…",
+  "workspace.card.deletePoker": "プランニングポーカーのルームを削除…",
   "workspace.create": "新しいボード",
   "workspace.create.new": "空のボード",
   "workspace.create.newDesc": "空のボードです。名前は今でも後でも付けられます。",

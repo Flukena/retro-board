@@ -400,11 +400,13 @@ const byName = (named, locale) => [...named]
   .sort((left, right) => left.name.localeCompare(right.name, locale) || (left.code < right.code ? -1 : Number(left.code > right.code)))
   .map((room) => room.code);
 
-/** Deletes `code` from its card through the type-to-confirm step; screenshots the confirm step. */
-async function deleteFromCard(page, lang, { code, name, kind, shotName, report }) {
-  const menu = await openCardMenu(page, lang, code, name);
-  await menu.getByRole('menuitem', { name: appLabel(lang, 'workspace.card.delete'), exact: true }).click();
+/** Deletes `code` from its card through the type-to-confirm step; screenshots the confirm step, and the open menu if asked. */
+async function deleteFromCard(page, lang, { code, name, kind, shotName, menuShotName, report }) {
   const copy = DELETE_COPY_KEYS[kind];
+  const menu = await openCardMenu(page, lang, code, name);
+  if (menuShotName) await shot(page, menuShotName, report);
+  // The entry names the room kind, as its dialog does.
+  await menu.getByRole('menuitem', { name: appLabel(lang, copy.menu), exact: true }).click();
   const confirm = page.getByRole('dialog', { name: appLabel(lang, copy.title), exact: true });
   await confirm.getByText(appLabel(lang, copy.prompt, { code }), { exact: true }).waitFor();
   await confirm.getByRole('textbox').fill(code);
@@ -678,7 +680,10 @@ async function threeCardSteps({ a, report, baseUrl, state }) {
     // A's whole context reads Thai since step 8 stored it, so A's own room tab is Thai too.
     await aBoard.goto(state.pokerUrl);
     await joinPoker(aBoard, 'th', NAME.a);
-    await deleteFromCard(a, 'th', { code: rooms.poker, name: rooms.poker, kind: ROOM_KIND.POKER, shotName: 'delete-confirm-poker-th.png', report });
+    await deleteFromCard(a, 'th', {
+      code: rooms.poker, name: rooms.poker, kind: ROOM_KIND.POKER, shotName: 'delete-confirm-poker-th.png',
+      menuShotName: 'card-menu-poker-th.png', report,
+    });
     await expectDeletedScreen(bGuest, 'th', 'roomDeleted.title.poker');
     await expectDeletedScreen(aBoard, 'th', 'roomDeleted.title.poker');
     await shot(bGuest, 'deleted-poker-th.png', report);

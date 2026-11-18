@@ -1152,6 +1152,7 @@ export default Object.freeze({
   "workspace.card.options": "Opciones de {title}",
   "workspace.card.renameLocked": "Cambia el nombre de un tablero bloqueado desde dentro.",
   "workspace.card.delete": "Eliminar tablero…",
+  "workspace.card.deletePoker": "Eliminar sala de Planning Poker…",
   "workspace.create": "Nuevo tablero",
   "workspace.create.new": "Tablero en blanco",
   "workspace.create.newDesc": "Un tablero vacío. Ponle nombre ahora o después.",

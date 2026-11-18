@@ -1152,6 +1152,7 @@ export default Object.freeze({
   "workspace.card.options": "Opções de {title}",
   "workspace.card.renameLocked": "Renomeie um quadro bloqueado de dentro dele.",
   "workspace.card.delete": "Excluir quadro…",
+  "workspace.card.deletePoker": "Excluir sala de Planning Poker…",
   "workspace.create": "Novo quadro",
   "workspace.create.new": "Quadro em branco",
   "workspace.create.newDesc": "Um quadro vazio. Dê um nome agora ou depois.",

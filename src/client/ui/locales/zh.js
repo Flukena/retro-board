@@ -1152,6 +1152,7 @@ export default Object.freeze({
   "workspace.card.options": "{title} 的选项",
   "workspace.card.renameLocked": "已锁定的白板请在白板内重命名。",
   "workspace.card.delete": "删除白板…",
+  "workspace.card.deletePoker": "删除 Planning Poker 房间…",
   "workspace.create": "新建白板",
   "workspace.create.new": "空白白板",
   "workspace.create.newDesc": "一块空白板，可现在或稍后命名。",

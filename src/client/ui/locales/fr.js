@@ -1152,6 +1152,7 @@ export default Object.freeze({
   "workspace.card.options": "Options de {title}",
   "workspace.card.renameLocked": "Renommez un tableau verrouillé depuis l’intérieur.",
   "workspace.card.delete": "Supprimer le tableau…",
+  "workspace.card.deletePoker": "Supprimer la salle Planning Poker…",
   "workspace.create": "Nouveau tableau",
   "workspace.create.new": "Tableau vierge",
   "workspace.create.newDesc": "Un tableau vide. Nommez-le maintenant ou plus tard.",

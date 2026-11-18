@@ -1152,6 +1152,7 @@ export default Object.freeze({
   "workspace.card.options": "Opsi untuk {title}",
   "workspace.card.renameLocked": "Ganti nama papan terkunci dari dalam papan.",
   "workspace.card.delete": "Hapus papan…",
+  "workspace.card.deletePoker": "Hapus ruang Planning Poker…",
   "workspace.create": "Papan baru",
   "workspace.create.new": "Papan kosong",
   "workspace.create.newDesc": "Papan kosong. Beri nama sekarang atau nanti.",

@@ -7,6 +7,7 @@ import { useDismiss } from '../ui/useDismiss.js';
 import { Divider, MenuItem, MenuLink } from '../ui/UiPrimitives.jsx';
 import { DIVIDER_ORIENTATION, MENU_ITEM_VARIANT } from '../ui/ui-variants.js';
 import { TemplateThumbnail } from '../templates/TemplateThumbnail.jsx';
+import { DELETE_COPY_KEYS } from './room-delete-copy.js';
 import {
   CARD_ACTIVITY, CARD_THUMBNAIL, RENAME_ACTION, cardActivityOf, cardThumbnailOf, renameActionOf, roomNameOf,
 } from './workspace-model.js';
@@ -85,7 +86,7 @@ function CardMenu({ room, name, busy, onAskRename, onAskDelete }) {
       )}
       {renameLocked && <p id={hintId} className="rb-workspace-card__hint">{t('workspace.card.renameLocked')}</p>}
       <Divider orientation={DIVIDER_ORIENTATION.HORIZONTAL} />
-      <MenuButton Icon={Trash2} label={t('workspace.card.delete')} variant={MENU_ITEM_VARIANT.DANGER} disabled={busy}
+      <MenuButton Icon={Trash2} label={t(DELETE_COPY_KEYS[room.kind].menu)} variant={MENU_ITEM_VARIANT.DANGER} disabled={busy}
         onClick={() => onAskDelete(room)} />
     </div>
   );

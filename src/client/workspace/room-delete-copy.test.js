@@ -13,6 +13,17 @@ test('delete copy names a Planning Poker room for poker and a board otherwise', 
   }
 });
 
+test('the card menu names a Planning Poker room for poker and a board otherwise, as its dialog does', () => {
+  for (const lang of ['th', 'en']) {
+    setLang(lang);
+    const poker = t(DELETE_COPY_KEYS.poker.menu);
+    const board = t(DELETE_COPY_KEYS.board.menu);
+    assert.ok(poker.includes('Planning Poker'), `${lang}: ${poker}`);
+    assert.ok(!board.includes('Planning Poker'), `${lang}: ${board}`);
+    assert.notEqual(poker, DELETE_COPY_KEYS.poker.menu, `${lang}: the poker label has an entry`);
+  }
+});
+
 test('the type-to-confirm prompt names a room for poker and a board otherwise', () => {
   const WORDS = { th: { room: 'ห้อง', board: 'บอร์ด' }, en: { room: 'room', board: 'board' } };
   const CODE = 'Ab3dEf7h';

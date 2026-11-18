@@ -1152,6 +1152,7 @@ export default Object.freeze({
   "workspace.card.options": "Optionen für {title}",
   "workspace.card.renameLocked": "Ein gesperrtes Board benennst du im Board selbst um.",
   "workspace.card.delete": "Board löschen…",
+  "workspace.card.deletePoker": "Planning-Poker-Raum löschen…",
   "workspace.create": "Neues Board",
   "workspace.create.new": "Leeres Board",
   "workspace.create.newDesc": "Ein leeres Board. Benenne es jetzt oder später.",

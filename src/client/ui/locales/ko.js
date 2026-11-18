@@ -1152,6 +1152,7 @@ export default Object.freeze({
   "workspace.card.options": "{title} 옵션",
   "workspace.card.renameLocked": "잠긴 보드는 보드 안에서 이름을 변경하세요.",
   "workspace.card.delete": "보드 삭제…",
+  "workspace.card.deletePoker": "플래닝 포커 방 삭제…",
   "workspace.create": "새 보드",
   "workspace.create.new": "빈 보드",
   "workspace.create.newDesc": "빈 보드입니다. 지금 또는 나중에 이름을 정할 수 있어요.",

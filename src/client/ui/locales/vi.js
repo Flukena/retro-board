@@ -1152,6 +1152,7 @@ export default Object.freeze({
   "workspace.card.options": "Tùy chọn cho {title}",
   "workspace.card.renameLocked": "Hãy đổi tên bảng đã khóa từ bên trong bảng.",
   "workspace.card.delete": "Xóa bảng…",
+  "workspace.card.deletePoker": "Xóa phòng Planning Poker…",
   "workspace.create": "Bảng mới",
   "workspace.create.new": "Bảng trống",
   "workspace.create.newDesc": "Một bảng trống. Đặt tên bây giờ hoặc sau.",

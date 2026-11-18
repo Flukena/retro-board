@@ -212,7 +212,8 @@ test('the open card menu offers rename by rule', async () => {
 
       const poker = cardOf(open(POKER.code), POKER.code);
       assert.equal(menuItemLabelled(poker, rename), undefined, `${lang}: poker has no rename`);
-      assert.ok(menuItemLabelled(poker, t('workspace.card.delete')), lang);
+      assert.ok(menuItemLabelled(poker, t('workspace.card.deletePoker')), `${lang}: poker delete names the room`);
+      assert.equal(menuItemLabelled(poker, t('workspace.card.delete')), undefined, `${lang}: poker never says delete board`);
       assert.ok(menuItemLabelled(poker, t('myBoards.open')), lang);
     }
     setLang('en');
