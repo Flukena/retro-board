@@ -33,6 +33,10 @@ export function createAccountSessionStore({ fetchAccount, storage }) {
       listeners.add(listener);
       return () => { listeners.delete(listener); };
     },
+    /**
+     * The held session, or a fresh fetch when there is none or `force` is set.
+     * A load already in flight is returned as is, even with `force`.
+     */
     load({ force = false } = {}) {
       if (inflight) return inflight;
       if (session && !force) return Promise.resolve(session);

@@ -82,6 +82,49 @@ test('markSignedOut sets SIGNED_OUT, clears the hint and notifies subscribers', 
   assert.equal(notified, 1);
 });
 
+// A fetch the test settles by hand, so a step can run while the account request is still open.
+const deferredFetch = (count) => {
+  const answers = Array.from({ length: count }, () => {
+    const answer = {};
+    answer.promise = new Promise((resolve, reject) => { Object.assign(answer, { resolve, reject }); });
+    return answer;
+  });
+  const calls = { count: 0 };
+  const fetchAccount = () => {
+    calls.count += 1;
+    return answers[calls.count - 1].promise;
+  };
+  return { fetchAccount, calls, answers };
+};
+
+test('signing out while a load is in flight wins over its late signed-in answer', async () => {
+  const map = new Map();
+  const { fetchAccount, answers: [answer] } = deferredFetch(1);
+  const store = createAccountSessionStore({ fetchAccount, storage: mapStorage(map) });
+  let notified = 0;
+  store.subscribe(() => { notified += 1; });
+  const pending = store.load();
+  store.markSignedOut();
+  answer.resolve(SIGNED_IN);
+  await pending;
+  assert.deepEqual(store.getSnapshot(), { status: ACCOUNT_STATUS.SIGNED_OUT });
+  assert.equal(map.has('rb_signed_in'), false, 'the late answer does not bring the hint back');
+  assert.equal(notified, 1, 'only the sign-out notified');
+});
+
+test('a failed load is not kept: the next load fetches again', async () => {
+  const { fetchAccount, calls, answers: [failed, retried] } = deferredFetch(2);
+  const store = createAccountSessionStore({ fetchAccount, storage: mapStorage() });
+  const first = store.load();
+  failed.reject(new Error('network down'));
+  await assert.rejects(first, /network down/);
+  const second = store.load();
+  retried.resolve(SIGNED_IN);
+  assert.equal(await second, SIGNED_IN);
+  assert.equal(calls.count, 2);
+  assert.equal(store.getSnapshot(), SIGNED_IN);
+});
+
 test('storage that throws never breaks a load', async () => {
   const fail = () => { throw new Error('storage blocked'); };
   const storage = { getItem: fail, setItem: fail, removeItem: fail };
