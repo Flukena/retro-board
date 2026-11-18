@@ -16,6 +16,15 @@ test('reads zones from Y.Map items and ignores everything else', () => {
   assert.equal(JSON.stringify(preview).includes('private'), false);
 });
 
+test('reads only the zone fields it needs and never copies an item', () => {
+  const doc = new Y.Doc();
+  const items = doc.getMap('items');
+  items.set('zone-1', zoneMap({ x: 10, y: 20, w: 300, h: 200, color: 2, title: 'private' }));
+  items.set('sticky-1', new Y.Map(Object.entries({ type: 'sticky', x: 5, y: 5, w: 100, h: 100, text: 'secret' })));
+  for (const item of items.values()) item.toJSON = () => assert.fail('an item was copied whole');
+  assert.deepEqual(boardPreviewOfDoc(doc), { zones: [{ x: 10, y: 20, w: 300, h: 200, color: 2 }] });
+});
+
 test('a doc without zones gives null', () => {
   const doc = new Y.Doc();
   doc.getMap('items').set('sticky-1', new Y.Map(Object.entries({ type: 'sticky', x: 5, y: 5, w: 100, h: 100 })));
