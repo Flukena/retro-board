@@ -1,13 +1,12 @@
-import React, { useId, useMemo, useState, useSyncExternalStore } from 'react';
+import React, { useId, useState } from 'react';
 import { Lock } from 'lucide-react';
 import { useAccountSession } from '../account/use-account-session.js';
 import { Button } from '../ui/UiPrimitives.jsx';
 import { BUTTON_VARIANT } from '../ui/ui-variants.js';
 import { t } from '../ui/i18n.js';
 import { ROOM_PASSWORD_MIN_LENGTH } from '../../domain/room-lock-contract.js';
-import {
-  FORM_ERROR, canOfferLockedRoom, createLockedRoomController, validateLockedRoomForm,
-} from './create-locked-room-controller.js';
+import { FORM_ERROR, canOfferLockedRoom, validateLockedRoomForm } from './create-locked-room-controller.js';
+import { useLockedRoomForm } from './use-locked-room-form.js';
 
 const ICON_SIZE_PX = 16;
 const NOTICE_KEYS = Object.freeze(['roomLock.create.notice.votes', 'roomLock.create.notice.owner', 'roomLock.create.notice.recovery']);
@@ -43,8 +42,6 @@ export function CreateLockedRoomForm({ form, onChange, onSubmit, busy, disabled,
   );
 }
 
-const EMPTY_FORM = Object.freeze({ password: '', confirmation: '', acknowledged: false });
-
 /** The toggle and, when open, the form: what an entitled user sees. */
 export function CreateLockedRoomOption({ open, onToggle, formId, ...formProps }) {
   return (
@@ -61,18 +58,7 @@ export function CreateLockedRoomOption({ open, onToggle, formId, ...formProps })
 export default function CreateLockedRoom({ boardName, createBoard, creating }) {
   const account = useAccountSession();
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState(EMPTY_FORM);
-  const controller = useMemo(() => createLockedRoomController(), []);
-  const formId = useId();
-  const { busy, failed } = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
+  const locked = useLockedRoomForm({ name: boardName, createBoard });
   if (!canOfferLockedRoom(account)) return null;
-  const onSubmit = async (event) => {
-    event.preventDefault();
-    await controller.submit(form, { name: boardName, createBoard });
-    setForm(EMPTY_FORM);
-  };
-  return (
-    <CreateLockedRoomOption open={open} onToggle={() => setOpen(!open)} formId={formId} failed={failed} form={form}
-      busy={busy} disabled={creating} onChange={(patch) => setForm({ ...form, ...patch })} onSubmit={onSubmit} />
-  );
+  return <CreateLockedRoomOption open={open} onToggle={() => setOpen(!open)} disabled={creating} {...locked} />;
 }

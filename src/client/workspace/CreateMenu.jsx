@@ -1,20 +1,20 @@
-import React, { useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useRef, useState } from 'react';
 import { ChevronDown, LayoutTemplate, Lock, Plus, Spade } from 'lucide-react';
 import { t } from '../ui/i18n.js';
 import { useDismiss } from '../ui/useDismiss.js';
 import { Button, Divider, MenuItem } from '../ui/UiPrimitives.jsx';
 import { BUTTON_VARIANT, DIVIDER_ORIENTATION, buttonClass } from '../ui/ui-variants.js';
 import { DISPLAY_NAME_MAX_LENGTH } from '../../domain/security-boundaries.js';
-import { ROOM_KIND } from '../app/router.js';
 import { useCreateBoard } from '../app/use-create-board.js';
 import CreateBoardError from '../app/CreateBoardError.jsx';
 import FormatChips from '../app/FormatChips.jsx';
 import { CreateLockedRoomForm } from '../room-lock/CreateLockedRoom.jsx';
-import { canOfferLockedRoom, createLockedRoomController } from '../room-lock/create-locked-room-controller.js';
+import { canOfferLockedRoom } from '../room-lock/create-locked-room-controller.js';
+import { useLockedRoomForm } from '../room-lock/use-locked-room-form.js';
+import { createMenuActions } from './create-menu-actions.js';
 
 const TRIGGER_ICON_SIZE_PX = 18;
 const ITEM_ICON_SIZE_PX = 18;
-const EMPTY_LOCK_FORM = Object.freeze({ password: '', confirmation: '', acknowledged: false });
 
 /** Which inline panel the open menu shows under its items. */
 export const CREATE_PANEL = Object.freeze({ NONE: 'none', NEW: 'new', LOCKED: 'locked', TEMPLATE: 'template' });
@@ -57,20 +57,12 @@ function NewPanel({ creating, onCreate }) {
 
 function LockedPanel({ creating, onCreateLocked }) {
   const [name, setName] = useState('');
-  const [form, setForm] = useState(EMPTY_LOCK_FORM);
-  const controller = useMemo(() => createLockedRoomController(), []);
-  const formId = useId();
-  const { busy, failed } = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
-  const submit = async (event) => {
-    event.preventDefault();
-    await controller.submit(form, { name, createBoard: onCreateLocked });
-    setForm(EMPTY_LOCK_FORM);
-  };
+  const { formId, form, failed, busy, onChange, onSubmit } = useLockedRoomForm({ name, createBoard: onCreateLocked });
   return (
     <div className="rb-workspace-create__panel">
       <NameField value={name} onChange={setName} />
       <CreateLockedRoomForm formId={formId} form={form} failed={failed} busy={busy} disabled={creating}
-        onChange={(patch) => setForm({ ...form, ...patch })} onSubmit={submit} />
+        onChange={onChange} onSubmit={onSubmit} />
     </div>
   );
 }
@@ -124,6 +116,7 @@ export function CreateMenuView({
 /** The masthead's create control for a signed-in account; the room itself is made by the relay. */
 export default function CreateMenu({ account }) {
   const { creating, createError, createBoard } = useCreateBoard();
+  const actions = createMenuActions(createBoard);
   const [open, setOpen] = useState(false);
   const [panel, setPanel] = useState(CREATE_PANEL.NONE);
   const rootRef = useRef(null);
@@ -142,8 +135,8 @@ export default function CreateMenu({ account }) {
     <div className="rb-workspace-create" ref={rootRef}>
       <CreateMenuView open={open} panel={panel} account={account} creating={creating} createError={createError}
         triggerRef={triggerRef} onToggle={toggle} onPanel={togglePanel}
-        onCreate={(name) => void createBoard({ name })} onStartFormat={(starter) => void createBoard({ starter })}
-        onCreatePoker={() => void createBoard({ kind: ROOM_KIND.POKER })} onCreateLocked={createBoard} />
+        onCreate={actions.blank} onStartFormat={actions.template} onCreatePoker={actions.poker}
+        onCreateLocked={actions.locked} />
     </div>
   );
 }

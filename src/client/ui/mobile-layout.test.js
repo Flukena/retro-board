@@ -114,10 +114,25 @@ test('landing preserves safe-area viewport coverage and uses usable mobile contr
 
 test('workspace search and sort fields use 16px text on touch screens, so iOS never zooms on focus', () => {
   const touch = mediaBlocks(readSource('../workspace/workspace.css'), MOBILE_LAYOUT_QUERY);
-  assert.match(touch, /\.rb-workspace__field\s*\{[^}]*font-size:\s*var\(--workspace-touch-field-font-size\)/);
+  assert.match(touch, /\.rb-workspace__field[^{]*\{[^}]*font-size:\s*var\(--workspace-touch-field-font-size\)/);
   for (const mode of [TOKENS.light, TOKENS.dark]) {
     assert.ok(Number.parseFloat(mode['--workspace-touch-field-font-size']) >= IOS_NO_ZOOM_FONT_PX);
   }
+});
+
+test('workspace create trigger sits beside the account on narrow windows and its menu stays inside the gutters on phones', () => {
+  const css = readSource('../workspace/workspace.css');
+  const narrow = mediaBlocks(css, '(max-width: 900px)');
+  assert.match(narrow, /\.rb-workspace__create\s*\{[^}]*margin-left:\s*auto/);
+  assert.match(narrow, /\.rb-workspace \.rb-landing__corner\s*\{[^}]*margin-left:\s*0/);
+  const phone = mediaBlocks(css, '(max-width: 599px)');
+  assert.match(phone, /\.rb-workspace-create\s*\{[^}]*position:\s*static/);
+  assert.match(phone, /\.rb-workspace-create__menu\s*\{[^}]*inset-inline:\s*var\(--workspace-gutter\)[^}]*width:\s*auto/);
+});
+
+test('create-menu password and name fields use 16px text on touch screens', () => {
+  const touch = mediaBlocks(readSource('../workspace/workspace.css'), MOBILE_LAYOUT_QUERY);
+  assert.match(touch, /\.rb-workspace-create \.rb-landing__input\s*\{[^}]*font-size:\s*var\(--workspace-touch-field-font-size\)/);
 });
 
 test('mobile connection status leaves board controls tappable and retry reachable', () => {

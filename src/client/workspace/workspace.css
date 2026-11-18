@@ -345,7 +345,14 @@
     min-width: var(--workspace-touch-target);
     min-height: var(--workspace-touch-target);
   }
-  .rb-workspace__field { font-size: var(--workspace-touch-field-font-size); }
+  .rb-workspace__field,
+  .rb-workspace-create .rb-landing__input { font-size: var(--workspace-touch-field-font-size); }
+}
+/* Narrow windows hide the nav and push the corner to the right: the create trigger takes that push
+   so it sits next to the account button. */
+@media (max-width: 900px) {
+  .rb-workspace__create { margin-left: auto; }
+  .rb-workspace .rb-landing__corner { margin-left: 0; }
 }
 /* Phones keep the logo, the account, the toggles and the create button on the first row. */
 @media (max-width: 599px) {
@@ -354,6 +361,9 @@
   .rb-workspace .rb-landing__wordmark,
   .rb-workspace .rb-account__plan,
   .rb-workspace__sort-label { display: none; }
+  /* The open create menu spans the masthead between the page gutters instead of hanging off the trigger. */
+  .rb-workspace-create { position: static; }
+  .rb-workspace-create__menu { inset-inline: var(--workspace-gutter); width: auto; max-width: none; }
   /* The create trigger stays on the first row as an icon-only button beside the account. */
   .rb-workspace-create__trigger { padding-inline: var(--space-3); }
   .rb-workspace-create__trigger-label,
