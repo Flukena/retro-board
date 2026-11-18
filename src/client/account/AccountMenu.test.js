@@ -55,14 +55,42 @@ test('AccountMenu signed in shows name and plan, and lists the actions only when
       const closed = render(mod, { session });
       assert.ok(closed.includes('Ada') && closed.includes(t('account.plan.pro')));
       assert.ok(!closed.includes(t('account.signOut')));
-      const open = render(mod, { session, open: true });
+      const open = render(mod, { session, open: true, myBoardsHref: '/' });
       for (const key of ['account.myBoards', 'account.signOut', 'account.signOutAll', 'account.delete']) assert.ok(open.includes(t(key)), key);
       assert.ok(open.includes('ada@example.com'));
       assert.ok(!open.includes(t('account.deleteConfirm')));
       assert.ok(render(mod, { session, confirmingDelete: true }).includes(t('account.deleteConfirm')));
-      assert.ok(!closed.includes(t('myBoards.loading')));
-      const boards = render(mod, { session, showingBoards: true });
-      assert.ok(boards.includes(t('myBoards.loading')) && boards.includes('role="dialog"'));
+      // My boards is a page now, not a dialog over the current one.
+      assert.ok(!open.includes('role="dialog"'));
+    }
+  });
+});
+
+const renderSignedIn = ({ SignedInMenu }, props) => renderToStaticMarkup(React.createElement(SignedInMenu, {
+  account: ACCOUNT, open: true, onToggle: noop, onSignOut: noop, onSignOutAll: noop, onAskDelete: noop, ...props,
+}));
+
+test('SignedInMenu links My boards to the home page', async () => {
+  await withChromeModule('/src/client/account/AccountMenu.jsx', (mod, { t, setLang }) => {
+    for (const lang of ['th', 'en']) {
+      setLang(lang);
+      const html = renderSignedIn(mod, { myBoardsHref: '/' });
+      const link = html.match(/<a\b[^>]*>([\s\S]*?)<\/a>/);
+      assert.ok(link, `${lang}: a link, so it navigates like one`);
+      assert.match(link[0], /\bhref="\/"/, lang);
+      assert.ok(link[1].includes(t('account.myBoards')), lang);
+    }
+  });
+});
+
+test('SignedInMenu has no My boards item where the page already is My boards', async () => {
+  await withChromeModule('/src/client/account/AccountMenu.jsx', (mod, { t, setLang }) => {
+    for (const lang of ['th', 'en']) {
+      setLang(lang);
+      const html = renderSignedIn(mod, { myBoardsHref: null });
+      assert.ok(!html.includes(t('account.myBoards')), lang);
+      assert.doesNotMatch(html, /<a\b/, lang);
+      for (const key of ['account.signOut', 'account.signOutAll', 'account.delete']) assert.ok(html.includes(t(key)), `${lang}: ${key}`);
     }
   });
 });

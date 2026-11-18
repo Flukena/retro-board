@@ -1,0 +1,14 @@
+/* Signed-in home: public/home-hint.js marks <html> on a hinted visit, so the prerendered guest
+   landing stays hidden until React shows the workspace. If the app never starts (the bundle failed),
+   the landing is revealed after the delay rather than leaving a blank page. The delay is declared
+   here too, so the reveal never depends on theme.js (part of that bundle) having run. */
+:root { --home-hint-reveal-delay: 3s; }
+
+.rb-home-hinted .rb-landing__page {
+  visibility: hidden;
+  animation: rb-home-hint-reveal 0s var(--home-hint-reveal-delay) forwards;
+}
+
+@keyframes rb-home-hint-reveal {
+  to { visibility: visible; }
+}

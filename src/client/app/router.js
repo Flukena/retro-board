@@ -53,6 +53,11 @@ function contentRoute(path) {
 
 const LANDING_PATHS = new Set(['/', '/index.html']);
 
+/** Whether a URL path is the home page, in any language ('/', '/index.html', '/th', ...). */
+export function isLandingPath(pathname) {
+  return LANDING_PATHS.has(splitLangPath(pathname).path);
+}
+
 function templateSlugForPath(path) {
   if (!path.startsWith(TEMPLATE_PATH_PREFIX)) return null;
   const slug = path.slice(TEMPLATE_PATH_PREFIX.length).replace(/\/$/, '');

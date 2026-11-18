@@ -42,6 +42,16 @@ export function MenuItem({ icon, label, variant = MENU_ITEM_VARIANT.DEFAULT, che
   );
 }
 
+/** A navigation link that looks like a MenuItem of the same variant. */
+export function MenuLink({ icon, label, variant = MENU_ITEM_VARIANT.DEFAULT, ...rest }) {
+  return (
+    <a className={menuItemClass(variant)} {...rest}>
+      {icon != null && <span className="rb-menu-item__icon">{icon}</span>}
+      <span className="rb-menu-item__label">{label}</span>
+    </a>
+  );
+}
+
 export function Divider({ orientation }) {
   return <div aria-hidden className={dividerClass(orientation)} />;
 }

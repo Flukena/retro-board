@@ -3,8 +3,8 @@ import { ArrowUpRight, Lock, MoreHorizontal, Pencil, Trash2 } from 'lucide-react
 import { t } from '../ui/i18n.js';
 import { formatRelativeTime } from '../ui/relative-time.js';
 import { useDismiss } from '../ui/useDismiss.js';
-import { Divider, MenuItem } from '../ui/UiPrimitives.jsx';
-import { DIVIDER_ORIENTATION, MENU_ITEM_VARIANT, menuItemClass } from '../ui/ui-variants.js';
+import { Divider, MenuItem, MenuLink } from '../ui/UiPrimitives.jsx';
+import { DIVIDER_ORIENTATION, MENU_ITEM_VARIANT } from '../ui/ui-variants.js';
 import { TemplateThumbnail } from '../templates/TemplateThumbnail.jsx';
 import {
   CARD_ACTIVITY, CARD_THUMBNAIL, RENAME_ACTION, cardActivityOf, cardThumbnailOf, renameActionOf, roomNameOf,
@@ -63,15 +63,6 @@ function CardActivity({ room, now }) {
   return <p className="rb-workspace-card__meta">{t(ACTIVITY_KEYS[activity.kind], { time: formatRelativeTime(activity.at, now) })}</p>;
 }
 
-function MenuItemContent({ Icon, label }) {
-  return (
-    <>
-      <span className="rb-menu-item__icon"><Icon size={MENU_ICON_SIZE_PX} aria-hidden="true" /></span>
-      <span className="rb-menu-item__label">{label}</span>
-    </>
-  );
-}
-
 function MenuButton({ Icon, ...rest }) {
   return <MenuItem role="menuitem" icon={<Icon size={MENU_ICON_SIZE_PX} aria-hidden="true" />} {...rest} />;
 }
@@ -83,9 +74,8 @@ function CardMenu({ room, name, busy, onAskRename, onAskDelete }) {
   return (
     <div className="rb-surface rb-workspace-card__menu" role="menu" aria-label={t('workspace.card.options', { title: name })}>
       {/* A full page load: the link carries the room key in its fragment. */}
-      <a role="menuitem" className={menuItemClass(MENU_ITEM_VARIANT.DEFAULT)} href={room.link}>
-        <MenuItemContent Icon={ArrowUpRight} label={t('myBoards.open')} />
-      </a>
+      <MenuLink role="menuitem" href={room.link} icon={<ArrowUpRight size={MENU_ICON_SIZE_PX} aria-hidden="true" />}
+        label={t('myBoards.open')} />
       {/* A locked rename stays focusable (aria-disabled, no handler) so its hint is read out. */}
       {rename !== RENAME_ACTION.HIDDEN && (
         <MenuButton Icon={Pencil} label={t('myBoards.rename')} disabled={busy}

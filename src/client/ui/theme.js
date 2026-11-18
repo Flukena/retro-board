@@ -305,6 +305,8 @@ const MODE_INDEPENDENT_TOKENS = Object.freeze({
   '--workspace-empty-title-size': '22px',
   '--workspace-empty-body-width': '460px',
   '--workspace-empty-art-dash': '6 4',
+  // home.css repeats this on :root: its fallback must work when this module never loads.
+  '--home-hint-reveal-delay': '3s',
 
 
   '--sticky-ink': '#2b2118',

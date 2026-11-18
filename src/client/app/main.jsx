@@ -5,7 +5,7 @@ import '../ui/native-selection.css';
 import '../ui/theme.js'; // apply CSS variables on <html> before first paint
 import RetroBoard from '../../../RetroBoard.jsx';
 import { establishPublicRoomSession } from '../public-wall/public-room-session.js';
-import Landing from './Landing.jsx';
+import HomeRoute from './HomeRoute.jsx';
 import LegalPage from '../legal/LegalPage.jsx';
 import TemplatePage from '../templates/TemplatePage.jsx';
 import NotFoundPage from './NotFoundPage.jsx';
@@ -100,7 +100,7 @@ const ROUTE_VIEWS = {
   template: () => <TemplatePage slug={route.slug} />,
   notFound: () => <NotFoundPage />,
 };
-const renderRoute = ROUTE_VIEWS[route.kind] ?? (() => <Landing />);
+const renderRoute = ROUTE_VIEWS[route.kind] ?? (() => <HomeRoute />);
 
 // Subscribes once for every page, so switching language re-renders the whole view,
 // not only the component that owns the language button.

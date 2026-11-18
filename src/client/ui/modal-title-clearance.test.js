@@ -36,10 +36,4 @@ test('room management dialogs keep their titles clear of the close button', asyn
       initialTitle: 'Sprint', onCancel: noop, onSave: noop,
     })), 'BoardTitleDialog');
   });
-  await withChromeModule('/src/client/account/MyBoardsDialog.jsx', ({ MyBoardsView }) => {
-    assertTitleClearsClose(renderToStaticMarkup(React.createElement(MyBoardsView, {
-      state: { status: 'ready', rooms: [], error: null, busyCode: null }, now: 0, signInUrl: '',
-      onClose: noop, onRetry: noop, onAskRename: noop, onAskDelete: noop,
-    })), 'MyBoards');
-  });
 });
