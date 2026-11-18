@@ -16,6 +16,7 @@ const HEAD_SCRIPT_PATH = 'public/home-hint.js';
 const HEAD_SCRIPT = readRepoFile(HEAD_SCRIPT_PATH);
 const HOME_CSS = readFileSync(new URL('./home.css', import.meta.url), 'utf8');
 const REVEAL_DELAY_TOKEN = '--home-hint-reveal-delay';
+const WORKSPACE_GROUND_TOKEN = '--workspace-ground';
 
 const session = (status) => ({ status });
 
@@ -145,6 +146,15 @@ test('home.css hides the landing only for hinted pages and reveals it after the 
   assert.match(rule[1], /forwards/, 'the landing stays revealed once the delay passes');
   // Only the guest landing hides: the workspace root and guide pages are untouched.
   assert.equal(css.match(/visibility: hidden/g).length, 1);
+});
+
+test('a hinted page paints the workspace ground while the landing is hidden, so it never steps from white to beige', () => {
+  const css = HOME_CSS.replaceAll(/\s+/g, ' ');
+  const rule = css.match(/\.rb-home-hinted body \{([^}]*)\}/);
+  assert.ok(rule, 'one rule for the hinted page body');
+  assert.match(rule[1], new RegExp(`background: var\\(${WORKSPACE_GROUND_TOKEN}\\);`));
+  // The prerendered pages carry every theme token inline, so the ground resolves before theme.js runs.
+  for (const [mode, tokens] of Object.entries(TOKENS)) assert.ok(tokens[WORKSPACE_GROUND_TOKEN], mode);
 });
 
 test('the CSS fallback delay matches the theme token', () => {
