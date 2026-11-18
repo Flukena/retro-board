@@ -4,9 +4,13 @@ import {
 } from './countdown.js';
 
 // The card-writing countdown an admin runs for the whole board. The shared value is `{ id, writtenAt, endsAt }`:
-// `endsAt - writtenAt` is the time left when it was written, on the writer's own clock, so a page that receives it
-// live counts that run from its own receipt and machines' clock skew cancels out. A page that only finds it in the
-// initial sync (late join, reopened board) has no receipt to count from and falls back to its own clock.
+// `endsAt - writtenAt` is the time left when it was written, on the writer's own clock.
+// Clock rule (no relay clock):
+// - A page that receives the value live counts that run from its own receipt, so clock skew between machines cancels
+//   out, whoever wrote it: the admin who started it, or another admin whose +1 republishes the run on its own clock.
+// - A page that only finds the value in the initial sync (late join, reopened board) has no receipt to count from and
+//   counts to `endsAt` on its own clock, so it is off by its clock's error against the writer's. The next live write
+//   puts it right; a +1 it writes meanwhile carries its error to every page until then.
 
 export const WRITING_TIMER_PRESET_MINUTES = Object.freeze([3, 5, 10]);
 export const WRITING_TIMER_EXTEND_MINUTES = 1;

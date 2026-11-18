@@ -60,15 +60,32 @@ test('+1 and stop reach every page', (t) => {
   assert.equal(admin.store.view().phase, WRITING_TIMER_PHASE.IDLE);
 });
 
-test('a late joiner counts what it finds in the initial sync against its own clock', (t) => {
+test('a second admin whose clock is 11 s behind adds +1, and every page, the starter included, shows the same', (t) => {
+  const starter = page(t);
+  const second = page(t, { skewMs: -BEHIND_MS });
+  const reader = page(t, { skewMs: AHEAD_MS });
+  const all = [starter, second, reader];
+  link(...all);
+  starter.store.start(3);
+  advance(all, MINUTE_MS);
+  assert.equal(second.store.extend(), true);
+  for (const one of all) assert.equal(one.store.view().label, '03:00', '2:00 left + 1:00');
+  advance(all, 30 * SECOND_MS);
+  for (const one of all) assert.equal(one.store.view().label, '02:30');
+});
+
+test('a late joiner counts to the deadline on its own clock, off by its clock error until the next live write', (t) => {
   const admin = page(t);
   admin.store.start(3);
   advance([admin], 30 * SECOND_MS);
   const joiner = page(t, { live: false });
-  joiner.clock.now = admin.clock.now;
+  joiner.clock.now = admin.clock.now - BEHIND_MS;
   Y.applyUpdate(joiner.doc, Y.encodeStateAsUpdate(admin.doc), RELAY);
   joiner.sync.live = true;
-  assert.equal(joiner.store.view().label, '02:30');
+  assert.equal(joiner.store.view().label, '02:41', '2:30 left, plus the 11 s its clock is behind');
+  link(admin, joiner);
+  assert.equal(admin.store.extend(), true);
+  assert.equal(joiner.store.view().label, '03:30', 'a live +1 is counted from its receipt');
 });
 
 test('an update that arrives while a page resyncs after a reconnect is not counted as live', (t) => {

@@ -2,7 +2,9 @@ import { WritingTimerClock, decodeWritingTimer, startedWritingTimer } from '../.
 
 // Its own root map, outside the board snapshot and the UndoManager's tracked types: starting, extending or stopping
 // the timer never reaches anyone's undo history, exports or imports, and travels (encrypted in locked rooms) with the
-// rest of the room document.
+// rest of the room document. A backup restores the board, not a session in progress: like the vote timer session,
+// presenter and meeting phase, and an open mood round, which import ends or closes, a running countdown is wall-clock
+// state that is stale or over by the time a backup is restored, so leaving it out loses no board information.
 export const WRITING_TIMER_MAP = 'writingTimer';
 const CURRENT_KEY = 'current';
 const WRITING_TIMER_ORIGIN = 'writing-timer';

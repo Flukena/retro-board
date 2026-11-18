@@ -283,6 +283,44 @@ test('retro boards, plain or locked, share a card-writing timer that never enter
   }
 });
 
+test('a board exported while the card-writing timer runs imports cleanly, round-trips exactly and starts no timer', async () => {
+  const importedAt = Date.now();
+  const transferModule = (server) => server.ssrLoadModule('/src/client/transfer/board-transfer.js');
+  const boardOf = async (storage) => (await storage.get('boardState', true)).value;
+  // The decoded manifest's data; the archive reader also hands back an image-reading function.
+  const manifestData = (manifest) => Object.fromEntries(
+    Object.entries(manifest).filter(([, value]) => typeof value !== 'function'),
+  );
+  /** The export the UI downloads, read back through the import decoder, as the import dialog does. */
+  const exportAndRead = async (storage, transfer) => {
+    const artifact = await transfer.createBoardExport(await boardOf(storage), { boardCode: 'TEST', userId: 'alice' });
+    const file = new File([artifact.blob], artifact.fileName, { type: artifact.mimeType });
+    return { file, manifest: manifestData(await transfer.readBoardImport(file, importedAt)) };
+  };
+  let exported;
+  await withStorage(async (browser, _cache, server) => {
+    const { storage } = browser;
+    assert.equal(storage.addItem(VALID_ITEM), true);
+    const before = await boardOf(storage);
+    assert.equal(storage.writingTimer.start(3), true);
+    assert.deepEqual(await boardOf(storage), before, 'the running timer is not part of the board snapshot');
+    exported = await exportAndRead(storage, await transferModule(server));
+  });
+  await withStorage(async (browser, _cache, server) => {
+    const { storage } = browser;
+    const transfer = await transferModule(server);
+    const manifest = await transfer.readBoardImport(exported.file, importedAt);
+    const board = await transfer.prepareBoardImport(manifest, await boardOf(storage));
+    assert.equal(storage.importBundle(
+      board, manifest.voteEntries, manifest.commentEntries, manifest.customTemplates, manifest.moodEntries,
+    ), true);
+    assert.equal(exported.manifest.items.length, 1);
+    assert.deepEqual((await boardOf(storage)).items.map((item) => ({ ...item })), exported.manifest.items);
+    assert.equal(storage.writingTimer.view().phase, 'idle', 'a restored board starts no countdown');
+    assert.deepEqual((await exportAndRead(storage, transfer)).manifest, exported.manifest, 'export -> import -> export is exact');
+  });
+});
+
 test('the Public Wall gets no card-writing timer', async () => {
   await withStorage(async (browser) => {
     assert.equal(browser.storage.writingTimer, undefined);
