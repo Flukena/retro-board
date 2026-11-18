@@ -894,6 +894,7 @@ export default Object.freeze({
   "writingTimer.open": "카드 작성 타이머",
   "writingTimer.minutes": "{n}분",
   "writingTimer.custom": "직접 입력 (분)",
+  "writingTimer.unit": "분",
   "writingTimer.start": "시작",
   "writingTimer.stop": "타이머 중지",
   "writingTimer.timesUp": "시간 종료",

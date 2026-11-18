@@ -151,3 +151,25 @@ test('a late joiner shows nothing, and no chime, for a deadline long past', () =
   assert.equal(lateJoiner.view(ADMIN_NOW_MS).phase, WRITING_TIMER_PHASE.IDLE);
   assert.equal(lateJoiner.takeExpiry(ADMIN_NOW_MS), false);
 });
+
+test('a +1 after the page already expired runs the timer again and reports the new end once', () => {
+  const page = pageWith(started(), ADMIN_NOW_MS, LIVE);
+  const end = ADMIN_NOW_MS + THREE_MINUTES_MS;
+  assert.equal(page.takeExpiry(end), true);
+  const extended = writingTimer(ID, end + SECOND_MS, end + SECOND_MS + MINUTE_MS);
+  page.apply(extended, { live: LIVE, now: end + SECOND_MS });
+  assert.equal(page.view(end + SECOND_MS).phase, WRITING_TIMER_PHASE.RUNNING);
+  assert.equal(page.takeExpiry(end + SECOND_MS), false, 'not before the new end');
+  assert.equal(page.takeExpiry(end + SECOND_MS + MINUTE_MS), true);
+  assert.equal(page.takeExpiry(end + SECOND_MS + MINUTE_MS + SECOND_MS), false, 'only once');
+});
+
+test("a late-joining admin's +1 moves every page by that admin's clock error (ruling 1)", () => {
+  const realNow = ADMIN_NOW_MS + 10 * SECOND_MS;
+  const lateAdminNow = realNow + AHEAD_MS;
+  const lateAdmin = pageWith(started(), lateAdminNow, SYNCED_LATER);
+  const extended = lateAdmin.extended(lateAdminNow);
+  const other = pageWith(extended, realNow, LIVE);
+  const trueLeftMs = ADMIN_NOW_MS + THREE_MINUTES_MS - realNow + MINUTE_MS;
+  assert.equal(other.view(realNow).remainingMs, trueLeftMs - AHEAD_MS);
+});

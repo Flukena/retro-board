@@ -894,6 +894,7 @@ export default Object.freeze({
   "writingTimer.open": "カード記入タイマー",
   "writingTimer.minutes": "{n}分",
   "writingTimer.custom": "カスタム（分）",
+  "writingTimer.unit": "分",
   "writingTimer.start": "開始",
   "writingTimer.stop": "タイマーを止める",
   "writingTimer.timesUp": "時間切れ",

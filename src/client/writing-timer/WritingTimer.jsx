@@ -16,12 +16,16 @@ import './writing-timer.css';
 
 // The storage bridge opens the store for retro boards only, so the Public Wall (and Poker) render nothing here.
 const boardWritingTimer = () => (typeof window === 'undefined' ? null : window.storage?.writingTimer ?? null);
+const ESCAPE_KEY = 'Escape';
+const TOGGLE_SELECTOR = '.rb-writing-timer-start__toggle';
+const SETUP_FOCUS_SELECTOR = '.rb-writing-timer-setup button';
 const DEFAULT_CUSTOM_MINUTES = WRITING_TIMER_PRESET_MINUTES[0];
 
 /** What this page shows now; re-reads on every shared change and whenever the shown second changes. */
 function useWritingTimerView(store) {
   const [view, setView] = useState(() => store.view());
   const chime = useMemo(() => createChime(), []);
+  useEffect(() => () => chime.close(), [chime]);
   useEffect(() => watchWritingTimer(store, setView), [store]);
   useEffect(() => {
     const delayMs = writingTimerTickMs(view);
@@ -56,6 +60,7 @@ export function WritingTimerSetup({ minutes, onMinutes, onStart }) {
           value={minutes}
           onChange={(event) => onMinutes(clampTimerMinutes(event.target.value))}
         />
+        <span className="rb-writing-timer-setup__unit">{t('writingTimer.unit')}</span>
         <Button variant={BUTTON_VARIANT.PRIMARY} onClick={() => onStart(minutes)}>{t('writingTimer.start')}</Button>
       </div>
     </Surface>
@@ -68,12 +73,20 @@ function TimerStarter({ store }) {
   const rootRef = useRef(null);
   const close = useCallback(() => setOpen(false), []);
   useDismiss(open, rootRef, close);
+  useEffect(() => {
+    if (open) rootRef.current?.querySelector(SETUP_FOCUS_SELECTOR)?.focus();
+  }, [open]);
+  const closeToToggle = (event) => {
+    if (!open || event.key !== ESCAPE_KEY) return;
+    setOpen(false);
+    rootRef.current?.querySelector(TOGGLE_SELECTOR)?.focus();
+  };
   const start = (chosen) => {
     store.start(chosen);
     setOpen(false);
   };
   return (
-    <div ref={rootRef} className="rb-writing-timer-start">
+    <div ref={rootRef} className="rb-writing-timer-start" onKeyDown={closeToToggle}>
       {open && <WritingTimerSetup minutes={minutes} onMinutes={setMinutes} onStart={start} />}
       <IconButton
         className="rb-writing-timer-start__toggle"
@@ -113,8 +126,26 @@ export function RunningTimer({ view, store, isAdmin }) {
   );
 }
 
+/** A polite live region, always mounted so a screen reader hears "Time's up" once and no tick before it. */
+export function EndAnnouncer({ view }) {
+  return (
+    <span className="rb-writing-timer__announcer" role="status" aria-live="polite">
+      {view.phase === WRITING_TIMER_PHASE.TIMES_UP ? t('writingTimer.timesUp') : ''}
+    </span>
+  );
+}
+
 function SharedTimer({ store, isAdmin }) {
   const view = useWritingTimerView(store);
+  return (
+    <>
+      <EndAnnouncer view={view} />
+      <TimerBody view={view} store={store} isAdmin={isAdmin} />
+    </>
+  );
+}
+
+function TimerBody({ view, store, isAdmin }) {
   if (view.phase === WRITING_TIMER_PHASE.IDLE) return isAdmin ? <TimerStarter store={store} /> : null;
   const running = view.phase === WRITING_TIMER_PHASE.RUNNING;
   return (

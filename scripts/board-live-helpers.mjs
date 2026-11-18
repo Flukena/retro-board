@@ -289,6 +289,30 @@ export async function lockedBoard(browser, baseUrl, report, password) {
   return { a, b };
 }
 
+export const LIVE_MODE = Object.freeze({ PLAIN: 'plain', LOCKED: 'locked' });
+
+/** The check's mode from argv[4] (`plain` or `locked`). */
+export function liveMode(argv = process.argv) {
+  const mode = argv[4] ?? LIVE_MODE.PLAIN;
+  if (!Object.values(LIVE_MODE).includes(mode)) throw new Error(`mode must be ${Object.values(LIVE_MODE).join(' or ')}`);
+  return mode;
+}
+
+export const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
+
+/** The last step of a check: no page errors were recorded in `mode`. */
+export async function errorsStep({ report }, mode) {
+  await step(report, `${mode}: no page errors`, async () => {
+    if (report.pageErrors.length) throw new Error(JSON.stringify(report.pageErrors));
+    return { consoleErrors: report.consoleErrors.length };
+  });
+}
+
+/** The `runLiveCheck` options for `mode`: a locked board for `locked`, the default shared board otherwise. */
+export const liveSetupFor = (mode, password) => (mode === LIVE_MODE.LOCKED
+  ? { setup: (browser, baseUrl, report) => lockedBoard(browser, baseUrl, report, password) }
+  : {});
+
 /**
  * CLI entry: `<script> <base-url> <output-dir>`; `scenario({a, b, report, browser, baseUrl})` runs the steps.
  * `setup(browser, baseUrl, report)` prepares the participants; by default A creates a board and B joins it.

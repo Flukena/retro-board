@@ -36,5 +36,11 @@ export function createChime({ AudioContextClass = browserAudioContext(), hasUser
       context ??= new AudioContextClass();
       context.resume().then(playTones, staySilent);
     },
+    /** Releases the audio context; a later `play` makes a new one. */
+    close() {
+      const closing = context;
+      context = null;
+      closing?.close?.().catch(staySilent);
+    },
   };
 }

@@ -894,6 +894,7 @@ export default Object.freeze({
   "writingTimer.open": "Timer zum Kartenschreiben",
   "writingTimer.minutes": "{n} Min.",
   "writingTimer.custom": "Eigene Dauer (Minuten)",
+  "writingTimer.unit": "Min.",
   "writingTimer.start": "Starten",
   "writingTimer.stop": "Timer stoppen",
   "writingTimer.timesUp": "Zeit ist um",

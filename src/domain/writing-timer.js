@@ -62,6 +62,8 @@ export class WritingTimerClock {
     // Never later than the whole run from now, so a far-future stamp cannot stretch a late joiner's countdown.
     this.#deadline = live ? now + runMs : Math.min(timer.endsAt, now + runMs);
     this.#seenRunning = this.#deadline > now;
+    // A write that moves the end ahead (+1 on a page that already expired) lets the new end be reported again.
+    if (this.#seenRunning) this.#lastExpiredId = null;
   }
 
   view(now) {

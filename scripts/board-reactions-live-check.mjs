@@ -13,13 +13,11 @@ import { BOARD_REACTIONS, REACTION_SEND_INTERVAL_MS } from '../src/domain/board-
 import { FIREWORKS_DURATION_MS, FLOAT_DURATION_MS } from '../src/client/reactions/reaction-timeline.js';
 import {
   CANVAS_SELECTOR, LAYOUT_VIEWPORTS, NAME_A, NAME_B, REDO_KEY, SYNC_TIMEOUT_MS, UNDO_KEY, VIEWPORT, addSharedSticky,
-  intersects, lockedBoard, runLiveCheck, step, undoUntilHidden, visibleBox,
+  errorsStep, intersects, liveMode, liveSetupFor, runLiveCheck, sleep, step, undoUntilHidden, visibleBox,
   waitForTextOn,
 } from './board-live-helpers.mjs';
 
-const MODE = Object.freeze({ PLAIN: 'plain', LOCKED: 'locked' });
-const mode = process.argv[4] ?? MODE.PLAIN;
-if (!Object.values(MODE).includes(mode)) throw new Error(`mode must be ${Object.values(MODE).join(' or ')}`);
+const mode = liveMode();
 
 const LABELS = Object.freeze({
   en: { open: 'Send a reaction to everyone', picker: 'Reactions', fireworks: 'Fireworks for everyone', send: 'Send' },
@@ -59,7 +57,6 @@ const stamp = Date.now();
 const STICKY_TEXT = `reaction-undo-${stamp}`;
 const password = `reactions-${randomBytes(9).toString('base64url')}`;
 
-const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 const waitForCooldown = () => sleep(REACTION_SEND_INTERVAL_MS + COOLDOWN_SLACK_MS);
 const reactionLabel = (lang, emoji) => (emoji === FIREWORKS ? LABELS[lang].fireworks : `${LABELS[lang].send} ${emoji}`);
 
@@ -372,13 +369,6 @@ async function drawingStep({ a, report }) {
   });
 }
 
-async function errorsStep({ report }) {
-  await step(report, `${mode}: no page errors`, async () => {
-    if (report.pageErrors.length) throw new Error(JSON.stringify(report.pageErrors));
-    return { consoleErrors: report.consoleErrors.length };
-  });
-}
-
 await runLiveCheck('board-reactions-live-check.mjs', async (context) => {
   await fireworksStep(context);
   await floatStep(context);
@@ -388,5 +378,5 @@ await runLiveCheck('board-reactions-live-check.mjs', async (context) => {
   await layoutStep(context);
   await touchScrollStep(context);
   await drawingStep(context);
-  await errorsStep(context);
-}, mode === MODE.LOCKED ? { setup: (browser, baseUrl, report) => lockedBoard(browser, baseUrl, report, password) } : {});
+  await errorsStep(context, mode);
+}, liveSetupFor(mode, password));

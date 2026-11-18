@@ -894,6 +894,7 @@ export default Object.freeze({
   "writingTimer.open": "卡片书写计时器",
   "writingTimer.minutes": "{n} 分钟",
   "writingTimer.custom": "自定义（分钟）",
+  "writingTimer.unit": "分钟",
   "writingTimer.start": "开始",
   "writingTimer.stop": "停止计时",
   "writingTimer.timesUp": "时间到",

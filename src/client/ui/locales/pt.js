@@ -894,6 +894,7 @@ export default Object.freeze({
   "writingTimer.open": "Cronômetro para escrever cartões",
   "writingTimer.minutes": "{n} min",
   "writingTimer.custom": "Personalizado (minutos)",
+  "writingTimer.unit": "min",
   "writingTimer.start": "Iniciar",
   "writingTimer.stop": "Parar cronômetro",
   "writingTimer.timesUp": "Tempo esgotado",

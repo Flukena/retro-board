@@ -894,6 +894,7 @@ export default Object.freeze({
   "writingTimer.open": "Pengatur waktu menulis kartu",
   "writingTimer.minutes": "{n} mnt",
   "writingTimer.custom": "Kustom (menit)",
+  "writingTimer.unit": "menit",
   "writingTimer.start": "Mulai",
   "writingTimer.stop": "Hentikan pengatur waktu",
   "writingTimer.timesUp": "Waktu habis",

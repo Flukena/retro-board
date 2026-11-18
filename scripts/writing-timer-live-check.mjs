@@ -18,12 +18,11 @@ import { MINUTE_MS } from '../src/domain/countdown.js';
 import { TIMES_UP_SHOW_MS, WRITING_TIMER_EXTEND_MINUTES } from '../src/domain/writing-timer.js';
 import {
   CANVAS_SELECTOR, LAYOUT_VIEWPORTS, NAME_B, REDO_KEY, SYNC_TIMEOUT_MS, VIEWPORT, addSharedSticky, enter, intersects,
-  lockedBoard, runLiveCheck, shot, step, undoUntilHidden, unlockScreen, visibleBox, waitForTextOn,
+  LIVE_MODE, errorsStep, liveMode, liveSetupFor, runLiveCheck, shot, sleep, step, undoUntilHidden, unlockScreen,
+  visibleBox, waitForTextOn,
 } from './board-live-helpers.mjs';
 
-const MODE = Object.freeze({ PLAIN: 'plain', LOCKED: 'locked' });
-const mode = process.argv[4] ?? MODE.PLAIN;
-if (!Object.values(MODE).includes(mode)) throw new Error(`mode must be ${Object.values(MODE).join(' or ')}`);
+const mode = liveMode();
 
 const LABELS = Object.freeze({
   en: {
@@ -54,6 +53,8 @@ const CHROME_SELECTORS = Object.freeze([
 const START_MINUTES = 3;
 const EXPIRY_MINUTES = 1;
 const SECONDS_PER_MINUTE = 60;
+// How far below the full run the first reading may be: the click-to-render and screenshot delay.
+const START_SETTLE_TOLERANCE_S = SECONDS_PER_MINUTE / 2;
 const SECOND_MS = 1000;
 // Both pages read their clock in the same instant; each label rounds a started second up.
 const SAME_TIME_TOLERANCE_S = 1;
@@ -84,7 +85,6 @@ const STICKY_TEXT = `writing-timer-undo-${Date.now()}`;
 const PHONE_CARD_TEXT = `writing-timer-phone-${Date.now()}`;
 const password = `writing-timer-${randomBytes(9).toString('base64url')}`;
 
-const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 const snap = (page, name, report) => shot(page, `${mode}-${name}.png`, report);
 
 async function secondsLeft(page) {
@@ -155,7 +155,7 @@ async function startStep({ a, b, report }) {
     await b.locator(RUNNING_SELECTOR).waitFor({ timeout: SYNC_TIMEOUT_MS });
     const [atA, atB] = await bothSecondsLeft(a, b);
     if (Math.abs(atA - atB) > SAME_TIME_TOLERANCE_S) throw new Error(`A shows ${atA} s, B ${atB} s`);
-    if (atA > START_MINUTES * SECONDS_PER_MINUTE || atA < START_MINUTES * SECONDS_PER_MINUTE - SECONDS_PER_MINUTE / 2) {
+    if (atA > START_MINUTES * SECONDS_PER_MINUTE || atA < START_MINUTES * SECONDS_PER_MINUTE - START_SETTLE_TOLERANCE_S) {
       throw new Error(`A shows ${atA} s for a ${START_MINUTES}-minute timer`);
     }
     await snap(a, 'running-desktop-en', report);
@@ -281,7 +281,7 @@ async function startLayoutStep({ a, report }) {
 /** B reloads the board (unlocking a locked one again) and taps it, as a member coming back would. */
 async function reopenB(b) {
   await b.reload();
-  if (mode === MODE.LOCKED) await unlockScreen(b, 'th', password, NAME_B);
+  if (mode === LIVE_MODE.LOCKED) await unlockScreen(b, 'th', password, NAME_B);
   else await enter(b, 'th', NAME_B);
   // Browsers let a page make sound only after the user has interacted with it.
   await b.locator(CANVAS_SELECTOR).click({ position: LAYOUT_EMPTY_PX });
@@ -381,13 +381,6 @@ async function reopenAfterEndStep({ b, report }) {
   });
 }
 
-async function errorsStep({ report }) {
-  await step(report, `${mode}: no page errors`, async () => {
-    if (report.pageErrors.length) throw new Error(JSON.stringify(report.pageErrors));
-    return { consoleErrors: report.consoleErrors.length };
-  });
-}
-
 await runLiveCheck('writing-timer-live-check.mjs', async (context) => {
   await adminOnlyStep(context);
   await startStep(context);
@@ -401,5 +394,5 @@ await runLiveCheck('writing-timer-live-check.mjs', async (context) => {
   await startLayoutStep(context);
   await expiryStep(context);
   await reopenAfterEndStep(context);
-  await errorsStep(context);
-}, mode === MODE.LOCKED ? { setup: (browser, baseUrl, report) => lockedBoard(browser, baseUrl, report, password) } : {});
+  await errorsStep(context, mode);
+}, liveSetupFor(mode, password));

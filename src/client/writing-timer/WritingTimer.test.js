@@ -37,7 +37,7 @@ test('only an admin gets the start control; others see nothing until a timer run
   await withChromeModule(MODULE, ({ WritingTimer }, { t, setLang }) => {
     for (const lang of LANGUAGES) {
       setLang(lang);
-      assert.equal(render(WritingTimer, IDLE, false), '', `${lang}: no start control for a non-admin`);
+      assert.doesNotMatch(render(WritingTimer, IDLE, false), /<button|data-phase/, `${lang}: no start control for a non-admin`);
       const html = render(WritingTimer, IDLE, true);
       assert.ok(html.includes(`aria-label="${escapeHtml(t('writingTimer.open'))}"`), `${lang}: start control`);
       assert.match(html, /aria-expanded="false"/);
@@ -108,6 +108,7 @@ test('the setup offers 3, 5 and 10 minutes, which start at once, and a custom va
         assert.ok(html.includes(escapeHtml(t('writingTimer.minutes', { n: minutes }))), `${lang}: ${minutes}`);
       }
       assert.ok(html.includes(`aria-label="${escapeHtml(t('writingTimer.custom'))}"`), `${lang}: custom`);
+      assert.ok(html.includes(`>${escapeHtml(t('writingTimer.unit'))}</span>`), `${lang}: the unit shows beside the field`);
       assert.match(html, /data-board-shortcuts="off"/, 'typing a custom value stays out of the board');
       assert.match(html, /min="1"/);
       assert.match(html, /max="120"/);
@@ -121,6 +122,23 @@ test('the setup offers 3, 5 and 10 minutes, which start at once, and a custom va
       input.props.onChange({ target: { value: '500' } });
       input.props.onChange({ target: { value: '' } });
       assert.deepEqual(custom, [120, 1], 'custom minutes clamp to 1-120');
+    }
+  });
+});
+
+test("Time's up is announced politely, once, and no countdown tick is", async () => {
+  await withChromeModule(MODULE, ({ WritingTimer }, { t, setLang }) => {
+    for (const lang of LANGUAGES) {
+      setLang(lang);
+      const announcer = (view, isAdmin) => render(WritingTimer, view, isAdmin).match(/<span class="rb-writing-timer__announcer"[^>]*>[^<]*<\/span>/)?.[0];
+      for (const isAdmin of [false, true]) {
+        const end = announcer(TIMES_UP, isAdmin);
+        assert.match(end, /role="status"/, `${lang}: status region`);
+        assert.match(end, /aria-live="polite"/, `${lang}: polite`);
+        assert.ok(end.includes(`>${escapeHtml(t('writingTimer.timesUp'))}<`), `${lang}: says the end`);
+        assert.ok(announcer(RUNNING, isAdmin)?.endsWith('></span>'), `${lang}: silent while running (the region stays mounted)`);
+        assert.ok(announcer(IDLE, isAdmin)?.endsWith('></span>'), `${lang}: silent while idle`);
+      }
     }
   });
 });

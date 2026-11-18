@@ -61,3 +61,21 @@ test('a browser that refuses to resume audio leaves the page silent without an e
   assert.deepEqual(rejections, []);
   assert.equal(audio.tones.length, 0);
 });
+
+test('closing releases the audio context, and a later chime makes a fresh one', async () => {
+  const audio = fakeAudio();
+  let closed = 0;
+  audio.FakeContext.prototype.close = () => { closed += 1; return Promise.resolve(); };
+  const chime = createChime({ AudioContextClass: audio.FakeContext, hasUserActivation: () => true });
+  chime.close();
+  assert.equal(closed, 0, 'nothing to release before the first chime');
+  chime.play();
+  await settle();
+  chime.close();
+  assert.equal(closed, 1);
+  chime.close();
+  assert.equal(closed, 1, 'closing twice releases once');
+  chime.play();
+  await settle();
+  assert.equal(audio.contexts(), 2);
+});

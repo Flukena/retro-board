@@ -140,3 +140,17 @@
     display: none;
   }
 }
+
+.rb-writing-timer-setup__unit {
+  color: var(--text-muted);
+}
+
+/* Read by screen readers only. */
+.rb-writing-timer__announcer {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

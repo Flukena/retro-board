@@ -894,6 +894,7 @@ export default Object.freeze({
   "writingTimer.open": "Hẹn giờ viết thẻ",
   "writingTimer.minutes": "{n} phút",
   "writingTimer.custom": "Tùy chỉnh (phút)",
+  "writingTimer.unit": "phút",
   "writingTimer.start": "Bắt đầu",
   "writingTimer.stop": "Dừng hẹn giờ",
   "writingTimer.timesUp": "Hết giờ",
