@@ -16,5 +16,5 @@ export default function HomeRoute() {
   useEffect(() => { document.documentElement.classList.remove(HOME_HINT_CLASS); }, []);
   if (homeViewFor({ hinted, session }) === HOME_VIEW.LANDING) return <Landing />;
   // The create menu reads the whole session: its status and the account's entitlements.
-  return <Workspace createAction={<CreateMenu account={session} />} />;
+  return <Workspace createAction={<CreateMenu session={session} />} />;
 }

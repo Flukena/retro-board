@@ -78,10 +78,10 @@ function CreatePanel({ panel, creating, onCreate, onStartFormat, onCreateLocked 
 
 /** The "new board" trigger and, when open, its menu of every room kind: pure, so each state renders on its own. */
 export function CreateMenuView({
-  open, panel, account, creating, createError, triggerRef,
+  open, panel, session, creating, createError, triggerRef,
   onToggle, onPanel, onCreate, onStartFormat, onCreatePoker, onCreateLocked,
 }) {
-  const showLocked = canOfferLockedRoom(account);
+  const showLocked = canOfferLockedRoom(session);
   const expandedFor = (target) => panel === target;
   return (
     <>
@@ -114,7 +114,7 @@ export function CreateMenuView({
 }
 
 /** The masthead's create control for a signed-in account; the room itself is made by the relay. */
-export default function CreateMenu({ account }) {
+export default function CreateMenu({ session }) {
   const { creating, createError, createBoard } = useCreateBoard();
   const actions = createMenuActions(createBoard);
   const [open, setOpen] = useState(false);
@@ -133,7 +133,7 @@ export default function CreateMenu({ account }) {
   const togglePanel = (next) => setPanel((current) => (current === next ? CREATE_PANEL.NONE : next));
   return (
     <div className="rb-workspace-create" ref={rootRef}>
-      <CreateMenuView open={open} panel={panel} account={account} creating={creating} createError={createError}
+      <CreateMenuView open={open} panel={panel} session={session} creating={creating} createError={createError}
         triggerRef={triggerRef} onToggle={toggle} onPanel={togglePanel}
         onCreate={actions.blank} onStartFormat={actions.template} onCreatePoker={actions.poker}
         onCreateLocked={actions.locked} />

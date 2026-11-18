@@ -14,7 +14,7 @@ const signedIn = (canCreateLockedRoom) => ({
 const noop = () => {};
 
 const render = ({ CreateMenuView, CREATE_PANEL }, props = {}) => renderToStaticMarkup(React.createElement(CreateMenuView, {
-  open: false, panel: CREATE_PANEL.NONE, account: signedIn(false), creating: false, createError: null,
+  open: false, panel: CREATE_PANEL.NONE, session: signedIn(false), creating: false, createError: null,
   onToggle: noop, onPanel: noop, onCreate: noop, onStartFormat: noop, onCreatePoker: noop, onCreateLocked: noop, ...props,
 }));
 const menuItems = (html) => [...html.matchAll(/<button\b[^>]*role="menuitem"[^>]*>([\s\S]*?)<\/button>/g)].map(([, inner]) => inner);
@@ -41,14 +41,14 @@ test('closed menu renders the workspace.create button with aria-expanded false',
 test('open menu lists blank, template and poker, and locked only when the account may create locked rooms', async () => {
   await forEachLang((module, t) => {
     const base = ['workspace.create.new', 'workspace.create.template', 'workspace.create.poker'].map(t);
-    const withoutLock = menuItems(render(module, { open: true, account: signedIn(false) }));
+    const withoutLock = menuItems(render(module, { open: true, session: signedIn(false) }));
     assert.equal(withoutLock.length, base.length);
     base.forEach((label, index) => assert.ok(withoutLock[index].includes(label), label));
-    const withLock = menuItems(render(module, { open: true, account: signedIn(true) }));
+    const withLock = menuItems(render(module, { open: true, session: signedIn(true) }));
     assert.equal(withLock.length, base.length + 1);
     assert.ok(withLock.some((inner) => inner.includes(t('workspace.create.locked'))));
     assert.match(render(module, { open: true }), /aria-expanded="true"/);
-    const signedOut = menuItems(render(module, { open: true, account: { status: 'signed-out' } }));
+    const signedOut = menuItems(render(module, { open: true, session: { status: 'signed-out' } }));
     assert.ok(!signedOut.some((inner) => inner.includes(t('workspace.create.locked'))));
   });
 });
@@ -72,7 +72,7 @@ test('the TEMPLATE panel renders the four format chips', async () => {
 
 test('the LOCKED panel renders the password form', async () => {
   await forEachLang((module) => {
-    const html = render(module, { open: true, panel: module.CREATE_PANEL.LOCKED, account: signedIn(true) });
+    const html = render(module, { open: true, panel: module.CREATE_PANEL.LOCKED, session: signedIn(true) });
     assert.equal(html.match(/type="password"/g)?.length, 2);
   });
 });

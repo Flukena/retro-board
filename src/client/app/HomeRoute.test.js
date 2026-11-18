@@ -51,7 +51,7 @@ test('a visitor without the hint gets the guest landing first', async () => {
 
 // The real views need a full browser DOM. Here they are plain roots carrying their class, so the mount
 // test exercises only HomeRoute's own work: choosing the view, wiring the create menu and releasing the
-// head script's mark. Each stub renders the masthead action it is given and says whether the account it
+// head script's mark. Each stub renders the masthead action it is given and says whether the session it
 // got may be offered a locked board.
 const VIEW_STUBS = Object.freeze({
   './Landing.jsx': 'rb-landing__page', '../workspace/Workspace.jsx': 'rb-workspace', '../workspace/CreateMenu.jsx': 'create-menu',
@@ -71,8 +71,8 @@ const stubHomeViews = () => ({
     return [
       "import React from 'react';",
       `import { canOfferLockedRoom } from '${LOCKED_OFFER_MODULE}';`,
-      'export default function View({ createAction = null, account }) {',
-      `  return React.createElement('div', { className: ${className}, '${OFFERS_LOCKED_ATTRIBUTE}': String(canOfferLockedRoom(account)) }, createAction);`,
+      'export default function View({ createAction = null, session }) {',
+      `  return React.createElement('div', { className: ${className}, '${OFFERS_LOCKED_ATTRIBUTE}': String(canOfferLockedRoom(session)) }, createAction);`,
       '}',
       '',
     ].join('\n');
