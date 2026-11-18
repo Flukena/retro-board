@@ -130,6 +130,20 @@ test('workspace create trigger sits beside the account on narrow windows and its
   assert.match(phone, /\.rb-workspace-create__menu\s*\{[^}]*inset-inline:\s*var\(--workspace-gutter\)[^}]*width:\s*auto/);
 });
 
+test('on phones the workspace account is a 44px initial circle and the language picker is capped, so the masthead stays inside the gutter', () => {
+  const css = readSource('../workspace/workspace.css');
+  const phone = mediaBlocks(css, '(max-width: 599px)');
+  assert.match(phone, /\.rb-workspace \.rb-account__trigger\s*\{[^}]*width:\s*var\(--workspace-touch-target\)[^}]*border-radius:\s*50%/);
+  assert.match(phone, /\.rb-workspace \.rb-account__initial\s*\{[^}]*display:\s*inline/);
+  assert.match(phone, /\.rb-workspace \.rb-account__name,[^{]*\{[^}]*display:\s*none/);
+  assert.match(phone, /\.rb-workspace \.rb-lang-picker__select\s*\{[^}]*max-width:\s*var\(--workspace-phone-lang-width\)/);
+  const accountCss = readSource('../account/account.css');
+  assert.match(accountCss, /\.rb-account__initial\s*\{\s*display:\s*none/);
+  for (const rule of phone.match(/[^{}]+\{/g)) {
+    if (/rb-account|rb-lang-picker|rb-landing__corner/.test(rule)) assert.match(rule, /\.rb-workspace /, rule);
+  }
+});
+
 test('create-menu password and name fields use 16px text on touch screens', () => {
   const touch = mediaBlocks(readSource('../workspace/workspace.css'), MOBILE_LAYOUT_QUERY);
   assert.match(touch, /\.rb-workspace-create \.rb-landing__input\s*\{[^}]*font-size:\s*var\(--workspace-touch-field-font-size\)/);

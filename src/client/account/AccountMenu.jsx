@@ -40,10 +40,14 @@ function PlanBadge({ plan }) {
   return <span className="rb-account__plan">{t(PLAN_KEYS[plan] ?? PLAN_KEYS.free)}</span>;
 }
 
+// The first character of the name (or email), shown instead of the name where space is tight.
+const initialOf = (account) => [...(account.name || account.email || '')][0]?.toUpperCase() ?? '';
+
 export function SignedInMenu({ account, open, onToggle, onShowBoards, onSignOut, onSignOutAll, onAskDelete }) {
   return (
     <>
       <Button className="rb-btn--pill rb-account__trigger" onClick={onToggle} aria-haspopup="menu" aria-expanded={open} aria-label={t('account.menu')}>
+        <span className="rb-account__initial" aria-hidden="true">{initialOf(account)}</span>
         <span className="rb-account__name">{account.name || account.email}</span>
         <PlanBadge plan={account.plan} />
         <ChevronDown size={TOPBAR_ICON_SIZE_PX.TOGGLE} aria-hidden="true" />

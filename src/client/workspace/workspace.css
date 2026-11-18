@@ -368,6 +368,14 @@
   .rb-workspace-create__trigger { padding-inline: var(--space-3); }
   .rb-workspace-create__trigger-label,
   .rb-workspace-create__chevron { display: none; }
+  /* The account is a 44px circle holding the initial, so a long name cannot push the corner past the gutter. */
+  .rb-workspace .rb-account__trigger { justify-content: center; width: var(--workspace-touch-target); padding: 0; border-radius: 50%; }
+  .rb-workspace .rb-account__initial { display: inline; }
+  .rb-workspace .rb-account__name,
+  .rb-workspace .rb-account__trigger svg { display: none; }
+  .rb-workspace .rb-landing__corner { flex: 0 1 auto; min-width: 0; }
+  .rb-workspace .rb-lang-picker { min-width: 0; }
+  .rb-workspace .rb-lang-picker__select { min-width: 0; max-width: var(--workspace-phone-lang-width); text-overflow: ellipsis; }
   .rb-workspace__main { padding-top: var(--space-6); }
   .rb-workspace__search { flex: 1 1 auto; }
   .rb-workspace__empty { padding: var(--space-6) var(--space-4); }
