@@ -5,6 +5,8 @@ import { createZoneHeaderActions } from '../board/zone-header-actions.js';
 import { PLAYER_PRESENCE_STALE_MS } from './player-cursors.js';
 import { REACTION_CLEAR_MS } from '../reactions/reaction-channel.js';
 import { LOCKED_TEST_HANDLE } from '../../test-support/fake-locked-relay.js';
+import { MOOD_SCALE, moodKey } from '../../domain/mood-check.js';
+import { TEMPLATE_PREFIX } from '../../domain/template-store.js';
 import {
   LOCKED_EPOCH, ROOM_HANDLE, ROOM_KEY_CHANGED_EVENT, VALID_ITEM, putItem, withStorage,
 } from '../../test-support/bridge-harness.js';
@@ -779,4 +781,136 @@ test('undo of a vote does not set the boardState flag', async () => {
     assert.equal(browser.__rbYDoc.getMap('kv').has(voteKey), false);
     assert.equal(events.some((event) => event.isUndoRedo), false);
   });
+});
+
+// Spec (current-state map, "Change fan-out"): the five kv observers keep this registration order.
+const KV_OBSERVER_ORDER = Object.freeze(['change', 'votes', 'comments', 'templates', 'moods']);
+const KV_EMITTERS = Object.freeze({
+  change: ['on', 'off'],
+  votes: ['onVotesChange', 'offVotesChange'],
+  comments: ['onCommentsChange', 'offCommentsChange'],
+  templates: ['onTemplatesChange', 'offTemplatesChange'],
+  moods: ['onMoodsChange', 'offMoodsChange'],
+});
+// The bridge's own registrations on the board maps; the Public Wall adds its creation guard on yItems first.
+const BOARD_CHANGE_OBSERVERS = Object.freeze(['items.observeDeep', 'meta.observe']);
+const PUBLIC_CHANGE_OBSERVERS = Object.freeze(['items.observe', ...BOARD_CHANGE_OBSERVERS]);
+const OBSERVER_METHODS = Object.freeze(['observe', 'observeDeep']);
+// `new Error().stack` lines: 0 is the message, 1 the spy, 2 the code that registered the observer.
+const REGISTRAR_FRAME_INDEX = 2;
+const BRIDGE_FRAME = '/src/client/session/storage-bridge.js:';
+const PEER_ORIGIN = 'peer';
+const PROBE_PREFERENCE_KEY = 'observerProbe';
+const PROBE_COMMENT_ID = 'probe-comment';
+const PROBE_TEMPLATE_ID = 'probe-template';
+const PROBE_ROUND_ID = 'probe-round';
+const PROBE_CREATED_AT_MS = 1;
+const PROBE_TEMPLATE_ZONE = { title: 'Went well', color: 0, x: 0, y: 0, w: 400, h: 300 };
+
+/** One valid kv entry per observer kind; the `u|` key is this client's own, the only kind the change dispatch forwards. */
+const kvProbeEntries = (clientId) => [
+  [`u|${clientId}|${PROBE_PREFERENCE_KEY}`, PROBE_PREFERENCE_KEY],
+  [`s||vote:${VALID_ITEM.id}:${VOTER_ID}`, true],
+  [`s||comment:${VALID_ITEM.id}:${PROBE_COMMENT_ID}`,
+    { authorId: VOTER_ID, authorName: VALID_ITEM.authorName, text: VALID_ITEM.text, createdAt: PROBE_CREATED_AT_MS }],
+  [`${TEMPLATE_PREFIX}${PROBE_TEMPLATE_ID}`,
+    { id: PROBE_TEMPLATE_ID, name: PROBE_TEMPLATE_ID, zones: [PROBE_TEMPLATE_ZONE], createdAt: PROBE_CREATED_AT_MS }],
+  [moodKey(PROBE_ROUND_ID, VOTER_ID), MOOD_SCALE[0].score],
+];
+
+const remoteKeyEvent = (key) => ({ keysChanged: new Set([key]), transaction: { origin: PEER_ORIGIN, local: false } });
+const collapseRepeats = (list) => list.filter((entry, index) => entry !== list[index - 1]);
+
+/** Calls `record(kind)` whenever the storage emitter one kv observer feeds fires; returns the unsubscribe. */
+function listenToKvEmitters(storage, record) {
+  const stops = Object.entries(KV_EMITTERS).map(([kind, [subscribe, unsubscribe]]) => {
+    const listener = () => record(kind);
+    storage[subscribe](listener);
+    return () => storage[unsubscribe](listener);
+  });
+  return () => stops.forEach((stop) => stop());
+}
+
+/** The emitters one kv observer fires when handed a remote event for each probe key in turn. */
+function emittersFiredBy(storage, handler, keys) {
+  const fired = new Set();
+  const stop = listenToKvEmitters(storage, (kind) => fired.add(kind));
+  try {
+    keys.forEach((key) => handler(remoteKeyEvent(key)));
+  } finally {
+    stop();
+  }
+  return [...fired];
+}
+
+/**
+ * Loads the bridge while every Y.Map observer registration is recorded with the code that made it, then runs
+ * `check(browser, registrations)`. Both methods are inherited from AbstractType, so restoring deletes the spy.
+ */
+async function withObserverSpy(check, options) {
+  const registrations = [];
+  const inherited = OBSERVER_METHODS.map((method) => (
+    [method, Object.getOwnPropertyDescriptor(Y.Map.prototype, method), Y.Map.prototype[method]]
+  ));
+  for (const [method, , original] of inherited) {
+    Y.Map.prototype[method] = function recordRegistration(handler) {
+      const registrar = new Error().stack.split('\n')[REGISTRAR_FRAME_INDEX] ?? '';
+      registrations.push({ method, target: this, handler, registrar });
+      return original.call(this, handler);
+    };
+  }
+  try {
+    await withStorage((browser) => check(browser, registrations), options);
+  } finally {
+    for (const [method, descriptor] of inherited) {
+      if (descriptor) Object.defineProperty(Y.Map.prototype, method, descriptor);
+      else delete Y.Map.prototype[method];
+    }
+  }
+}
+
+test('the kv map has exactly five observers, registered in the order change dispatch, votes, comments, templates, moods', async () => {
+  await withObserverSpy(async (browser, registrations) => {
+    const kv = browser.__rbYDoc.getMap('kv');
+    const handlers = registrations
+      .filter(({ method, target }) => method === 'observe' && target === kv)
+      .map(({ handler }) => handler);
+    assert.equal(handlers.length, KV_OBSERVER_ORDER.length);
+    const entries = kvProbeEntries(browser.__rbClientId);
+    entries.forEach(([key, value]) => kv.set(key, value));
+    const keys = entries.map(([key]) => key);
+    assert.deepEqual(
+      handlers.map((handler) => emittersFiredBy(browser.storage, handler, keys)),
+      KV_OBSERVER_ORDER.map((kind) => [kind]),
+    );
+  });
+});
+
+test('one remote transaction touching all five key kinds notifies in that order', async () => {
+  await withStorage(async (browser) => {
+    const peer = new Y.Doc();
+    const arrivals = [];
+    const stop = listenToKvEmitters(browser.storage, (kind) => arrivals.push(kind));
+    try {
+      kvProbeEntries(browser.__rbClientId).forEach(([key, value]) => peer.getMap('kv').set(key, value));
+      Y.applyUpdate(browser.__rbYDoc, Y.encodeStateAsUpdate(peer), PEER_ORIGIN);
+    } finally {
+      stop();
+      peer.destroy();
+    }
+    assert.deepEqual(collapseRepeats(arrivals), KV_OBSERVER_ORDER);
+  });
+});
+
+test('the board-change observers are yItems.observeDeep then yMeta.observe', async () => {
+  for (const [publicWall, expected] of [[false, BOARD_CHANGE_OBSERVERS], [true, PUBLIC_CHANGE_OBSERVERS]]) {
+    await withObserverSpy(async (browser, registrations) => {
+      const mapNames = new Map([[browser.__rbYItems, 'items'], [browser.__rbYMeta, 'meta']]);
+      // drawing-previews.js and e2e-vote-expiry.js also observe yItems; only the bridge's own calls count here.
+      const bridgeRegistrations = registrations
+        .filter(({ target, registrar }) => mapNames.has(target) && registrar.includes(BRIDGE_FRAME))
+        .map(({ method, target }) => `${mapNames.get(target)}.${method}`);
+      assert.deepEqual(bridgeRegistrations, expected, `publicWall=${publicWall}`);
+    }, { publicWall });
+  }
 });
