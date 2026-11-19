@@ -6,10 +6,10 @@ export const ALLOWED_ORIGIN = 'https://allowed.example';
 export const TEST_DOC_NAME = 'policy-room';
 export const TEST_ROOM_HANDLE = 'a'.repeat(32);
 
-export async function connectionFixture(t, { inspection = () => ({ kind: 'other' }), parse = () => {}, parserCount = 1 } = {}) {
+export async function connectionFixture(t, { inspection = () => ({ kind: 'other' }), parse = () => {}, parserCount = 1, modules = {}, env = {} } = {}) {
   const docs = new Map();
   const servers = [];
-  const state = await relayEntrypoint(t, { modules: {
+  const state = await relayEntrypoint(t, { env, modules: {
     ws: { WebSocketServer: class extends EventEmitter {
       clients = new Set();
       constructor() { super(); servers.push(this); }
@@ -21,6 +21,7 @@ export async function connectionFixture(t, { inspection = () => ({ kind: 'other'
       },
     },
     './src/server/relay-protocol.js': { RelayProtocol: class { inspect(data) { return inspection(data); } } },
+    ...modules,
   } });
   const wss = servers[0];
   const connect = (doc, context = {}) => {
@@ -37,5 +38,5 @@ export async function connectionFixture(t, { inspection = () => ({ kind: 'other'
     wss.emit('connection', conn, req);
     return { conn, context: req.wsSecurityContext };
   };
-  return { ...state, docs, wss, connect };
+  return { ...state, relayState: state, docs, wss, connect };
 }

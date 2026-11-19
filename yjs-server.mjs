@@ -1,3 +1,4 @@
+import { createWsAdmission } from './src/server/relay-ws-admission.js';
 import { createAwarenessPolicy } from './src/server/relay-awareness-policy.js';
 import { createVoteExpiry } from './src/server/relay-vote-expiry.js';
 import { createRoomAccounting } from './src/server/relay-room-accounting.js';
@@ -61,7 +62,7 @@ import { createHttpRequestSlots } from './src/server/relay-http-slots.js';
 import { createAccountRoomRoutes } from './src/server/account-room-routes.js';
 import { createRoomSummaryReader, createRoomTitleWriter } from './src/server/room-title-writer.js';
 import { orphanRoomsOfDeletedAccounts } from './src/server/room-orphaning.js';
-import { admitPublicAction, registerPublicQuotaClient, notifyPublicQuota } from './src/server/public-action-limit.js';
+import { registerPublicQuotaClient, notifyPublicQuota } from './src/server/public-action-limit.js';
 
 // yjs, y-leveldb, and y-websocket must all resolve to the SAME yjs module
 // instance. y-websocket's bin/utils.js (below) is CJS and does
@@ -691,6 +692,10 @@ if (publicWall) {
   retainPublicDocument(publicDoc);
 }
 const rejectionCounters = createRejectionCounters((message, counts) => console.log(message, counts));
+const { inspectMessage } = createWsAdmission({
+  config: relayConfig, accounting, roomUsage, persistenceChurnFor, scheduleRoomCompaction,
+  markStorageFailure, inspectProtocolMessage, planAwarenessUpdate, rejectionCounters, PUBLIC_WALL, Y,
+});
 const ACCOUNT_SIGNING_KEY = loadSigningKey(DB_DIR, ACCOUNT_SESSION_KEY);
 const accountSessions = new AccountSessions({ signingKey: ACCOUNT_SIGNING_KEY, allowInsecureHttp: ALLOW_INSECURE_HTTP, maxCookieHeaderBytes: MAX_COOKIE_HEADER_BYTES });
 const roomLockVerifier = new RoomLockVerifier();
@@ -908,58 +913,8 @@ wss.on('connection', (conn, req) => {
     let inspection;
     let awarenessPlan = null;
     try {
-      inspection = inspectProtocolMessage(data);
-      if (inspection.kind === 'sync-update') {
-        const usage = roomUsage.get(doc) || {
-          upperBytes: 0,
-          exactBytes: 0,
-          lastMeasuredAt: Date.now(),
-        };
-        const churn = persistenceChurnFor(docName);
-        const estimatedStoreBytes = inspection.updateBytes + STORE_OPERATION_OVERHEAD_BYTES;
-        if (accounting.pendingStoreOps >= MAX_PENDING_STORE_OPS
-            || accounting.pendingStoreBytes + estimatedStoreBytes > MAX_PENDING_STORE_BYTES) {
-          rejectionCounters.storageBacklog();
-          throw new Error('persistence backlog');
-        }
-        if (accounting.dbUsageBytes + accounting.pendingStoreBytes + estimatedStoreBytes > MAX_DB_BYTES) {
-          markStorageFailure(new Error('configured database quota exceeded'));
-          throw new Error('database capacity reached');
-        }
-        if (usage.upperBytes + inspection.updateBytes > MAX_DOCUMENT_BYTES) {
-          scheduleRoomCompaction(docName, { remeasure: true });
-          throw Object.assign(new Error('document conservative limit'), { closeCode: 1009 });
-        }
-        if (accounting.activeDocumentBytes + inspection.updateBytes > MAX_ACTIVE_DOCUMENT_BYTES) {
-          scheduleRoomCompaction(docName, { remeasure: true });
-          throw Object.assign(new Error('active document capacity reached'), { closeCode: 1009 });
-        }
-        if (churn.uncompactedUpdates + 1 > ROOM_MAX_UNCOMPACTED_UPDATES) {
-          scheduleRoomCompaction(docName, { remeasure: true });
-          throw new Error('room persistence compacting');
-        }
-        if (churn.uncompactedBytes + inspection.updateBytes + STORE_OPERATION_OVERHEAD_BYTES > ROOM_MAX_UNCOMPACTED_BYTES) {
-          scheduleRoomCompaction(docName, { remeasure: true });
-          throw new Error('room persistence compacting');
-        }
-      } else if (inspection.kind === 'sync-step-1') {
-        const usage = roomUsage.get(doc) || {
-          upperBytes: 0,
-          exactBytes: 0,
-          lastMeasuredAt: Date.now(),
-        };
-        const estimatedBytes = Math.min(
-          MAX_DOCUMENT_BYTES,
-          Math.max(usage.upperBytes, usage.exactBytes),
-        );
-        if (!meter.takeSyncResponse(estimatedBytes)) {
-          throw new Error('sync response rate-limit');
-        }
-      } else if (inspection.kind === 'awareness') {
-        awarenessPlan = planAwarenessUpdate(doc, conn, context, inspection.entries);
-        if (awarenessPlan.dropFrame) return;
-      }
-      if (PUBLIC_WALL && inspection.kind === 'sync-update' && !admitPublicAction(Y, doc, clientIp, data)) throw Object.assign(new Error(PUBLIC_ACTION_LIMIT_REASON), { closeReason: PUBLIC_ACTION_LIMIT_REASON });
+      ({ inspection, awarenessPlan } = inspectMessage(data, { doc, docName, conn, context, meter, clientIp }));
+      if (awarenessPlan?.dropFrame) return;
     } catch (err) {
       limited = true;
       if (err.closeReason === PUBLIC_ACTION_LIMIT_REASON) rejectionCounters.increment(PUBLIC_ACTION_LIMIT_REASON, 1008);
