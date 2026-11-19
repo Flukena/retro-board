@@ -335,6 +335,7 @@ export default Object.freeze({
   "topbar.importTitle": "ZIP、JSON、CSVからボードを読み込む(現在のボードを上書き)",
   "export.done": "{file} をダウンロードしました",
   "export.repaired": "{file} をダウンロードしました(アイテム{positions}件の位置を調整、ゾーン{zones}件のサイズを既定値に設定)",
+  "export.flattened": "{file} をダウンロードしました — アニメーションまたは上限超過の画像 {count} 件を静止画として保存しました（{ids}）",
   "export.processing": "バックアップと画像を準備中…",
   "export.fail": "再インポート可能なバックアップを作成できませんでした — {err}",
   "import.confirm.head": "ファイルからボードを読み込みますか?",

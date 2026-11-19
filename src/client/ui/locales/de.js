@@ -335,6 +335,7 @@ export default Object.freeze({
   "topbar.importTitle": "Board aus ZIP, JSON oder CSV laden (überschreibt das aktuelle)",
   "export.done": "{file} heruntergeladen",
   "export.repaired": "{file} heruntergeladen ({positions} Element(e) neu positioniert; {zones} Zonengröße(n) auf Standard gesetzt)",
+  "export.flattened": "{file} heruntergeladen — {count} animierte oder zu große Bild(er) wurden als Standbilder gespeichert ({ids})",
   "export.processing": "Backup und Bilder werden vorbereitet…",
   "export.fail": "Es konnte kein wieder importierbares Backup erstellt werden — {err}",
   "import.confirm.head": "Board aus Datei laden?",

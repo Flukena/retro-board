@@ -335,6 +335,7 @@ export default Object.freeze({
   "topbar.importTitle": "Charger un tableau depuis un ZIP, JSON ou CSV (remplace le tableau actuel)",
   "export.done": "{file} téléchargé",
   "export.repaired": "{file} téléchargé ({positions} élément(s) repositionné(s) ; {zones} taille(s) de zone par défaut)",
+  "export.flattened": "{file} téléchargé — {count} image(s) animée(s) ou trop volumineuse(s) enregistrée(s) comme images fixes ({ids})",
   "export.processing": "Préparation de la sauvegarde et des images…",
   "export.fail": "Impossible de créer une sauvegarde réimportable — {err}",
   "import.confirm.head": "Charger le tableau depuis le fichier ?",

@@ -335,6 +335,7 @@ export default Object.freeze({
   "topbar.importTitle": "从 ZIP、JSON 或 CSV 加载看板（将覆盖当前内容）",
   "export.done": "已下载 {file}",
   "export.repaired": "已下载 {file}（重新定位了 {positions} 个项目，{zones} 个分区使用了默认尺寸）",
+  "export.flattened": "已下载 {file} — {count} 张动画或超限图片已保存为静态图片（{ids}）",
   "export.processing": "正在准备备份和图片…",
   "export.fail": "无法创建可重新导入的备份 — {err}",
   "import.confirm.head": "从文件加载看板？",

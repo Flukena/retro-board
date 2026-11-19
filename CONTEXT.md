@@ -11,7 +11,10 @@ not a rendering fallback.
 
 The versioned JSON representation of a board, votes, comments, mood answers
 and shared templates. An exported backup manifest must pass the same decoder
-used by import without repair or information loss. The board's mood round
+used by import without repair or information loss. One exception (owner decision
+2026-11-19): export converts a legacy image that fails today's image rules (animated
+PNG/WebP, oversized, over-limit GIF) into a still image of its first frame and
+reports it; the round trip stays exact for everything else. The board's mood round
 (`board.moodCheck`) is restored closed; presenter and meeting phase are live
 session state and reset on import.
 

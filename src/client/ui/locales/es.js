@@ -335,6 +335,7 @@ export default Object.freeze({
   "topbar.importTitle": "Cargar tablero desde ZIP, JSON o CSV (sobrescribe el actual)",
   "export.done": "Descargado {file}",
   "export.repaired": "Descargado {file} (se reposicionaron {positions} elemento(s); se asignó tamaño predeterminado a {zones} zona(s))",
+  "export.flattened": "Descargado {file} — {count} imagen(es) animada(s) o demasiado grande(s) se guardaron como imágenes fijas ({ids})",
   "export.processing": "Preparando copia de seguridad e imágenes…",
   "export.fail": "No se pudo crear una copia de seguridad reimportable — {err}",
   "import.confirm.head": "¿Cargar tablero desde el archivo?",
