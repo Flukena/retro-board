@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { withChromeModule } from '../../test-support/chrome-test-helper.js';
+import { localizedPath } from '../seo/seo-pages.js';
 
 const MODULE = '/src/client/workspace/Workspace.jsx';
 const LANGS = Object.freeze(['th', 'en']);
@@ -338,8 +339,9 @@ test('the page puts the create action and the workspace links in the masthead', 
       const html = renderToStaticMarkup(React.createElement(Workspace, { createAction }));
       const header = html.match(/<header class="rb-landing__masthead"[\s\S]*?<\/header>/)[0];
       assert.ok(header.includes('class="probe-create"'), lang);
-      assert.ok(header.includes(`<a href="/planning-poker">${t('poker.title')}</a>`), lang);
-      assert.ok(header.includes(`<a href="/agile-scrum">${t('agileGuide.nav.guide')}</a>`), lang);
+      // Indexable pages follow the UI language, as every site link does (src/client/seo/page-links.js).
+      assert.ok(header.includes(`<a href="${localizedPath('/planning-poker', lang)}">${t('poker.title')}</a>`), lang);
+      assert.ok(header.includes(`<a href="${localizedPath('/agile-scrum', lang)}">${t('agileGuide.nav.guide')}</a>`), lang);
       assert.match(html, new RegExp(`<h1[^>]*>${t('workspace.title')}`), lang);
       assert.match(html, /aria-busy="true"/, `${lang}: the list starts loading`);
     }
