@@ -55,3 +55,11 @@ test('mobile Draw toolbar: tool and action buttons keep their touch size', () =>
     assert.equal(rule['min-height'], 'var(--modal-touch-target)', selector);
   }
 });
+
+test('mobile Draw toolbar: direct children outside the named areas take a full row of their own', () => {
+  // The retry button is the only direct button child (the others live in the tools/options/actions groups).
+  // Left to auto-place it falls into the first auto track and stretches Undo and squeezes the options.
+  assert.equal(mobileDeclarations('.rb-drawing-toolbar > button')['grid-column'], '1 / -1');
+  // The status line must stay out of the grid flow, or it becomes another auto-placed item.
+  assert.equal(mobileDeclarations('.rb-drawing-status').position, 'fixed');
+});
