@@ -17,7 +17,7 @@ export function createVoteSnapshotController({ window = globalThis.window, setVo
       }
     };
 
-return { refreshVotes: voteHandler, refreshComments: commentHandler, subscribe() {
+  return { refreshVotes: voteHandler, refreshComments: commentHandler, subscribe() {
     if (typeof window !== 'undefined' && window.storage?.onVotesChange) {
       window.storage.onVotesChange(voteHandler);
     }
@@ -35,7 +35,7 @@ return { refreshVotes: voteHandler, refreshComments: commentHandler, subscribe()
 }
 
 export function createController({boardRef, activeVoteZone = voteZone, Date = globalThis.Date, setToast, t = translate, window = globalThis.window, userId, flashVote, setBoard, storage, setSelectedIds, focusedTextIdRef, updateFocusedText}) {
-const toggleVote = (it) => {
+  const toggleVote = (it) => {
     const items = boardRef.current.items;
     const voteZone = activeVoteZone(it, items, Date.now());
     const zTimer = voteZone?.voteTimer;
@@ -67,7 +67,7 @@ const toggleVote = (it) => {
     window.storage.setVote(it.id, userId, !has);
     if (!has) flashVote(it.id);
   };
-const removeItemUnchecked = (id) => {
+  const removeItemUnchecked = (id) => {
     // One Yjs transaction so Cmd+Z restores the item and its related state together.
     // Falls back to the two-call path if the bridge is an older build that
     // doesn't expose the combined helper yet.
@@ -91,7 +91,7 @@ const removeItemUnchecked = (id) => {
     });
     if (focusedTextIdRef.current?.startsWith(`${id}:`)) updateFocusedText(null);
   };
-return {toggleVote,removeItemUnchecked, dispose() {}};
+  return {toggleVote,removeItemUnchecked, dispose() {}};
 }
 
 const VOTE_FLASH_MS = 900;

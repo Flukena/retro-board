@@ -3,11 +3,11 @@ import { readBoardImport as readImport, prepareBoardImport as prepareImport, Imp
 import { t as translate } from '../ui/i18n.js';
 
 export function createController({isAdmin, fileInputRef, setToast, setPendingImport, pendingImport, importBusy, setImportBusy, boardRef, setBoard, readBoardImport = readImport, prepareBoardImport = prepareImport, ImportBundleLimitError = BundleLimitError, t = translate, window = globalThis.window}) {
-const onImportPick = () => {
+  const onImportPick = () => {
     if (!isAdmin) { setToast({ msg: t('common.adminOnly'), type: 'warn' }); return; }
     fileInputRef.current?.click();
   };
-const onImportFileChange = async (e) => {
+  const onImportFileChange = async (e) => {
     const file = e.target.files?.[0];
     e.target.value = ''; // allow re-picking the same file later
     if (!file) return;
@@ -17,7 +17,7 @@ const onImportFileChange = async (e) => {
       setToast({ msg: t('import.fail', { err: err.message }), type: 'warn' });
     }
   };
-const confirmImport = async () => {
+  const confirmImport = async () => {
     if (!pendingImport || !isAdmin || importBusy) return;
     const {
       voteEntries, commentEntries, moodEntries, customTemplates: importedTemplates,
@@ -51,7 +51,7 @@ const confirmImport = async () => {
       type: 'info',
     });
   };
-return {onImportPick,onImportFileChange,confirmImport, dispose() {}};
+  return {onImportPick,onImportFileChange,confirmImport, dispose() {}};
 }
 
 export function useOnImportPick(options, dependencies) {

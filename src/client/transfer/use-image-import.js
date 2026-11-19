@@ -4,7 +4,7 @@ import { IMAGE_MAX_MIB_LABEL as MAX_MIB_LABEL, prepareImageBlob as prepareBlob, 
 import { t as translate } from '../ui/i18n.js';
 
 export function createController({canStartImageImport = canStart, window = globalThis.window, isSafeImageMime = safeMime, setToast, t = translate, IMAGE_MAX_BYTES = MAX_BYTES, IMAGE_MAX_MIB_LABEL = MAX_MIB_LABEL, prepareImageBlob = prepareBlob, addImage}) {
-const importImageFromBlob = async (blob, worldX, worldY) => {
+  const importImageFromBlob = async (blob, worldX, worldY) => {
     if (!canStartImageImport(blob, window.storage)) return;
     if (!isSafeImageMime(blob.type)) {
       setToast({ msg: t('image.unsupportedFormat'), type: 'warn' });
@@ -39,7 +39,7 @@ const importImageFromBlob = async (blob, worldX, worldY) => {
     }
     addImage(worldX, worldY, url, prepared.nw, prepared.nh);
   };
-return {importImageFromBlob, dispose() {}};
+  return {importImageFromBlob, dispose() {}};
 }
 
 export function useImageImport(options, dependencies) {

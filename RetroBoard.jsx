@@ -946,7 +946,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
 
   const importImageFromBlob = useImageImport({ addImage, setToast }, [addImage, setToast]);
 
-
   /* ============================================================
      Admin gates
      ============================================================ */
