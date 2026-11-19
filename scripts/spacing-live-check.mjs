@@ -49,7 +49,8 @@ function word(user, key) { setLang(user.lang); return t(key); }
 async function activate(user, target) { if (user.mobile) await target.tap(); else await target.click(); }
 function near(value, expected) { return Math.abs(value - expected) <= TOLERANCE_PX; }
 function finding(ok, scene, message) { if (!ok) report.findings.push(`${scene}: ${message}`); }
-// The recents card has its own token, --landing-recents-padding (20px, theme.js:137), which the 599px block leaves alone.
+// The recents card keeps 20px today (--landing-recents-padding, theme.js:137): pending ruling T2b-RECENTS (an app fix on
+// branch fix/mobile-draw-toolbar-fit). Remove this exception when that fix merges.
 function expectedContentPadding(node, width) {
   if (node.selector === '.rb-landing__card' && !node.isRecents && width <= LANDING_MOBILE_MAX_WIDTH_PX) return LANDING_MOBILE_CARD_PADDING_PX;
   return CONTENT_PADDING_PX;

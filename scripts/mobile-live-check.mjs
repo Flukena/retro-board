@@ -1186,20 +1186,22 @@ async function drawStroke(user) {
   await settleDrawingPaint(user);
 }
 const boxOf = locator => locator.evaluate(node => node.getBoundingClientRect().toJSON());
-function assertInside(box, frame, label) {
-  assert.ok(box.left >= frame.left - EDGE_TOLERANCE_PX && box.right <= frame.right + EDGE_TOLERANCE_PX
-    && box.top >= frame.top - EDGE_TOLERANCE_PX && box.bottom <= frame.bottom + EDGE_TOLERANCE_PX, `${label} must fit inside its frame`);
+function assertInsideRow(box, row, label) {
+  assert.ok(box.left >= row.left - EDGE_TOLERANCE_PX && box.right <= row.right + EDGE_TOLERANCE_PX
+    && box.top >= row.top - EDGE_TOLERANCE_PX && box.bottom <= row.bottom + EDGE_TOLERANCE_PX, `${label} must fit inside its row`);
 }
 // e1f7f51: the mobile options row (sizes and colours) scrolls sideways (drawing-tool.css:31), so every option must
 // be reachable and, once scrolled into view, sit fully inside the row's scrollport at its own touch floor.
-async function checkMobileOptionsRow(user) {
+async function checkMobileOptionsRow(user, size) {
   const row = drawingToolbar(user).locator('.rb-drawing-options');
+  // The scrollport itself must be on screen, otherwise options "inside the row" can still be off the viewport.
+  assertWithinViewport(await boxOf(row), size, 'Draw options row');
   assert.equal(await row.evaluate(node => getComputedStyle(node).overflowX), 'auto', 'The Draw options row must scroll horizontally');
   const options = row.locator('button');
   for (let index = 0; index < await options.count(); index++) {
     await options.nth(index).scrollIntoViewIfNeeded();
     const box = await boxOf(options.nth(index));
-    assertInside(box, await boxOf(row), `Draw option ${index} after scrolling into view`);
+    assertInsideRow(box, await boxOf(row), `Draw option ${index} after scrolling into view`);
     assert.ok(Math.min(box.width, box.height) >= DRAWING_MOBILE_OPTION_MIN_PX, `Draw option ${index} must be at least ${DRAWING_MOBILE_OPTION_MIN_PX}px: ${box.width}x${box.height}`);
   }
 }
@@ -1208,13 +1210,12 @@ async function checkDrawingBounds(user) {
   for (const width of user.mobile ? [360, 390] : [1440]) {
     const size = user.mobile ? { ...MOBILE_VIEWPORT, width } : DESKTOP_VIEWPORT;
     await user.page.setViewportSize(size);
-    const frame = { left: 0, top: 0, right: size.width, bottom: size.height };
     const controls = user.mobile ? drawingToolbar(user).locator('.rb-drawing-tools button, .rb-drawing-actions button')
       : drawingToolbar(user).locator('button');
     const boxes = [await boxOf(drawingToolbar(user)), ...await controls.evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().toJSON()))];
     report.measurements.push({ mode: 'drawing-toolbar', mobile: user.mobile, lang: user.lang, viewport: size, boxes });
-    if (user.mobile) await checkMobileOptionsRow(user);
-    for (const box of boxes) assertInside(box, frame, 'Drawing toolbar/control');
+    if (user.mobile) await checkMobileOptionsRow(user, size);
+    for (const box of boxes) assertWithinViewport(box, size, 'Drawing toolbar/control');
     if (user.mobile) for (const box of boxes.slice(1)) assert.ok(box.height >= TOUCH_TARGET_MIN_PX, `Drawing controls must be touch sized: ${box.height}px`);
     await user.page.screenshot({ path: join(output, `draw-${user.lang}-${width}.png`) });
   }

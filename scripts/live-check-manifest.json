@@ -160,7 +160,7 @@
       "checkEnv": {},
       "timeoutSec": 900,
       "baseline": "known-red",
-      "reason": "T2b-CLOSE app fix pending on branch fix/mobile-draw-toolbar-fit: at 360px the Draw toolbar's Close button sits at right=397 > 360 (e1f7f51 two-row layout, drawing-tool.css:27-30), so 'Drawing toolbar/control must fit inside its frame' fails in checkDrawingBounds; the options row (scrolls by design) and its 34px floor already pass. Steps after it have not run",
+      "reason": "T2b-CLOSE app fix pending on branch fix/mobile-draw-toolbar-fit: at 360px the Draw toolbar overflows the viewport (Close button right=397 > 360, and the options row extends past the viewport so purple is off-screen; e1f7f51 two-row layout, drawing-tool.css:27-30), so 'Draw options row must fit width' fails in checkDrawingBounds. Steps after it have not run",
       "failingStep": "private: freehand draft/history/pinch/save/transparent PNG/sync/cancel"
     },
     {
