@@ -58,6 +58,7 @@ COPY --chown=node:node \
     src/server/relay-session.js src/server/relay-uploads.js src/server/relay-vote-maintenance.js \
     src/server/relay-room-accounting.js \
     src/server/relay-vote-expiry.js \
+    src/server/relay-awareness-policy.js \
     ./src/server/
 
 COPY --chown=node:node scripts/public-wall-restore.mjs scripts/public-wall-restore.sh ./scripts/
