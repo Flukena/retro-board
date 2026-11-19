@@ -21,6 +21,8 @@ import PokerFeature from '../poker/PokerFeature.jsx';
 import { AGILE_GUIDE_PATH, PLANNING_POKER_PATH } from '../seo/seo-pages.js';
 import { LEGAL_PAGE, LEGAL_PATH } from '../legal/legal-content.js';
 import SiteMasthead from './SiteMasthead.jsx';
+import { pageHref } from '../seo/page-links.js';
+import LanguageLinks from '../seo/LanguageLinks.jsx';
 import './landing.css';
 
 const LANDING_ICON_SIZE_PX = Object.freeze({ ACTION: 16, TRUST: 14 });
@@ -152,9 +154,10 @@ function LandingFooter() {
       </span>
       <p>{t('landing.footer')}</p>
       <nav className="rb-landing__legal" aria-label={t('legal.footer.nav')}>
-        <a href={LEGAL_PATH[LEGAL_PAGE.PRIVACY]}>{t('legal.footer.privacy')}</a>
-        <a href={LEGAL_PATH[LEGAL_PAGE.TERMS]}>{t('legal.footer.terms')}</a>
+        <a href={pageHref(LEGAL_PATH[LEGAL_PAGE.PRIVACY])}>{t('legal.footer.privacy')}</a>
+        <a href={pageHref(LEGAL_PATH[LEGAL_PAGE.TERMS])}>{t('legal.footer.terms')}</a>
       </nav>
+      <LanguageLinks />
     </footer>
   );
 }

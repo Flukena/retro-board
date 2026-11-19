@@ -597,6 +597,7 @@ export default Object.freeze({
   "selection.byMany": "{name}님 외 {n}명이 선택 중",
   "selection.byCount": "{name}님이 카드 {n}장을 선택 중",
   "settings.lang": "언어",
+  "settings.langLinks": "언어",
   "settings.theme": "테마",
   "settings.scrollWheelZoom": "스크롤 휠로 확대/축소",
   "settings.theme.light": "라이트",

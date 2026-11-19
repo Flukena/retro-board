@@ -1,6 +1,7 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { setLang, t } from '../ui/i18n.js';
+import { PagePathContext } from './LanguageLinks.jsx';
 import { TOKENS } from '../ui/theme.js';
 import Landing from '../app/Landing.jsx';
 import LegalPage from '../legal/LegalPage.jsx';
@@ -36,6 +37,11 @@ const STRUCTURED_DATA = Object.freeze({
   }),
 });
 
+// The page path (not the URL) tells the language links which page they belong to.
+const renderBody = (page) => renderToStaticMarkup(
+  <PagePathContext.Provider value={page.path}>{VIEWS[page.kind](page)}</PagePathContext.Provider>,
+);
+
 const outputFile = (path) => (path === '/' ? 'index.html' : `${path.slice(1)}/index.html`);
 
 // t() reads the current language at call time, so the language (and its
@@ -49,7 +55,7 @@ async function languagePages(lang, shared) {
     return {
       file: outputFile(path),
       options: { lang, title: t(page.titleKey), description: t(page.descriptionKey), canonical: url,
-        alternates: pageAlternates(page.path), body: renderToStaticMarkup(VIEWS[page.kind](page)), structuredData, ...shared },
+        alternates: pageAlternates(page.path), body: renderBody(page), structuredData, ...shared },
     };
   });
 }

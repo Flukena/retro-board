@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { withChromeModule } from '../../test-support/chrome-test-helper.js';
+import { localizedPath } from '../seo/seo-pages.js';
 import { LEGAL_EFFECTIVE_DATE_ISO, LEGAL_PAGE, LEGAL_PATH, legalSections } from './legal-content.js';
 
 test('legal pages render every translated section, the effective date and a link to the other page', async () => {
@@ -18,8 +19,8 @@ test('legal pages render every translated section, the effective date and a link
         for (const section of legalSections(page)) assert.ok(html.includes(t(section.titleKey)), section.titleKey);
         assert.doesNotMatch(html, /legal\.[a-z]+\./);
         const other = page === LEGAL_PAGE.PRIVACY ? LEGAL_PAGE.TERMS : LEGAL_PAGE.PRIVACY;
-        assert.ok(html.includes(`href="${LEGAL_PATH[other]}"`));
-        assert.match(html, /href="\/"/);
+        assert.ok(html.includes(`href="${localizedPath(LEGAL_PATH[other], lang)}"`));
+        assert.ok(html.includes(`href="${localizedPath('/', lang)}"`));
         assert.match(html, new RegExp(`<option value="${lang}"[^>]*selected=""`), 'language picker shows the current language');
       }
     }

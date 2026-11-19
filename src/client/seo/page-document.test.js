@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { escapeHtml, pageDocument, themeTokenCss } from './page-document.js';
+import { escapeHtml, markEmailOff, pageDocument, themeTokenCss } from './page-document.js';
 
 const TEMPLATE = '<!doctype html>\n<html lang="th">\n  <head>\n    <title>Retro Board</title>\n  </head>\n  <body><div id="root"></div></body>\n</html>';
 
@@ -61,4 +61,16 @@ test('structured data is embedded as JSON-LD that cannot close its script elemen
   assert.ok(block, 'one JSON-LD block');
   assert.deepEqual(JSON.parse(block[1]), { headline: '</script><b>x' });
   assert.doesNotMatch(pageDocument(TEMPLATE, { lang: 'en', title: 'X' }), /ld\+json/);
+});
+
+const MAIL = 'someone@example.com';
+
+test('markEmailOff wraps every address in text, and only in text', () => {
+  const wrapped = markEmailOff(`<p>Write to ${MAIL} or ${MAIL}.</p><p>No address here.</p>`, MAIL);
+  assert.equal(wrapped, `<p>Write to <!--email_off-->${MAIL}<!--/email_off--> or <!--email_off-->${MAIL}<!--/email_off-->.</p><p>No address here.</p>`);
+  assert.equal(markEmailOff('<p>nothing</p>', MAIL), '<p>nothing</p>');
+});
+
+test('markEmailOff refuses an address inside a tag, where markers cannot go', () => {
+  assert.throws(() => markEmailOff(`<a href="mailto:${MAIL}">mail</a>`, MAIL), /inside a tag/);
 });

@@ -9,6 +9,8 @@ import PokerFeature from './PokerFeature.jsx';
 import RecentRooms, { useRecentRooms } from '../app/RecentRooms.jsx';
 import { ROOM_KIND } from '../app/router.js';
 import { PLANNING_POKER_PATH } from '../seo/seo-pages.js';
+import { pageHref } from '../seo/page-links.js';
+import LanguageLinks from '../seo/LanguageLinks.jsx';
 import '../legal/legal.css';
 import './poker.css';
 
@@ -37,7 +39,7 @@ export default function PokerGuidePage() {
   useLang();
   const { recents, remove } = useRecentRooms(ROOM_KIND.POKER);
   const retroLink = (
-    <a className="rb-btn rb-btn--pill rb-poker-home__retro" href={RETRO_HOME_PATH} aria-label={t('pokerPage.retroLink')} title={t('pokerPage.retroLink')}>
+    <a className="rb-btn rb-btn--pill rb-poker-home__retro" href={pageHref(RETRO_HOME_PATH)} aria-label={t('pokerPage.retroLink')} title={t('pokerPage.retroLink')}>
       <Sparkles size={RETRO_ICON_SIZE_PX} aria-hidden="true" />
       <span className="rb-poker-home__retro-label">{t('pokerPage.retroLink')}</span>
     </a>
@@ -58,6 +60,7 @@ export default function PokerGuidePage() {
             <GuideSection id={SECTION_ID.MORE} titleKey="tpl.section.more"><SiteLinks /></GuideSection>
           </Surface>
         </main>
+        <footer className="rb-landing__footer"><LanguageLinks /></footer>
       </div>
     </div>
   );

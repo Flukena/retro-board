@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { withChromeModule } from '../../test-support/chrome-test-helper.js';
+import { localizedPath } from '../seo/seo-pages.js';
 
 const UNTRANSLATED = /\b(guide|tpl|notFound|seo)\.[a-z0-9.]+/;
 
@@ -25,7 +26,7 @@ test('the home guide renders feature cards, step cards, template cards and a col
       for (const key of ['notes', 'reveal', 'vote', 'extras', 'devices', 'export']) assert.ok(markup.includes(t(`guide.features.${key}.title`)));
       assert.equal((markup.match(/class="rb-landing__template"/g) || []).length, 4, `${lang}: template cards`);
       for (const [path, name] of [['/templates/retro-loop', 'Retro Loop'], ['/templates/start-stop-continue', 'Start Stop Continue'], ['/templates/mad-sad-glad', 'Mad Sad Glad'], ['/templates/4ls-retrospective', '4Ls']]) {
-        assert.match(markup, new RegExp(`href="${path}"`), `${lang} ${path}`);
+        assert.match(markup, new RegExp(`href="${localizedPath(path, lang)}"`), `${lang} ${path}`);
         assert.ok(markup.includes(`aria-label="${t('tpl.start', { name })}"`), `${lang}: start ${name}`);
       }
       assert.equal((markup.match(/<details/g) || []).length, 6, `${lang}: FAQ items`);
@@ -41,7 +42,7 @@ test('the retro steps link to the Agile & Scrum guide, so phones (no top menu) c
       setLang(lang);
       const markup = renderToStaticMarkup(React.createElement(LandingGuide));
       const steps = markup.match(/<section[^>]*id="landing-guide-steps"[\s\S]*?<\/section>/)?.[0] ?? '';
-      assert.match(steps, new RegExp(`<a [^>]*href="/agile-scrum"[^>]*>${t('agileGuide.brand').replaceAll('&', '&amp;')}`), lang);
+      assert.match(steps, new RegExp(`<a [^>]*href="${localizedPath('/agile-scrum', lang)}"[^>]*>${t('agileGuide.brand').replaceAll('&', '&amp;')}`), lang);
     }
   });
 });
@@ -69,12 +70,12 @@ test('template guides and the not-found page render fully translated in both lan
     await renderBoth('/src/client/templates/TemplatePage.jsx', { slug }, (markup, lang) => {
       assert.doesNotMatch(markup, UNTRANSLATED, `${lang} ${slug}`);
       assert.match(markup, /<button[^>]*class="[^"]*rb-btn--primary/, `${lang} ${slug}: start button`);
-      assert.doesNotMatch(markup, new RegExp(`href="/templates/${slug}"`), 'no link to itself');
+      assert.doesNotMatch(markup, new RegExp(`href="${localizedPath(`/templates/${slug}`, lang)}"`), 'no link to itself');
     });
   }
   await renderBoth('/src/client/app/NotFoundPage.jsx', {}, (markup, lang) => {
     assert.doesNotMatch(markup, UNTRANSLATED, lang);
-    assert.match(markup, /href="\/"/);
+    assert.match(markup, new RegExp(`href="${localizedPath('/', lang)}"`));
   });
 });
 

@@ -597,6 +597,7 @@ export default Object.freeze({
   "selection.byMany": "{name} e mais {n} estão selecionando",
   "selection.byCount": "{name} está selecionando {n} cartões",
   "settings.lang": "Idioma",
+  "settings.langLinks": "Idiomas",
   "settings.theme": "Tema",
   "settings.scrollWheelZoom": "Usar a roda do mouse para zoom",
   "settings.theme.light": "Claro",

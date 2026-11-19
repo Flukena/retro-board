@@ -597,6 +597,7 @@ export default Object.freeze({
   "selection.byMany": "{name} dan {n} lainnya sedang memilih",
   "selection.byCount": "{name} sedang memilih {n} kartu",
   "settings.lang": "Bahasa",
+  "settings.langLinks": "Bahasa",
   "settings.theme": "Tema",
   "settings.scrollWheelZoom": "Gunakan zoom roda gulir",
   "settings.theme.light": "Terang",
