@@ -23,3 +23,13 @@ Browser checks are intentionally not run, as requested. Owed before release: `ui
 - Ceiling: 1452 → 1348. ESLint complexity ≤15 and unused-variable checks PASS.
 - Full gate: `p3-gate-2.log`; build PASS (`p3-build-2.log`).
 - RULE CONFORMANCE: Code shape PASS; Tests PASS; Logging and disk writes N/A; Data location PASS; Karpathy guidelines PASS; repo style PASS; failure-path tests PASS.
+- Task 2 commit: `8d95af8`; full gate **2831/2831**, build PASS.
+
+## Task 3 — S4 awareness-presence
+
+- Files: `bridge/awareness-presence.{js,test.js}`, bridge, ratchet, report.
+- Before move: bridge/contract and awareness characterization **52/52** (`p3-before-3.log`). Tests pin 30-second freshness, independent per-connection busy ownership, text/geometry claim merging, singular text editing, and real Awareness slot removal on document destroy. Same tests green through the new module; a fake Awareness also exercises readers and writes (`p3-after-3.log`).
+- Three readers remain distinct: editing accepts a nonempty overlong ID while busy/selection reject it. Only the identical editing/selection signature formatting is shared (`p3-presence-signatures.log`, 3/3).
+- RED: `awareness-presence.js:34`, replace the text `slice(0, 1)` branch with all normalized IDs. Tests failed because busy state included extra `d` (`p3-red-3.log`). Restored.
+- Ceiling: 1348 → 1130. Full gate: `p3-gate-3.log`; build PASS (`p3-build-3.log`). ESLint complexity ≤15 and unused-variable checks PASS. A transient extraction-range syntax error was corrected before the passing post-move test and before the full gate; it is not claimed as a mutation proof.
+- RULE CONFORMANCE: Code shape PASS; Tests PASS; Logging and disk writes N/A; Data location PASS; Karpathy guidelines PASS; repo style PASS; failure-path tests PASS.
