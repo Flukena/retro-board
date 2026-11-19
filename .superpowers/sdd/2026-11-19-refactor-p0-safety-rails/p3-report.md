@@ -13,3 +13,13 @@ Browser checks are intentionally not run, as requested. Owed before release: `ui
 - Ceiling: 1469 → 1452.
 - Full gate: see `p3-gate-1.log`; build passed (`p3-build-1.log`).
 - RULE CONFORMANCE: Code shape PASS; Tests PASS; Logging and disk writes N/A (no new sinks); Data location PASS; Karpathy guidelines PASS; repo style PASS; failure-path tests PASS.
+- Task 1 commit: `9d37497`; full gate **2829/2829**, build PASS.
+
+## Task 2 — S3 user-prefs
+
+- Files: `bridge/user-prefs.{js,test.js}`, bridge, ratchet, report.
+- Before move: bridge/contract plus new dual-write/blocked-cache and shared sync-wait tests **52/52** (`p3-before-2.log`). Same tests green after extraction (`p3-after-2.log`). Cache hit seeds Yjs, blocked storage retains durable recovery, system origin stays off undo, one wait serves concurrent reads and removes its listener. Receiver observations are asserted outside swallowed storage exceptions.
+- RED: `user-prefs.js:110` at mutation time (now :115 after named ID constants), replaced durable `ymap.set` with `ymap.delete`; `user-prefs.test.js:26` failed `undefined !== 'Bob'` (`p3-red-2.log`). Restored.
+- Ceiling: 1452 → 1348. ESLint complexity ≤15 and unused-variable checks PASS.
+- Full gate: `p3-gate-2.log`; build PASS (`p3-build-2.log`).
+- RULE CONFORMANCE: Code shape PASS; Tests PASS; Logging and disk writes N/A; Data location PASS; Karpathy guidelines PASS; repo style PASS; failure-path tests PASS.
