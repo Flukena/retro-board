@@ -708,3 +708,75 @@ test('the image rewrite is for locked rooms and only accepts canonical encrypted
     assert.equal(browser.storage.rewriteImageSources(new Map([[before, own('4f2b8c1e-4d5a-4e6f-8a9b-0c1d2e3f4a5b')]])), 1);
   }, { locked: true });
 });
+
+const BOARD_STATE_KEY = 'boardState';
+const VOTER_ID = 'voter1';
+
+function collectBoardStateEvents(storage) {
+  const events = [];
+  storage.on(({ detail }) => { if (detail.key === BOARD_STATE_KEY) events.push(detail); });
+  return events;
+}
+
+test('undo and redo each emit boardState with isUndoRedo true', async () => {
+  await withStorage(async (browser) => {
+    const { storage } = browser;
+    assert.equal(storage.addItem(VALID_ITEM), true);
+    storage.stopUndoCapture();
+    const events = collectBoardStateEvents(storage);
+
+    assert.equal(storage.undo(), true);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].isUndoRedo, true);
+    assert.equal(events[0].value.items.some((item) => item.id === VALID_ITEM.id), false);
+
+    assert.equal(storage.redo(), true);
+    assert.equal(events.length, 2);
+    assert.equal(events[1].isUndoRedo, true);
+    assert.equal(events[1].value.items.some((item) => item.id === VALID_ITEM.id), true);
+  });
+});
+
+test('a local write does not echo', async () => {
+  await withStorage(async (browser) => {
+    const { storage } = browser;
+    const events = collectBoardStateEvents(storage);
+    assert.equal(storage.addItem(VALID_ITEM), true);
+    assert.equal(storage.updateItem(VALID_ITEM.id, { x: 99 }), true);
+    assert.equal(events.length, 0);
+  });
+});
+
+test('a remote update and a system write are not undo or redo', async () => {
+  await withStorage(async (browser) => {
+    const { storage } = browser;
+    const peer = new Y.Doc();
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(browser.__rbYDoc));
+    const events = collectBoardStateEvents(storage);
+
+    peer.getMap('items').set('remote', new Y.Map(Object.entries({ ...VALID_ITEM, id: undefined })));
+    Y.applyUpdate(browser.__rbYDoc, Y.encodeStateAsUpdate(peer), peer);
+    assert.equal(events.length, 1);
+    assert.equal(Boolean(events[0].isUndoRedo), false);
+
+    browser.__rbYDoc.transact(() => browser.__rbYMeta.set('title', 'x'), 'system');
+    assert.equal(events.length, 2);
+    assert.equal(Boolean(events[1].isUndoRedo), false);
+  });
+});
+
+test('undo of a vote does not set the boardState flag', async () => {
+  await withStorage(async (browser) => {
+    const { storage } = browser;
+    assert.equal(storage.addItem(VALID_ITEM), true);
+    storage.stopUndoCapture();
+    storage.setVote(VALID_ITEM.id, VOTER_ID, true);
+    const events = collectBoardStateEvents(storage);
+    const voteKey = `s||vote:${VALID_ITEM.id}:${VOTER_ID}`;
+    assert.equal(browser.__rbYDoc.getMap('kv').has(voteKey), true);
+
+    assert.equal(storage.undo(), true);
+    assert.equal(browser.__rbYDoc.getMap('kv').has(voteKey), false);
+    assert.equal(events.some((event) => event.isUndoRedo), false);
+  });
+});
