@@ -208,3 +208,22 @@ test('the Agile and Scrum guide routes in English and Thai', async () => {
     globalThis.window = original;
   }
 });
+
+test('isLandingPath accepts the home page in every language and nothing else', async () => {
+  const { isLandingPath, parseRoute } = await import('./router.js');
+  const original = globalThis.window;
+  try {
+    const routeKind = (pathname) => { globalThis.window = { location: { pathname, hash: '' } }; return parseRoute().kind; };
+    for (const pathname of ['/', '/index.html', '/th', '/th/', '/th/index.html', '/ja', '/id/']) {
+      assert.equal(isLandingPath(pathname), true, pathname);
+      assert.equal(routeKind(pathname), 'landing', `${pathname} is the landing route too`);
+    }
+    // English has no prefix, so /en is not a home page; neither are guides, templates or rooms.
+    for (const pathname of ['/en', '/en/', '/thai', '/index.htm', '/th/index.html/', '/agile-scrum', '/th/agile-scrum',
+      '/planning-poker', '/templates/mad-sad-glad', '/privacy', '/public', '/b/Room1234', '/p/Room1234']) {
+      assert.equal(isLandingPath(pathname), false, pathname);
+    }
+  } finally {
+    globalThis.window = original;
+  }
+});

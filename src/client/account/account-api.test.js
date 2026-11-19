@@ -2,12 +2,18 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AUTH_ERROR_CODES } from '../../domain/auth-errors.js';
 import {
-  ACCOUNT_STATUS, AccountRequestError, deleteAccount, deleteRoom, fetchAccount, listRooms, logout, logoutAll, readAuthError,
-  renameRoom, signInHref,
+  ACCOUNT_STATUS, AccountRequestError, deleteAccount, deleteRoom, fetchAccount, isSignedIn, listRooms, logout, logoutAll,
+  readAuthError, renameRoom, signInHref,
 } from './account-api.js';
 
 const BASE = 'https://retroroom.party/yjs';
 const reply = (status, body) => async () => new Response(body === undefined ? null : JSON.stringify(body), { status });
+
+test('only a signed-in answer from the relay counts as signed in', () => {
+  assert.equal(isSignedIn({ status: ACCOUNT_STATUS.SIGNED_IN, account: { name: 'Ada', plan: 'free' } }), true);
+  const unconfirmed = [ACCOUNT_STATUS.SIGNED_OUT, ACCOUNT_STATUS.DISABLED, ACCOUNT_STATUS.UNAVAILABLE].map((status) => ({ status }));
+  for (const session of [null, undefined, ...unconfirmed]) assert.equal(isSignedIn(session), false, JSON.stringify(session));
+});
 
 test('fetchAccount maps 404/401/200/503/network', async () => {
   const account = { name: 'Ada', email: 'ada@example.com', plan: 'free', entitlements: {} };

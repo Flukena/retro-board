@@ -231,6 +231,8 @@ is non-empty and the relay is not the Public Wall relay.
   owns. "My boards" (`GET /api/account/rooms`) hands out working links, so
   anyone who takes over the Google account or its `rb_account` cookie can open
   every normal room that account owns. Locked rooms still need their password.
+  The list also carries a geometry-only zone preview (rectangles and colour
+  indexes, no text) for plain boards, and none for locked rooms.
   The plan only gates account features (today: both plans may create locked
   rooms).
 - **Ownership is not revealed.** Rename (`POST /api/account/rooms/<code>/title`)

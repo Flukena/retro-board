@@ -25,7 +25,7 @@ export function ButtonLink({ variant = BUTTON_VARIANT.DEFAULT, className, childr
   return <a className={[buttonClass(variant), className].filter(Boolean).join(' ')} {...rest}>{children}</a>;
 }
 
-export function MenuItem({ icon, label, variant = MENU_ITEM_VARIANT.DEFAULT, checked, disabled, onClick, checkIcon }) {
+export function MenuItem({ icon, label, variant = MENU_ITEM_VARIANT.DEFAULT, checked, disabled, onClick, checkIcon, ...rest }) {
   return (
     <button
       type="button"
@@ -33,11 +33,22 @@ export function MenuItem({ icon, label, variant = MENU_ITEM_VARIANT.DEFAULT, che
       disabled={disabled}
       onClick={onClick}
       aria-pressed={checked == null ? undefined : checked}
+      {...rest}
     >
       {icon != null && <span className="rb-menu-item__icon">{icon}</span>}
       <span className="rb-menu-item__label">{label}</span>
       {checked && checkIcon}
     </button>
+  );
+}
+
+/** A navigation link that looks like a MenuItem of the same variant. */
+export function MenuLink({ icon, label, variant = MENU_ITEM_VARIANT.DEFAULT, ...rest }) {
+  return (
+    <a className={menuItemClass(variant)} {...rest}>
+      {icon != null && <span className="rb-menu-item__icon">{icon}</span>}
+      <span className="rb-menu-item__label">{label}</span>
+    </a>
   );
 }
 

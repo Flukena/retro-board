@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 /**
  * Two-context live check of optional Google sign-in against the local fake Google.
+ * Build the maintainer console once (the relay serves it from dist-maintainer/ and exits at start-up without it):
+ *   npm run maintainer:build
  * Start isolated servers first (free ports, never production ones or the repo .env):
  *   FAKE_OIDC_PORT=4455 node scripts/fake-google-oidc.mjs
  *   VITE_YJS_PORT=1250 npx vite --host localhost --port 5190 --strictPort
@@ -22,8 +24,8 @@
 import assert from 'node:assert/strict';
 import { FAKE_GOOGLE_PROFILE } from './fake-google-oidc.mjs';
 import {
-  BASE_LABELS, FAKE_GOOGLE_DECISION, REDO_KEY, SYNC_TIMEOUT_MS, addSharedSticky, enter, openLanding, participant, runLiveCheck,
-  shot, signInLink, step, undoUntilHidden, visitStub, waitForTextOn,
+  BASE_LABELS, FAKE_GOOGLE_DECISION, REDO_KEY, SYNC_TIMEOUT_MS, addSharedSticky, enter, openLanding, openWorkspace, participant,
+  runLiveCheck, shot, signInLink, step, undoUntilHidden, visitStub, waitForTextOn,
 } from './board-live-helpers.mjs';
 
 const BOARD_URL_PATTERN = /\/b\/[A-Za-z0-9_-]+#[A-Za-z0-9_-]+$/;
@@ -187,7 +189,8 @@ async function collaborationSteps({ a, b, report, baseUrl }) {
     return { undoPresses: presses };
   });
   await step(report, 'A is still signed in after the board session', async () => {
-    await openLanding(a, baseUrl);
+    // A signed-in person's home page is the workspace.
+    await openWorkspace(a, baseUrl);
     await expectSignedIn(a, LABELS.en.free);
   });
 }

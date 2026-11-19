@@ -194,6 +194,26 @@ test('at the active-room cap a cold rename answers 503 and lets no second room i
   assert.equal((await rename(env.relay, busy.code, cookie)).status, STATUS.OK, 'the resident room already holds its slot');
 });
 
+test('the list carries a zone preview written over the wire and no zone text', async (t) => {
+  const env = await hookedRelay(t);
+  const cookie = await signIn(env);
+  const session = await roomSession(env, await createOwnedRoom(env, cookie));
+  const peer = openPeer(t, env.relay, session);
+  await peer.synced;
+  peer.doc.getMap('items').set('zone-1', new Y.Map(Object.entries({
+    type: 'zone', x: 100, y: 50, w: 600, h: 400, color: 1, title: 'private zone words',
+  })));
+  // A second peer seeing the zone proves the relay holds it; the list is rate limited, so it is read once.
+  const witness = openPeer(t, env.relay, session);
+  await witness.synced;
+  await until(() => witness.doc.getMap('items').has('zone-1'), Boolean, 'the zone at the relay');
+  const answer = await fetch(`${env.relay.url}${ROOMS}`, { headers: { cookie } });
+  assert.equal(answer.status, STATUS.OK, env.relay.output());
+  const response = await answer.text();
+  assert.deepEqual(JSON.parse(response).rooms[0].preview, { zones: [{ x: 100, y: 50, w: 600, h: 400, color: 1 }] });
+  assert.equal(response.includes('private zone words'), false);
+});
+
 test('the list links a Poker room under /p/ and a locked room under /b/ with no title', async (t) => {
   const env = await hookedRelay(t);
   const cookie = await signIn(env);

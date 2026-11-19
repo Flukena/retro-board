@@ -1,4 +1,5 @@
 import { isBoardTitle } from '../domain/board-title.js';
+import { boardPreviewOfDoc } from './board-preview-reader.js';
 import { unloadUnattachedDoc } from './plain-upgrade.js';
 
 /** Transaction origin of a relay rename. Clients track only their own 'local' origin for undo. */
@@ -43,16 +44,18 @@ function boundedRunner(limit) {
 }
 
 /**
- * Title of a room for a list: read live from a resident doc, otherwise from storage into a throwaway doc that is never
- * registered. Null when it has none (a room cleared mid-list reads as empty); a storage failure rejects.
+ * Title and zone preview of a room for a list: read live from a resident doc, otherwise from storage into a throwaway
+ * doc that is never registered, so one document load answers both. Each is null when the room has none (a room cleared
+ * mid-list reads as empty); a storage failure rejects.
  * Ports: docs, roomReady (doc → hydration promise), readStoredDoc(docName) → Y.Doc built from persistence.
  */
-export function createRoomTitleReader({ docs, roomReady, readStoredDoc, limit = MAX_CONCURRENT_TITLE_READS }) {
+export function createRoomSummaryReader({ docs, roomReady, readStoredDoc, limit = MAX_CONCURRENT_TITLE_READS }) {
   const run = boundedRunner(limit);
+  const summaryOf = (doc) => ({ title: titleOf(doc), preview: boardPreviewOfDoc(doc) });
   const readStored = (docName) => run(async () => {
     const stored = await readStoredDoc(docName);
     try {
-      return titleOf(stored);
+      return summaryOf(stored);
     } finally {
       stored.destroy();
     }
@@ -61,7 +64,7 @@ export function createRoomTitleReader({ docs, roomReady, readStoredDoc, limit = 
     const resident = docs.get(docName);
     if (!resident) return readStored(docName);
     await roomReady.get(resident);
-    return titleOf(resident);
+    return summaryOf(resident);
   };
 }
 

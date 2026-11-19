@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { readFileSync } from 'node:fs';
 import { createServer } from 'vite';
 import { BUTTON_VARIANT, MENU_ITEM_VARIANT, DIVIDER_ORIENTATION, SURFACE_KIND } from './ui-variants.js';
 
@@ -16,7 +17,7 @@ test('UI primitives preserve native button and accessibility contracts', async (
     appType: 'custom',
   });
   try {
-    const { Button, ButtonLink, MenuItem, Divider, Surface, IconButton, ChoiceChip, portalToBody } = await server.ssrLoadModule('/src/client/ui/UiPrimitives.jsx');
+    const { Button, ButtonLink, MenuItem, MenuLink, Divider, Surface, IconButton, ChoiceChip, portalToBody } = await server.ssrLoadModule('/src/client/ui/UiPrimitives.jsx');
     await context.test('floating content remains renderable without a browser document', () => {
       const content = portalToBody(createElement('p', { role: 'status' }, TEST_LABEL));
       assert.equal(renderToStaticMarkup(content), `<p role="status">${TEST_LABEL}</p>`);
@@ -72,6 +73,26 @@ test('UI primitives preserve native button and accessibility contracts', async (
       assert.equal(unchecked.props['aria-pressed'], false);
       assert.equal(unchecked.props.children[2], false);
       assert.equal(MenuItem({}).props['aria-pressed'], undefined);
+    });
+    await context.test('menu items pass role and other native attributes through to the button', () => {
+      const html = renderToStaticMarkup(createElement(MenuItem, {
+        label: TEST_LABEL, role: 'menuitem', 'aria-expanded': false, 'aria-describedby': 'hint',
+      }));
+      assert.match(html, /<button[^>]*role="menuitem"/);
+      assert.match(html, /aria-expanded="false"/);
+      assert.match(html, /aria-describedby="hint"/);
+    });
+    await context.test('menu links navigate like links and look like the matching menu item', () => {
+      const html = renderToStaticMarkup(createElement(MenuLink, { icon: 'icon', label: TEST_LABEL, href: '/', role: 'menuitem' }));
+      assert.equal(html, `<a class="rb-menu-item" href="/" role="menuitem"><span class="rb-menu-item__icon">icon</span><span class="rb-menu-item__label">${TEST_LABEL}</span></a>`);
+      const danger = renderToStaticMarkup(createElement(MenuLink, { label: TEST_LABEL, href: '/x', variant: MENU_ITEM_VARIANT.DANGER }));
+      assert.equal(danger, `<a class="rb-menu-item rb-menu-item--danger" href="/x"><span class="rb-menu-item__label">${TEST_LABEL}</span></a>`);
+    });
+    await context.test('menu links are not underlined and size like the button items', () => {
+      const css = readFileSync(new URL('./ui.css', import.meta.url), 'utf8');
+      const rule = css.match(/(?:^|\n)a\.rb-menu-item\s*\{([^}]*)\}/)?.[1] ?? '';
+      assert.match(rule, /text-decoration:\s*none/);
+      assert.match(rule, /box-sizing:\s*border-box/);
     });
     await context.test('menu items omit absent icon slots and retain supplied icons', () => {
       for (const icon of [null, undefined]) {

@@ -10,12 +10,16 @@ const THUMBNAIL_PADDING_PX = 2;
 const THUMBNAIL_STROKE_WIDTH_PX = 1;
 const FALLBACK_PALETTE_INDEX = 0;
 
-export function TemplateThumbnail({ zones }) {
-  const rects = templateThumbnail(zones, THUMBNAIL_WIDTH_PX, THUMBNAIL_HEIGHT_PX, THUMBNAIL_PADDING_PX, ZONE_RADIUS_PX);
+const BASE_CLASS = 'rb-template-thumbnail';
+
+export function TemplateThumbnail({
+  zones, width = THUMBNAIL_WIDTH_PX, height = THUMBNAIL_HEIGHT_PX, padding = THUMBNAIL_PADDING_PX, className,
+}) {
+  const rects = templateThumbnail(zones, width, height, padding, ZONE_RADIUS_PX);
   return (
-    <svg className="rb-template-thumbnail" aria-hidden="true" focusable="false"
-      width={THUMBNAIL_WIDTH_PX} height={THUMBNAIL_HEIGHT_PX}
-      viewBox={`0 0 ${THUMBNAIL_WIDTH_PX} ${THUMBNAIL_HEIGHT_PX}`}>
+    <svg className={className ? `${BASE_CLASS} ${className}` : BASE_CLASS} aria-hidden="true" focusable="false"
+      width={width} height={height}
+      viewBox={`0 0 ${width} ${height}`}>
       {rects.map(({ x, y, w, h, r, color }, index) => {
         const palette = PALETTE[color] || PALETTE[FALLBACK_PALETTE_INDEX];
         return <rect key={`${x}:${y}:${w}:${h}:${color}:${index}`} x={x} y={y} width={w} height={h} rx={r} ry={r} fill={palette.bg} stroke={palette.border}

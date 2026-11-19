@@ -1,0 +1,383 @@
+/* "My boards", the signed-in home page. It has its own root class (not .rb-landing__page),
+   so the hinted-landing guard never hides it; the masthead keeps SiteMasthead's landing styles. */
+.rb-workspace {
+  --landing-logo-size: var(--landing-compact-logo-size);
+  --landing-wordmark-size: var(--landing-wordmark-mobile-size);
+  position: fixed;
+  inset: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--workspace-ground);
+  color: var(--text);
+  font-family: var(--font-ui);
+}
+/* Masthead and page share one centred column: a gutter, or more once the window is wider than the column,
+   plus the notch insets that viewport-fit=cover exposes. */
+.rb-workspace .rb-landing__masthead,
+.rb-workspace__main {
+  --rb-workspace-inline: max(var(--workspace-gutter), calc((100% - var(--workspace-max-width)) / 2 + var(--workspace-gutter)));
+  padding-left: calc(var(--rb-workspace-inline) + env(safe-area-inset-left, 0px));
+  padding-right: calc(var(--rb-workspace-inline) + env(safe-area-inset-right, 0px));
+}
+/* Wraps instead of scrolling sideways when the account, language and create controls outgrow one row. */
+.rb-workspace .rb-landing__masthead {
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  row-gap: var(--space-2);
+  padding-block: calc(var(--space-3) + env(safe-area-inset-top, 0px)) var(--space-3);
+  background: var(--bg-panel);
+  border-bottom: var(--workspace-border-width) solid var(--border);
+}
+.rb-workspace .rb-landing__brand { border-radius: var(--radius-md); }
+.rb-workspace__create { display: flex; }
+
+/* ---- Create menu ---- */
+.rb-workspace-create { position: relative; display: flex; }
+.rb-workspace-create__trigger { gap: var(--space-2); min-height: var(--workspace-touch-target); }
+.rb-workspace-create__menu {
+  position: absolute;
+  inset-inline-end: 0;
+  top: calc(100% + var(--space-1));
+  z-index: var(--workspace-create-layer);
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: var(--workspace-create-menu-width);
+  max-width: calc(100vw - 2 * var(--workspace-gutter));
+}
+.rb-workspace-create__menu .rb-menu-item {
+  box-sizing: border-box;
+  min-height: var(--workspace-touch-target);
+  align-items: flex-start;
+  font-size: var(--landing-control-font-size);
+}
+.rb-workspace-create__item-title { display: block; font-weight: var(--landing-heading-font-weight); }
+.rb-workspace-create__item-desc { display: block; font-size: var(--landing-small-font-size); color: var(--text-muted); }
+.rb-workspace-create__panel { display: grid; gap: var(--space-2); padding: var(--space-3); }
+.rb-workspace-create__name { width: 100%; box-sizing: border-box; }
+.rb-workspace-create__menu .rb-workspace__create-error { margin: 0 var(--space-3) var(--space-3); }
+
+.rb-workspace__main {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: 100%;
+  padding-block: var(--space-8) calc(var(--space-8) + env(safe-area-inset-bottom, 0px));
+}
+
+/* ---- Heading, search and sort ---- */
+.rb-workspace__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+.rb-workspace__heading { flex: 1 1 var(--workspace-heading-basis); min-width: 0; }
+.rb-workspace__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--landing-section-title-size);
+  font-weight: var(--landing-title-font-weight);
+  line-height: var(--legal-title-line-height);
+}
+.rb-workspace__count { font-size: var(--workspace-count-size); font-weight: normal; color: var(--text-muted); }
+.rb-workspace__intro { margin: var(--space-1) 0 0; font-size: var(--landing-control-font-size); color: var(--text-muted); }
+.rb-workspace__field {
+  min-height: var(--workspace-touch-target);
+  padding: 0 var(--space-3);
+  font-size: var(--landing-control-font-size);
+  border-radius: var(--radius-md);
+}
+.rb-workspace__search { position: relative; display: flex; align-items: center; flex: 0 1 var(--workspace-search-width); min-width: 0; }
+.rb-workspace__search svg {
+  position: absolute;
+  inset-inline-start: var(--space-3);
+  width: var(--workspace-search-icon-size);
+  height: var(--workspace-search-icon-size);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+.rb-workspace__search .rb-workspace__field {
+  width: 100%;
+  padding-inline-start: calc(var(--space-3) + var(--workspace-search-icon-size) + var(--space-2));
+}
+.rb-workspace__sort {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--landing-body-font-size);
+  color: var(--text-muted);
+}
+
+/* ---- Card grid ---- */
+.rb-workspace__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--workspace-card-min-width)), 1fr));
+  gap: var(--space-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.rb-workspace-card {
+  position: relative;
+  min-width: 0;
+  background: var(--workspace-card-bg);
+  border: var(--workspace-border-width) solid var(--border);
+  border-radius: var(--workspace-card-radius);
+  box-shadow: var(--shadow-card);
+}
+.rb-workspace-card:not(.rb-workspace-card--skeleton):hover,
+.rb-workspace-card:focus-within { border-color: var(--workspace-card-hover-border); }
+/* The open menu hangs below its card, over the next row. */
+.rb-workspace-card--menu-open { z-index: var(--workspace-menu-layer); }
+.rb-workspace-card__link { display: block; color: inherit; text-decoration: none; border-radius: inherit; }
+.rb-workspace-card__link:focus-visible,
+.rb-workspace-card__more:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* The dot-grid canvas behind card thumbnails and the empty-state sketch. */
+.rb-workspace-card__thumb,
+.rb-template-thumbnail.rb-workspace__empty-art {
+  background-color: var(--workspace-thumb-bg);
+  background-image: radial-gradient(circle, var(--grid-dot) 1px, transparent 1px);
+  background-size: var(--workspace-thumb-dot-pitch) var(--workspace-thumb-dot-pitch);
+}
+/* Isolated, so the raised poker card never paints over an open menu from the row above. */
+.rb-workspace-card__thumb {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--workspace-thumb-height);
+  overflow: hidden;
+  border-bottom: var(--workspace-border-width) solid var(--border);
+  border-radius: calc(var(--workspace-card-radius) - var(--workspace-border-width)) calc(var(--workspace-card-radius) - var(--workspace-border-width)) 0 0;
+}
+.rb-template-thumbnail.rb-workspace-card__zones { width: 100%; height: 100%; background: none; border-radius: 0; }
+.rb-workspace-card__thumb--locked {
+  background-image: repeating-linear-gradient(135deg, transparent 0 calc(var(--workspace-locked-stripe) - var(--workspace-border-width)), var(--grid-dot) 0 var(--workspace-locked-stripe));
+  background-size: auto;
+}
+.rb-workspace-card__lock {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--workspace-lock-size);
+  height: var(--workspace-lock-size);
+  border: var(--workspace-border-width) solid var(--border);
+  border-radius: var(--radius-round);
+  background: var(--bg-panel);
+  color: var(--text-muted);
+}
+.rb-workspace-card__poker-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--workspace-poker-card-width);
+  height: var(--workspace-poker-card-height);
+  box-sizing: border-box;
+  border: var(--landing-line-width) solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--workspace-card-bg);
+  color: var(--text-muted);
+  font-size: var(--workspace-poker-card-font-size);
+  font-weight: var(--landing-title-font-weight);
+}
+.rb-workspace-card__poker-card:first-child { margin-inline-end: var(--workspace-poker-card-overlap); transform: rotate(calc(-1 * var(--workspace-poker-card-tilt))); }
+.rb-workspace-card__poker-card:last-child { margin-inline-start: var(--workspace-poker-card-overlap); transform: rotate(var(--workspace-poker-card-tilt)); }
+.rb-workspace-card__poker-card--picked {
+  position: relative;
+  z-index: var(--workspace-poker-picked-layer);
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.rb-workspace-card__no-zones { font-size: var(--landing-body-font-size); color: var(--text-muted); }
+
+.rb-workspace-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: var(--space-3) calc(var(--workspace-touch-target) + var(--space-4)) var(--space-4) var(--space-4);
+}
+.rb-workspace-card__badge {
+  align-self: flex-start;
+  padding: var(--workspace-badge-padding);
+  border-radius: var(--radius-pill);
+  background: var(--bg-panel-2);
+  color: var(--text-muted);
+  font-size: var(--landing-small-font-size);
+  font-weight: var(--landing-recent-font-weight);
+}
+.rb-workspace-card__title {
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--workspace-card-title-size);
+  font-weight: var(--landing-recent-font-weight);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.rb-workspace-card__meta { margin: 0; font-size: var(--landing-body-font-size); color: var(--text-muted); }
+
+/* ---- Card menu ---- */
+.rb-workspace-card__actions { position: absolute; inset-inline-end: var(--space-2); bottom: var(--space-3); }
+.rb-workspace-card__more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--workspace-touch-target);
+  height: var(--workspace-touch-target);
+  padding: 0;
+  border: var(--workspace-border-width) solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.rb-workspace-card__more:hover,
+.rb-workspace-card__more[aria-expanded="true"] { border-color: var(--border); background: var(--bg-panel-2); color: var(--text); }
+.rb-workspace-card__menu {
+  position: absolute;
+  inset-inline-end: 0;
+  top: calc(100% + var(--space-1));
+  display: flex;
+  flex-direction: column;
+  width: var(--workspace-menu-width);
+}
+.rb-workspace-card__menu .rb-menu-item {
+  box-sizing: border-box;
+  min-height: var(--workspace-touch-target);
+  font-size: var(--landing-control-font-size);
+  text-decoration: none;
+}
+.rb-workspace-card__hint {
+  margin: 0;
+  padding: 0 var(--space-3) var(--space-2) var(--workspace-menu-hint-indent);
+  font-size: var(--landing-small-font-size);
+  color: var(--text-muted);
+}
+
+/* ---- Loading placeholders ---- */
+.rb-workspace-card--skeleton { box-shadow: none; }
+.rb-workspace-card__bar {
+  display: block;
+  width: var(--workspace-skeleton-title-width);
+  height: var(--workspace-skeleton-bar-height);
+  border-radius: var(--radius-pill);
+  background: var(--bg-panel-2);
+  animation: rb-workspace-pulse var(--workspace-skeleton-duration) ease-in-out infinite alternate;
+}
+.rb-workspace-card__bar--short { width: var(--workspace-skeleton-meta-width); }
+@keyframes rb-workspace-pulse { to { opacity: var(--workspace-skeleton-dim-opacity); } }
+
+/* ---- Notices, empty state and notes ---- */
+.rb-workspace__notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  border: var(--workspace-border-width) solid var(--warn-border);
+  border-radius: var(--radius-lg);
+  background: var(--warn-bg);
+  color: var(--warn-text);
+}
+.rb-workspace__notice .rb-btn { height: var(--workspace-touch-target); }
+.rb-workspace__no-match {
+  margin: 0;
+  padding: var(--space-6);
+  border: var(--workspace-border-width) dashed var(--border);
+  border-radius: var(--workspace-card-radius);
+  color: var(--text-muted);
+  text-align: center;
+}
+.rb-workspace__note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-6) 0 0;
+  font-size: var(--landing-body-font-size);
+  color: var(--text-muted);
+}
+.rb-workspace__empty {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  min-height: var(--workspace-empty-min-height);
+  box-sizing: border-box;
+  padding: var(--space-8) var(--space-6);
+  border: var(--landing-line-width) dashed var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--bg-panel);
+  text-align: center;
+}
+.rb-template-thumbnail.rb-workspace__empty-art {
+  border: var(--workspace-border-width) solid var(--border);
+  border-radius: var(--workspace-card-radius);
+}
+.rb-workspace__empty-art rect { fill: none; stroke-width: var(--landing-line-width); stroke-dasharray: var(--workspace-empty-art-dash); }
+.rb-workspace__empty-title {
+  margin: var(--space-2) 0 0;
+  font-family: var(--font-display);
+  font-size: var(--workspace-empty-title-size);
+  font-weight: var(--landing-title-font-weight);
+}
+.rb-workspace__empty-body { max-width: var(--workspace-empty-body-width); margin: 0; line-height: var(--legal-line-height); color: var(--text-muted); }
+.rb-workspace__cta { height: var(--workspace-touch-target); padding: 0 var(--space-5); font-size: var(--landing-control-font-size); }
+.rb-workspace__create-error { margin: 0; color: var(--danger); font-size: var(--landing-body-font-size); }
+.rb-workspace__empty .rb-workspace__note { justify-content: center; margin-top: var(--space-2); }
+
+@media (prefers-reduced-motion: reduce) {
+  .rb-workspace-card__bar { animation: none; }
+}
+/* Touch screens: every masthead control is a full tap target and the fields are large enough
+   that iOS does not zoom into them, as on the landing page. */
+@media (max-width: 767px), (max-width: 1024px) and (pointer: coarse) {
+  .rb-workspace .rb-landing__masthead button {
+    box-sizing: border-box;
+    min-width: var(--workspace-touch-target);
+    min-height: var(--workspace-touch-target);
+  }
+  .rb-workspace__field,
+  .rb-workspace-create .rb-landing__input { font-size: var(--workspace-touch-field-font-size); }
+}
+/* Narrow windows hide the nav and push the corner to the right: the create trigger takes that push
+   so it sits next to the account button. */
+@media (max-width: 900px) {
+  .rb-workspace__create { margin-left: auto; }
+  .rb-workspace .rb-landing__corner { margin-left: 0; }
+}
+/* Phones keep the logo, the account, the toggles and the create button on the first row. */
+@media (max-width: 599px) {
+  .rb-workspace { --workspace-gutter: var(--space-4); }
+  .rb-workspace .rb-landing__masthead { gap: var(--space-2); }
+  .rb-workspace .rb-landing__wordmark,
+  .rb-workspace .rb-account__plan,
+  .rb-workspace__sort-label { display: none; }
+  /* The open create menu spans the masthead between the page gutters instead of hanging off the trigger. */
+  .rb-workspace-create { position: static; }
+  .rb-workspace-create__menu { inset-inline: var(--workspace-gutter); width: auto; max-width: none; }
+  /* The create trigger stays on the first row as an icon-only button beside the account. */
+  .rb-workspace-create__trigger { padding-inline: var(--space-3); }
+  .rb-workspace-create__trigger-label,
+  .rb-workspace-create__chevron { display: none; }
+  /* The account is a 44px circle holding the initial, so a long name cannot push the corner past the gutter. */
+  .rb-workspace .rb-account__trigger { justify-content: center; width: var(--workspace-touch-target); padding: 0; border-radius: 50%; }
+  .rb-workspace .rb-account__initial { display: inline; }
+  .rb-workspace .rb-account__name,
+  .rb-workspace .rb-account__trigger svg { display: none; }
+  .rb-workspace .rb-landing__corner { flex: 0 1 auto; min-width: 0; }
+  .rb-workspace .rb-lang-picker { min-width: 0; }
+  .rb-workspace .rb-lang-picker__select { min-width: 0; max-width: var(--workspace-phone-lang-width); text-overflow: ellipsis; }
+  .rb-workspace__main { padding-top: var(--space-6); }
+  .rb-workspace__search { flex: 1 1 auto; }
+  .rb-workspace__empty { padding: var(--space-6) var(--space-4); }
+}

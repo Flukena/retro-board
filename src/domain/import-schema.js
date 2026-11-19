@@ -1,3 +1,4 @@
+import { isPaletteIndex } from './palette-index.js';
 import {
   COMMENT_AUTHOR_NAME_MAX_LEN,
   isSafeId,
@@ -85,7 +86,7 @@ const stickyRevealOverride = (item) => {
 
 const normalizeColor = (value, label) => {
   if (value == null) return undefined;
-  if (!Number.isInteger(value) || value < 0 || value > 5) fail(`${label} has an invalid color`);
+  if (!isPaletteIndex(value)) fail(`${label} has an invalid color`);
   return value;
 };
 

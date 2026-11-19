@@ -1,29 +1,27 @@
 import { useCallback, useEffect, useState } from 'react';
 import { t } from '../ui/i18n.js';
-import {
-  ACCOUNT_STATUS, deleteAccount, fetchAccount, logout, logoutAll, readAuthError,
-} from './account-api.js';
+import { deleteAccount, logout, logoutAll, readAuthError } from './account-api.js';
+import { accountSessionStore } from './account-session-store.js';
+import { useAccountSession } from './use-account-session.js';
 
 const TOAST_DURATION_MS = 5000;
 const TOAST_TYPE = Object.freeze({ INFO: 'info', WARN: 'warn' });
+const LOADING_SESSION = Object.freeze({ status: null });
 const ACTIONS = Object.freeze({ logout, logoutAll, deleteAccount });
 
 const currentLinkWithoutFragment = () => `${location.origin}${location.pathname}${location.search}`;
 
 // State and actions behind the account menu; the component only renders.
 export function useAccountMenu() {
-  const [session, setSession] = useState({ status: null });
+  const session = useAccountSession() ?? LOADING_SESSION;
   const [toast, setToast] = useState(null);
 
-  const load = useCallback(async () => {
-    setSession(await fetchAccount());
-  }, []);
+  const reload = useCallback(() => accountSessionStore.load({ force: true }), []);
 
   useEffect(() => {
     const code = readAuthError();
     if (code) setToast({ msg: t(`account.error.${code}`), type: TOAST_TYPE.WARN });
-    void load();
-  }, [load]);
+  }, []);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -34,7 +32,7 @@ export function useAccountMenu() {
   const run = useCallback(async (name) => {
     try {
       await ACTIONS[name]();
-      setSession({ status: ACCOUNT_STATUS.SIGNED_OUT });
+      accountSessionStore.markSignedOut();
       return true;
     } catch {
       setToast({ msg: t('account.failed'), type: TOAST_TYPE.WARN });
@@ -51,5 +49,5 @@ export function useAccountMenu() {
     }
   }, []);
 
-  return { session, toast, closeToast: () => setToast(null), reload: load, run, copyLink };
+  return { session, toast, closeToast: () => setToast(null), reload, run, copyLink };
 }

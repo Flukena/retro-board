@@ -75,7 +75,12 @@ function roomPorts() {
     titles: new Map(), writes: [], deletes: [], storageFailures: [],
     writeResult: TITLE_WRITE_STATUS.OK, deleteResult: () => Promise.resolve({ deleted: true, files: 0 }),
   };
-  ports.readTitle = async (docName) => ports.titles.get(docName) ?? null;
+  ports.reads = [];
+  ports.previews = new Map();
+  ports.readSummary = async (docName) => {
+    ports.reads.push(docName);
+    return { title: ports.titles.get(docName) ?? null, preview: ports.previews.get(docName) ?? null };
+  };
   ports.writeTitle = async (docName, title) => { ports.writes.push([docName, title]); return ports.writeResult; };
   ports.deleteRoom = (docName) => { ports.deletes.push(docName); return ports.deleteResult(); };
   return ports;
@@ -91,7 +96,7 @@ async function startRoutes(t) {
   const ports = roomPorts();
   const accountRooms = createAccountRoomRoutes({
     registry, store, maxBodyBytes: MAX_BODY_BYTES, log: QUIET, onStorageFailure: (error) => ports.storageFailures.push(error.code),
-    readTitle: (docName) => ports.readTitle(docName), writeTitle: ports.writeTitle, deleteRoom: ports.deleteRoom,
+    readSummary: (docName) => ports.readSummary(docName), writeTitle: ports.writeTitle, deleteRoom: ports.deleteRoom,
   });
   const routes = createAuthRoutes({
     oauth: OAUTH, accountKey, sessions, store, ledger: new FlowLedger(), allowedOrigins: [BOARD_ORIGIN], allowInsecureHttp: false,
@@ -153,7 +158,7 @@ test('the owner lists their rooms newest first, with kind-aware links, live titl
   const { rooms } = await response.json();
   assert.deepEqual(new Set(rooms.map((room) => room.code)), new Set([board.code, poker.code, locked.code]));
   const byCode = new Map(rooms.map((room) => [room.code, room]));
-  assert.deepEqual(Object.keys(byCode.get(board.code)).sort(), ['code', 'createdAt', 'kind', 'lastActiveAt', 'link', 'locked', 'title'].sort());
+  assert.deepEqual(Object.keys(byCode.get(board.code)).sort(), ['code', 'createdAt', 'kind', 'lastActiveAt', 'link', 'locked', 'preview', 'title'].sort());
   assert.deepEqual(byCode.get(board.code), {
     ...byCode.get(board.code), kind: ROOM_KIND.BOARD, locked: false, title: TITLE, link: `/b/${board.code}#${board.token}`,
   });
@@ -165,6 +170,23 @@ test('the owner lists their rooms newest first, with kind-aware links, live titl
   const created = rooms.map((room) => room.createdAt);
   assert.deepEqual(created, [...created].sort((a, b) => b - a), 'newest first');
   assert.equal(rooms.length, 3, 'a guest room is never listed');
+});
+
+test('board entries carry the preview; locked and poker entries carry null', async (t) => {
+  const ctx = await startRoutes(t);
+  const { account, cookie } = await ctx.signIn(OWNER_PROFILE);
+  const board = await ctx.createRoom(ownedBoard(account));
+  const poker = await ctx.createRoom({ owner: { kind: ROOM_KIND.POKER, accountId: account.id } });
+  const locked = await ctx.createRoom({ lock: lockRecord({ ownerAccountId: account.id }) });
+  const preview = { zones: [{ x: 1, y: 2, w: 300, h: 200, color: 4 }] };
+  for (const room of [board, poker, locked]) ctx.ports.previews.set(room.docName, preview);
+
+  const { rooms } = await (await get(ctx, ROOMS, { cookie })).json();
+  const byCode = new Map(rooms.map((room) => [room.code, room]));
+  assert.deepEqual(byCode.get(board.code).preview, preview);
+  assert.equal(byCode.get(poker.code).preview, null);
+  assert.equal(byCode.get(locked.code).preview, null);
+  assert.equal(ctx.ports.reads.includes(locked.docName), false, 'a locked room is never read');
 });
 
 test('a same-origin GET without Origin is answered; an allowed Origin gets credential CORS; a foreign one is refused', async (t) => {
@@ -319,11 +341,11 @@ test('a relay that is shutting down or failed answers 503 on every room route', 
   assert.deepEqual(ctx.ports.deletes, []);
 });
 
-test('a storage failure while reading titles answers 503 and is latched, never listed as a room without a title', async (t) => {
+test('a storage failure while reading summaries answers 503 and is latched, never listed as a room without a title', async (t) => {
   const ctx = await startRoutes(t);
   const { account, cookie } = await ctx.signIn(OWNER_PROFILE);
   await ctx.createRoom(ownedBoard(account));
-  ctx.ports.readTitle = async () => { throw storageOperationError('getYDoc failed'); };
+  ctx.ports.readSummary = async () => { throw storageOperationError('getYDoc failed'); };
   assert.equal((await get(ctx, ROOMS, { cookie })).status, STATUS.UNAVAILABLE);
   assert.deepEqual(ctx.ports.storageFailures, [STORAGE_FAILURE_CODE]);
 });

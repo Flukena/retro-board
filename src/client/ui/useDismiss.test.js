@@ -35,3 +35,20 @@ test('a portalled menu is inside the dismissal boundary as well as its trigger',
   assert.equal(closes, 0, 'Clicking a popup action must not remove the popup before click dispatch');
   cleanup();
 });
+
+test('Escape that ends an IME composition does not dismiss, so a half-typed name survives', () => {
+  const target = new EventTarget();
+  const ref = { current: { contains: () => false } };
+  let dismissals = 0;
+  const cleanup = subscribeDismiss(ref, () => { dismissals += 1; }, target);
+  const escape = (isComposing) => {
+    const event = new Event('keydown');
+    Object.assign(event, { key: 'Escape', isComposing });
+    target.dispatchEvent(event);
+  };
+  escape(true);
+  assert.equal(dismissals, 0);
+  escape(false);
+  assert.equal(dismissals, 1);
+  cleanup();
+});

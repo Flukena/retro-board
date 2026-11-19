@@ -6,6 +6,7 @@ import { contrastRatio, parseColor } from './color-contrast.js';
 import { MIN_NORMAL_TEXT_CONTRAST_RATIO } from '../../test-support/contrast.js';
 import { parseBoardCsv } from '../../domain/csv-import.js';
 import { normalizeImportManifest } from '../../domain/import-schema.js';
+import { PALETTE_COLOR_COUNT } from '../../domain/palette-index.js';
 
 test('palette order matches persisted indices through the public CSV API', () => {
   PALETTE.forEach((entry, index) => {
@@ -16,6 +17,7 @@ test('palette order matches persisted indices through the public CSV API', () =>
 });
 
 test('palette length matches the public manifest color boundary', () => {
+  assert.equal(PALETTE.length, PALETTE_COLOR_COUNT);
   const manifest = (color) => ({ board: { items: [{
     id: 'sticky', type: 'sticky', x: 0, y: 0, w: 200, h: 180, text: 'Note', color,
   }] } });

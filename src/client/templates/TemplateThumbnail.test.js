@@ -64,3 +64,32 @@ test('thumbnail zones are rounded from the board zone radius token value, scaled
     assert.equal(attrs.ry, attrs.rx);
   });
 });
+
+test('TemplateThumbnail sizes its viewBox from width and height props', async () => {
+  await withChromeModule('/src/client/templates/TemplateThumbnail.jsx', ({ TemplateThumbnail }) => {
+    const BOX_PX = 100;
+    const PADDING_PX = 10;
+    const zones = [{ x: 0, y: 0, w: 300, h: 300, color: 1 }];
+    const html = renderToStaticMarkup(React.createElement(TemplateThumbnail, {
+      zones, width: BOX_PX * 2, height: BOX_PX, padding: PADDING_PX, className: 'rb-probe-band',
+    }));
+    const svg = svgAttributes(html.match(/<svg[^>]*>/)[0]);
+    assert.equal(svg.viewBox, `0 0 ${BOX_PX * 2} ${BOX_PX}`);
+    assert.equal(svg.width, String(BOX_PX * 2));
+    assert.equal(svg.height, String(BOX_PX));
+    assert.equal(svg.class, 'rb-template-thumbnail rb-probe-band');
+    // A square board fills the padded height and is centred across the width.
+    const rect = svgAttributes(html.match(/<rect[^>]*>/)[0]);
+    assert.equal(Number(rect.y), PADDING_PX);
+    assert.equal(Number(rect.height), BOX_PX - 2 * PADDING_PX);
+    assert.equal(Number(rect.x), (BOX_PX * 2 - Number(rect.width)) / 2);
+  });
+});
+
+test('TemplateThumbnail keeps its 48 by 32 default box and plain class', async () => {
+  await withChromeModule('/src/client/templates/TemplateThumbnail.jsx', ({ TemplateThumbnail }) => {
+    const html = renderToStaticMarkup(React.createElement(TemplateThumbnail, { zones: [] }));
+    assert.equal(html.match(/<svg[^>]*>/)[0],
+      '<svg class="rb-template-thumbnail" aria-hidden="true" focusable="false" width="48" height="32" viewBox="0 0 48 32">');
+  });
+});

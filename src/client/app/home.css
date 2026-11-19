@@ -1,0 +1,20 @@
+/* Signed-in home: public/home-hint.js marks <html> on a hinted visit, so the prerendered guest
+   landing stays hidden until React shows the workspace. If the app never starts (the bundle failed),
+   the landing is revealed after the delay rather than leaving a blank page. The delay is declared
+   here too, so the reveal never depends on theme.js (part of that bundle) having run. */
+:root { --home-hint-reveal-delay: 3s; }
+
+.rb-home-hinted .rb-landing__page {
+  visibility: hidden;
+  animation: rb-home-hint-reveal 0s var(--home-hint-reveal-delay) forwards;
+}
+
+@keyframes rb-home-hint-reveal {
+  to { visibility: visible; }
+}
+
+/* While the landing is hidden the page shows its body: paint it the workspace's ground rather than
+   --bg (white in the light theme), so the page does not step from white to beige when the workspace mounts.
+   !important outranks the inline body background theme.js writes once the bundle runs. The class lives
+   only until HomeRoute mounts, so the override cannot outlast the first paint of the real view. */
+.rb-home-hinted body { background: var(--workspace-ground) !important; }

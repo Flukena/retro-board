@@ -6,6 +6,7 @@ import { existsSync, realpathSync } from 'node:fs';
 import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { setLang, t } from '../src/client/ui/i18n.js';
 
 export const VIEWPORT = { width: 1440, height: 900 };
 export const SYNC_TIMEOUT_MS = 15_000;
@@ -48,6 +49,24 @@ export const UNDO_KEY = 'ControlOrMeta+z';
 export const REDO_KEY = 'ControlOrMeta+Shift+z';
 const UNDO_PRESS_LIMIT = 12;
 const UNDO_SETTLE_TIMEOUT_MS = 2_000;
+
+/** Text in `lang`, from the app's own dictionary. */
+export function appLabel(lang, key, params) {
+  setLang(lang);
+  return t(key, params);
+}
+
+export const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const WORKSPACE_LANGS = Object.freeze(['en', 'th']);
+// The workspace's skeleton list while the rooms load (Workspace.jsx).
+const WORKSPACE_LOADING_SELECTOR = 'ul[aria-busy="true"]';
+
+/** The workspace heading's name in either language; once there are rooms it ends with their count ("My boards 3"). */
+export const workspaceHeadingName = () => new RegExp(
+  `^(?:${WORKSPACE_LANGS.map((lang) => escapeRegExp(appLabel(lang, 'workspace.title'))).join('|')})(?: \\d+)?$`,
+);
+
+export const workspaceHeading = (page) => page.getByRole('heading', { level: 1, name: workspaceHeadingName() });
 
 export async function loadPlaywright() {
   const dir = process.env.PLAYWRIGHT_MODULE || join(execFileSync('npm', ['root', '-g'], { encoding: 'utf8' }).trim(), 'playwright');
@@ -127,6 +146,40 @@ export async function openLanding(page, baseUrl) {
     .or(page.getByRole('button', { name: BASE_LABELS.th.create, exact: true })).first().waitFor();
 }
 
+/** Opens `/` as a signed-in person and waits until "My boards" (either language) has loaded its rooms. */
+export async function openWorkspace(page, baseUrl) {
+  await page.goto(new URL('/', baseUrl).href);
+  await workspaceHeading(page).waitFor();
+  await page.locator(WORKSPACE_LOADING_SELECTOR).waitFor({ state: 'detached' });
+}
+
+export const createMenuTrigger = (page, lang) => page.getByRole('button', { name: appLabel(lang, 'workspace.create'), exact: true });
+
+/** Opens the workspace's create menu and returns it. */
+export async function openCreateMenu(page, lang) {
+  await createMenuTrigger(page, lang).click();
+  const menu = page.getByRole('menu', { name: appLabel(lang, 'workspace.create'), exact: true });
+  await menu.waitFor();
+  return menu;
+}
+
+/** A create-menu entry by its title; the entry's accessible name continues with its description. */
+export const createMenuItem = (menu, lang, titleKey) => menu.getByRole('menuitem', {
+  name: new RegExp(`^${escapeRegExp(appLabel(lang, titleKey))}`),
+});
+
+export const createMenuNameField = (menu, lang) => menu.getByRole('textbox', { name: appLabel(lang, 'workspace.create.name'), exact: true });
+
+/** Creates a blank board, named when `title` is given, from the open workspace's create menu; returns its link. */
+export async function createBlankBoardFromMenu(page, lang, title = '') {
+  const menu = await openCreateMenu(page, lang);
+  await createMenuItem(menu, lang, 'workspace.create.new').click();
+  if (title) await createMenuNameField(menu, lang).fill(title);
+  await menu.getByRole('button', { name: appLabel(lang, 'workspace.create.submit'), exact: true }).click();
+  await page.waitForURL(BOARD_URL_PATTERN);
+  return page.url();
+}
+
 export const signInLink = (page, lang) => page.getByRole('link', { name: BASE_LABELS[lang].signIn, exact: true });
 /** The fake Google consent page's buttons (scripts/fake-google-oidc.mjs). */
 export const FAKE_GOOGLE_DECISION = Object.freeze({ APPROVE: '#approve', CANCEL: '#cancel' });
@@ -149,10 +202,14 @@ export const LOCK_LABELS = {
 
 export const passwordScreen = (page, lang) => page.getByRole('heading', { name: LOCK_LABELS[lang].promptTitle, exact: true });
 
-/** Creates a password-protected board from the landing page (signed in, English) and returns its link. */
+/**
+ * Creates a password-protected board from the signed-in workspace's create menu (English) and returns its link.
+ * Only signed-in people may create one, and their home page is the workspace.
+ */
 export async function createLockedBoard(page, baseUrl, password) {
-  await openLanding(page, baseUrl);
-  await page.getByRole('button', { name: LOCK_LABELS.en.toggle }).click();
+  await openWorkspace(page, baseUrl);
+  const menu = await openCreateMenu(page, 'en');
+  await createMenuItem(menu, 'en', 'workspace.create.locked').click();
   const form = page.getByRole('form', { name: LOCK_LABELS.en.toggle });
   await form.getByLabel(LOCK_LABELS.en.password, { exact: true }).fill(password);
   await form.getByLabel(LOCK_LABELS.en.confirm, { exact: true }).fill(password);

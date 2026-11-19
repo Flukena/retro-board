@@ -24,9 +24,9 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { crc32, deflateSync } from 'node:zlib';
 import {
-  BASE_LABELS, BOARD_URL_PATTERN, CANVAS_SELECTOR, FAKE_GOOGLE_DECISION, LOCK_LABELS, REDO_KEY, SYNC_TIMEOUT_MS, UNLOCK_TIMEOUT_MS,
-  addSharedSticky, createLockedBoard, download, enter, openLanding, openMenu, participant, passwordScreen, runLiveCheck, shot,
-  step, submitPassword, undoUntilHidden, unlockScreen, visitStub, waitForTextOn,
+  BASE_LABELS, CANVAS_SELECTOR, FAKE_GOOGLE_DECISION, LOCK_LABELS, REDO_KEY, SYNC_TIMEOUT_MS, UNLOCK_TIMEOUT_MS,
+  addSharedSticky, createBlankBoardFromMenu, createLockedBoard, download, enter, openLanding, openMenu, openWorkspace, participant,
+  passwordScreen, runLiveCheck, shot, step, submitPassword, undoUntilHidden, unlockScreen, visitStub, waitForTextOn,
 } from './board-live-helpers.mjs';
 
 // A rotation re-encrypts the board and its images.
@@ -456,9 +456,9 @@ async function finalSteps({ a, report, baseUrl, state }) {
     await shot(a, 'owner-menu-th.png', report);
     await a.keyboard.press('Escape');
     await a.evaluate(() => localStorage.setItem('rb_lang', 'en'));
-    await openLanding(a, baseUrl);
-    await a.getByRole('button', { name: BASE_LABELS.en.create, exact: true }).click();
-    await a.waitForURL(BOARD_URL_PATTERN);
+    // Signed-in A's home page is the workspace, so the plain control board comes from its create menu.
+    await openWorkspace(a, baseUrl);
+    await createBlankBoardFromMenu(a, 'en');
     await enter(a, 'en', NAME_A);
     await addSharedSticky(a, 'en', TEXT.control, STICKY_CONTROL_PX);
     await a.waitForTimeout(PERSIST_SETTLE_MS);

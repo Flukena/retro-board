@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import { withChromeModule } from '../../test-support/chrome-test-helper.js';
+import { HostIFrame, createHostDocument } from '../../test-support/host-document.js';
 
 test('boundary preserves a healthy board and offers translated reload after a render error', async () => {
   await withChromeModule('/src/client/app/BoardErrorBoundary.jsx', ({ BoardErrorBoundary }, { setLang, t }) => {
@@ -22,50 +23,6 @@ test('boundary preserves a healthy board and offers translated reload after a re
     }
   });
 });
-
-// Minimal host DOM for React DOM's real renderer. It implements storage and
-// tree operations only; React itself performs reconciliation and error capture.
-const ELEMENT_NODE_TYPE = 1;
-const DOCUMENT_NODE_TYPE = 9;
-const HTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
-class HostElement extends EventTarget {
-  nodeType = ELEMENT_NODE_TYPE;
-  namespaceURI = HTML_NAMESPACE;
-  childNodes = [];
-  attributes = new Map();
-  style = {};
-  parentNode = null;
-  #text = '';
-
-  constructor(name, ownerDocument) {
-    super();
-    this.tagName = name.toUpperCase();
-    this.nodeName = this.tagName;
-    this.ownerDocument = ownerDocument;
-  }
-
-  get firstChild() { return this.childNodes[0] ?? null; }
-  get textContent() { return this.#text + this.childNodes.map((child) => child.textContent).join(''); }
-  set textContent(value) { this.#text = value; this.childNodes = []; }
-  setAttribute(name, value) { this.attributes.set(name, value); }
-  removeAttribute(name) { this.attributes.delete(name); }
-  appendChild(child) { this.childNodes.push(child); child.parentNode = this; return child; }
-  removeChild(child) {
-    this.childNodes.splice(this.childNodes.indexOf(child), 1);
-    child.parentNode = null;
-    return child;
-  }
-}
-class HostIFrame extends HostElement {}
-
-function createHostDocument() {
-  const document = new EventTarget();
-  document.nodeType = DOCUMENT_NODE_TYPE;
-  document.createElement = (name) => new HostElement(name, document);
-  document.body = document.createElement('body');
-  document.activeElement = document.body;
-  return document;
-}
 
 function ThrowingDescendant() {
   throw new Error('boundary regression fixture');

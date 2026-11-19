@@ -4,7 +4,7 @@ import * as Y from 'yjs';
 import { RoomFence } from './room-fence.js';
 import { STORAGE_FAILURE_CODE, storageOperationError } from './relay-storage.js';
 import {
-  MAX_CONCURRENT_TITLE_READS, RELAY_TITLE_ORIGIN, TITLE_WRITE_STATUS, createRoomTitleReader, createRoomTitleWriter,
+  MAX_CONCURRENT_TITLE_READS, RELAY_TITLE_ORIGIN, TITLE_WRITE_STATUS, createRoomSummaryReader, createRoomTitleWriter,
 } from './room-title-writer.js';
 
 const DOC = 'yjs/board-Title123-abcdefgh12345678';
@@ -168,44 +168,50 @@ test('a room deleted while it hydrated gets no title and answers 404', async () 
   assert.deepEqual(rooms.origins, []);
 });
 
-const storedDoc = (title) => {
+const storedDoc = (title, zones = []) => {
   const doc = new Y.Doc();
   if (title !== undefined) doc.getMap('meta').set('title', title);
+  zones.forEach((zone, index) => doc.getMap('items').set(`zone-${index}`, new Y.Map(Object.entries({ type: 'zone', ...zone }))));
   return doc;
 };
+const ZONE = { x: 10, y: 20, w: 300, h: 200, color: 2, title: 'private words' };
+const ZONE_PREVIEW = { zones: [{ x: 10, y: 20, w: 300, h: 200, color: 2 }] };
 
-test('the reader reads a resident room live and a cold room from storage without loading it', async () => {
+test('a resident room summary is read live; a cold one from one stored doc that is destroyed', async () => {
   const rooms = relayRooms();
   const resident = rooms.getYDoc(DOC);
   resident.getMap('meta').set('title', 'Live title');
   rooms.hydrations.get(DOC)();
   const cold = 'yjs/board-Cold1234-abcdefgh12345678';
   const destroyed = [];
-  const read = createRoomTitleReader({
+  const loads = [];
+  const read = createRoomSummaryReader({
     docs: rooms.docs, roomReady: rooms.roomReady,
     readStoredDoc: async (docName) => {
-      assert.equal(docName, cold);
-      const doc = storedDoc('Stored title');
+      loads.push(docName);
+      const doc = storedDoc('Stored title', [ZONE]);
       doc.on('destroy', () => destroyed.push(docName));
       return doc;
     },
   });
-  assert.equal(await read(DOC), 'Live title');
-  assert.equal(await read(cold), 'Stored title');
+  assert.deepEqual(await read(DOC), { title: 'Live title', preview: null });
+  assert.deepEqual(loads, []);
+  assert.deepEqual(await read(cold), { title: 'Stored title', preview: ZONE_PREVIEW });
+  assert.deepEqual(loads, [cold], 'exactly one document load per cold read');
   assert.deepEqual(destroyed, [cold]);
   assert.equal(rooms.docs.has(cold), false);
 });
 
-test('the reader answers null for a missing or invalid title', async () => {
+test('the summary of a room without a title or zones is null for both', async () => {
   const titles = new Map([['none', undefined], ['blank', '  '], ['number', 42]]);
-  const read = createRoomTitleReader({
+  const read = createRoomSummaryReader({
     docs: new Map(), roomReady: new WeakMap(), readStoredDoc: async (docName) => storedDoc(titles.get(docName)),
   });
-  for (const docName of titles.keys()) assert.equal(await read(docName), null, docName);
+  for (const docName of titles.keys()) assert.deepEqual(await read(docName), { title: null, preview: null }, docName);
 });
 
-test('a storage failure while reading a title is never turned into a missing title', async () => {
-  const read = createRoomTitleReader({
+test('a storage failure while reading a summary is never turned into an empty summary', async () => {
+  const read = createRoomSummaryReader({
     docs: new Map(), roomReady: new WeakMap(), readStoredDoc: async () => { throw storageOperationError('getYDoc failed'); },
   });
   await assert.rejects(read('cold'), { code: STORAGE_FAILURE_CODE });
@@ -214,7 +220,7 @@ test('a storage failure while reading a title is never turned into a missing tit
 test('the reader keeps at most MAX_CONCURRENT_TITLE_READS storage reads in flight', async () => {
   let inFlight = 0;
   let peak = 0;
-  const read = createRoomTitleReader({
+  const read = createRoomSummaryReader({
     docs: new Map(), roomReady: new WeakMap(),
     readStoredDoc: async () => {
       inFlight += 1;
@@ -225,7 +231,7 @@ test('the reader keeps at most MAX_CONCURRENT_TITLE_READS storage reads in fligh
     },
   });
   const reads = Array.from({ length: MAX_CONCURRENT_TITLE_READS * 3 }, (_, index) => read(`room-${index}`));
-  assert.deepEqual(new Set(await Promise.all(reads)), new Set(['t']));
+  assert.deepEqual(new Set((await Promise.all(reads)).map((summary) => summary.title)), new Set(['t']));
   assert.equal(peak, MAX_CONCURRENT_TITLE_READS);
 });
 

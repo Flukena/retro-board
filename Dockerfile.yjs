@@ -42,7 +42,7 @@ COPY --chown=node:node \
     src/domain/vote-results.js src/domain/vote-session-lifecycle.js src/domain/vote-timing.js \
     src/domain/voting-results.js src/domain/z-order.js src/domain/zone-actions.js \
     src/domain/room-retention.js src/domain/room-ownership.js src/domain/board-title.js src/domain/zone-title.js src/domain/plan-entitlements.js src/domain/auth-errors.js \
-    src/domain/account-identity.js src/domain/room-lock-contract.js src/domain/vote-expiry.js src/domain/e2e-envelope.js src/domain/e2e-limits.js \
+    src/domain/account-identity.js src/domain/room-lock-contract.js src/domain/vote-expiry.js src/domain/e2e-envelope.js src/domain/e2e-limits.js src/domain/board-preview.js src/domain/palette-index.js \
     ./src/domain/
 
 COPY --chown=node:node \
@@ -54,7 +54,7 @@ COPY --chown=node:node \
     src/server/relay-maintenance.js src/server/relay-protocol.js src/server/relay-public-wall.js \
     src/server/relay-rate-bucket.js src/server/relay-rejection-counters.js src/server/relay-room-registry.js \
     src/server/relay-room-routes.js src/server/relay-room-target.js src/server/relay-storage.js src/server/relay-ws-traffic.js src/server/room-lock.js src/server/room-lock-routes.js src/server/room-lock-commit-body.js src/server/room-session-routes.js src/server/room-lock-record.js src/server/room-retirement.js src/server/guest-room-sweep.js \
-    src/server/room-activity.js src/server/room-owner-index.js src/server/room-fence.js src/server/room-deletion.js src/server/plain-room-teardown.js src/server/plain-upgrade.js src/server/relay-http-slots.js src/server/account-room-routes.js src/server/room-title-writer.js src/server/room-links.js src/server/room-orphaning.js \
+    src/server/room-activity.js src/server/room-owner-index.js src/server/room-fence.js src/server/room-deletion.js src/server/plain-room-teardown.js src/server/plain-upgrade.js src/server/relay-http-slots.js src/server/account-room-routes.js src/server/room-title-writer.js src/server/room-links.js src/server/room-orphaning.js src/server/board-preview-reader.js \
     src/server/relay-session.js src/server/relay-uploads.js src/server/relay-vote-maintenance.js \
     ./src/server/
 
