@@ -1,3 +1,4 @@
+import { useOnImportPick, useOnImportFileChange, useConfirmImport } from './src/client/transfer/use-board-import.js';
 import { RemoteCursorLayer } from './src/client/session/RemoteCursorLayer.jsx';
 import { usePresenceBroadcastState, usePresenceBroadcast } from './src/client/session/use-presence-broadcast.js';
 import { useEditingPresenceState, useEditingPresence, createLocalEditingPresence } from './src/client/session/use-editing-presence.js';
@@ -23,7 +24,6 @@ import { BOARD_MODE } from './src/domain/public-wall-contract.js';
 import React, {
   useState, useEffect, useRef, useCallback, useMemo, startTransition,
 } from 'react';
-import { readBoardImport, prepareBoardImport, ImportBundleLimitError } from './src/client/transfer/board-transfer.js';
 import { useBoardExports } from './src/client/transfer/use-board-exports.js';
 import { useActionItems } from './src/client/board/use-action-items.js';
 import { useRetroPhase } from './src/client/board/use-retro-phase.js';
@@ -2767,56 +2767,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
   const [importBusy, setImportBusy] = useState(false); // sanitizing legacy images before write
   const [helpOpen, setHelpOpen] = useState(false);
 
-  const onImportPick = useCallback(() => {
-    if (!isAdmin) { setToast({ msg: t('common.adminOnly'), type: 'warn' }); return; }
-    fileInputRef.current?.click();
-  }, [isAdmin]);
+  const onImportPick = useOnImportPick({ isAdmin, fileInputRef, setToast, setPendingImport, pendingImport, importBusy, setImportBusy, boardRef, setBoard }, [isAdmin]);
 
-  const onImportFileChange = useCallback(async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = ''; // allow re-picking the same file later
-    if (!file) return;
-    try {
-      setPendingImport(await readBoardImport(file));
-    } catch (err) {
-      setToast({ msg: t('import.fail', { err: err.message }), type: 'warn' });
-    }
-  }, []);
+  const onImportFileChange = useOnImportFileChange({ isAdmin, fileInputRef, setToast, setPendingImport, pendingImport, importBusy, setImportBusy, boardRef, setBoard }, []);
 
-  const confirmImport = useCallback(async () => {
-    if (!pendingImport || !isAdmin || importBusy) return;
-    const {
-      voteEntries, commentEntries, moodEntries, customTemplates: importedTemplates,
-    } = pendingImport;
-    setImportBusy(true);
-    let nextBoard;
-    try {
-      nextBoard = await prepareBoardImport(pendingImport, boardRef.current);
-    } catch (err) {
-      setImportBusy(false);
-      setToast({
-        msg: err instanceof ImportBundleLimitError ? t('import.tooLarge', { mb: err.maximumMiB }) : t('import.fail', { err: err.message }),
-        type: 'warn',
-      });
-      return;
-    }
-    const imported = window.storage?.importBundle?.(
-      nextBoard, voteEntries, commentEntries, importedTemplates, moodEntries,
-    );
-    if (!imported) {
-      setImportBusy(false);
-      setToast({ msg: t('import.fail', { err: 'invalid import bundle' }), type: 'warn' });
-      return;
-    }
-    setBoard(nextBoard);
-    const n = nextBoard.items.length;
-    setPendingImport(null);
-    setImportBusy(false);
-    setToast({
-      msg: t('import.done', { n }),
-      type: 'info',
-    });
-  }, [pendingImport, isAdmin, importBusy]);
+  const confirmImport = useConfirmImport({ isAdmin, fileInputRef, setToast, setPendingImport, pendingImport, importBusy, setImportBusy, boardRef, setBoard }, [pendingImport, isAdmin, importBusy]);
 
   /* ============================================================
      Rendering helpers
