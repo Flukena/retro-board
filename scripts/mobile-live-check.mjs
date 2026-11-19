@@ -12,7 +12,7 @@ import { SELECTION_TOOLBAR_GAP_PX, TOOLBAR_MIN_ANCHOR_PX } from '../src/client/c
 import { Z } from '../src/client/chrome/chrome-layout.js';
 import { parseColor } from '../src/client/ui/color-contrast.js';
 import { VIEWPORT_ZOOM_MAX } from '../src/domain/viewport-limits.js';
-import { PUBLIC_RELAY_PREFIX, PUBLIC_SNAPSHOT_ROUTE } from '../src/domain/public-wall-contract.js';
+import { PUBLIC_CREATION_WINDOW_MS, PUBLIC_RELAY_PREFIX, PUBLIC_SNAPSHOT_ROUTE } from '../src/domain/public-wall-contract.js';
 
 const SSD_ROOT = '/Volumes/ssd-fluke/BaseData';
 const PLAYWRIGHT_MODULE = '/opt/homebrew/lib/node_modules/playwright/index.mjs';
@@ -60,6 +60,11 @@ const DRAWING_MIN_INK_PIXELS = 20;
 const DRAWING_STROKE_WIDTH_PX = 8;
 const DRAWING_SHAPE_WIDTH_PX = 4;
 // Longer than tap-to-edit's 500 ms tap window (tap-to-edit.js) plus a React commit, so a late editor would be seen.
+const SAVED_INK_MARGIN_PX = 30;
+const SAVED_INK_RAIL_RIGHT_PX = 110;
+const SAVED_INK_BOTTOM_CLEAR_PX = 120;
+// The relay opens its own creation window a little after the client stamped the creation (same margin as pan).
+const CREATION_WINDOW_MARGIN_MS = 5_000;
 const EDITOR_ABSENCE_WINDOW_MS = 1_000;
 const PINCH_RESTORE_ZOOM_TOLERANCE = 0.02;
 const DRAWING_MOBILE_OPTION_MIN_PX = 34; // --draw-mobile-option-size (theme.js:98), T2b-TOUCH
@@ -372,7 +377,11 @@ async function addMobileCard(user, text, privateRoom) {
   await user.page.locator('[data-tool="sticky"]').tap();
   await user.page.locator('.rb-mobile-editor__input').fill(text);
   await tapAway(user);
-  if (privateRoom) await user.page.getByTitle(WORDS[user.lang].privacy, { exact: true }).tap();
+  // Tapping away deselected the card (Done used to keep it selected), and the privacy toggle lives in the selection toolbar.
+  if (privateRoom) {
+    await card(user, text).tap();
+    await user.page.getByTitle(WORDS[user.lang].privacy, { exact: true }).tap();
+  }
 }
 async function addDesktopCard(user, text, privateRoom) {
   const position = await blankCanvasPosition(user);
@@ -438,6 +447,9 @@ async function checkDrag(mobile, desktop, text) {
 async function checkResize(mobile, desktop, text) {
   const before = await geometry(mobile, text);
   const handle = mobile.page.locator('[data-mobile-resize="true"]').last();
+  // a7505a9: the edit no longer reserves room for Done, so the card can end the touch drag at the screen edge with its
+  // resize handle half off-screen; frame the handle with the existing helper before dragging it.
+  await showLocator(mobile, handle);
   const box = await handle.boundingBox();
   assert.ok(box.width >= TOUCH_TARGET_MIN_PX && box.height >= TOUCH_TARGET_MIN_PX, 'Resize targets must be touch sized');
   await drag(mobile, { x: box.x + box.width / 2, y: box.y + box.height / 2 }, { x: TOUCH_MOVE_PX, y: TOUCH_MOVE_PX });
@@ -745,7 +757,8 @@ async function checkSelectionFollowsViewport(user, text, secondText = null) {
   }
   await fit(user);
   await showText(user, text);
-  await activate(user, card(user, text));
+  // a7505a9: on touch a second tap on a selected card starts editing, so tap only a card that is not selected yet.
+  if (!await card(user, text).evaluate(node => node.classList.contains('rb-sticky--selected'))) await activate(user, card(user, text));
   if (secondText) await card(user, secondText).click({ modifiers: ['Shift'] });
   if (secondText) await user.page.locator('[data-selection-bounds="true"]').waitFor();
   else await eventually(() => selectedCornerMatches(user, card(user, text)));
@@ -1351,22 +1364,25 @@ async function openSavedDrawing(user, fixture) {
   await drawingToolbar(user).locator('[data-drawing-tool="eraser"]').waitFor();
 }
 async function savedInkPoint(user, fixture) {
-  return uploadedImage(user, fixture).evaluate(async image => {
+  return uploadedImage(user, fixture).evaluate(async (image, { margin, railRight, bottomClear }) => {
     const blob = await (await fetch(image.currentSrc, { credentials: 'include' })).blob();
     const bitmap = await createImageBitmap(blob), canvas = document.createElement('canvas');
     canvas.width = bitmap.width; canvas.height = bitmap.height;
     const ctx = canvas.getContext('2d'); ctx.drawImage(bitmap, 0, 0); bitmap.close();
     const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
     const bounds = image.getBoundingClientRect();
-    const toolbarBottom = document.querySelector('.rb-drawing-toolbar').getBoundingClientRect().bottom;
+    // e1f7f51 moved the mobile toolbar to the bottom, so keep clear of wherever it is instead of assuming it is on top.
+    const toolbar = document.querySelector('.rb-drawing-toolbar').getBoundingClientRect();
+    const clearOfToolbar = (x, y) => x < toolbar.left - margin || x > toolbar.right + margin
+      || y < toolbar.top - margin || y > toolbar.bottom + margin;
     for (let offset = 0; offset < pixels.length; offset += 4) {
       if (pixels[offset + 3] < 240) continue;
       const index = offset / 4, u = (index % canvas.width + 0.5) / canvas.width, v = (Math.floor(index / canvas.width) + 0.5) / canvas.height;
       const x = bounds.left + u * bounds.width, y = bounds.top + v * bounds.height;
-      if (x > 110 && x < innerWidth - 30 && y > toolbarBottom + 30 && y < innerHeight - 120) return { x, y, u, v };
+      if (x > railRight && x < innerWidth - margin && y > margin && y < innerHeight - bottomClear && clearOfToolbar(x, y)) return { x, y, u, v };
     }
     throw new Error('No reachable opaque drawing pixel');
-  });
+  }, { margin: SAVED_INK_MARGIN_PX, railRight: SAVED_INK_RAIL_RIGHT_PX, bottomClear: SAVED_INK_BOTTOM_CLEAR_PX });
 }
 async function checkSavedDrawingEdit(user, peer, fixture) {
   const before = (await canonicalItems(user)).find(item => item.id === fixture.id);
@@ -1460,13 +1476,15 @@ async function saveAndCheckDrawing(user, peer, mode, initialIds) {
     await eventually(async () => !(await canonicalItems(peer)).some(item => item.id === fixture.id));
   }
 }
-async function checkDrawingCancellation(user, peer, initialIds) {
+async function checkDrawingCancellation(user, peer, initialIds, mode) {
+  await waitForPublicImageWindow(user, mode);
   await openDrawing(user); await drawStroke(user);
   let started;
   const waiting = new Promise(resolveStarted => { started = resolveStarted; });
   await user.page.route('**/upload', route => { started(route); });
   await exitDrawing(user);
-  const route = await waiting;
+  const route = await Promise.race([waiting, new Promise((_, reject) => setTimeout(
+    () => reject(new Error('The save upload never started (Public image window?)')), ACTION_TIMEOUT_MS))]);
   await activate(user, drawingToolbar(user).getByRole('button', { name: drawingWord(user, 'draw.close'), exact: true }));
   await route.abort(); await user.page.unroute('**/upload');
   await drawingToolbar(user).waitFor({ state: 'hidden' });
@@ -1558,7 +1576,8 @@ async function checkRealtimeDrag(user, peer) {
   await endGesture();
 }
 
-async function checkDrawingDeletion(user, peer) {
+async function checkDrawingDeletion(user, peer, mode) {
+  await waitForPublicImageWindow(user, mode);
   const before=new Set((await canonicalItems(user)).map(item=>item.id));let fixture,release;
   try {
     await openDrawing(user);await drawStroke(user);
@@ -1619,15 +1638,21 @@ async function checkRealtimeDrawing(mobile, desktop, mode) {
     } finally {
       if (fixture) { await user.page.evaluate(id => window.storage.removeItem(id), fixture.id); await eventually(async () => !(await canonicalItems(peer)).some(item => item.id === fixture.id)); }
     }
-    await checkDrawingDeletion(user,peer);
+    await checkDrawingDeletion(user, peer, mode);
   }
 }
 
+// 2d698a1: Public allows one image per creation window, and every new drawing saves a new PNG image item. The
+// preceding image (upload step or the other participant's drawing) must age out before the next drawing may save.
+async function waitForPublicImageWindow(user, mode) {
+  if (mode === 'public') await user.page.waitForTimeout(PUBLIC_CREATION_WINDOW_MS + CREATION_WINDOW_MARGIN_MS);
+}
 async function checkDrawing(mobile, desktop, mode) {
   assert.ok(['localhost', '127.0.0.1'].includes(new URL(baseUrl).hostname), 'Drawing fixtures are local only');
   const initialIds = (await canonicalItems(mobile)).map(item => item.id).sort();
   for (const user of [mobile, desktop]) {
     const peer = user === mobile ? desktop : mobile;
+    await waitForPublicImageWindow(user, mode);
     await checkDraftHistory(user, peer, initialIds);
     if (user.mobile) await checkDrawingPinch(user);
     await checkShapeTools(user);
@@ -1635,7 +1660,7 @@ async function checkDrawing(mobile, desktop, mode) {
     await checkDrawingFailure(user);
     await user.page.screenshot({ path: join(output, `draw-ink-${mode}-${user.lang}.png`) });
     await saveAndCheckDrawing(user, peer, mode, initialIds);
-    await checkDrawingCancellation(user, peer, initialIds);
+    await checkDrawingCancellation(user, peer, initialIds, mode);
   }
 }
 async function checkRoom(mode) {
