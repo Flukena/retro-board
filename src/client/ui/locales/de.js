@@ -573,6 +573,7 @@ export default Object.freeze({
   "phase.wholeBoardHint": "Alle obersten Zonen",
   "mood.start": "Stimmungscheck starten",
   "mood.close": "Stimmungscheck schließen",
+  "mood.showResult": "Stimmungsergebnis zeigen",
   "mood.question": "Wie fühlst du dich gerade?",
   "mood.anonymous": "Ergebnisse werden nach Ende der Runde anonym gezeigt",
   "mood.skip": "Später",

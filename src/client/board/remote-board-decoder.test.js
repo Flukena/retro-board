@@ -126,7 +126,9 @@ test('meeting phase is kept when valid and dropped when it is not', () => {
 test('mood round is kept when valid and dropped when it is not', () => {
   const moodCheck = { id: 'round1', startedAt: 5, open: true };
   assert.deepEqual(decodeRemoteBoard([], { moodCheck }).moodCheck, moodCheck);
-  for (const bad of [{ ...moodCheck, open: 1 }, { ...moodCheck, id: 'bad id' }, 'round1']) {
+  const shown = { ...moodCheck, open: false, resultShownAt: 7 };
+  assert.deepEqual(decodeRemoteBoard([], { moodCheck: shown }).moodCheck, shown);
+  for (const bad of [{ ...shown, resultShownAt: '7' }, { ...shown, resultShownAt: -1 }, { ...moodCheck, open: 1 }, { ...moodCheck, id: 'bad id' }, 'round1']) {
     assert.equal('moodCheck' in decodeRemoteBoard([], { moodCheck: bad }), false, JSON.stringify(bad));
   }
 });

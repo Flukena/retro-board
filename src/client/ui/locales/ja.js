@@ -573,6 +573,7 @@ export default Object.freeze({
   "phase.wholeBoardHint": "すべての最上位ゾーン",
   "mood.start": "気分チェックを開始",
   "mood.close": "気分チェックを締め切る",
+  "mood.showResult": "チームの気分結果を表示",
   "mood.question": "いまの気分はどうですか？",
   "mood.anonymous": "結果はラウンド終了後に匿名で表示されます",
   "mood.skip": "あとで",

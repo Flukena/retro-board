@@ -573,6 +573,7 @@ export default Object.freeze({
   "phase.wholeBoardHint": "Toutes les zones principales",
   "mood.start": "Lancer la météo d’humeur",
   "mood.close": "Clore la météo d’humeur",
+  "mood.showResult": "Afficher le résultat d’humeur",
   "mood.question": "Comment te sens-tu en ce moment ?",
   "mood.anonymous": "Les résultats s’affichent anonymement à la fin du tour",
   "mood.skip": "Passer pour l’instant",

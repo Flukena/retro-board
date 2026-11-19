@@ -573,6 +573,7 @@ export default Object.freeze({
   "phase.wholeBoardHint": "Todas as zonas principais",
   "mood.start": "Iniciar check de humor",
   "mood.close": "Encerrar check de humor",
+  "mood.showResult": "Mostrar resultado do humor",
   "mood.question": "Como você está se sentindo agora?",
   "mood.anonymous": "Os resultados aparecem de forma anônima quando a rodada fecha",
   "mood.skip": "Pular por enquanto",

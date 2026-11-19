@@ -573,6 +573,7 @@ export default Object.freeze({
   "phase.wholeBoardHint": "모든 최상위 영역",
   "mood.start": "기분 체크 시작",
   "mood.close": "기분 체크 마감",
+  "mood.showResult": "팀 기분 결과 보기",
   "mood.question": "지금 기분이 어떤가요?",
   "mood.anonymous": "결과는 라운드가 끝난 뒤 익명으로 표시됩니다",
   "mood.skip": "나중에",

@@ -573,6 +573,7 @@ export default Object.freeze({
   "phase.wholeBoardHint": "Mọi vùng cấp cao nhất",
   "mood.start": "Bắt đầu kiểm tra tâm trạng",
   "mood.close": "Đóng kiểm tra tâm trạng",
+  "mood.showResult": "Hiện kết quả tâm trạng",
   "mood.question": "Bạn đang cảm thấy thế nào?",
   "mood.anonymous": "Kết quả hiển thị ẩn danh khi vòng kết thúc",
   "mood.skip": "Bỏ qua",

@@ -573,6 +573,7 @@ export default Object.freeze({
   "phase.wholeBoardHint": "Todas las zonas principales",
   "mood.start": "Iniciar chequeo de ánimo",
   "mood.close": "Cerrar chequeo de ánimo",
+  "mood.showResult": "Mostrar resultado del ánimo",
   "mood.question": "¿Cómo te sientes ahora?",
   "mood.anonymous": "Los resultados se muestran de forma anónima al cerrar la ronda",
   "mood.skip": "Saltar por ahora",

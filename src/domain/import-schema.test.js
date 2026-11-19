@@ -195,6 +195,8 @@ test('mood answers import for the board round, which comes back closed', () => {
   const withMoods = (moodCheck, moods) => ({ ...validManifest(), board: { ...validManifest().board, moodCheck }, moods });
   const manifest = normalizeImportManifest(withMoods(round, { 'user-a': 5, 'user-b': 2 }), importedAt);
   assert.deepEqual(manifest.boardMeta.moodCheck, { ...round, open: false });
+  const shown = normalizeImportManifest(withMoods({ ...round, open: false, resultShownAt: 99 }, {}), importedAt);
+  assert.deepEqual(shown.boardMeta.moodCheck, { ...round, open: false }, 'a restore hides the result');
   assert.deepEqual(manifest.moodEntries, [
     { roundId: 'round1', userId: 'user-a', score: 5 }, { roundId: 'round1', userId: 'user-b', score: 2 },
   ]);
@@ -202,6 +204,9 @@ test('mood answers import for the board round, which comes back closed', () => {
   assert.equal(normalizeImportManifest(validManifest(), importedAt).boardMeta.moodCheck, null);
   const rejects = [
     [withMoods({ ...round, id: 'bad id' }, {}), /moodCheck/],
+    [withMoods({ ...round, resultShownAt: '5' }, {}), /moodCheck/],
+    [withMoods({ ...round, resultShownAt: -1 }, {}), /moodCheck/],
+    [withMoods({ ...round, resultShownAt: 1.5 }, {}), /moodCheck/],
     [withMoods(null, { 'user-a': 3 }), /moodCheck round/],
     [withMoods(round, []), /moods must be an object/],
     [withMoods(round, { 'bad id': 3 }), /invalid user id/],

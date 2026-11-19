@@ -573,6 +573,7 @@ export default Object.freeze({
   "phase.wholeBoardHint": "所有顶层区域",
   "mood.start": "开始心情打卡",
   "mood.close": "结束心情打卡",
+  "mood.showResult": "显示团队心情结果",
   "mood.question": "你现在感觉怎么样？",
   "mood.anonymous": "本轮结束后以匿名方式显示结果",
   "mood.skip": "先跳过",
