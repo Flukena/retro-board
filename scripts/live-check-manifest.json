@@ -29,14 +29,12 @@
       "stack": "plain",
       "viteHost": "127.0.0.1",
       "ports": {},
-      "publicRelay": false,
+      "publicRelay": true,
       "maintainer": false,
       "relayEnv": {},
       "checkEnv": {},
       "timeoutSec": 900,
-      "baseline": "known-red",
-      "reason": "Stale since 68032f6 (mood result on demand): import drops resultShownAt on purpose and the step never presses \"Show mood result\" — unguarded until repaired (controller ruling T2-REPAIR)",
-      "failingStep": "ZIP export then import keeps the round and its answers"
+      "baseline": "pass"
     },
     {
       "id": "retro-outcomes",

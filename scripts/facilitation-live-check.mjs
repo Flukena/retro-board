@@ -6,7 +6,7 @@
  * A (English, admin) presents, runs the phases and a mood check; B (Thai) follows, answers and sees the result.
  * Writes screenshots, the ZIP backup and report.json.
  */
-import { BASE_LABELS, CANVAS_SELECTOR, SYNC_TIMEOUT_MS, addSticky, addZone, download, openMenu, runLiveCheck, shot, step } from './board-live-helpers.mjs';
+import { BASE_LABELS, CANVAS_SELECTOR, SYNC_TIMEOUT_MS, addSticky, addZone, appLabel, download, openMenu, runLiveCheck, shot, step } from './board-live-helpers.mjs';
 
 const PRESENTER_NAME = 'Ada';
 const STICKY_TEXT = 'Presenter card';
@@ -191,6 +191,8 @@ await runLiveCheck('facilitation-live-check.mjs', async ({ a, b, report }) => {
     await openMenu(a, 'en', MOOD.en.import);
     await (await chooser).setFiles(zip);
     await a.getByRole('button', { name: MOOD.en.importOk, exact: true }).click();
+    // An import never pops the result up for everyone (68032f6); the item exists only when the answers survived.
+    await openMenu(a, 'en', appLabel('en', 'mood.showResult'));
     await Promise.all([visible(a, MOOD.en.average), visible(b, MOOD.th.average), visible(b, MOOD.th.answered(2))]);
   });
 });
