@@ -14,5 +14,7 @@
 }
 
 /* While the landing is hidden the page shows its body: paint it the workspace's ground rather than
-   --bg (white in the light theme), so the page does not step from white to beige when the workspace mounts. */
-.rb-home-hinted body { background: var(--workspace-ground); }
+   --bg (white in the light theme), so the page does not step from white to beige when the workspace mounts.
+   !important outranks the inline body background theme.js writes once the bundle runs. The class lives
+   only until HomeRoute mounts, so the override cannot outlast the first paint of the real view. */
+.rb-home-hinted body { background: var(--workspace-ground) !important; }

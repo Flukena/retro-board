@@ -148,11 +148,11 @@ test('home.css hides the landing only for hinted pages and reveals it after the 
   assert.equal(css.match(/visibility: hidden/g).length, 1);
 });
 
-test('a hinted page paints the workspace ground while the landing is hidden, so it never steps from white to beige', () => {
+test('a hinted page paints the workspace ground with !important, so the inline body background theme.js writes cannot make it step to white', () => {
   const css = HOME_CSS.replaceAll(/\s+/g, ' ');
   const rule = css.match(/\.rb-home-hinted body \{([^}]*)\}/);
   assert.ok(rule, 'one rule for the hinted page body');
-  assert.match(rule[1], new RegExp(`background: var\\(${WORKSPACE_GROUND_TOKEN}\\);`));
+  assert.match(rule[1], new RegExp(`background: var\\(${WORKSPACE_GROUND_TOKEN}\\) !important;`));
   // The prerendered pages carry every theme token inline, so the ground resolves before theme.js runs.
   for (const [mode, tokens] of Object.entries(TOKENS)) assert.ok(tokens[WORKSPACE_GROUND_TOKEN], mode);
 });
