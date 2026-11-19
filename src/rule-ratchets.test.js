@@ -10,6 +10,8 @@ const YJS_SERVER_MAX_LINES = 1446;
 const STORAGE_BRIDGE_MAX_LINES = 1469;
 const I18N_MAX_LINES = 2510;
 const UNCEILINGED_MAX_LINES = 1250;
+// P1 retained source-scan owners: this explicit map owns all size ceilings.
+// Reading complete files here measures the contract; no implementation slices.
 const LINE_CEILINGS = new Map([
   ['RetroBoard.jsx', RETRO_BOARD_MAX_LINES],
   ['yjs-server.mjs', YJS_SERVER_MAX_LINES],
@@ -68,6 +70,8 @@ for (const [filename, maxLines] of LINE_CEILINGS) {
   });
 }
 
+// Colour-scan owners: RetroBoard.jsx and every src/**/*.jsx, discovered recursively.
+// New JSX owners join automatically; the functional-signal allowlist stays explicit.
 const jsxFiles = ['RetroBoard.jsx', ...filesUnder('src').filter(filename => filename.endsWith('.jsx'))];
 
 for (const filename of jsxFiles) {
@@ -105,6 +109,8 @@ test('colour scanner accepts tokens and functional selection signals', () => {
 });
 
 // The encrypted-blob request headers are one contract between browser and relay: only the domain module names them.
+// Other retained ratchet scans own productionSources(): shared blob-header spelling
+// and discovery of oversized sources without a ceiling (including both roots).
 const BLOB_HEADER_OWNER = 'src/domain/room-lock-contract.js';
 const BLOB_HEADER_LITERAL = /['"`]x-blob-/i;
 test('encrypted-blob header names are spelled only in the shared contract module', () => {
