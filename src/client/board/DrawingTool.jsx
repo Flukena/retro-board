@@ -135,9 +135,9 @@ export const DrawingTool = memo(function DrawingTool(props) {
         <ColorSwatches color={color} disabled={closing || erasing || !ready} onChange={setColor} />
       </div>
       <div className="rb-drawing-actions">
-      <IconButton title={t('topbar.undo')} aria-label={t('topbar.undo')} disabled={closing || !summary.canUndo} onClick={() => changeHistory(false)}><Undo2 size={CHROME_ICON_SIZE_PX.TOOL} /></IconButton>
-      <IconButton title={t('topbar.redo')} aria-label={t('topbar.redo')} disabled={closing || !summary.canRedo} onClick={() => changeHistory(true)}><Redo2 size={CHROME_ICON_SIZE_PX.TOOL} /></IconButton>
-      <IconButton title={t('draw.close')} aria-label={t('draw.close')} onClick={() => { if (closeDiscardsDraft({ error, failed, closing })) sessionRef.current?.discard(); finish(); }}><X size={CHROME_ICON_SIZE_PX.TOOL} /></IconButton>
+      <IconButton data-drawing-action="undo" title={t('topbar.undo')} aria-label={t('topbar.undo')} disabled={closing || !summary.canUndo} onClick={() => changeHistory(false)}><Undo2 size={CHROME_ICON_SIZE_PX.TOOL} /></IconButton>
+      <IconButton data-drawing-action="redo" title={t('topbar.redo')} aria-label={t('topbar.redo')} disabled={closing || !summary.canRedo} onClick={() => changeHistory(true)}><Redo2 size={CHROME_ICON_SIZE_PX.TOOL} /></IconButton>
+      <IconButton data-drawing-action="close" title={t('draw.close')} aria-label={t('draw.close')} onClick={() => { if (closeDiscardsDraft({ error, failed, closing })) sessionRef.current?.discard(); finish(); }}><X size={CHROME_ICON_SIZE_PX.TOOL} /></IconButton>
       </div>
       {failed && <Button onClick={retry}>{t('draw.retryLoad')}</Button>}
       {status && <div className="rb-drawing-status" role={error ? 'alert' : 'status'}>{t(status)}</div>}

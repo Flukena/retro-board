@@ -2,8 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-// Contract: on a phone the Draw toolbar's top row can never push Undo, Redo or Close past the viewport.
-// The tools group gives way (it shrinks and scrolls); the actions group never does.
+// Contract: on a phone every tool and Close sit in the top row without scrolling; only the options row scrolls.
 const css = readFileSync(new URL('./drawing-tool.css', import.meta.url), 'utf8');
 const MOBILE_MEDIA_START = '@media (max-width: 767px)';
 const CSS_COMMENT = /\/\*[\s\S]*?\*\//g;
@@ -19,29 +18,37 @@ function mobileDeclarations(selector) {
   return declarations;
 }
 
-const SHRINKABLE_TRACK = /^minmax\(\s*0(px)?\s*,\s*1fr\s*\)$/;
-const SCROLLING_OVERFLOW = /^(auto|scroll)$/;
+const OPTION_ROW_NAME = 'options';
+const gridRows = () => mobileDeclarations('.rb-drawing-toolbar')['grid-template-areas']
+  .match(/"[^"]+"/g).map((row) => row.slice(1, -1).trim().split(/\s+/));
 
-test('mobile Draw toolbar: the tools track can shrink below its content and the actions track cannot', () => {
-  const [toolsTrack, actionsTrack, ...extraTracks] = mobileDeclarations('.rb-drawing-toolbar')['grid-template-columns'].split(/\s+(?![^(]*\))/);
-  assert.deepEqual(extraTracks, []);
-  assert.match(toolsTrack, SHRINKABLE_TRACK, 'a plain 1fr track will not shrink below the tool buttons, so the row overflows the viewport');
-  assert.match(actionsTrack, /^(auto|max-content)$/, 'the actions track must size to its three buttons and never give way');
+test('mobile Draw toolbar: every tool and Close share the top row, so nothing needs scrolling to be found', () => {
+  const [top] = gridRows();
+  assert.ok(top.includes('tools') && top.includes('close'), `top row must hold the tools and Close: ${top}`);
+  assert.ok(!top.includes('undo') && !top.includes('redo') && !top.includes(OPTION_ROW_NAME), 'history and options must not crowd the top row');
+  for (const property of ['overflow', 'overflow-x']) {
+    assert.equal(mobileDeclarations('.rb-drawing-tools')[property], undefined, 'a scrolling tools group hides tools such as the eraser');
+  }
 });
 
-test('mobile Draw toolbar: the tools group scrolls instead of overflowing, the actions group is never clipped', () => {
-  const tools = mobileDeclarations('.rb-drawing-tools');
-  assert.equal(tools['min-width'], '0', 'a grid item with min-width:auto cannot shrink to its track');
-  assert.match(tools['overflow-x'], SCROLLING_OVERFLOW);
-  assert.equal(tools['overscroll-behavior-x'], 'contain', 'same scroll containment as the options row');
-  const actions = mobileDeclarations('.rb-drawing-actions');
-  assert.equal(actions['overflow-x'] ?? actions.overflow, undefined, 'clipping or scrolling the actions would hide Close');
-  assert.notEqual(actions['min-width'], '0');
+test('mobile Draw toolbar: Undo and Redo sit pinned at the start of the row below, before the scrolling options', () => {
+  const second = gridRows()[1];
+  assert.deepEqual(second.slice(0, 2), ['undo', 'redo']);
+  assert.ok(second.slice(2).every((cell) => cell === OPTION_ROW_NAME), 'the rest of the row is the options');
+  assert.match(mobileDeclarations(`.rb-drawing-${OPTION_ROW_NAME}`)['overflow-x'], /^(auto|scroll)$/, 'only sizes and colours scroll');
 });
 
-test('mobile Draw toolbar: scrolling tool buttons and action buttons keep their touch size', () => {
-  assert.equal(mobileDeclarations('.rb-drawing-tools > *')['flex-shrink'], '0', 'tool buttons scroll, they do not squash');
-  assert.equal(mobileDeclarations('.rb-drawing-actions > *')['flex-shrink'], '0');
+test('mobile Draw toolbar: action buttons are placed on the grid individually, not as one wrapper', () => {
+  assert.equal(mobileDeclarations('.rb-drawing-actions').display, 'contents');
+  const areas = new Set(gridRows().flat());
+  for (const action of ['undo', 'redo', 'close']) {
+    const placement = mobileDeclarations(`.rb-drawing-actions [data-drawing-action="${action}"]`)['grid-area'];
+    assert.equal(placement, action);
+    assert.ok(areas.has(placement), `${action} has no named grid area`);
+  }
+});
+
+test('mobile Draw toolbar: tool and action buttons keep their touch size', () => {
   for (const selector of ['.rb-drawing-tools button', '.rb-drawing-actions button']) {
     const rule = mobileDeclarations(selector);
     assert.equal(rule['min-width'], 'var(--modal-touch-target)', selector);
