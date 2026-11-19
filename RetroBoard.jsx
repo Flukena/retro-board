@@ -1,3 +1,4 @@
+import { undoBlockReason } from './src/domain/undo-guard.js';
 import { createStickyItem, createTextItem, createZoneItem, createImageItem } from './src/domain/item-factory.js';
 import { filterLockedZoneMoves } from './src/domain/zone-move-lock.js';
 import BoardLoading from './src/client/app/BoardLoading.jsx';
@@ -1066,19 +1067,13 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
   // trailing flush would overwrite the revert right back into Yjs.
   const midDrag = () => !!(dragItemsRef.current && dragItemsRef.current.size > 0);
   const doUndo = useCallback(() => {
-    if (midDrag()) { setToast({ msg: t('topbar.finishDragFirst'), type: 'warn' }); return; }
-    if (!boardEditingAllowed(mode, isPrivateAdmin, boardRef.current.editingLocked)) {
-      setToast({ msg: t('common.warnLockEdit'), type: 'warn' });
-      return;
-    }
+    const blocked = undoBlockReason(midDrag(), !boardEditingAllowed(mode, isPrivateAdmin, boardRef.current.editingLocked));
+    if (blocked) { setToast({ msg: t(blocked), type: 'warn' }); return; }
     if (!window.storage?.undo?.()) setToast({ msg: t('topbar.nothingToUndo'), type: 'warn' });
   }, [mode, isPrivateAdmin, t]);
   const doRedo = useCallback(() => {
-    if (midDrag()) { setToast({ msg: t('topbar.finishDragFirst'), type: 'warn' }); return; }
-    if (!boardEditingAllowed(mode, isPrivateAdmin, boardRef.current.editingLocked)) {
-      setToast({ msg: t('common.warnLockEdit'), type: 'warn' });
-      return;
-    }
+    const blocked = undoBlockReason(midDrag(), !boardEditingAllowed(mode, isPrivateAdmin, boardRef.current.editingLocked));
+    if (blocked) { setToast({ msg: t(blocked), type: 'warn' }); return; }
     if (!window.storage?.redo?.()) setToast({ msg: t('topbar.nothingToRedo'), type: 'warn' });
   }, [mode, isPrivateAdmin, t]);
 
