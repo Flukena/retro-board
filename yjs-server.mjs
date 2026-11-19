@@ -1,3 +1,4 @@
+import { createRelayLateBindings, createStorageFailureHandler } from './src/server/relay-late-bindings.js';
 import { createWsConnectionHandler } from './src/server/relay-ws-connection.js';
 import { createRoomPolicy, createRoomState } from './src/server/relay-room-state.js';
 import { createRelayPersistence } from './src/server/relay-persistence.js';
@@ -32,7 +33,7 @@ import { randomBytes } from 'crypto';
 import { isIP } from 'net';
 import { WebSocketServer } from 'ws';
 import {
-  createRelayLifecycle, drainRelay, isRelayReady, STORAGE_FAILURE_LOG, STORAGE_FAILURE_REASON,
+  createRelayLifecycle, drainRelay, isRelayReady,
   UNHANDLED_REJECTION_EVENT, UNCAUGHT_EXCEPTION_EVENT,
 } from './src/server/relay-lifecycle.js';
 import { RoomRegistry, REGISTRY_STORAGE_FAILURE_EVENT } from './src/server/relay-room-registry.js';
@@ -42,7 +43,7 @@ import { AccountStore, ACCOUNT_STORAGE_FAILURE_EVENT } from './src/server/accoun
 import { AccountSessions } from './src/server/auth-session.js';
 import { FlowLedger } from './src/server/auth-google.js';
 import { createAuthRoutes, enabledOAuthConfig } from './src/server/auth-routes.js';
-import { publicRelayEnvironment, isPublicWallEnabled,  PUBLIC_SNAPSHOT_DIRECTORY } from './src/server/public-wall-config.js';
+import { publicRelayEnvironment, isPublicWallEnabled, PUBLIC_SNAPSHOT_DIRECTORY } from './src/server/public-wall-config.js';
 import { claimPublicDirectory, PublicWallHistory } from './src/server/public-wall-history.js';
 import { provisionPublicWall, RelayPublicWall, retainPublicDocument } from './src/server/relay-public-wall.js';
 import { createRejectionCounters } from './src/server/relay-rejection-counters.js';
@@ -63,6 +64,7 @@ import { createAccountRoomRoutes } from './src/server/account-room-routes.js';
 import { createRoomSummaryReader, createRoomTitleWriter } from './src/server/room-title-writer.js';
 import { orphanRoomsOfDeletedAccounts } from './src/server/room-orphaning.js';
 
+const bindings = createRelayLateBindings();
 const { Y, LeveldbPersistence, loadUtils } = createRelayRuntime();
 
 Object.assign(process.env, publicRelayEnvironment(process.env));
@@ -92,51 +94,13 @@ const { setupWSConnection, setPersistence, docs, getYDoc, awarenessProtocol } = 
 const ALLOWED_ORIGINS = readAllowedOrigins(process.env.YJS_ALLOWED_ORIGINS, ALLOW_INSECURE_HTTP);
 
 const relayConfig = readRelayConfig();
-const {
-  RL_MAX_BYTES,
-  MAX_CONNECTIONS,
-  MAX_ACTIVE_ROOMS,
-  MAX_DOCUMENT_BYTES,
-  MAX_ACTIVE_DOCUMENT_BYTES,
-  MAX_UPDATE_BYTES,
-  MAX_PENDING_STORE_OPS,
-  MAX_PENDING_STORE_BYTES,
-  MAX_DB_BYTES,
-  ROOM_COMPACT_AFTER_BYTES,
-  ROOM_COMPACT_AFTER_UPDATES,
-  ROOM_MAX_UNCOMPACTED_UPDATES,
-  ROOM_COMPACTION_MIN_INTERVAL_MS,
-  DOCUMENT_REMEASURE_MIN_INTERVAL_MS,
-  ROOM_MAX_UNCOMPACTED_BYTES,
-  MAX_STATE_VECTOR_BYTES,
-  MAX_AWARENESS_MESSAGE_BYTES,
-  MAX_AWARENESS_STATE_BYTES,
-  MAX_AWARENESS_IDS_PER_CONNECTION,
-  MAX_AWARENESS_CLIENTS_PER_ROOM,
-  MAX_AWARENESS_ROOM_BYTES,
-  MAX_REGISTERED_ROOMS,
-  ROOM_SESSION_TTL_MS,
-  MAX_API_BODY_BYTES,
-  MAX_COOKIE_HEADER_BYTES,
-  MAX_HEADER_BYTES,
-  MAX_HTTP_REQUESTS,
-  MAX_HTTP_REQUESTS_PER_IP,
-  REQUEST_TIMEOUT_MS,
-  HEADERS_TIMEOUT_MS,
-  KEEP_ALIVE_TIMEOUT_MS,
-  UPGRADE_TIMEOUT_MS,
-  SHUTDOWN_TIMEOUT_MS,
-  HTTP_SHUTDOWN_GRACE_MS,
-  UPLOADS_DIR,
-  MAX_UPLOAD_STORAGE_BYTES,
-} = relayConfig;
-fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+fs.mkdirSync(relayConfig.UPLOADS_DIR, { recursive: true });
 const uploadState = createUploadState(relayConfig);
 const initialUploadUsage = uploadState.initialUsage;
 const uploadBuckets = uploadState.buckets;
 
 const ldb = new LeveldbPersistence(DB_DIR);
-const accounting = createRoomAccounting({ databaseSizeBytes, MAX_DB_BYTES, MAX_PENDING_STORE_OPS, MAX_PENDING_STORE_BYTES, MAX_ACTIVE_DOCUMENT_BYTES });
+const accounting = createRoomAccounting({ databaseSizeBytes, MAX_DB_BYTES: relayConfig.MAX_DB_BYTES, MAX_PENDING_STORE_OPS: relayConfig.MAX_PENDING_STORE_OPS, MAX_PENDING_STORE_BYTES: relayConfig.MAX_PENDING_STORE_BYTES, MAX_ACTIVE_DOCUMENT_BYTES: relayConfig.MAX_ACTIVE_DOCUMENT_BYTES });
 const { roomUsage } = accounting;
 
 // Marks the one update we apply from disk during hydration, so the listener
@@ -171,8 +135,8 @@ const registryPersistence = {
   measureDatabase: accounting.measureDatabase,
 };
 const roomRegistry = new RoomRegistry({
-  persistence: registryPersistence, Y, maxRooms: MAX_REGISTERED_ROOMS,
-  maxDatabaseBytes: MAX_DB_BYTES, signingKey: SESSION_SIGNING_KEY,
+  persistence: registryPersistence, Y, maxRooms: relayConfig.MAX_REGISTERED_ROOMS,
+  maxDatabaseBytes: relayConfig.MAX_DB_BYTES, signingKey: SESSION_SIGNING_KEY,
 });
 // Rooms in the deletion journal are fenced and never registered; recovery below finishes them.
 const roomFence = new RoomFence();
@@ -184,17 +148,7 @@ const publicHistory = PUBLIC_WALL ? new PublicWallHistory(DB_DIR, Y) : null;
 const { registeredRoomsByHandle, roomUploadUsage } = roomRegistry;
 const roomHandleForDoc = (docName) => roomRegistry.roomHandleForDoc(docName);
 
-// Flipped by the first storage failure. Existing clients are closed as well as
-// refusing new upgrades: otherwise they would continue seeing edits that can
-// no longer be persisted and lose them at the next restart.
-// Set by the signal handlers at the bottom of this file; checked in the
-// upgrade path so a draining process stops taking on new rooms.
-const markStorageFailure = (err) => {
-  if (accounting.storageFailure) return;
-  accounting.storageFailure = err;
-  console.error(STORAGE_FAILURE_LOG, { errorId: roomLogId(String(err)) });
-  shutdown(STORAGE_FAILURE_REASON, true);
-};
+const markStorageFailure = createStorageFailureHandler({ accounting, bindings });
 
 roomRegistry.on(REGISTRY_STORAGE_FAILURE_EVENT, markStorageFailure);
 const accountStore = new AccountStore({ ldb, getMeta: checkedGetMeta, hasCapacity: registryPersistence.hasCapacity });
@@ -257,7 +211,7 @@ const roomKeyEpoch = (docName) => {
 };
 const roomSessions = new RoomSessions({
   signingKey: SESSION_SIGNING_KEY, rooms: registeredRoomsByHandle,
-  ttlMs: ROOM_SESSION_TTL_MS, maxCookieHeaderBytes: MAX_COOKIE_HEADER_BYTES,
+  ttlMs: relayConfig.ROOM_SESSION_TTL_MS, maxCookieHeaderBytes: relayConfig.MAX_COOKIE_HEADER_BYTES,
   allowInsecureHttp: ALLOW_INSECURE_HTTP, epochOf: roomKeyEpoch,
 });
 const createSessionCookie = roomSessions.createCookie.bind(roomSessions);
@@ -294,21 +248,21 @@ const uploads = createRelayUploads({
   allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, strictRasterValidation: PUBLIC_WALL, fence: roomFence,
 });
 uploadState.events.on(UPLOAD_STORAGE_FAILURE_EVENT, markStorageFailure);
-const e2eBlobStore = new E2EBlobStore({ uploadsDir: UPLOADS_DIR, admission: uploads.admission, roomUploadUsage });
+const e2eBlobStore = new E2EBlobStore({ uploadsDir: relayConfig.UPLOADS_DIR, admission: uploads.admission, roomUploadUsage });
 
 const relayProtocol = new RelayProtocol({
-  maxStateVectorBytes: MAX_STATE_VECTOR_BYTES, maxUpdateBytes: MAX_UPDATE_BYTES,
-  maxAwarenessMessageBytes: MAX_AWARENESS_MESSAGE_BYTES,
-  maxAwarenessClientsPerRoom: MAX_AWARENESS_CLIENTS_PER_ROOM,
-  maxAwarenessStateBytes: MAX_AWARENESS_STATE_BYTES,
+  maxStateVectorBytes: relayConfig.MAX_STATE_VECTOR_BYTES, maxUpdateBytes: relayConfig.MAX_UPDATE_BYTES,
+  maxAwarenessMessageBytes: relayConfig.MAX_AWARENESS_MESSAGE_BYTES,
+  maxAwarenessClientsPerRoom: relayConfig.MAX_AWARENESS_CLIENTS_PER_ROOM,
+  maxAwarenessStateBytes: relayConfig.MAX_AWARENESS_STATE_BYTES,
 });
 const inspectProtocolMessage = relayProtocol.inspect.bind(relayProtocol);
 
 const { planAwarenessUpdate, commitAwarenessPlan, releaseAwarenessForConnection } = createAwarenessPolicy({
-  awarenessProtocol, MAX_AWARENESS_IDS_PER_CONNECTION, MAX_AWARENESS_CLIENTS_PER_ROOM, MAX_AWARENESS_ROOM_BYTES,
+  awarenessProtocol, MAX_AWARENESS_IDS_PER_CONNECTION: relayConfig.MAX_AWARENESS_IDS_PER_CONNECTION, MAX_AWARENESS_CLIENTS_PER_ROOM: relayConfig.MAX_AWARENESS_CLIENTS_PER_ROOM, MAX_AWARENESS_ROOM_BYTES: relayConfig.MAX_AWARENESS_ROOM_BYTES,
 });
 
-const reserveHttpRequest = createHttpRequestSlots({ maxRequests: MAX_HTTP_REQUESTS, maxRequestsPerIp: MAX_HTTP_REQUESTS_PER_IP });
+const reserveHttpRequest = createHttpRequestSlots({ maxRequests: relayConfig.MAX_HTTP_REQUESTS, maxRequestsPerIp: relayConfig.MAX_HTTP_REQUESTS_PER_IP });
 
 if (publicWall) {
   const publicDoc = getYDoc(publicWall.docName);
@@ -321,28 +275,28 @@ const { inspectMessage } = createWsAdmission({
   markStorageFailure, inspectProtocolMessage, planAwarenessUpdate, rejectionCounters, PUBLIC_WALL, Y,
 });
 const ACCOUNT_SIGNING_KEY = loadSigningKey(DB_DIR, ACCOUNT_SESSION_KEY);
-const accountSessions = new AccountSessions({ signingKey: ACCOUNT_SIGNING_KEY, allowInsecureHttp: ALLOW_INSECURE_HTTP, maxCookieHeaderBytes: MAX_COOKIE_HEADER_BYTES });
+const accountSessions = new AccountSessions({ signingKey: ACCOUNT_SIGNING_KEY, allowInsecureHttp: ALLOW_INSECURE_HTTP, maxCookieHeaderBytes: relayConfig.MAX_COOKIE_HEADER_BYTES });
 const roomLockVerifier = new RoomLockVerifier();
 const roomSessionRoutes = createRoomSessionRoutes({
   registry: roomRegistry, sessions: roomSessions, verifier: roomLockVerifier, accountSessions, accountStore,
   buckets: { takeCreateToken, takeSessionExchangeToken, failureAttemptAvailable, recordSessionFailure },
-  config: { allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, sessionTtlMs: ROOM_SESSION_TTL_MS, maxApiBodyBytes: MAX_API_BODY_BYTES },
+  config: { allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, sessionTtlMs: relayConfig.ROOM_SESSION_TTL_MS, maxApiBodyBytes: relayConfig.MAX_API_BODY_BYTES },
   unavailable: () => accounting.shuttingDown || Boolean(accounting.storageFailure), onStorageFailure: markStorageFailure, fence: roomFence,
 });
 const plainRoomRefusal = (doc, docName) => (accounting.shuttingDown && new Error('shutting down')) || accounting.storageFailure
   || (capacityRejectedDocs.has(doc) && new Error('active document capacity reached')) || (isRoomBlocked(docName) && new Error('room unavailable')) || null;
-const hasActiveRoomCapacity = () => docs.size + e2eRelay.activeRooms() < MAX_ACTIVE_ROOMS; // the one cold-room admission: upgrades and renames
+const hasActiveRoomCapacity = () => docs.size + bindings.activeRooms() < relayConfig.MAX_ACTIVE_ROOMS; // the one cold-room admission: upgrades and renames
 const titleWriter = createRoomTitleWriter({ docs, getYDoc, roomReady, fence: roomFence, refusal: plainRoomRefusal, admitsColdRoom: hasActiveRoomCapacity, storeWriteOf: (doc) => storeWrites.get(doc) });
 const accountRooms = createAccountRoomRoutes({
-  registry: roomRegistry, store: accountStore, maxBodyBytes: MAX_API_BODY_BYTES, onStorageFailure: markStorageFailure,
-  deleteRoom: (docName) => roomDeletion.deleteRoom(docName), readSummary: createRoomSummaryReader({ docs, roomReady, readStoredDoc: checkedGetYDoc }),
+  registry: roomRegistry, store: accountStore, maxBodyBytes: relayConfig.MAX_API_BODY_BYTES, onStorageFailure: markStorageFailure,
+  deleteRoom: (docName) => bindings.deleteRoom(docName), readSummary: createRoomSummaryReader({ docs, roomReady, readStoredDoc: checkedGetYDoc }),
   writeTitle: (docName, title) => titleWriter.write(docName, title),
 });
 const authRoutes = createAuthRoutes({
   oauth: enabledOAuthConfig(process.env, { allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, publicWall: PUBLIC_WALL, log: console }),
   sessions: accountSessions,
   accountKey: ACCOUNT_SIGNING_KEY, store: accountStore, ledger: new FlowLedger(), allowedOrigins: ALLOWED_ORIGINS,
-  allowInsecureHttp: ALLOW_INSECURE_HTTP, maxCookieHeaderBytes: MAX_COOKIE_HEADER_BYTES, rejectionCounters, accountRooms,
+  allowInsecureHttp: ALLOW_INSECURE_HTTP, maxCookieHeaderBytes: relayConfig.MAX_COOKIE_HEADER_BYTES, rejectionCounters, accountRooms,
 });
 const rejectUpgrade = (socket, status) => {
   rejectionCounters.upgrade(status);
@@ -350,13 +304,13 @@ const rejectUpgrade = (socket, status) => {
 };
 
 const maintenance = new RelayMaintenance();
-const guestSweep = new GuestRoomSweep({ registry: roomRegistry, docs, connections: wsTraffic.connectionsByRoom, publicWall: PUBLIC_WALL, log: console, deleteRoom: (docName) => roomDeletion.deleteRoom(docName) }, readGuestSweepTiming(process.env, { allowInsecureHttp: ALLOW_INSECURE_HTTP }));
+const guestSweep = new GuestRoomSweep({ registry: roomRegistry, docs, connections: wsTraffic.connectionsByRoom, publicWall: PUBLIC_WALL, log: console, deleteRoom: (docName) => bindings.deleteRoom(docName) }, readGuestSweepTiming(process.env, { allowInsecureHttp: ALLOW_INSECURE_HTTP }));
 const maintainer = await startMaintainer(process.env, () => maintainerSnapshot({
   registry: roomRegistry, docs, connections: wsTraffic.connectionsByRoom, blockedRooms, roomUsage,
   ready: isRelayReady(accounting.storageFailure, accounting.shuttingDown), publicWall: PUBLIC_WALL,
   databaseBytes: accounting.dbUsageBytes, uploadBytes: uploadState.bytes,
   pendingStoreOps: accounting.pendingStoreOps, pendingStoreBytes: accounting.pendingStoreBytes, activeDocumentBytes: accounting.activeDocumentBytes,
-  limits: { databaseBytes: MAX_DB_BYTES, uploadBytes: MAX_UPLOAD_STORAGE_BYTES, activeDocumentBytes: MAX_ACTIVE_DOCUMENT_BYTES, pendingStoreBytes: MAX_PENDING_STORE_BYTES, pendingStoreOps: MAX_PENDING_STORE_OPS },
+  limits: { databaseBytes: relayConfig.MAX_DB_BYTES, uploadBytes: relayConfig.MAX_UPLOAD_STORAGE_BYTES, activeDocumentBytes: relayConfig.MAX_ACTIVE_DOCUMENT_BYTES, pendingStoreBytes: relayConfig.MAX_PENDING_STORE_BYTES, pendingStoreOps: relayConfig.MAX_PENDING_STORE_OPS },
 }), { registry: roomRegistry, boardOrigin: ALLOWED_ORIGINS[0], publicWall: PUBLIC_WALL }, () => guestSweep.retireIdle(), accountStore);
 maintenance.on(MAINTENANCE_STORAGE_FAILURE_EVENT, markStorageFailure);
 const runMaintenance = () => maintenance.run({
@@ -366,26 +320,26 @@ const runMaintenance = () => maintenance.run({
   compaction: { schedule: scheduleRoomCompaction },
   votes: { finalize: finalizeExpiredVotes },
   storage: { measureDatabase: registryPersistence.measureDatabase, reconcileUploadUsage },
-  e2eBlobs,
+  e2eBlobs: bindings.e2eBlobs,
 });
-const maintenanceTimer = setInterval(() => { roomLockVerifier.sweep(); runMaintenance(); void roomDeletion.recover(); void guestSweep.tick(); }, MAINTENANCE_INTERVAL_MS);
+const maintenanceTimer = setInterval(() => { roomLockVerifier.sweep(); runMaintenance(); void bindings.recoverRooms(); void guestSweep.tick(); }, MAINTENANCE_INTERVAL_MS);
 maintenanceTimer.unref();
 
 const { dispatch } = createHttpDispatch({
-  settings: { PUBLIC_WALL, ALLOWED_ORIGINS, ALLOW_INSECURE_HTTP, ROOM_SESSION_TTL_MS }, accounting, rejectionCounters,
+  settings: { PUBLIC_WALL, ALLOWED_ORIGINS, ALLOW_INSECURE_HTTP, ROOM_SESSION_TTL_MS: relayConfig.ROOM_SESSION_TTL_MS }, accounting, rejectionCounters,
   traffic: { clientIpFromRequest, reserveHttpRequest, wsTraffic },
   sessions: { takeSessionExchangeToken, createSessionCookie, authenticatedDocFromRequest },
   rooms: { publicWall, docs, registeredRoomsByHandle },
-  routes: { roomSessionRoutes, authRoutes, get roomLockRoutes() { return roomLockRoutes; } },
-  assets: { uploads, lockForDoc, get e2eBlobs() { return e2eBlobs; } },
+  routes: { roomSessionRoutes, authRoutes },
+  assets: { uploads, lockForDoc }, lateBindings: bindings,
 });
-const server = http.createServer({ maxHeaderSize: MAX_HEADER_BYTES }, dispatch);
+const server = http.createServer({ maxHeaderSize: relayConfig.MAX_HEADER_BYTES }, dispatch);
 
-server.requestTimeout = REQUEST_TIMEOUT_MS;
-server.headersTimeout = HEADERS_TIMEOUT_MS;
-server.keepAliveTimeout = KEEP_ALIVE_TIMEOUT_MS;
+server.requestTimeout = relayConfig.REQUEST_TIMEOUT_MS;
+server.headersTimeout = relayConfig.HEADERS_TIMEOUT_MS;
+server.keepAliveTimeout = relayConfig.KEEP_ALIVE_TIMEOUT_MS;
 server.maxRequestsPerSocket = MAX_REQUESTS_PER_SOCKET;
-server.maxConnections = MAX_CONNECTIONS + MAX_HTTP_REQUESTS;
+server.maxConnections = relayConfig.MAX_CONNECTIONS + relayConfig.MAX_HTTP_REQUESTS;
 server.on('clientError', (err, socket) => {
   const status = err.code === 'HPE_HEADER_OVERFLOW' ? 431 : 400;
   if (socket.writable) rejectUpgrade(socket, status);
@@ -399,33 +353,38 @@ server.on('clientError', (err, socket) => {
 // listener, which parses and applies it. RL_MAX_BYTES is the right ceiling —
 // the bucket holds at most that many bytes, so a larger frame could never
 // have been admitted anyway.
-const wss = new WebSocketServer({ noServer: true, maxPayload: RL_MAX_BYTES });
+const wss = new WebSocketServer({ noServer: true, maxPayload: relayConfig.RL_MAX_BYTES });
 roomRegistry.activity.watch(wss, (error) => roomRegistry.reportStorageFailure(error));
 const e2eRoomLog = new E2ERoomLog({
-  ldb, maxRoomBytes: MAX_DOCUMENT_BYTES, reserveStore: registryPersistence.reserveStore, hasCapacity: registryPersistence.hasCapacity,
+  ldb, maxRoomBytes: relayConfig.MAX_DOCUMENT_BYTES, reserveStore: registryPersistence.reserveStore, hasCapacity: registryPersistence.hasCapacity,
   onError: markStorageFailure, deleteStagedBlobs: (_docName, rotationId) => e2eBlobStore.deleteStaged(rotationId),
   onBlobsRetired: (docName) => e2eBlobStore.trackRetired(docName), fence: roomFence,
 });
 const e2eRelay = createE2ERelay({
-  traffic: wsTraffic, maxRoomBytes: MAX_DOCUMENT_BYTES, maxAppendBytes: RL_MAX_BYTES, onStorageFailure: markStorageFailure, touch: (docName) => roomRegistry.activity.touch(docName),
+  traffic: wsTraffic, maxRoomBytes: relayConfig.MAX_DOCUMENT_BYTES, maxAppendBytes: relayConfig.RL_MAX_BYTES, onStorageFailure: markStorageFailure, touch: (docName) => roomRegistry.activity.touch(docName),
   roomLog: e2eRoomLog,
 });
+bindings.bind('activeRooms', () => e2eRelay.activeRooms());
 const e2eBlobs = createE2EBlobs({
   config: relayConfig, allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, uploads, store: e2eBlobStore,
   roomLog: e2eRoomLog, registry: roomRegistry, onStorageFailure: markStorageFailure, fence: roomFence,
 });
+bindings.bind('e2eBlobs', e2eBlobs);
 const roomLockRoutes = createRoomLockRoutes({
   registry: roomRegistry, roomLog: e2eRoomLog, blobStore: e2eBlobStore, closeRoom: e2eRelay.closeRoom, verifier: roomLockVerifier, accountSessions, accountStore,
-  config: { allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, maxApiBodyBytes: MAX_API_BODY_BYTES },
+  config: { allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, maxApiBodyBytes: relayConfig.MAX_API_BODY_BYTES },
   unavailable: () => accounting.shuttingDown || Boolean(accounting.storageFailure), onStorageFailure: markStorageFailure, fence: roomFence,
 });
+bindings.bind('roomLockRoutes', roomLockRoutes);
 const roomDeletion = new RoomDeletion({
   fence: roomFence, journal: deletionJournal, registry: roomRegistry, pending: journaledDeletions, onStorageFailure: markStorageFailure,
   plainRooms: createPlainRoomTeardown({ docs, roomReady, roomPersistenceChurn, blockedRooms }), e2eRooms: e2eRelay,
-  files: createRoomFileRemover({ io: fs.promises, uploadsDir: UPLOADS_DIR, reconcileUploadUsage }),
+  files: createRoomFileRemover({ io: fs.promises, uploadsDir: relayConfig.UPLOADS_DIR, reconcileUploadUsage }),
 });
+bindings.bind('deleteRoom', docName => roomDeletion.deleteRoom(docName));
+bindings.bind('recoverRooms', () => roomDeletion.recover());
 const plainUpgrades = createPlainUpgrades({
-  docs, getYDoc, roomReady, wss, fence: roomFence, reject: rejectUpgrade, timeoutMs: UPGRADE_TIMEOUT_MS, refusal: plainRoomRefusal,
+  docs, getYDoc, roomReady, wss, fence: roomFence, reject: rejectUpgrade, timeoutMs: relayConfig.UPGRADE_TIMEOUT_MS, refusal: plainRoomRefusal,
 });
 roomRegistry.activity.watch(e2eRelay.wss, (error) => roomRegistry.reportStorageFailure(error));
 const { handleConnection } = createWsConnectionHandler({
@@ -445,7 +404,7 @@ server.on('upgrade', handleUpgrade);
 // storeUpdate calls are still in flight, so the last edits before a deploy
 // can be lost even though every client saw them.
 const lifecycle = createRelayLifecycle({
-  timeoutMs: SHUTDOWN_TIMEOUT_MS,
+  timeoutMs: relayConfig.SHUTDOWN_TIMEOUT_MS,
   log: console,
   errorId: (err) => roomLogId(String(err)),
   exit: (code) => process.exit(code),
@@ -460,7 +419,7 @@ const lifecycle = createRelayLifecycle({
     const roomCount = docs.size;
     await e2eRelay.drain();
     await drainRelay({
-      server, clients: wss.clients, httpGraceMs: HTTP_SHUTDOWN_GRACE_MS,
+      server, clients: wss.clients, httpGraceMs: relayConfig.HTTP_SHUTDOWN_GRACE_MS,
       isBusy: () => maintenance.running || roomRegistry.pendingRoomCreations > 0 || uploadState.active > 0 || accounting.pendingStoreOps > 0
         || accountStore.pendingOperations > 0 || authRoutes.pendingExchanges > 0,
       compactions: () => [...roomPersistenceChurn.values()].map((churn) => churn.compactionPromise).filter(Boolean),
@@ -469,6 +428,7 @@ const lifecycle = createRelayLifecycle({
     console.log('[yjs] drained', { rooms: roomCount });
   },
 });
+bindings.bind('shutdown', (...args) => lifecycle.shutdown(...args));
 const shutdown = lifecycle.shutdown;
 process.on('SIGTERM', () => { shutdown('SIGTERM'); });
 process.on('SIGINT', () => { shutdown('SIGINT'); });
@@ -478,5 +438,5 @@ await roomDeletion.recover();
 if (await e2eBlobs.reconcileOrphans() > 0) await reconcileUploadUsage();
 server.listen(PORT, HOST, () => logRelayBanner({
   server, PORT, HOST, DB_DIR, ALLOWED_ORIGINS, ALLOW_INSECURE_HTTP,
-  ALLOW_LEGACY_ROOMS, ALLOW_LEGACY_URL_TOKENS, TRUST_PROXY, accounting, MAX_DB_BYTES, markStorageFailure,
+  ALLOW_LEGACY_ROOMS, ALLOW_LEGACY_URL_TOKENS, TRUST_PROXY, accounting, MAX_DB_BYTES: relayConfig.MAX_DB_BYTES, markStorageFailure,
 }));

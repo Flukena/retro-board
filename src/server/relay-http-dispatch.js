@@ -3,7 +3,7 @@ import { PUBLIC_RELAY_PREFIX } from './public-wall-config.js';
 import { isRelayReady } from './relay-lifecycle.js';
 import { handleRoomRoute } from './relay-room-routes.js';
 
-export function createHttpDispatch({ settings, accounting, traffic, sessions, rooms, routes, assets, rejectionCounters }) {
+export function createHttpDispatch({ settings, accounting, traffic, sessions, rooms, routes, assets, rejectionCounters, lateBindings }) {
   const { PUBLIC_WALL, ALLOWED_ORIGINS, ALLOW_INSECURE_HTTP, ROOM_SESSION_TTL_MS } = settings;
   const { clientIpFromRequest, reserveHttpRequest, wsTraffic } = traffic;
   const { takeSessionExchangeToken, createSessionCookie, authenticatedDocFromRequest } = sessions;
@@ -56,12 +56,12 @@ export function createHttpDispatch({ settings, accounting, traffic, sessions, ro
 
   const handlePrivate = (req, res, clientIp, { routePath, prefixed, hasQueryOrFragment }) => {
     if (roomSessionRoutes.handle(req, res, routePath, { clientIp, prefixed, hasQueryOrFragment })) return true;
-    if (routes.roomLockRoutes.handle(req, res, routePath, { clientIp, hasQueryOrFragment })) return true;
+    if (lateBindings.roomLockRoutes.handle(req, res, routePath, { clientIp, hasQueryOrFragment })) return true;
     if (authRoutes.handle(req, res, routePath, { prefixed, clientIp, unavailable: () => accounting.shuttingDown || Boolean(accounting.storageFailure) })) return true;
     if (handleRoomRoute(req, res, routePath, {
       hasQueryOrFragment, allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP,
       unavailable: accounting.shuttingDown || Boolean(accounting.storageFailure), rooms: registeredRoomsByHandle,
-      authenticate: authenticatedDocFromRequest, uploads, clientIp, lockFor: lockForDoc, e2eBlobs: assets.e2eBlobs,
+      authenticate: authenticatedDocFromRequest, uploads, clientIp, lockFor: lockForDoc, e2eBlobs: lateBindings.e2eBlobs,
     })) return true;
     return false;
   };
