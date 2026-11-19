@@ -1,3 +1,4 @@
+import { useBrowserZoomGuard } from './src/client/board/use-browser-zoom-guard.js';
 import { resizeGeometry } from './src/domain/resize-geometry.js';
 import { routeBoardKey } from './src/client/board/board-key-router.js';
 import { undoBlockReason } from './src/domain/undo-guard.js';
@@ -144,7 +145,6 @@ import { reparentMoveEntries } from './src/domain/move-reparenting.js';
 import { isStickyHiddenForUser, stickyEffectiveRevealed, stickyCloneRevealOverride } from './src/domain/board-visibility.js';
 import { attachSafariGestures } from './src/client/board/safari-gestures.js';
 import { attachMobileGestures, isMobileGestureEvent } from './src/client/board/mobile-gestures.js';
-import { APP_VIEWPORT_CONTENT } from './src/client/ui/mobile-layout.js';
 import { useMobileLayout } from './src/client/ui/use-mobile-layout.js';
 import { attachMobileEditorViewport } from './src/client/board/mobile-editor-viewport.js';
 import { worldMotionProps } from './src/client/board/world-motion.js';
@@ -1077,53 +1077,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     if (!window.storage?.redo?.()) setToast({ msg: t('topbar.nothingToRedo'), type: 'warn' });
   }, [mode, isPrivateAdmin, t]);
 
-  /* ============================================================
-     Block browser zoom outside the board canvas.
-     The canvas onWheel handles its own zoom; this catches pinch /
-     ctrl+wheel over toolbars and keyboard zoom,
-     plus counter-scales any zoom applied via the browser menu.
-     ============================================================ */
-  useEffect(() => {
-    const meta = document.querySelector('meta[name="viewport"]');
-    const prevContent = meta?.getAttribute('content') || '';
-    if (meta) {
-      meta.setAttribute(
-        'content',
-        APP_VIEWPORT_CONTENT,
-      );
-    }
-
-    const onWheel = (e) => {
-      // Canvas already preventDefaults its own wheel; this stops zoom
-      // when pinch/ctrl-wheel happens over toolbars or modals.
-      if (e.ctrlKey || e.metaKey) e.preventDefault();
-    };
-    const onKeyDown = (e) => {
-      if (!(e.ctrlKey || e.metaKey)) return;
-      if (['+', '-', '=', '0'].includes(e.key)) e.preventDefault();
-    };
-
-    window.addEventListener('wheel', onWheel, { passive: false });
-    window.addEventListener('keydown', onKeyDown);
-
-    const baseDPR = window.devicePixelRatio || 1;
-    const counterZoom = () => {
-      const ratio = (window.devicePixelRatio || 1) / baseDPR;
-      document.body.style.zoom = Math.abs(ratio - 1) > 0.01 ? String(1 / ratio) : '';
-    };
-    counterZoom();
-    window.addEventListener('resize', counterZoom);
-    window.visualViewport?.addEventListener('resize', counterZoom);
-
-    return () => {
-      if (meta) meta.setAttribute('content', prevContent);
-      window.removeEventListener('wheel', onWheel);
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('resize', counterZoom);
-      window.visualViewport?.removeEventListener('resize', counterZoom);
-      document.body.style.zoom = '';
-    };
-  }, []);
+  useBrowserZoomGuard();
 
   /* ============================================================
      Coordinate helpers
