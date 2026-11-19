@@ -696,6 +696,7 @@ const dict = {
 
     // settings
     'settings.lang': 'ภาษา',
+    'settings.langLinks': 'ภาษา',
     'settings.theme': 'ธีม',
     'settings.scrollWheelZoom': 'ใช้ล้อเมาส์เพื่อซูม',
     'settings.theme.light': 'สว่าง',
@@ -1854,6 +1855,7 @@ const dict = {
     'selection.byCount': '{name} is selecting {n} cards',
 
     'settings.lang': 'Language',
+    'settings.langLinks': 'Languages',
     'settings.theme': 'Theme',
     'settings.scrollWheelZoom': 'Use scroll wheel zoom',
     'settings.theme.light': 'Light',

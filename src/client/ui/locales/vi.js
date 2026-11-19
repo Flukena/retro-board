@@ -600,6 +600,7 @@ export default Object.freeze({
   "selection.byMany": "{name} và {n} người khác đang chọn",
   "selection.byCount": "{name} đang chọn {n} thẻ",
   "settings.lang": "Ngôn ngữ",
+  "settings.langLinks": "Ngôn ngữ",
   "settings.theme": "Giao diện",
   "settings.scrollWheelZoom": "Dùng con lăn chuột để thu phóng",
   "settings.theme.light": "Sáng",

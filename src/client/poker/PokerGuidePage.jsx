@@ -10,6 +10,7 @@ import RecentRooms, { useRecentRooms } from '../app/RecentRooms.jsx';
 import { ROOM_KIND } from '../app/router.js';
 import { PLANNING_POKER_PATH } from '../seo/seo-pages.js';
 import { pageHref } from '../seo/page-links.js';
+import LanguageLinks from '../seo/LanguageLinks.jsx';
 import '../legal/legal.css';
 import './poker.css';
 
@@ -59,6 +60,7 @@ export default function PokerGuidePage() {
             <GuideSection id={SECTION_ID.MORE} titleKey="tpl.section.more"><SiteLinks /></GuideSection>
           </Surface>
         </main>
+        <footer className="rb-landing__footer"><LanguageLinks /></footer>
       </div>
     </div>
   );

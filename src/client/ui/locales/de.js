@@ -600,6 +600,7 @@ export default Object.freeze({
   "selection.byMany": "{name} und {n} weitere wählen gerade aus",
   "selection.byCount": "{name} wählt {n} Karten aus",
   "settings.lang": "Sprache",
+  "settings.langLinks": "Sprachen",
   "settings.theme": "Design",
   "settings.scrollWheelZoom": "Zoom mit dem Mausrad",
   "settings.theme.light": "Hell",

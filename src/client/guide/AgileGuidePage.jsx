@@ -7,6 +7,7 @@ import { Surface } from '../ui/UiPrimitives.jsx';
 import { SURFACE_KIND } from '../ui/ui-variants.js';
 import { AGILE_GUIDE_PATH, PLANNING_POKER_PATH } from '../seo/seo-pages.js';
 import { pageHref } from '../seo/page-links.js';
+import LanguageLinks from '../seo/LanguageLinks.jsx';
 import { AGILE_GUIDE_SECTIONS, AGILE_SECTION, GUIDE_BLOCK } from './agile-guide-content.js';
 import '../legal/legal.css';
 import '../templates/template-page.css';
@@ -107,6 +108,7 @@ export default function AgileGuidePage() {
             </section>
           </Surface>
         </main>
+        <footer className="rb-landing__footer"><LanguageLinks /></footer>
       </div>
     </div>
   );

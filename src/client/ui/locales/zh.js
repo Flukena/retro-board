@@ -600,6 +600,7 @@ export default Object.freeze({
   "selection.byMany": "{name} 等 {n} 人正在选择",
   "selection.byCount": "{name} 正在选择 {n} 张卡片",
   "settings.lang": "语言",
+  "settings.langLinks": "语言",
   "settings.theme": "主题",
   "settings.scrollWheelZoom": "使用滚轮缩放",
   "settings.theme.light": "浅色",

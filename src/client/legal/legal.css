@@ -45,3 +45,5 @@
   .rb-legal__doc { padding: var(--space-6) var(--space-4); }
   .rb-legal__title { font-size: var(--legal-title-size-mobile); }
 }
+
+.rb-legal__footer { max-width: var(--legal-max-width); margin: var(--space-6) auto 0; padding-bottom: var(--space-4); }

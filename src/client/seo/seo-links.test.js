@@ -9,6 +9,7 @@ const TEMPLATE = readFileSync(new URL('../../../index.html', import.meta.url), '
 const NON_PAGE_PREFIXES = Object.freeze(['/public', '/b/', '/p/', '/assets/']);
 
 const bodyOf = (html) => html.slice(html.indexOf('<body'));
+const withoutLanguageLinks = (html) => html.replace(/<nav class="rb-lang-links".*?<\/nav>/s, '');
 const internalHrefs = (html) => [...bodyOf(html).matchAll(/<a [^>]*?href="([^"]+)"/g)]
   .map((match) => match[1].replace(/[?#].*$/, ''))
   .filter((href) => href.startsWith('/') && !href.startsWith('//'));
@@ -24,7 +25,7 @@ test('on a language page every link to an indexable page stays in that language'
       const ownPages = new Set(SEO_PAGES.map(({ path }) => localizedPath(path, lang)));
       for (const { path } of SEO_PAGES) {
         const file = fileOf(localizedPath(path, lang));
-        for (const href of internalHrefs(pages.get(file))) {
+        for (const href of internalHrefs(withoutLanguageLinks(pages.get(file)))) {
           const trimmed = href.length > 1 ? href.replace(/\/$/, '') : href;
           assert.ok(ownPages.has(trimmed) || NON_PAGE_PREFIXES.some((prefix) => trimmed.startsWith(prefix)), `${file}: ${href}`);
         }
@@ -43,5 +44,27 @@ test('every internal link in every page body reaches a page the build writes', a
         assert.ok(written.has(trimmed) || NON_PAGE_PREFIXES.some((prefix) => trimmed.startsWith(prefix)), `${file}: dead link ${href}`);
       }
     }
+  });
+});
+
+test('every indexable page body links to all language versions of itself', async () => {
+  await renderAll((pages) => {
+    for (const lang of SEO_LANGS) {
+      for (const { path } of SEO_PAGES) {
+        const file = fileOf(localizedPath(path, lang));
+        const links = new Set(internalHrefs(pages.get(file)));
+        for (const target of SEO_LANGS) assert.ok(links.has(localizedPath(path, target)), `${file} -> ${target}`);
+      }
+    }
+  });
+});
+
+test('the language links name their language, mark the current one and are labelled', async () => {
+  await renderAll((pages) => {
+    const html = pages.get('th/privacy/index.html');
+    assert.match(html, /<nav class="rb-lang-links" aria-label="ภาษา">/);
+    assert.match(html, /<a href="\/th\/privacy" hrefLang="th" lang="th" aria-current="page">ไทย<\/a>/i);
+    assert.match(html, /<a href="\/privacy" hrefLang="en" lang="en">English<\/a>/i);
+    assert.equal((html.match(/aria-current="page"/g) || []).length, 1);
   });
 });

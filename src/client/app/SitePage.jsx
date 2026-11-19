@@ -6,6 +6,7 @@ import { LEGAL_PAGE, LEGAL_PATH } from '../legal/legal-content.js';
 import { starterFormat, starterSlugs } from '../templates/starter-formats.js';
 import { AGILE_GUIDE_PATH } from '../seo/seo-pages.js';
 import { pageHref } from '../seo/page-links.js';
+import LanguageLinks from '../seo/LanguageLinks.jsx';
 import '../legal/legal.css';
 import '../templates/template-page.css';
 
@@ -43,6 +44,7 @@ export default function SitePage({ labelledBy, className = '', homeLink = true, 
         <LanguagePicker />
       </header>
       <main className={`rb-legal__doc ${className}`.trim()} aria-labelledby={labelledBy}>{children}</main>
+      <footer className="rb-legal__footer"><LanguageLinks /></footer>
     </div>
   );
 }

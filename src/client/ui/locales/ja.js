@@ -600,6 +600,7 @@ export default Object.freeze({
   "selection.byMany": "{name}さんほか{n}人が選択中",
   "selection.byCount": "{name}さんが{n}枚のカードを選択中",
   "settings.lang": "言語",
+  "settings.langLinks": "言語",
   "settings.theme": "テーマ",
   "settings.scrollWheelZoom": "スクロールホイールでズーム",
   "settings.theme.light": "ライト",
