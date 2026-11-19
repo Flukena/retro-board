@@ -1,4 +1,4 @@
-export const DRAWING_AUTOSAVE_IDLE_MS = 700;
+const DRAWING_AUTOSAVE_IDLE_MS = 700;
 export const DRAWING_AUTOSAVE_MIN_INTERVAL_MS = 5000;
 
 // One upload at a time. Changes during an upload stay queued; a late result can

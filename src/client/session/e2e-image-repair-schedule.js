@@ -1,4 +1,4 @@
-export const IMAGE_REPAIR_DEBOUNCE_MS = 1000;
+const IMAGE_REPAIR_DEBOUNCE_MS = 1000;
 
 /**
  * Decides WHEN image repair runs (the repair itself is serial and idempotent). It runs after a key epoch change

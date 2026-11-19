@@ -13,7 +13,7 @@ const DATA_URL_PREFIX = 'data:';
 const cssToken = (style, name) => style.getPropertyValue(name).trim();
 
 /** Theme values the scene needs, read from the live CSS-variable tokens. */
-export function readBoardImageLook(documentRef) {
+function readBoardImageLook(documentRef) {
   const style = documentRef.defaultView.getComputedStyle(documentRef.documentElement);
   return { background: cssToken(style, '--bg'), text: cssToken(style, '--text'),
     uiFont: cssToken(style, '--font-ui'), displayFont: cssToken(style, '--font-display') };

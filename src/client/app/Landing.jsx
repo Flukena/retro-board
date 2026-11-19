@@ -27,7 +27,7 @@ import './landing.css';
 
 const LANDING_ICON_SIZE_PX = Object.freeze({ ACTION: 16, TRUST: 14 });
 const TRUST_KEYS = Object.freeze(['landing.trust.free', 'landing.trust.signup', 'landing.trust.realtime']);
-export const RECENTS_SECTION_ID = 'landing-recents';
+const RECENTS_SECTION_ID = 'landing-recents';
 const LANDING_LINKS = Object.freeze([
   { href: '#landing-guide-templates', labelKey: 'landing.nav.templates' },
   { href: '#landing-guide-faq', labelKey: 'landing.nav.faq' },

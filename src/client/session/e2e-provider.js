@@ -30,7 +30,7 @@ const STATUS = Object.freeze({ CONNECTING: 'connecting', CONNECTED: 'connected',
 const AAD_KIND = Object.freeze({ UPDATE: 'update', EPHEMERAL: 'ephemeral', SNAPSHOT: 'snapshot' });
 const RECONNECT_BASE_MS = 100;
 /** Cap for both reconnect and REJECT RATE retry backoff. */
-export const E2E_MAX_BACKOFF_MS = 2_500;
+const E2E_MAX_BACKOFF_MS = 2_500;
 const APPEND_OVERHEAD_BYTES = e2eFrameHeaderBytes(E2E_FRAME.APPEND) + E2E_CIPHERTEXT_OVERHEAD_BYTES;
 // An update with no structs and an empty delete set: appending it changes no document. It proves ordering
 // after a snapshot (its ACK means the relay finished the snapshot first) and moves the log head when needed.
@@ -43,7 +43,7 @@ const EMPTY_UPDATE = (() => {
 const WS_OPEN_STATE = 1;
 const NORMAL_CLOSE = Object.freeze({ code: 1000, reason: 'disconnect' });
 /** A page advertises e2eSynced again only after it stayed caught up this long, so presence does not flap per edit. */
-export const E2E_SYNCED_SETTLE_MS = 1_000;
+const E2E_SYNCED_SETTLE_MS = 1_000;
 const SKIPPED_LOG = '[e2e] skipped an unreadable log entry';
 const SKIPPED_SUPPRESSED_LOG = '[e2e] more unreadable log entries skipped';
 /** How a log frame ended: applied; not decrypted under the room key (nobody can read it); or decrypted but invalid. */

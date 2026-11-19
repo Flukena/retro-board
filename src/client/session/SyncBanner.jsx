@@ -7,7 +7,7 @@ import { PublicCreationNotice } from './PublicCreationNotice.jsx';
 import { TOAST_BOTTOM_PX, Z } from '../chrome/chrome-layout.js';
 import './client-resilience.css';
 
-export function useSyncStatus() {
+function useSyncStatus() {
   return useSyncExternalStore(window.storage.onSyncStatus, window.storage.getSyncStatus);
 }
 

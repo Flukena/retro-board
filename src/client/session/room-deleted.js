@@ -1,7 +1,7 @@
 import { ROOM_DELETED_CLOSE_CODE } from '../../domain/room-ownership.js';
 
 /** Fired once on a room-deleted state when its room is gone for good. */
-export const ROOM_DELETED_EVENT = 'retroroom:room-deleted';
+const ROOM_DELETED_EVENT = 'retroroom:room-deleted';
 
 /** True for the close the relay sends to every socket of a room its owner deleted. */
 export const isRoomDeletedClose = (event) => event?.code === ROOM_DELETED_CLOSE_CODE;

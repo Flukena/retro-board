@@ -6,8 +6,8 @@ const DEFAULT_STICKY_WIDTH_PX = 200;
 const DEFAULT_IMAGE_WIDTH_PX = 200;
 const TEXT_ANCHOR_OFFSET_PX = 60;
 const CENTRE_DIVISOR = 2;
-export const FONT_SIZE_MIN_PX = 10;
-export const FONT_SIZE_MAX_PX = 96;
+const FONT_SIZE_MIN_PX = 10;
+const FONT_SIZE_MAX_PX = 96;
 export const FONT_SIZE_STEP_PX = 2;
 const FONT_SIZE_DEFAULT_PX = Object.freeze({ text: 40 });
 

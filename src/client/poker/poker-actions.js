@@ -10,7 +10,7 @@ import {
 
 // Story edits (add, rename, remove) are undoable; round actions (votes,
 // reveal, final estimate) are not, so undo never resurrects a hidden vote.
-export const POKER_ORIGIN = Object.freeze({ STORY_EDIT: 'local', ROUND: 'poker-round' });
+const POKER_ORIGIN = Object.freeze({ STORY_EDIT: 'local', ROUND: 'poker-round' });
 export const POKER_SHARED_MAP_NAMES = Object.freeze(Object.values(POKER_DOC_KEY));
 
 const roomMap = (doc) => doc.getMap(POKER_DOC_KEY.ROOM);

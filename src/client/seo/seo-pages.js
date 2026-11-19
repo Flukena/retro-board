@@ -37,7 +37,7 @@ export const canonicalUrl = (path) => `${SITE_ORIGIN}${path}`;
 // Each indexable page exists once per app language. English stays at the root and
 // is also the x-default for other languages; every other language lives under
 // /<code> (/th, /ja, /de, ...).
-export const SEO_LANG = Object.freeze({ EN: 'en', TH: 'th' });
+const SEO_LANG = Object.freeze({ EN: 'en', TH: 'th' });
 export const SEO_LANGS = Object.freeze(LANGUAGE_OPTIONS.map(({ code }) => code));
 export const DEFAULT_SEO_LANG = SEO_LANG.EN;
 const langPathPrefix = (lang) => (lang === DEFAULT_SEO_LANG ? '' : `/${lang}`);

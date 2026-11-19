@@ -51,7 +51,7 @@ export function paletteIndexByName(name) {
   return index;
 }
 
-export const DOCK_TILE_NAME = Object.freeze({
+const DOCK_TILE_NAME = Object.freeze({
   templates: 'purple', select: 'orange', text: 'yellow', zone: 'green', image: 'blue', draw: 'purple',
 });
 export const DOCK_TILE_INDEX = Object.freeze(Object.fromEntries(
