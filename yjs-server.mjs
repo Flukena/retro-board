@@ -1,3 +1,4 @@
+import { createRelayPersistence } from './src/server/relay-persistence.js';
 import { createRelayRuntime, logRelayBanner } from './src/server/relay-runtime.js';
 import { createHttpDispatch } from './src/server/relay-http-dispatch.js';
 import { createUpgradeHandler } from './src/server/relay-upgrade.js';
@@ -14,7 +15,7 @@ import { RelayProtocol } from './src/server/relay-protocol.js';
 // Yjs WebSocket relay with LevelDB persistence.
 // Single source of truth for collaborative state.
 
-import { envInt, envBool, readGuestSweepTiming, readRelayConfig, ROOM_BLOCK_TTL_MS, BLOCKED_ROOM_ENTRIES_PER_ACTIVE_ROOM, LARGE_UPDATE_LOG_THRESHOLD_BYTES, MAINTENANCE_INTERVAL_MS, STORE_OPERATION_OVERHEAD_BYTES, MAX_REQUESTS_PER_SOCKET, RETRY_AFTER_LONG_SECONDS } from './src/server/relay-config.js';
+import { envInt, envBool, readGuestSweepTiming, readRelayConfig, ROOM_BLOCK_TTL_MS, BLOCKED_ROOM_ENTRIES_PER_ACTIVE_ROOM, MAINTENANCE_INTERVAL_MS, MAX_REQUESTS_PER_SOCKET, RETRY_AFTER_LONG_SECONDS } from './src/server/relay-config.js';
 import { RelayWsTraffic, closeOnSessionExpiry } from './src/server/relay-ws-traffic.js';
 import { createE2ERelay } from './src/server/e2e-relay.js';
 import { E2ERoomLog } from './src/server/e2e-room-log.js';
@@ -228,30 +229,6 @@ const reconcileUploadUsage = async () => {
 const destroyedDocs = new WeakSet();
 const capacityRejectedDocs = new WeakSet();
 
-// A small current Y.Doc can still have a very large LevelDB update log (for
-// example repeated insert/delete cycles). Track that write amplification
-// independently and compact while peers remain connected instead of waiting
-// for the last socket to leave.
-const roomPersistenceChurn = new Map();
-const persistenceChurnFor = (docName) => {
-  let state = roomPersistenceChurn.get(docName);
-  if (!state) {
-    state = {
-      uncompactedBytes: 0,
-      uncompactedUpdates: 0,
-      compactionPromise: null,
-      compactionTimer: null,
-      compactionTimerDueAt: 0,
-      // Permit one prompt compaction after process start, then enforce the
-      // cooldown. Cold-open budgets bound how often an attacker can reset
-      // this state by cycling rooms, while legitimate first edits stay fluid.
-      lastCompactedAt: 0,
-      remeasureRequested: false,
-    };
-    roomPersistenceChurn.set(docName, state);
-  }
-  return state;
-};
 const blockedRooms = new Map();
 const MAX_BLOCKED_ROOM_ENTRIES = MAX_ACTIVE_ROOMS * BLOCKED_ROOM_ENTRIES_PER_ACTIVE_ROOM;
 
@@ -280,164 +257,10 @@ const isRoomBlocked = (docName) => {
   return true;
 };
 
-const armRoomCompactionTimer = (docName, churn, dueAt) => {
-  if (churn.compactionTimer && churn.compactionTimerDueAt <= dueAt) return;
-  if (churn.compactionTimer) clearTimeout(churn.compactionTimer);
-  churn.compactionTimerDueAt = dueAt;
-  churn.compactionTimer = setTimeout(() => {
-    churn.compactionTimer = null;
-    churn.compactionTimerDueAt = 0;
-    scheduleRoomCompaction(docName);
-  }, Math.max(1, dueAt - Date.now()));
-  churn.compactionTimer.unref();
-};
-
-const scheduleRoomCompaction = (docName, { remeasure = false } = {}) => {
-  const churn = persistenceChurnFor(docName);
-  if (remeasure) churn.remeasureRequested = true;
-  if (churn.compactionPromise || accounting.shuttingDown || accounting.storageFailure) return churn.compactionPromise;
-  let activeDoc = docs.get(docName);
-  if (!activeDoc) churn.remeasureRequested = false;
-
-  const hasPersistenceWork = churn.uncompactedBytes > 0 || churn.uncompactedUpdates > 0;
-  if (!hasPersistenceWork && !churn.remeasureRequested) return null;
-
-  const now = Date.now();
-  const compactionDueAt = churn.lastCompactedAt + ROOM_COMPACTION_MIN_INTERVAL_MS;
-  const canCompact = hasPersistenceWork && now >= compactionDueAt;
-  const usage = activeDoc ? roomUsage.get(activeDoc) : null;
-  const remeasureDueAt = (usage?.lastMeasuredAt || now) + DOCUMENT_REMEASURE_MIN_INTERVAL_MS;
-  const canRemeasure = Boolean(churn.remeasureRequested && activeDoc && now >= remeasureDueAt);
-
-  if (!canCompact && !canRemeasure) {
-    const nextDueAt = Math.min(
-      hasPersistenceWork ? compactionDueAt : Number.POSITIVE_INFINITY,
-      churn.remeasureRequested && activeDoc ? remeasureDueAt : Number.POSITIVE_INFINITY,
-    );
-    if (Number.isFinite(nextDueAt)) armRoomCompactionTimer(docName, churn, nextDueAt);
-    return null;
-  }
-
-  if (churn.compactionTimer) clearTimeout(churn.compactionTimer);
-  churn.compactionTimer = null;
-  churn.compactionTimerDueAt = 0;
-  const coveredBytes = canCompact ? churn.uncompactedBytes : 0;
-  const coveredUpdates = canCompact ? churn.uncompactedUpdates : 0;
-
-  // checkedFlushDocument enters y-leveldb's single serialized transaction
-  // queue at this exact point. Later storeUpdate calls are queued behind it,
-  // so subtracting only this captured generation cannot hide concurrent edits.
-  // Exact in-memory measurement is independent and can run without a flush;
-  // both expensive operations have their own per-room cooldown.
-  const compaction = (canCompact ? checkedFlushDocument(docName) : Promise.resolve())
-    .then(() => {
-      if (canCompact) {
-        churn.uncompactedBytes = Math.max(0, churn.uncompactedBytes - coveredBytes);
-        churn.uncompactedUpdates = Math.max(0, churn.uncompactedUpdates - coveredUpdates);
-        churn.lastCompactedAt = Date.now();
-        accounting.dbUsageBytes = databaseSizeBytes();
-      }
-      activeDoc = docs.get(docName);
-      const currentUsage = activeDoc ? roomUsage.get(activeDoc) : null;
-      const measurementNow = Date.now();
-      if (churn.remeasureRequested && activeDoc && currentUsage
-          && measurementNow - currentUsage.lastMeasuredAt >= DOCUMENT_REMEASURE_MIN_INTERVAL_MS) {
-        try {
-          const exactBytes = Y.encodeStateAsUpdate(activeDoc).byteLength;
-          commitRoomUsage(activeDoc, {
-            upperBytes: exactBytes,
-            exactBytes,
-            lastMeasuredAt: measurementNow,
-          });
-          churn.remeasureRequested = false;
-          if (exactBytes > MAX_DOCUMENT_BYTES) {
-            blockRoom(docName, activeDoc, 'document too large');
-          } else if (accounting.activeDocumentBytes > MAX_ACTIVE_DOCUMENT_BYTES) {
-            blockRoom(docName, activeDoc, 'active document capacity exceeded');
-          }
-          console.log('[yjs] document remeasured', {
-            docName: roomLogId(docName),
-            bytes: exactBytes,
-          });
-        } catch (err) {
-          churn.remeasureRequested = false;
-          blockRoom(docName, activeDoc, 'document size check failed');
-          console.error('[yjs] document size check failed', {
-            docName: roomLogId(docName),
-            err: err.message,
-          });
-        }
-      }
-      if (!activeDoc) churn.remeasureRequested = false;
-      if (canCompact) {
-        console.log('[yjs] room compacted', {
-          docName: roomLogId(docName),
-          bytes: coveredBytes,
-          updates: coveredUpdates,
-        });
-      }
-    })
-    .catch((err) => {
-      markStorageFailure(err);
-      console.error('[yjs] room compaction failed', { docName: roomLogId(docName), err: err.message });
-    })
-    .finally(() => {
-      churn.compactionPromise = null;
-      if (churn.uncompactedBytes >= ROOM_COMPACT_AFTER_BYTES
-          || churn.uncompactedUpdates >= ROOM_COMPACT_AFTER_UPDATES
-          || churn.remeasureRequested) {
-        scheduleRoomCompaction(docName);
-      }
-    });
-  churn.compactionPromise = compaction;
-  return compaction;
-};
-
-const storeWrites = new WeakMap(); // the last store write each doc queued (true once stored); a relay rename awaits its own
-const queueStoreUpdate = (docName, update, ydoc) => {
-  const estimatedBytes = update.byteLength + STORE_OPERATION_OVERHEAD_BYTES;
-  const churn = persistenceChurnFor(docName);
-  if (churn.uncompactedBytes + estimatedBytes > ROOM_MAX_UNCOMPACTED_BYTES
-      || churn.uncompactedUpdates + 1 > ROOM_MAX_UNCOMPACTED_UPDATES) {
-    scheduleRoomCompaction(docName, { remeasure: true });
-    blockRoom(docName, ydoc, 'room persistence backlog');
-    return;
-  }
-  if (accounting.pendingStoreOps >= MAX_PENDING_STORE_OPS
-      || accounting.pendingStoreBytes + estimatedBytes > MAX_PENDING_STORE_BYTES) {
-    blockRoom(docName, ydoc, 'persistence backlog');
-    return;
-  }
-  if (accounting.dbUsageBytes + accounting.pendingStoreBytes + estimatedBytes > MAX_DB_BYTES) {
-    markStorageFailure(new Error('configured database quota exceeded'));
-    return;
-  }
-  accounting.pendingStoreOps += 1;
-  accounting.pendingStoreBytes += estimatedBytes;
-  churn.uncompactedBytes += estimatedBytes;
-  churn.uncompactedUpdates += 1;
-  storeWrites.set(ydoc, checkedStoreUpdate(docName, update)
-    .then(() => {
-      accounting.dbUsageBytes += estimatedBytes;
-      if (update.byteLength > LARGE_UPDATE_LOG_THRESHOLD_BYTES) {
-        console.log('[yjs] storeUpdate ok', { docName: roomLogId(docName), bytes: update.byteLength });
-      }
-      return true;
-    })
-    .catch((err) => {
-      markStorageFailure(err);
-      console.error('[yjs] storeUpdate failed', { docName: roomLogId(docName), err: err.message });
-      return false;
-    })
-    .finally(() => {
-      accounting.pendingStoreOps = Math.max(0, accounting.pendingStoreOps - 1);
-      accounting.pendingStoreBytes = Math.max(0, accounting.pendingStoreBytes - estimatedBytes);
-    }));
-  if (churn.uncompactedBytes >= ROOM_COMPACT_AFTER_BYTES
-      || churn.uncompactedUpdates >= ROOM_COMPACT_AFTER_UPDATES) {
-    scheduleRoomCompaction(docName, { remeasure: true });
-  }
-};
+const { roomPersistenceChurn, persistenceChurnFor, scheduleRoomCompaction, storeWrites, queueStoreUpdate } = createRelayPersistence({
+  config: relayConfig, accounting, docs, Y, blockRoom, markStorageFailure,
+  storage: { checkedFlushDocument, checkedStoreUpdate, databaseSizeBytes },
+});
 
 const { finalizeExpiredVotes, armVoteExpiry, voteExpiryTimers } = createVoteExpiry({
   Y, accounting, destroyedDocs, isRoomBlocked,

@@ -12,7 +12,7 @@ const ENTRYPOINT = new URL('../../yjs-server.mjs', import.meta.url);
 const SESSION_EVENTS = ['SIGTERM', 'SIGINT', 'unhandledRejection', 'uncaughtException'];
 const TEST_SIGNING_KEY_BYTES = 32;
 const SERVER_ROOT = new URL('../server/', import.meta.url).href;
-const ISOLATED_MODULES = new Set(['relay-runtime.js', 'relay-http-dispatch.js', 'relay-upgrade.js', 'relay-ws-admission.js', 'relay-awareness-policy.js', 'relay-vote-expiry.js', 'relay-room-accounting.js']);
+const ISOLATED_MODULES = new Set(['relay-persistence.js', 'relay-runtime.js', 'relay-http-dispatch.js', 'relay-upgrade.js', 'relay-ws-admission.js', 'relay-awareness-policy.js', 'relay-vote-expiry.js', 'relay-room-accounting.js']);
 const require = createRequire(ENTRYPOINT);
 let nextSessionId = 0;
 
