@@ -8,7 +8,7 @@ const REPO_ROOT = new URL('../', import.meta.url);
 const RETRO_BOARD_MAX_LINES = 3983;
 const YJS_SERVER_MAX_LINES = 1446;
 const STORAGE_BRIDGE_MAX_LINES = 1469;
-const I18N_MAX_LINES = 2510;
+const I18N_MAX_LINES = 105;
 const UNCEILINGED_MAX_LINES = 1250;
 // P1 retained source-scan owners: this explicit map owns all size ceilings.
 // Reading complete files here measures the contract; no implementation slices.

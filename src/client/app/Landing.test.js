@@ -2,6 +2,8 @@ import React from 'react';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import th from '../ui/locales/th.js';
+import en from '../ui/locales/en.js';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { withChromeModule } from '../../test-support/chrome-test-helper.js';
 
@@ -52,7 +54,15 @@ test('the brand is RetroRoom in both languages', async () => {
     setLang(lang);
     assert.equal(t('app.title'), 'RetroRoom');
   }
-  assert.doesNotMatch(readFileSync(new URL('../ui/i18n.js', import.meta.url), 'utf8'), /Retro Board/);
+  for (const dictionary of [th, en]) assertCurrentBrand(dictionary);
+});
+
+function assertCurrentBrand(dictionary) {
+  assert.doesNotMatch(Object.values(dictionary).join('\n'), /Retro Board/);
+}
+
+test('brand guard rejects the former product name in an imported dictionary', () => {
+  assert.throws(() => assertCurrentBrand({ ...en, 'app.title': 'Retro Board' }), assert.AssertionError);
 });
 
 test('landing uses primary create, disabled empty join and display-font hero in both languages', async () => {
