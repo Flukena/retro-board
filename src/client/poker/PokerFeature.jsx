@@ -3,6 +3,7 @@ import { Check } from 'lucide-react';
 import { t } from '../ui/i18n.js';
 import { BUTTON_VARIANT } from '../ui/ui-variants.js';
 import { PLANNING_POKER_PATH } from '../seo/seo-pages.js';
+import { pageHref } from '../seo/page-links.js';
 import StartPokerButton from './StartPokerButton.jsx';
 import './poker.css';
 
@@ -40,7 +41,7 @@ export default function PokerFeature({
         </ul>
         <div className="rb-poker-feature__actions">
           <StartPokerButton describedBy="poker-feature-lede" errorClassName="rb-poker-feature__error" variant={buttonVariant} />
-          {showGuideLink && <a href={PLANNING_POKER_PATH}>{t('landing.poker.guide')}</a>}
+          {showGuideLink && <a href={pageHref(PLANNING_POKER_PATH)}>{t('landing.poker.guide')}</a>}
           {noteKey && <p className="rb-poker-feature__note">{t(noteKey)}</p>}
         </div>
       </div>

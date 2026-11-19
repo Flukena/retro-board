@@ -1,6 +1,7 @@
 import React from 'react';
 import { t, useLang } from '../ui/i18n.js';
 import SitePage from '../app/SitePage.jsx';
+import { pageHref } from '../seo/page-links.js';
 import {
   LEGAL_CONTACT_EMAIL, LEGAL_EFFECTIVE_DATE_ISO, LEGAL_PATH, legalSections, otherLegalPage,
 } from './legal-content.js';
@@ -22,7 +23,7 @@ export default function LegalPage({ page }) {
         </section>
       ))}
       <p className="rb-legal__other">
-        <a href={LEGAL_PATH[other]}>{t(`legal.${other}.title`)}</a>
+        <a href={pageHref(LEGAL_PATH[other])}>{t(`legal.${other}.title`)}</a>
       </p>
     </SitePage>
   );

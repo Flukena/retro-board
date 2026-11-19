@@ -6,6 +6,7 @@ import SiteMasthead from '../app/SiteMasthead.jsx';
 import { Surface } from '../ui/UiPrimitives.jsx';
 import { SURFACE_KIND } from '../ui/ui-variants.js';
 import { AGILE_GUIDE_PATH, PLANNING_POKER_PATH } from '../seo/seo-pages.js';
+import { pageHref } from '../seo/page-links.js';
 import { AGILE_GUIDE_SECTIONS, AGILE_SECTION, GUIDE_BLOCK } from './agile-guide-content.js';
 import '../legal/legal.css';
 import '../templates/template-page.css';
@@ -23,7 +24,7 @@ const GUIDE_LINKS = Object.freeze([
 
 function RowHeader({ row }) {
   const [nameKey] = row.cellKeys;
-  return <th scope="row">{row.href ? <a href={row.href}>{t(nameKey)}</a> : t(nameKey)}</th>;
+  return <th scope="row">{row.href ? <a href={pageHref(row.href)}>{t(nameKey)}</a> : t(nameKey)}</th>;
 }
 
 function GuideTable({ block }) {
@@ -77,10 +78,10 @@ function GuideCallToAction() {
   return (
     <Surface kind={SURFACE_KIND.CARD} className="rb-landing__card rb-guide-home__cta">
       <p className="rb-guide-home__cta-title">{t('agileGuide.cta.title')}</p>
-      <a className="rb-btn rb-btn--primary rb-btn--pill" href={RETRO_HOME_PATH}>
+      <a className="rb-btn rb-btn--primary rb-btn--pill" href={pageHref(RETRO_HOME_PATH)}>
         <Sparkles size={CTA_ICON_SIZE_PX} aria-hidden="true" />{t('agileGuide.cta.retro')}
       </a>
-      <a className="rb-btn rb-btn--pill" href={PLANNING_POKER_PATH}>
+      <a className="rb-btn rb-btn--pill" href={pageHref(PLANNING_POKER_PATH)}>
         <Spade size={CTA_ICON_SIZE_PX} aria-hidden="true" />{t('agileGuide.cta.poker')}
       </a>
     </Surface>

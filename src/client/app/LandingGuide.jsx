@@ -5,6 +5,7 @@ import { paletteStyleVars } from '../ui/palette.js';
 import { TemplateThumbnail } from '../templates/TemplateThumbnail.jsx';
 import { starterFormat, starterSlugs, starterTemplate } from '../templates/starter-formats.js';
 import { AGILE_GUIDE_PATH } from '../seo/seo-pages.js';
+import { pageHref } from '../seo/page-links.js';
 import CreateBoardError from './CreateBoardError.jsx';
 
 // Plain-language guide below the hero: what the board does, how to run a
@@ -44,7 +45,7 @@ function TemplateCard({ slug, onStart, creating }) {
       <h3>{t(format.headingKey)}</h3>
       <p>{t(format.ledeKey)}</p>
       <div className="rb-landing__template-actions">
-        <a href={format.path}>{t('guide.templates.read')} <ArrowRight size={LINK_ICON_SIZE_PX} aria-hidden="true" /></a>
+        <a href={pageHref(format.path)}>{t('guide.templates.read')} <ArrowRight size={LINK_ICON_SIZE_PX} aria-hidden="true" /></a>
         <button type="button" className="rb-btn rb-landing__template-start" disabled={creating}
           aria-label={t('tpl.start', { name })} onClick={() => onStart?.(slug)}>
           {t('guide.templates.start')}
@@ -75,7 +76,7 @@ export default function LandingGuide({ onStartFormat, creating = false, createEr
         <ol className="rb-landing__steps">
           {GUIDE_STEP_KEYS.map((key) => <li key={key}>{t(`guide.steps.${key}`)}</li>)}
         </ol>
-        <a className="rb-landing__more" href={AGILE_GUIDE_PATH}>
+        <a className="rb-landing__more" href={pageHref(AGILE_GUIDE_PATH)}>
           {t('agileGuide.brand')} <ArrowRight size={LINK_ICON_SIZE_PX} aria-hidden="true" />
         </a>
       </GuideSection>

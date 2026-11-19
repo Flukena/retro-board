@@ -4,6 +4,7 @@ import { t, useLang } from '../ui/i18n.js';
 import { LanguagePicker } from '../ui/LanguagePicker.jsx';
 import { useTheme, nextThemePref } from '../ui/theme.js';
 import { Button } from '../ui/UiPrimitives.jsx';
+import { pageHref } from '../seo/page-links.js';
 import AccountMenu from '../account/AccountMenu.jsx';
 import { TOPBAR_ICON_SIZE_PX } from '../chrome/chrome-layout.js';
 import './landing.css';
@@ -38,12 +39,12 @@ export default function SiteMasthead({ homeHref, BrandIcon, titleKey, links, act
   useLang();
   return (
     <header className="rb-landing__masthead">
-      <a className="rb-landing__identity" href={homeHref}>
+      <a className="rb-landing__identity" href={pageHref(homeHref)}>
         <span className="rb-landing__brand"><BrandIcon size={BRAND_ICON_SIZE_PX} /></span>
         <span className="rb-landing__wordmark">{t(titleKey)}</span>
       </a>
       <nav className="rb-landing__nav" aria-label={t('tpl.linksNav')}>
-        {links.map(({ href, labelKey }) => <a key={href} href={href}>{t(labelKey)}</a>)}
+        {links.map(({ href, labelKey }) => <a key={href} href={pageHref(href)}>{t(labelKey)}</a>)}
       </nav>
       {action}
       <CornerToggles />

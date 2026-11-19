@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { withChromeModule } from '../../test-support/chrome-test-helper.js';
+import { localizedPath } from '../seo/seo-pages.js';
 
 const THAI_TEXT = /[฀-๿]/;
 const SECTION_COUNT = 9;
@@ -15,13 +16,13 @@ test('the guide page has one h1, its nine sections plus more links, and in-page 
       assert.equal(html.match(/<h1\b/g)?.length, 1, lang);
       assert.ok(html.includes(t('agileGuide.heading')), lang);
       assert.equal(html.match(/<h2\b/g)?.length, SECTION_COUNT + 1, `${lang}: sections + more`);
-      assert.match(html, /<a class="rb-landing__identity" href="\/agile-scrum">/);
+      assert.ok(html.includes(`<a class="rb-landing__identity" href="${localizedPath('/agile-scrum', lang)}">`));
       const navTargets = [...html.matchAll(/<a href="#([^"]+)">/g)].map((match) => match[1]);
       assert.equal(navTargets.length, 3);
       for (const target of navTargets) assert.match(html, new RegExp(`id="${target}"`), `#${target}`);
-      assert.match(html, /<a class="rb-btn rb-btn--primary rb-btn--pill" href="\/">/, 'start a retro board');
-      assert.match(html, /href="\/planning-poker"/);
-      assert.doesNotMatch(html, /<a href="\/agile-scrum">/, 'no link to itself in More');
+      assert.ok(html.includes(`<a class="rb-btn rb-btn--primary rb-btn--pill" href="${localizedPath('/', lang)}">`), 'start a retro board');
+      assert.ok(html.includes(`href="${localizedPath('/planning-poker', lang)}"`));
+      assert.ok(!html.includes(`<a href="${localizedPath('/agile-scrum', lang)}">`), 'no link to itself in More');
     }
     setLang('th');
     assert.match(renderToStaticMarkup(React.createElement(AgileGuidePage)), new RegExp(`<h1[^>]*>[^<]*${THAI_TEXT.source}`));
