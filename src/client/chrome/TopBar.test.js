@@ -80,6 +80,8 @@ test('top bar preserves undo, admin, claim and follow contracts', async (context
         'presence trigger must not render rb-btn class',
       );
     });
+    // Source-scan owners: TopBar.jsx, TopBarPopovers.jsx, Avatar.jsx.
+    // R8 (use-topbar-props) must preserve this presentational boundary and update owners.
     for (const file of ['./TopBar.jsx', './TopBarPopovers.jsx', '../ui/Avatar.jsx']) {
       const source = readFileSync(new URL(file, import.meta.url), 'utf8');
       for (const signature of source.matchAll(/function \w+\(\{([^}]+)\}/g)) {

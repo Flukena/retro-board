@@ -125,6 +125,8 @@ test('selector contract distinguishes target compounds from ancestors and incomp
   assert.equal(targetsClass('.rb-input.rb-dialog__pin-input', 'rb-dialog__pin-input', input), true);
 });
 
+// Source-scan owners: the explicit component/stylesheet pairs below. Extractions
+// must update both paths together and retain the last-compound selector contract.
 test('every scoped component class has a compatible stylesheet selector targeting its last compound', () => {
   for (const [component, stylesheet] of [
     ['./Modals.jsx', './modals.css'], ['../voting/TimerSetup.jsx', '../voting/timer-setup.css'],
