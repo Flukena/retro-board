@@ -20,9 +20,9 @@ export const ITEM_MIN_SIZE_PX = Object.freeze({
 
 // Longest allowed side per type, in world px.
 export const ZONE_MAX_SIDE_PX = 7_488;
-export const IMAGE_MAX_SIDE_PX = 2_400;
-export const STICKY_MAX_SIDE_PX = 1_200;
-export const TEXT_MAX_SIDE_PX = 2_400;
+const IMAGE_MAX_SIDE_PX = 2_400;
+const STICKY_MAX_SIDE_PX = 1_200;
+const TEXT_MAX_SIDE_PX = 2_400;
 
 export const ITEM_MAX_SIDE_PX = Object.freeze({
   zone: ZONE_MAX_SIDE_PX,

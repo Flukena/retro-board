@@ -4,8 +4,8 @@ import { IMPORT_COORDINATE_MAX_ABS } from './security-boundaries.js';
 import { centerViewportOnWorld } from './minimap.js';
 import { fitViewportToItems } from './viewport-framing.js';
 
-export const TEMPLATE_PLACEMENT_GAP_PX = 80;
-export const TEMPLATE_PLACEMENT_MAX_RINGS = 8;
+const TEMPLATE_PLACEMENT_GAP_PX = 80;
+const TEMPLATE_PLACEMENT_MAX_RINGS = 8;
 const CENTRE_DIVISOR = 2;
 
 const reachesSelection = (zone, selected, owners) => {

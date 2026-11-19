@@ -15,8 +15,8 @@ import { e2eBlobFilename } from './relay-uploads.js';
 
 export { E2E_BLOB_ID_HEADER, E2E_BLOB_STAGE_HEADER };
 export const E2E_BLOB_PREFLIGHT_HEADERS = ['Content-Type', E2E_BLOB_ID_HEADER, E2E_BLOB_STAGE_HEADER].join(', ');
-export const E2E_BLOB_CONTENT_TYPE = 'application/octet-stream';
-export const E2E_BLOB_CACHE_CONTROL = 'private, no-store';
+const E2E_BLOB_CONTENT_TYPE = 'application/octet-stream';
+const E2E_BLOB_CACHE_CONTROL = 'private, no-store';
 /** Ciphertext beyond MAX_UPLOAD_BYTES that a blob may carry: the encoding envelope around the image. */
 const BLOB_ENVELOPE_SLACK_BYTES = 256;
 const PRIVATE_FILE_MODE = 0o600;

@@ -20,7 +20,7 @@ const validateJsonHeaders = (req) => {
 };
 
 /** Buffers a request body, refusing (BODY_TOO_LARGE) as soon as the declared or streamed size passes the cap. */
-export const readBoundedBody = async (req, maxBodyBytes) => {
+const readBoundedBody = async (req, maxBodyBytes) => {
   const rawLength = req.headers['content-length'];
   if (rawLength != null && (!/^\d+$/.test(String(rawLength)) || Number(rawLength) > maxBodyBytes)) {
     throw Object.assign(new Error('invalid body length'), { code: 'BODY_TOO_LARGE' });

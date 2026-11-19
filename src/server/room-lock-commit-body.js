@@ -1,7 +1,7 @@
 import { BLOB_ID_PATTERN, hasExactKeys, isCounter, parseAuthKey, parseLockParams } from '../domain/room-lock-contract.js';
 
 export const MAX_COMMIT_HEADER_BYTES = 1024 * 1024;
-export const MAX_KEEP_BLOBS = 10_000;
+const MAX_KEEP_BLOBS = 10_000;
 export const HEADER_LENGTH_BYTES = 4;
 const COMMIT_KEYS = ['oldAuthKey', 'rotationId', 'expectedHead', 'knownSnapshotBase', 'keyEpoch', 'lock', 'keepBlobs'];
 const HTTP_BAD_REQUEST = 400;
@@ -17,7 +17,7 @@ const parseKeepBlobs = (value) => {
 };
 
 /** Validates the JSON header of a rotation commit (Deviation 5). */
-export function parseCommitHeader(jsonBytes) {
+function parseCommitHeader(jsonBytes) {
   let header;
   try { header = JSON.parse(jsonBytes.toString('utf8')); } catch { throw refusal(HTTP_BAD_REQUEST); }
   if (!header || typeof header !== 'object' || Array.isArray(header) || !hasExactKeys(header, COMMIT_KEYS)) throw refusal(HTTP_BAD_REQUEST);

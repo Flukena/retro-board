@@ -34,7 +34,7 @@ const SEED_META_MAP = 'meta';
 const SEED_REGISTRATION_KEY = '__roomRegistered';
 const REGISTRATION_VERSION = 1;
 /** Registration marker of a normal room: the only marker releases before encrypted rooms serve. */
-export const UNLOCKED_REGISTRATION_MARKER = REGISTRATION_VERSION;
+const UNLOCKED_REGISTRATION_MARKER = REGISTRATION_VERSION;
 /**
  * Registration marker of a locked room. Releases before encrypted rooms quarantine any marker other than 1, so a
  * rollback answers 404 for locked rooms instead of serving them unlocked; rolling forward serves them again.
