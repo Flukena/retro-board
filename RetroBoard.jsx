@@ -1,3 +1,4 @@
+import { useImageImport } from './src/client/transfer/use-image-import.js';
 import { useOnImportPick, useOnImportFileChange, useConfirmImport } from './src/client/transfer/use-board-import.js';
 import { RemoteCursorLayer } from './src/client/session/RemoteCursorLayer.jsx';
 import { usePresenceBroadcastState, usePresenceBroadcast } from './src/client/session/use-presence-broadcast.js';
@@ -34,9 +35,7 @@ import { actionTogglePatch } from './src/domain/action-item.js';
 import { geometryErrorForItem, geometryErrorForPatch, sizeForPlacement, sizeForResize, sizeForGroupBounds, sizeForStickySignature } from './src/domain/board-geometry.js';
 import {
   BOARD_TEXT_MAX_LENGTH,
-  IMAGE_MAX_BYTES,
   ZONE_TITLE_MAX_LENGTH,
-  isSafeImageMime,
 } from './src/domain/security-boundaries.js';
 import { CLEARED_VOTE_RESULTS, voteSessionScope, resetVoteSessionEntries } from './src/domain/vote-session-lifecycle.js';
 import { boardEditingAllowed, boardManagementPermissions, runSharedBoardAction } from './src/domain/public-board-permissions.js';
@@ -123,7 +122,6 @@ import { storage, adminRoleStorage } from './src/client/session/room-storage.js'
 import { DEFAULT_BOARD } from './src/domain/board-state.js';
 import { applyRemoteSnapshot, shouldDropSnapshotFocus } from './src/domain/apply-remote-snapshot.js';
 import { effectiveZIndex, compareZOrder, swapZOrderEntries } from './src/domain/z-order.js';
-import { IMAGE_MAX_MIB_LABEL, prepareImageBlob, canStartImageImport } from './src/client/transfer/image-upload.js';
 import { CollaborativeTextEditor } from './src/client/board/CollaborativeTextEditor.jsx';
 import { TextCard } from './src/client/board/TextCard.jsx';
 import { ImageCard } from './src/client/board/ImageCard.jsx';
@@ -1043,41 +1041,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     return it.id;
   }, [userId, userName, addItemLocal, setSelectedId]);
 
-  const importImageFromBlob = useCallback(async (blob, worldX, worldY) => {
-    if (!canStartImageImport(blob, window.storage)) return;
-    if (!isSafeImageMime(blob.type)) {
-      setToast({ msg: t('image.unsupportedFormat'), type: 'warn' });
-      return;
-    }
-    if (blob.size > IMAGE_MAX_BYTES) {
-      setToast({
-        msg: t('image.tooLarge', { mb: IMAGE_MAX_MIB_LABEL }),
-        type: 'warn',
-      });
-      return;
-    }
-    let prepared;
-    try {
-      prepared = await prepareImageBlob(blob);
-    } catch {
-      prepared = null;
-    }
-    if (!prepared) {
-      setToast({
-        msg: t('image.tooLarge', { mb: IMAGE_MAX_MIB_LABEL }),
-        type: 'warn',
-      });
-      return;
-    }
-    let url;
-    try {
-      url = await window.storage.uploadImage(prepared.blob);
-    } catch {
-      setToast({ msg: t('image.uploadFailed'), type: 'warn' });
-      return;
-    }
-    addImage(worldX, worldY, url, prepared.nw, prepared.nh);
-  }, [addImage, setToast]);
+  const importImageFromBlob = useImageImport({ addImage, setToast }, [addImage, setToast]);
 
 
   /* ============================================================
