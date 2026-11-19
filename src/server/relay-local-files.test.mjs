@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { runInNewContext } from 'node:vm';
+import { relayEntrypoint } from '../test-support/relay-entrypoint.js';
 import { mkdtemp, mkdir, writeFile, rm, readFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -36,8 +36,17 @@ test('public database accounting excludes only the root history directory', asyn
   await writeFile(join(root, 'nested', PUBLIC_SNAPSHOT_DIRECTORY, 'keep'), 'keep');
   assert.equal(directorySizeSync(root, { excludedRootDirectories: [PUBLIC_SNAPSHOT_DIRECTORY] }), 6);
   assert.equal(directorySizeSync(root), 13);
-  const source = await readFile(new URL('../../yjs-server.mjs', import.meta.url), 'utf8');
-  const measureSource = source.split('\n').find(line => line.startsWith('const databaseSizeBytes ='));
-  const measure = runInNewContext(`${measureSource}\ndatabaseSizeBytes;`, { directorySizeSync, DB_DIR: root, PUBLIC_WALL: true, PUBLIC_SNAPSHOT_DIRECTORY });
-  assert.equal(measure(), 6, 'the actual relay measurement must use the non-overlapping budget');
+  const measuredDirectories = [];
+  const relay = await relayEntrypoint(t, {
+    env: { YJS_PUBLIC_WALL: 'true' },
+    modules: { './src/server/relay-local-files.js': {
+      directorySizeSync: (directory, options) => {
+        measuredDirectories.push(directory);
+        return directorySizeSync(root, options);
+      },
+    } },
+  });
+  assert.equal(relay.persistence.measureDatabase(), 6, 'the actual relay measurement must use the non-overlapping budget');
+  assert.ok(measuredDirectories.every(directory => directory === join(relay.root, 'db')),
+    'the actual relay must measure its configured database directory');
 });

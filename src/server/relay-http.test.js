@@ -1,19 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
-import { readFileSync } from 'node:fs';
-import { runInNewContext } from 'node:vm';
+import { relayEntrypoint } from '../test-support/relay-entrypoint.js';
+import * as uploadModule from './relay-uploads.js';
+import * as sessionModule from './relay-session.js';
+import * as publicWallModule from './relay-public-wall.js';
+import * as publicConfig from './public-wall-config.js';
+import * as trafficModule from './relay-ws-traffic.js';
 import { RelayPublicWall } from './relay-public-wall.js';
-import { PUBLIC_RELAY_PREFIX } from '../domain/public-wall-contract.js';
+import { docs as relayDocs } from '../../node_modules/y-websocket/bin/utils.js';
 import * as Y from 'yjs';
 import * as configHelpers from './relay-config.js';
-import { isRelayReady } from './relay-lifecycle.js';
-import { handleRoomRoute } from './relay-room-routes.js';
 import { createRoomSessionRoutes } from './room-session-routes.js';
-import { setCredentialCors, acceptCredentialOrigin, isExactAllowedOrigin, readJsonBody, sendJson, sendIfWritable, sendUpgradeRejection, sendCredentialPreflight } from './relay-http.js';
+import { acceptCredentialOrigin, isExactAllowedOrigin, readJsonBody, sendJson, sendIfWritable, sendUpgradeRejection, sendCredentialPreflight } from './relay-http.js';
 
 const ORIGIN = 'https://allowed.example';
 const MAX_BODY_BYTES = 16;
+const HTTP_DISPATCH_TIMEOUT_MS = 5_000;
 const response = () => ({
   headers: {}, body: undefined, status: undefined,
   setHeader(name, value) { this.headers[name] = value; },
@@ -95,28 +98,11 @@ test('upgrade rejection bytes and socket failure behavior remain exact', () => {
 
 const ROOM_HANDLE = 'a'.repeat(32);
 const UNKNOWN_HANDLE = 'b'.repeat(32);
-const SERVER_SOURCE = readFileSync(new URL('../../yjs-server.mjs', import.meta.url), 'utf8');
-const sourceSection = (start, end) => {
-  const offset = SERVER_SOURCE.indexOf(start);
-  assert.ok(offset >= 0, `missing entrypoint seam ${start}`);
-  const endOffset = SERVER_SOURCE.indexOf(end, offset);
-  assert.ok(endOffset > offset, `missing entrypoint seam ${end}`);
-  return SERVER_SOURCE.slice(offset, endOffset);
-};
-const entrypointHttp = (overrides = {}) => {
-  let dispatch;
+const entrypointHttp = async (t, overrides = {}) => {
   const context = {
-    ...configHelpers, ...configHelpers.readRelayConfig({}),
-    URL, Buffer, Object, Date, String, Number,
-    isRelayReady, isExactAllowedOrigin, setCredentialCors, acceptCredentialOrigin, readJsonBody, sendJson, sendIfWritable, sendCredentialPreflight, handleRoomRoute,
-    ALLOWED_ORIGINS: [ORIGIN], ALLOW_INSECURE_HTTP: false,
+    ...configHelpers.readRelayConfig({}),
     shuttingDown: false, storageFailure: null, PUBLIC_WALL: false, publicWall: null,
     registeredRoomsByHandle: new Map([[ROOM_HANDLE, 'doc']]),
-    clientIpFromRequest: () => 'test-ip',
-    reserveHttpRequest: () => ({ status: 0, release() {} }),
-    rejectionCounters: { observeResponse() {} },
-    authRoutes: { handle: () => false },
-    roomLockRoutes: { handle: () => false },
     authenticatedDocFromRequest: () => null,
     takeCreateToken: () => 0, createRegisteredRoom: async () => ({ code: 'abc', token: 'capability' }),
     markStorageFailure() { assert.fail('unexpected storage failure'); },
@@ -124,15 +110,12 @@ const entrypointHttp = (overrides = {}) => {
     registeredDocForCapability: () => null,
     takeSessionExchangeToken: () => true, roomHandleForDoc: () => ROOM_HANDLE,
     createSessionCookie: () => 'scoped-cookie',
-    http: { createServer(_options, callback) { dispatch = callback; return {}; } },
-    lockForDoc: () => null,
-    e2eBlobs: { handleUpload() { assert.fail('unexpected blob upload dispatch'); }, handleGet() { assert.fail('unexpected blob read dispatch'); } },
     uploads: { handleUpload() { assert.fail('unexpected upload dispatch'); },
       handleGetRoomImage() { assert.fail('unexpected image dispatch'); },
       handleGetLegacyImage() { assert.fail('unexpected legacy dispatch'); } },
     ...overrides,
   };
-  // The two handlers live in room-session-routes.js; the entrypoint slice only dispatches to them.
+  // Session handlers are real; the complete entrypoint dispatches to this injected instance.
   const routes = createRoomSessionRoutes({
     registry: {
       createRoom: () => context.createRegisteredRoom(), registeredDocForCapability: (...args) => context.registeredDocForCapability(...args),
@@ -150,16 +133,47 @@ const entrypointHttp = (overrides = {}) => {
     unavailable: () => context.shuttingDown || Boolean(context.storageFailure),
     onStorageFailure: (...args) => context.markStorageFailure(...args),
   });
-  Object.assign(context, routes, { roomSessionRoutes: routes });
-  const server = sourceSection('const server = http.createServer', '\nserver.requestTimeout');
-  runInNewContext(server, context);
-  return { dispatch, ...routes };
+  const state = await relayEntrypoint(t, { modules: {
+    './src/server/room-session-routes.js': { createRoomSessionRoutes: () => routes },
+    './src/server/relay-uploads.js': { ...uploadModule, createRelayUploads: () => context.uploads },
+    './src/server/relay-session.js': { ...sessionModule, RoomSessions: class {
+      createCookie(...args) { return context.createSessionCookie(...args); }
+      authenticate(...args) { return context.authenticatedDocFromRequest(...args); }
+    } },
+    './src/server/public-wall-config.js': { ...publicConfig,
+      isPublicWallEnabled: () => context.PUBLIC_WALL, publicRelayEnvironment: env => env,
+    },
+    './src/server/relay-public-wall.js': { ...publicWallModule,
+      provisionPublicWall: async () => context.publicWall,
+    },
+    './src/server/relay-ws-traffic.js': { ...trafficModule, RelayWsTraffic: class extends trafficModule.RelayWsTraffic {
+      constructor(...args) { super(...args); if (context.wsTraffic) this.connectionsByRoom = context.wsTraffic.connectionsByRoom; }
+    } },
+  } });
+  state.registry.registeredRoomsByHandle.clear();
+  for (const [handle, docName] of context.registeredRoomsByHandle) state.registry.registeredRoomsByHandle.set(handle, docName);
+  if (context.shuttingDown) state.lifecycle.onStart('test drain');
+  // Public snapshots must read the same real document map used by the entrypoint.
+  if (context.docs) {
+    for (const [name, doc] of context.docs) relayDocs.set(name, doc);
+    t.after(() => { for (const name of context.docs.keys()) relayDocs.delete(name); });
+  }
+  return {
+    dispatch: state.dispatch,
+    handleCreateRoom: throughEntrypoint(state.dispatch, '/yjs/api/rooms'),
+    handleRoomSession: throughEntrypoint(state.dispatch, '/yjs/api/room-session'),
+  };
 };
+const throughEntrypoint = (dispatch, url) => (req, res) => new Promise(resolve => {
+  const end = res.end;
+  res.end = function (...args) { end.apply(this, args); resolve(); };
+  dispatch(Object.assign(req, { method: 'POST', url }), res);
+});
 const routeRequest = (method, url, origin = ORIGIN) => ({ method, url, headers: { origin } });
 const routeResponse = () => Object.assign(response(), { once() {} });
 
-test('entrypoint preserves preflight headers and origin before unknown-room precedence', () => {
-  const { dispatch } = entrypointHttp();
+test('entrypoint preserves preflight headers and origin before unknown-room precedence', async t => {
+  const { dispatch } = await entrypointHttp(t);
   const accepted = routeResponse();
   dispatch(routeRequest('OPTIONS', '/yjs/api/rooms'), accepted);
   assert.equal(accepted.status, 204);
@@ -179,14 +193,14 @@ test('entrypoint preserves preflight headers and origin before unknown-room prec
   assert.equal(unknown.headers['access-control-allow-origin'], ORIGIN);
 });
 
-test('entrypoint preserves upload origin, unavailable, room and session guard precedence', () => {
+test('entrypoint preserves upload origin, unavailable, room and session guard precedence', async t => {
   for (const [overrides, handle, origin, expected] of [
     [{ shuttingDown: true }, UNKNOWN_HANDLE, 'https://hostile.example', 403],
     [{ shuttingDown: true }, UNKNOWN_HANDLE, ORIGIN, 503],
     [{}, UNKNOWN_HANDLE, ORIGIN, 404],
     [{}, ROOM_HANDLE, ORIGIN, 401],
   ]) {
-    const { dispatch } = entrypointHttp(overrides);
+    const { dispatch } = await entrypointHttp(t, overrides);
     const res = routeResponse();
     dispatch(routeRequest('POST', `/yjs/rooms/${handle}/upload`, origin), res);
     assert.equal(res.status, expected);
@@ -194,8 +208,8 @@ test('entrypoint preserves upload origin, unavailable, room and session guard pr
   }
 });
 
-test('entrypoint image access retains unknown room before session and skips origin checks', () => {
-  const { dispatch } = entrypointHttp();
+test('entrypoint image access retains unknown room before session and skips origin checks', async t => {
+  const { dispatch } = await entrypointHttp(t);
   for (const [handle, status] of [[UNKNOWN_HANDLE, 404], [ROOM_HANDLE, 401]]) {
     const res = routeResponse();
     dispatch(routeRequest('GET', `/rooms/${handle}/images/abcdef01.png`, 'https://hostile.example'), res);
@@ -204,32 +218,32 @@ test('entrypoint image access retains unknown room before session and skips orig
   }
 });
 
-test('entrypoint retains creation and session JSON error and failure-budget precedence', async () => {
-  const limited = entrypointHttp({ takeCreateToken: () => 60 });
-  const create = response();
+test('entrypoint retains creation and session JSON error and failure-budget precedence', { timeout: HTTP_DISPATCH_TIMEOUT_MS }, async t => {
+  const limited = await entrypointHttp(t, { takeCreateToken: () => 60 });
+  const create = routeResponse();
   await limited.handleCreateRoom(request(['bad'], { origin: ORIGIN, 'content-type': 'text/plain' }), create, 'ip');
   assert.equal(create.status, 429);
   assert.equal(create.headers['retry-after'], '60');
   assert.equal(create.headers['cache-control'], 'no-store');
   let failures = 0;
-  const session = entrypointHttp({ failureAttemptAvailable: () => false, recordSessionFailure() { failures += 1; } });
-  const denied = response();
+  const session = await entrypointHttp(t, { failureAttemptAvailable: () => false, recordSessionFailure() { failures += 1; } });
+  const denied = routeResponse();
   await session.handleRoomSession(request(['bad'], { origin: ORIGIN }), denied, 'ip', true);
   assert.equal(denied.status, 429);
   assert.equal(denied.headers['retry-after'], '60');
   assert.equal(failures, 0);
-  const invalid = response();
-  await entrypointHttp().handleRoomSession(request(['{}'], { origin: ORIGIN }), invalid, 'ip', true);
+  const invalid = routeResponse();
+  await (await entrypointHttp(t)).handleRoomSession(request(['{}'], { origin: ORIGIN }), invalid, 'ip', true);
   assert.equal(invalid.status, 404);
 });
 
-test('entrypoint retains successful room creation and signed session response shape', async () => {
-  const endpoints = entrypointHttp({ registeredDocForCapability: () => 'doc' });
-  const created = response();
+test('entrypoint retains successful room creation and signed session response shape', { timeout: HTTP_DISPATCH_TIMEOUT_MS }, async t => {
+  const endpoints = await entrypointHttp(t, { registeredDocForCapability: () => 'doc' });
+  const created = routeResponse();
   await endpoints.handleCreateRoom(request(['{}'], { origin: ORIGIN }), created, 'ip');
   assert.equal(created.status, 201);
   assert.equal(created.body, '{"code":"abc","token":"capability"}');
-  const session = response();
+  const session = routeResponse();
   await endpoints.handleRoomSession(request(['{"code":"abc","token":"capability"}'], { origin: ORIGIN }), session, 'ip', true);
   assert.equal(session.status, 200);
   assert.equal(JSON.parse(session.body).roomHandle, ROOM_HANDLE);
@@ -238,12 +252,13 @@ test('entrypoint retains successful room creation and signed session response sh
   assert.equal(session.headers['cache-control'], 'no-store');
 });
 
-test('public entrypoint dispatches isolated snapshot and writer admission without private handlers', () => {
+test('public entrypoint dispatches isolated snapshot and writer admission without private handlers', async t => {
   const doc = new Y.Doc();
+  t.after(() => doc.destroy());
   doc.getMap('items').set('visible', new Y.Map([['type', 'text'], ['x', 0], ['y', 0], ['text', 'public']]));
   const publicWall = new RelayPublicWall({ docName: 'public-document', roomHandle: ROOM_HANDLE });
   const connections = new Map();
-  const { dispatch } = entrypointHttp({ PUBLIC_WALL: true, PUBLIC_RELAY_PREFIX, publicWall,
+  const { dispatch } = await entrypointHttp(t, { PUBLIC_WALL: true, publicWall,
     docs: new Map([['public-document', doc]]), wsTraffic: { connectionsByRoom: connections } });
   const snapshot = routeResponse();
   dispatch(routeRequest('GET', '/yjs-public/api/snapshot'), snapshot);
@@ -268,12 +283,11 @@ test('public entrypoint dispatches isolated snapshot and writer admission withou
   const foreignUpload = routeResponse();
   dispatch(routeRequest('POST', `/yjs-public/rooms/${UNKNOWN_HANDLE}/upload`), foreignUpload);
   assert.equal(foreignUpload.status, 404);
-  doc.destroy();
 });
 
-test('authenticated image reads expose credentialed CORS only to an exact allowed origin', () => {
+test('authenticated image reads expose credentialed CORS only to an exact allowed origin', async t => {
   let reads = 0;
-  const { dispatch } = entrypointHttp({ authenticatedDocFromRequest: () => ({ docName: 'doc' }),
+  const { dispatch } = await entrypointHttp(t, { authenticatedDocFromRequest: () => ({ docName: 'doc' }),
     uploads: { handleGetRoomImage(_handle, _image, _ip, res) { reads++; res.writeHead(200); res.end(); } } });
   const allowed = routeResponse();
   dispatch(routeRequest('GET', `/rooms/${ROOM_HANDLE}/images/abcdef01.png`), allowed);
@@ -288,8 +302,8 @@ test('authenticated image reads expose credentialed CORS only to an exact allowe
   dispatch(noOrigin, native); assert.equal(native.status, 200);
 });
 
-test('allowed-origin image authentication errors remain readable for the client session refresh flow', () => {
-  const { dispatch } = entrypointHttp(); const res=routeResponse();
+test('allowed-origin image authentication errors remain readable for the client session refresh flow', async t => {
+  const { dispatch } = await entrypointHttp(t); const res=routeResponse();
   dispatch(routeRequest('GET', `/rooms/${ROOM_HANDLE}/images/abcdef01.png`),res);
   assert.equal(res.status,401); assert.equal(res.headers['access-control-allow-origin'],ORIGIN);
 });
