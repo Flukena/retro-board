@@ -1,59 +1,54 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { runInNewContext } from 'node:vm';
-import { planVoteFinalization } from './src/domain/vote-finalization.js';
+import { relayEntrypoint } from './src/test-support/relay-entrypoint.js';
 import { RelayMaintenance } from './src/server/relay-maintenance.js';
-import { geometryErrorForPatch } from './src/domain/board-geometry.js';
+import { REGISTRY_STORAGE_FAILURE_EVENT } from './src/server/relay-room-registry.js';
+import { MAINTENANCE_INTERVAL_MS } from './src/server/relay-config.js';
+import { RoomSessions } from './src/server/relay-session.js';
+import { RelayWsTraffic } from './src/server/relay-ws-traffic.js';
+import { createRejectionCounters } from './src/server/relay-rejection-counters.js';
 
 const require = createRequire(import.meta.url);
 const Y = require('yjs');
-const source = await readFile(process.env.RB_TEST_SOURCE || new URL('./yjs-server.mjs', import.meta.url), 'utf8');
-const imported = {};
-for (const match of source.matchAll(/^import \{[^}]+\} from '(\.\/src\/server\/relay-[^']+)';/gm)) {
-  Object.assign(imported, await import(match[1]));
-}
-const section = (start, end) => {
-  const startAt = source.indexOf(start);
-  assert.ok(startAt >= 0, `missing server seam: ${start}`);
-  return source.slice(startAt, source.indexOf(end, startAt));
-};
-const evaluate = (code, context) => runInNewContext(code, { ...imported, ...context });
 const QUIET_LOGGER = { error() {}, warn() {}, log() {} };
 const ROOM_NAME = 'private-room';
 const AT_TIME_MS = 100;
+const readiness = state => {
+  const response = { writeHead(status) { this.status = status; }, end(body) { this.body = body; }, once() {} };
+  state.dispatch({ method: 'GET', url: '/readyz', headers: {} }, response);
+  return response;
+};
 
-test('storage latch requests one fatal drain and retains the first failure', () => {
-  const requests = [];
-  const callbacks = [];
+test('storage latch requests one fatal drain and retains the first failure', async t => {
+  const identified = [];
+  const state = await relayEntrypoint(t, { modules: {
+    './src/server/relay-log-id.js': { roomLogId: value => { identified.push(value); return 'keyed-id'; } },
+  } });
+  const diagnostics = t.mock.method(console, 'error', () => {});
   const first = new Error('first storage failure');
   const second = new Error('second storage failure');
-  const result = evaluate(`${section('const markStorageFailure =', '\nroomRegistry.on')}\n
-    markStorageFailure(first); markStorageFailure(second);
-    callbacks.forEach((callback) => callback()); storageFailure;`, {
-    storageFailure: null, docs: new Map(), console: QUIET_LOGGER,
-    first, second, callbacks, roomLogId: () => 'keyed-id',
-    setImmediate: (callback) => callbacks.push(callback),
-    shutdown: (...args) => requests.push(args),
-  });
-  assert.equal(requests.length, 1);
-  assert.equal(requests[0][1], true);
-  assert.equal(result, first);
+  state.registry.emit(REGISTRY_STORAGE_FAILURE_EVENT, first);
+  state.registry.emit(REGISTRY_STORAGE_FAILURE_EVENT, second);
+  assert.deepEqual(state.shutdowns, [['storage failure', true]]);
+  assert.deepEqual(identified, [String(first)]);
+  assert.equal(diagnostics.mock.callCount(), 1);
+  assert.equal(readiness(state).status, 503);
 });
 
-test('readiness rejects requests during drain', () => {
-  let status;
-  let body;
-  evaluate(`(() => { ${section("if (req.method === 'GET' && routePath === '/readyz')", "\n  if (roomSessionRoutes.handle(")} })()`, {
-    req: { method: 'GET' }, routePath: '/readyz', storageFailure: null, shuttingDown: true,
-    res: { writeHead: (value) => { status = value; }, end: (value) => { body = value; } },
-  });
-  assert.equal(status, 503);
-  assert.equal(body, 'not ready');
+test('readiness rejects requests during drain', async t => {
+  const state = await relayEntrypoint(t);
+  assert.equal(readiness(state).status, 200);
+  state.lifecycle.onStart('SIGTERM');
+  const response = readiness(state);
+  assert.equal(response.status, 503);
+  assert.equal(response.body, 'not ready');
 });
 
-test('rooms without expired vote timers do not flatten item text', () => {
+test('rooms without expired vote timers do not flatten item text', async t => {
+  const state = await relayEntrypoint(t);
+  state.timers.find(timer => timer.intervalMs === MAINTENANCE_INTERVAL_MS).callback();
+  assert.ok(state.maintenance, 'entrypoint must wire scheduled maintenance');
   const doc = new Y.Doc();
   try {
     const item = new Y.Map();
@@ -62,11 +57,7 @@ test('rooms without expired vote timers do not flatten item text', () => {
     const text = new Y.Text('large private item');
     item.set('text', text);
     text.toString = () => { assert.fail('text flattened with no expired timer'); };
-    evaluate(`${section('const finalizeExpiredVotes =', '\nconst voteExpiryTimers')}\nfinalizeExpiredVotes(room, doc, atTime);`, {
-      Y, doc, room: ROOM_NAME, atTime: AT_TIME_MS, storageFailure: null, shuttingDown: false,
-      isRoomBlocked: () => false, planVoteFinalization, geometryErrorForPatch,
-      console: QUIET_LOGGER, roomLogId: () => 'keyed-id',
-    });
+    state.maintenance.votes.finalize(ROOM_NAME, doc, AT_TIME_MS);
   } finally { doc.destroy(); }
 });
 
@@ -98,27 +89,31 @@ test('one bad room does not skip later rooms or storage and upload maintenance',
   assert.equal(blobSweeps, 1);
 });
 
-test('upgrade rejections count status without exposing socket data', () => {
+test('upgrade rejections count status without exposing socket data', async t => {
   const counts = [];
-  evaluate(`${section('const rejectUpgrade =', '\nconst maintenance =')}\nrejectUpgrade(socket, status);`, {
-    socket: { end() {}, destroy() {} }, status: 429,
-    rejectionCounters: { upgrade: (status) => counts.push(status) },
-  });
-  assert.equal(counts.length, 1);
-  assert.equal(counts[0], 429);
+  t.mock.method(RoomSessions.prototype, 'authenticate', () => ({ docName: 'doc' }));
+  t.mock.method(RelayWsTraffic.prototype, 'reserve', () => ({ status: 429 }));
+  const state = await relayEntrypoint(t, { modules: {
+    './src/server/relay-rejection-counters.js': { createRejectionCounters: log => ({
+      ...createRejectionCounters(log), upgrade: (...args) => counts.push(args),
+    }) },
+  } });
+  const socket = { end() {}, destroy() {}, privateData: 'must not reach counters' };
+  state.server.emit('upgrade', { headers: { origin: 'https://hostile.example' } }, socket, Buffer.alloc(0));
+  const handle = 'a'.repeat(32);
+  state.registry.registeredRoomsByHandle.set(handle, 'doc');
+  state.server.emit('upgrade', { url: `/rooms/${handle}`, headers: { origin: 'https://allowed.example' } }, socket, Buffer.alloc(0));
+  assert.deepEqual(counts, [[403], [429]]);
 });
 
-test('fatal process events are wired to the shared lifecycle', () => {
-  const handlers = new Map();
-  const requests = [];
-  const registrations = source.split('\n').filter((line) => /^process.on\(/.test(line)).join('\n');
-  evaluate(registrations, {
-    process: { on: (event, callback) => handlers.set(event, callback) },
-    lifecycle: { fatal: (...args) => requests.push(args) }, shutdown() {},
-  });
+test('fatal process events are wired to the shared lifecycle', async t => {
+  const state = await relayEntrypoint(t);
   for (const event of ['unhandledRejection', 'uncaughtException']) {
-    assert.ok(handlers.has(event), `missing ${event} handler`);
-    handlers.get(event)(new Error('private token must not be logged'));
+    const handlers = state.handlers.get(event);
+    assert.equal(handlers.length, 1, `missing ${event} handler`);
+    const failure = new Error('private token must not be logged');
+    handlers[0](failure);
+    assert.deepEqual(state.fatals.at(-1), [event, failure]);
   }
-  assert.equal(requests.length, 2);
+  assert.equal(state.fatals.length, 2);
 });
