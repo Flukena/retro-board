@@ -1,79 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as Y from 'yjs';
-import { createServer } from 'vite';
 import { createZoneHeaderActions } from '../board/zone-header-actions.js';
 import { PLAYER_PRESENCE_STALE_MS } from './player-cursors.js';
 import { REACTION_CLEAR_MS } from '../reactions/reaction-channel.js';
-import { createRoomLock } from '../room-lock/e2e-crypto.js';
-import { fakeLockedRelay, LOCKED_TEST_CODE, LOCKED_TEST_HANDLE, LOCKED_TEST_TOKEN } from '../../test-support/fake-locked-relay.js';
-
-const SESSION_TTL_MS = 60_000;
-const ROOM_HANDLE = 'Abcdefghijklmnopqrstuvwxyz012345';
-const VALID_ITEM = { id: 'valid', type: 'sticky', x: 20, y: 30, text: 'Keep me', authorName: 'Alice' };
-class OfflineSocket {
-  close() { /* Transport fixture never opens a socket. */ }
-  send() { /* Offline transport deliberately cannot deliver updates. */ }
-}
-
-const LOCK_PASSWORD = 'correct horse battery staple';
-const LOCKED_EPOCH = 1;
-const ROOM_KEY_CHANGED_EVENT = 'retroroom:room-key-changed';
-
-async function unlockLockedRoom(server) {
-  const { lock, authKey } = await createRoomLock(LOCK_PASSWORD);
-  globalThis.fetch = fakeLockedRelay({ lock, authKey, keyEpoch: LOCKED_EPOCH }).fetch;
-  const lockSession = await server.ssrLoadModule('/src/client/room-lock/lock-session.js');
-  await lockSession.unlockRoom({
-    code: LOCKED_TEST_CODE, token: LOCKED_TEST_TOKEN, password: LOCK_PASSWORD, lockHint: { salt: lock.salt, kdf: lock.kdf },
-  });
-  return lockSession;
-}
-
-async function withStorage(check, { publicWall = false, locked = false } = {}) {
-  const saved = Object.getOwnPropertyDescriptors(globalThis);
-  const cache = new Map();
-  const browser = new EventTarget();
-  browser.location = new URL(publicWall ? 'http://localhost:5180/public' : 'http://localhost:5180/b/TEST#Abcdefgh12345678');
-  Object.assign(globalThis, { window: browser, WebSocket: OfflineSocket });
-  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
-    getItem: (key) => cache.get(key) ?? null,
-    setItem: (key, value) => cache.set(key, value),
-  } });
-  globalThis.fetch = async () => new Response(JSON.stringify({
-    roomHandle: ROOM_HANDLE, expiresAt: Date.now() + SESSION_TTL_MS,
-  }), { headers: { 'content-type': 'application/json' } });
-  const server = await createServer({ configFile: false,
-    server: { middlewareMode: true, watch: null, ws: false },
-    optimizeDeps: { noDiscovery: true, include: [] }, appType: 'custom' });
-  let refreshTimer;
-  const originalTimeout = globalThis.setTimeout;
-  try {
-    const session = await server.ssrLoadModule('/src/client/session/room-session.js');
-    globalThis.setTimeout = (...args) => { refreshTimer = originalTimeout(...args); return refreshTimer; };
-    if (publicWall) await session.establishPublicSession();
-    else if (locked) await unlockLockedRoom(server);
-    else await session.establishRoomSession('TEST', 'Abcdefgh12345678');
-    globalThis.setTimeout = originalTimeout;
-    await server.ssrLoadModule('/src/client/session/storage-bridge.js');
-    await check(browser, cache, server);
-  } finally {
-    globalThis.setTimeout = originalTimeout;
-    clearTimeout(refreshTimer);
-    browser.__rbProvider?.destroy();
-    browser.__rbYDoc?.destroy();
-    await server.close();
-    for (const key of ['window', 'WebSocket', 'localStorage', 'fetch']) {
-      if (saved[key]) Object.defineProperty(globalThis, key, saved[key]);
-      else delete globalThis[key];
-    }
-  }
-}
-
-function putItem(browser, item) {
-  const map = new Y.Map(Object.entries(item).filter(([key]) => key !== 'id'));
-  browser.__rbYItems.set(item.id, map);
-}
+import { LOCKED_TEST_HANDLE } from '../../test-support/fake-locked-relay.js';
+import {
+  LOCKED_EPOCH, ROOM_HANDLE, ROOM_KEY_CHANGED_EVENT, VALID_ITEM, putItem, withStorage,
+} from '../../test-support/bridge-harness.js';
 
 test('remote board changes identify only canonical root item deletions and local writes do not echo', async () => {
   await withStorage(async (browser) => {
