@@ -416,6 +416,12 @@
         "tests": 2602,
         "pass": 2602,
         "fail": 0
+      },
+      "atEnd": {
+        "commit": "ec9326c",
+        "tests": 2659,
+        "pass": 2659,
+        "fail": 0
       }
     },
     "bundle": {
