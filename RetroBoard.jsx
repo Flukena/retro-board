@@ -1,3 +1,4 @@
+import { createMinimapVisibility, useMinimapReveal, useMinimapNavigation, useMinimapKeys } from './src/client/board/use-minimap.js';
 import { useAdminToggle, useAdminStartTimer, useAdminExtendTimer, useAdminStopTimer, useAdminClearBoard, useAdminResetVotes, useAdminUnlockAll } from './src/client/board/use-admin-actions.js';
 import { createVoteSnapshotController, useVoteSnapshotsState, useVoteFlashes, useToggleVote, useRemoveItem } from './src/client/board/use-vote-state.js';
 import { useSelection, useFocusedSelection, useSingleSelection } from './src/client/board/use-selection.js';
@@ -18,7 +19,6 @@ import { createStickyItem, createTextItem, createZoneItem, createImageItem } fro
 import { filterLockedZoneMoves } from './src/domain/zone-move-lock.js';
 import BoardLoading from './src/client/app/BoardLoading.jsx';
 import { FOLLOW_VIEWPORT_COMMIT_MS } from './src/client/board/follow-timing.js';
-import { MINIMAP_IDLE_MS } from './src/client/board/minimap-timing.js';
 import { DRAG_THRESHOLD, DRAG_FLUSH_MS, DRAG_TRAILING_MS, RECENT_MOVE_WINDOW_MS } from './src/client/board/drag-timing.js';
 import { useToast } from './src/client/ui/use-toast.js';
 // RetroBoard.jsx — application coordinator for the collaborative board
@@ -93,7 +93,6 @@ import { unlockEntriesForSelection } from './src/client/board/selection-actions.
 import {
   buildMinimapModel,
   centerViewportOnWorld,
-  minimapPointToWorld,
 } from './src/domain/minimap.js';
 import {
   visiblePlayerCursors,
@@ -379,27 +378,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
   }), [sortedItems, detailViewport, viewportSize]);
   minimapModelRef.current = minimapModel;
 
-  const revealMinimap = useCallback(() => {
-    const panel = minimapPanelRef.current;
-    if (!panel) return;
-    panel.style.opacity = '1';
-    panel.style.pointerEvents = 'auto';
-    if (minimapHideTimerRef.current != null) clearTimeout(minimapHideTimerRef.current);
-    const hideWhenIdle = () => {
-      const currentPanel = minimapPanelRef.current;
-      if (!currentPanel) return;
-      const hasFocus = currentPanel.contains(document.activeElement);
-      const isHovered = currentPanel.matches(':hover');
-      if (hasFocus || isHovered || interactionRef.current?.kind === 'minimap') {
-        minimapHideTimerRef.current = setTimeout(hideWhenIdle, MINIMAP_IDLE_MS);
-        return;
-      }
-      currentPanel.style.opacity = '0';
-      currentPanel.style.pointerEvents = 'none';
-      minimapHideTimerRef.current = null;
-    };
-    minimapHideTimerRef.current = setTimeout(hideWhenIdle, MINIMAP_IDLE_MS);
-  }, []);
+  const revealMinimap = useMinimapReveal({ minimapPanelRef, minimapHideTimerRef, interactionRef }, []);
 
   const { publishLocalCursor, clearLocalCursor, publishLocalView } = usePresenceBroadcast(presenceBroadcastRef, viewportSize);
 
@@ -428,7 +407,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
   }, [clearLocalCursor]);
 
   useEffect(() => () => {
-    if (minimapHideTimerRef.current != null) clearTimeout(minimapHideTimerRef.current);
+    createMinimapVisibility({ minimapPanelRef, minimapHideTimerRef, interactionRef }).dispose();
   }, []);
 
   // Snapped viewport — quantize pan/zoom so small movements don't invalidate
@@ -1594,96 +1573,19 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     }));
   }, [commitViewportImmediately, stopFollowing]);
 
-  const startMinimapNavigation = useCallback((e) => {
-    if (e.button !== 0 || interactionRef.current !== null || !minimapModelRef.current) return;
-    stopFollowing();
-    e.preventDefault();
-    e.stopPropagation();
-    settleWheelBeforeInteraction();
-    const surface = e.currentTarget;
-    const surfaceRect = surface.getBoundingClientRect();
-    const pointerId = e.pointerId;
-    const startZoom = viewportRef.current.zoom;
-    let pendingPoint = null;
-    let frame = null;
-    let finished = false;
+  const minimapViewport = {
+    getViewport: () => viewportRef.current,
+    commitViewport: (next, options = {}) => {
+      if (options.live) liveApplyViewport(next);
+      else if (options.finish) setViewport(next);
+      else commitViewportImmediately(next);
+    },
+  };
+  const minimapNavigationOptions = { viewport: minimapViewport, minimapModelRef, interactionRef,
+    stopFollowing, settleWheelBeforeInteraction, activeViewportFinalizerRef };
+  const startMinimapNavigation = useMinimapNavigation(minimapNavigationOptions, [liveApplyViewport, settleWheelBeforeInteraction, stopFollowing]);
 
-    const navigate = (clientX, clientY) => {
-      const model = minimapModelRef.current;
-      if (!model) return;
-      const worldPoint = minimapPointToWorld({ clientX, clientY }, surfaceRect, model);
-      liveApplyViewport(centerViewportOnWorld(
-        { ...viewportRef.current, zoom: startZoom },
-        model.viewportSize,
-        worldPoint,
-      ));
-    };
-    const flush = () => {
-      frame = null;
-      if (!pendingPoint) return;
-      const point = pendingPoint;
-      pendingPoint = null;
-      navigate(point.x, point.y);
-    };
-    const queue = (clientX, clientY) => {
-      pendingPoint = { x: clientX, y: clientY };
-      if (frame == null) frame = requestAnimationFrame(flush);
-    };
-    const onMove = (ev) => {
-      if (ev.pointerId !== pointerId) return;
-      queue(ev.clientX, ev.clientY);
-    };
-    const removeListeners = () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onCancel);
-      window.removeEventListener('blur', onBlur);
-    };
-    const finalize = () => {
-      if (finished) return;
-      finished = true;
-      if (frame != null) { cancelAnimationFrame(frame); frame = null; }
-      if (pendingPoint) {
-        const point = pendingPoint;
-        pendingPoint = null;
-        navigate(point.x, point.y);
-      }
-      interactionRef.current = null;
-      surface.style.cursor = 'crosshair';
-      removeListeners();
-      if (activeViewportFinalizerRef.current === onBlur) activeViewportFinalizerRef.current = null;
-      setViewport(viewportRef.current);
-    };
-    const onUp = (ev) => { if (ev.pointerId === pointerId) finalize(); };
-    const onCancel = (ev) => { if (ev.pointerId === pointerId) finalize(); };
-    const onBlur = () => finalize();
-
-    interactionRef.current = { kind: 'minimap' };
-    surface.style.cursor = 'grabbing';
-    navigate(e.clientX, e.clientY);
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onCancel);
-    window.addEventListener('blur', onBlur);
-    activeViewportFinalizerRef.current = onBlur;
-  }, [liveApplyViewport, settleWheelBeforeInteraction, stopFollowing]);
-
-  const onMinimapKeyDown = useCallback((e) => {
-    const model = minimapModelRef.current;
-    if (!model || interactionRef.current !== null) return;
-    const current = viewportRef.current;
-    const stepX = model.viewportSize.w * 0.2;
-    const stepY = model.viewportSize.h * 0.2;
-    let next = null;
-    if (e.key === 'ArrowLeft') next = { ...current, x: current.x + stepX };
-    if (e.key === 'ArrowRight') next = { ...current, x: current.x - stepX };
-    if (e.key === 'ArrowUp') next = { ...current, y: current.y + stepY };
-    if (e.key === 'ArrowDown') next = { ...current, y: current.y - stepY };
-    if (!next) return;
-    e.preventDefault();
-    e.stopPropagation();
-    commitViewportImmediately(next);
-  }, [commitViewportImmediately]);
+  const onMinimapKeyDown = useMinimapKeys(minimapNavigationOptions, [commitViewportImmediately]);
 
   const updateZIndexes = useCallback((entries) => {
     if (!storage.updateItems(entries)) { reportWriteFailure(); return false; }
