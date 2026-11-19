@@ -6,6 +6,7 @@ import {
   classifyImportedImageSource,
   imageInfoIsWithinLimits,
   inspectRasterImageBytes,
+  RETIRED_APP_ORIGINS,
   normalizeRuntimeImageSource,
   resolveRoomImageSource,
   isE2EImageSource,
@@ -103,6 +104,41 @@ test('runtime image URLs stay on the page or configured relay origin', () => {
   );
   assert.equal(
     normalizeRuntimeImageSource(`https://tracker.example/images/${IMAGE_ID}.png`, options),
+    null,
+  );
+});
+
+test('images stored under a retired app origin load from the current server, never the retired host', () => {
+  const options = {
+    pageOrigin: 'https://retroroom.party',
+    relayBaseUrl: 'https://retroroom.party/yjs',
+    roomHandle: ROOM_HANDLE,
+  };
+  const retired = 'https://retro.sagonzis.space';
+  assert.ok(Object.isFrozen(RETIRED_APP_ORIGINS));
+  assert.equal(
+    normalizeRuntimeImageSource(`${retired}/yjs/rooms/${ROOM_HANDLE}/images/${IMAGE_ID}.png`, options),
+    `https://retroroom.party/yjs/rooms/${ROOM_HANDLE}/images/${IMAGE_ID}.png`,
+  );
+  assert.equal(
+    normalizeRuntimeImageSource(`${retired}/yjs/images/${IMAGE_ID}.png`, options),
+    `https://retroroom.party/yjs/images/${IMAGE_ID}.png`,
+  );
+  const refused = [
+    `${retired}/yjs/rooms/${'z'.repeat(32)}/images/${IMAGE_ID}.png`,
+    `${retired}/yjs/rooms/${ROOM_HANDLE}/images/${IMAGE_ID}.png?x=1`,
+    `${retired}/yjs/rooms/${ROOM_HANDLE}/images/${IMAGE_ID}.png#x`,
+    `${retired}/yjs-public/rooms/${ROOM_HANDLE}/images/${IMAGE_ID}.png`,
+    `http://retro.sagonzis.space/yjs/images/${IMAGE_ID}.png`,
+    `https://www.retro.sagonzis.space/yjs/images/${IMAGE_ID}.png`,
+    `https://retro.sagonzis.space:8443/yjs/images/${IMAGE_ID}.png`,
+    `https://retroroom.party@retro.sagonzis.space/yjs/images/${IMAGE_ID}.png`,
+    `https://retro.sagonzis.space.evil.com/yjs/images/${IMAGE_ID}.png`,
+    `https://tracker.example/yjs/images/${IMAGE_ID}.png`,
+  ];
+  for (const source of refused) assert.equal(normalizeRuntimeImageSource(source, options), null, source);
+  assert.equal(
+    resolveRoomImageSource(`${retired}/yjs/rooms/${ROOM_HANDLE}/e2e-blobs/${IMAGE_ID}`, options),
     null,
   );
 });
