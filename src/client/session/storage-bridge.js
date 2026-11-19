@@ -1,3 +1,4 @@
+import { createUndoController } from './bridge/undo-controller.js';
 import { createSnapshotDoc, boardItemWriteError, boardItemsWriteError, LEGACY_BOARD_KEY,
   META_INTERNAL_PREFIX, IMAGE_REPAIR_ORIGIN, originOf } from './bridge/snapshot-doc.js';
 import { createAwarenessPresence } from './bridge/awareness-presence.js';
@@ -780,34 +781,10 @@ if (provider) {
 // produce independent stack entries that can be undone individually without
 // touching any peer's concurrent changes.
 // ---------------------------------------------------------------------------
-const undoEmitter = new EventTarget();
 if (provider) {
-  undoManager = new Y.UndoManager([yItems, yMeta, ymap], {
-    trackedOrigins: new Set(['local']),
-    captureTimeout: 500,
-  });
-  const fire = () => undoEmitter.dispatchEvent(new Event('change'));
-  undoManager.on('stack-item-added', fire);
-  undoManager.on('stack-item-popped', fire);
-  undoManager.on('stack-cleared', fire);
-
-  Object.assign(window.storage, {
-    stopUndoCapture() { undoManager?.stopCapturing(); },
-    undo() {
-      if (!undoManager || undoManager.undoStack.length === 0) return false;
-      undoManager.undo();
-      return true;
-    },
-    redo() {
-      if (!undoManager || undoManager.redoStack.length === 0) return false;
-      undoManager.redo();
-      return true;
-    },
-    canUndo() { return !!(undoManager && undoManager.undoStack.length > 0); },
-    canRedo() { return !!(undoManager && undoManager.redoStack.length > 0); },
-    onUndoChange(handler) { undoEmitter.addEventListener('change', handler); },
-    offUndoChange(handler) { undoEmitter.removeEventListener('change', handler); },
-  });
+  const undoController = createUndoController({ yItems, yMeta, ymap });
+  undoManager = undoController.undoManager;
+  Object.assign(window.storage, undoController.methods);
 }
 
 if (provider && isEncryptedRoom(roomKey, ROOM)) {

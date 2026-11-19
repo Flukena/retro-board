@@ -44,3 +44,14 @@ Browser checks are intentionally not run, as requested. Owed before release: `ui
 - Ceiling: 1130 → 869. New-module ESLint complexity ≤15 and unused-variable checks PASS. The old bridge importBundle complexity remains for its owning task 6.
 - Full gate: `p3-gate-4.log`; build PASS (`p3-build-4.log`).
 - RULE CONFORMANCE: Code shape PASS; Tests PASS; Logging and disk writes N/A; Data location PASS; Karpathy guidelines PASS; repo style PASS; failure-path tests PASS.
+- Task 4 commit: `a57dba4`; full gate **2859/2859**, build PASS.
+
+## Task 5 — S7 undo-controller
+
+- Files: `bridge/undo-controller.{js,test.js}`, bridge, ratchet, report.
+- Before move: unchanged bridge/contract plus rapid-command grouping and silent-state survival characterization **51/51** (`p3-before-5.log`). Same behavior passes after the extraction; the bare-document test also verifies the configured 500 ms capture window, change notifications and unsubscribe (`p3-after-5.log`, 2/2).
+- `undoManager` remains declared before all observers and assigned only at its original late point. Root observers read that live binding rather than a copied value. No module points back to the bridge.
+- RED: `undo-controller.js:3`, change `UNDO_CAPTURE_TIMEOUT_MS` from 500 to 0. The rapid-command test fails because undo leaves an item, and the configuration assertion fails `0 !== 500` (`p3-red-5.log`). Restored.
+- Ceiling: 869 → 846. New-module ESLint complexity ≤15 and unused-variable checks PASS.
+- Full gate: `p3-gate-5.log`; build PASS (`p3-build-5.log`).
+- RULE CONFORMANCE: Code shape PASS; Tests PASS; Logging and disk writes N/A; Data location PASS; Karpathy guidelines PASS; repo style PASS; failure-path tests PASS.
