@@ -1,3 +1,4 @@
+import { createVoteSnapshotController, useVoteSnapshotsState, useVoteFlashes, useToggleVote, useRemoveItem } from './src/client/board/use-vote-state.js';
 import { useSelection, useFocusedSelection, useSingleSelection } from './src/client/board/use-selection.js';
 import { useImageImport } from './src/client/transfer/use-image-import.js';
 import { useOnImportPick, useOnImportFileChange, useConfirmImport } from './src/client/transfer/use-board-import.js';
@@ -222,18 +223,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
   const { selectedIds, setSelectedIds, selectedIdsRef } = useSelection();
   const [focusedTextId, setFocusedTextId] = useState(null);
   const [marquee, setMarquee] = useState(null); // {x1,y1,x2,y2} in screen coords
-  // Vote state lives in Yjs as per-user-per-item keys (CRDT — no LWW race).
-  // `votesByItem` mirrors window.storage.snapshotVotes() and re-renders on remote change.
-  const [votesByItem, setVotesByItem] = useState(() => (
-    typeof window !== 'undefined' && window.storage?.snapshotVotes
-      ? window.storage.snapshotVotes()
-      : new Map()
-  ));
-  const [commentsByItem, setCommentsByItem] = useState(() => (
-    typeof window !== 'undefined' && window.storage?.snapshotComments
-      ? window.storage.snapshotComments()
-      : new Map()
-  ));
+  const { votesByItem, setVotesByItem, commentsByItem, setCommentsByItem } = useVoteSnapshotsState();
   const commentPreviewCacheRef = useRef(new Map());
   const [creationMode, setCreationMode, drawingExitRef] = useDrawingMode();
   const clipboardRef = useRef(null);
@@ -248,18 +238,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
   const [commentsOpenFor, setCommentsOpenFor] = useState(null);
   const [toast, setToast] = useToast();
-  const [voteFlashes, setVoteFlashes] = useState({}); // itemId -> timestamp of latest local vote
-  const flashVote = useCallback((itemId) => {
-    const t = Date.now();
-    setVoteFlashes((prev) => ({ ...prev, [itemId]: t }));
-    setTimeout(() => {
-      setVoteFlashes((prev) => {
-        if (prev[itemId] !== t) return prev;
-        const { [itemId]: _gone, ...rest } = prev;
-        return rest;
-      });
-    }, 900);
-  }, []);
+  const { voteFlashes, flashVote, disposeVoteFlashes } = useVoteFlashes();
   const [now, setNow] = useState(Date.now());
   const [loaded, setLoaded] = useState(false);
   const [confirmResetVotes, setConfirmResetVotes] = useState(false);
@@ -311,6 +290,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     activeViewportFinalizerRef.current?.();
     storage.setLocalBusyItems('geometry', []);
     localEditingPresence.dispose();
+    disposeVoteFlashes();
     presenceBroadcastRef.current.cancel();
     if (followViewportCommitRef.current != null) clearTimeout(followViewportCommitRef.current);
     if (followMotionFrameRef.current != null) cancelAnimationFrame(followMotionFrameRef.current);
@@ -753,18 +733,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     // WebSocket re-syncs (reconnect, etc.) so React state never drifts from
     // the canonical yMeta/yItems.
     // Subscribe to vote-key changes (local + remote) and rebuild the snapshot.
-    const voteHandler = () => {
-      if (typeof window !== 'undefined' && window.storage?.snapshotVotes) {
-        const next = window.storage.snapshotVotes();
-        setVotesByItem(previous => reuseSnapshotMap(previous, next));
-      }
-    };
-    const commentHandler = () => {
-      if (typeof window !== 'undefined' && window.storage?.snapshotComments) {
-        const next = window.storage.snapshotComments();
-        setCommentsByItem(previous => reuseSnapshotMap(previous, next));
-      }
-    };
+    const voteSnapshots = createVoteSnapshotController({ setVotesByItem, setCommentsByItem });
+    const voteHandler = voteSnapshots.refreshVotes;
+    const commentHandler = voteSnapshots.refreshComments;
     const resync = () => {
       storage.get('boardState', true).then((r) => {
         if (r?.value) applyRemoteBoard(r.value);
@@ -788,21 +759,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
       commentHandler();
     };
     const interval = setInterval(safetyTick, POLL_SAFETY);
-    if (typeof window !== 'undefined' && window.storage?.onVotesChange) {
-      window.storage.onVotesChange(voteHandler);
-    }
-    if (typeof window !== 'undefined' && window.storage?.onCommentsChange) {
-      window.storage.onCommentsChange(commentHandler);
-    }
+    voteSnapshots.subscribe();
     return () => {
       stopped = true;
       if (typeof storage.off === 'function') storage.off(handler);
-      if (typeof window !== 'undefined' && window.storage?.offVotesChange) {
-        window.storage.offVotesChange(voteHandler);
-      }
-      if (typeof window !== 'undefined' && window.storage?.offCommentsChange) {
-        window.storage.offCommentsChange(commentHandler);
-      }
+      voteSnapshots.dispose();
       clearInterval(interval);
       offSyncRefresh();
     };
@@ -943,30 +904,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
      Item operations
      ============================================================ */
 
-  const removeItemUnchecked = useCallback((id) => {
-    // One Yjs transaction so Cmd+Z restores the item and its related state together.
-    // Falls back to the two-call path if the bridge is an older build that
-    // doesn't expose the combined helper yet.
-    if (window.storage?.deleteItemWithVotesAndComments) {
-      window.storage.deleteItemWithVotesAndComments(id);
-      // React state still needs to drop the item — the deepObserver fires a
-      // synthetic boardState change, but only for non-local origins. Our own
-      // delete is 'local', so do it explicitly here.
-      setBoard((prev) => ({ ...prev, items: prev.items.filter((it) => it.id !== id) }));
-    } else {
-      window.storage?.clearVotesFor?.(id);
-      window.storage?.clearCommentsForItems?.([id]);
-      setBoard((prev) => ({ ...prev, items: prev.items.filter((it) => it.id !== id) }));
-      storage.removeItem(id);
-    }
-    setSelectedIds((prev) => {
-      if (!prev.has(id)) return prev;
-      const n = new Set(prev);
-      n.delete(id);
-      return n;
-    });
-    if (focusedTextIdRef.current?.startsWith(`${id}:`)) updateFocusedText(null);
-  }, [updateFocusedText]);
+  const removeItemUnchecked = useRemoveItem({ setBoard, storage, setSelectedIds, focusedTextIdRef, updateFocusedText }, [updateFocusedText]);
 
   const addSticky = useCallback((wx, wy) => {
     // Inherit the color of the deepest enclosing zone — when zones overlap
@@ -1147,38 +1085,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
   /* ============================================================
      Voting
      ============================================================ */
-  const toggleVote = useCallback((it) => {
-    const items = boardRef.current.items;
-    const voteZone = activeVoteZone(it, items, Date.now());
-    const zTimer = voteZone?.voteTimer;
-    const allowed = !!voteZone && !voteZone.votingLocked;
-    if (!allowed) {
-      setToast({ msg: t('vote.notStarted'), type: 'warn' });
-      return;
-    }
-    if (!window.storage?.setVote) return;
-    // Read the live Yjs snapshot (not React state) so rapid clicks and
-    // concurrent remote writes see the latest value.
-    const live = window.storage.snapshotVotes();
-    const has = !!live.get(it.id)?.has(userId);
-    if (!has && zTimer.voteLimit != null) {
-      let used = 0;
-      // Only count votes on cards still under an active session — a vote
-      // cast in an earlier, already-finished session (anywhere on the
-      // board) must not eat into a brand-new session's quota.
-      live.forEach((set, id) => {
-        if (!set.has(userId)) return;
-        const votedItem = items.find((i) => i.id === id);
-        if (votedItem && activeVoteZone(votedItem, items, Date.now())) used += 1;
-      });
-      if (used >= zTimer.voteLimit) {
-        setToast({ msg: t('vote.outOfQuota'), type: 'warn' });
-        return;
-      }
-    }
-    window.storage.setVote(it.id, userId, !has);
-    if (!has) flashVote(it.id);
-  }, [userId, flashVote, t]);
+  const toggleVote = useToggleVote({ boardRef, setToast, userId, flashVote }, [userId, flashVote, t]);
 
   const openComments = useCallback((item) => {
     setCommentsOpenFor(item.id);
