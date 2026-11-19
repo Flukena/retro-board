@@ -17,6 +17,28 @@ const ITEM_SIZE = Object.freeze({
   text: Object.freeze({ w: 400, h: 80 }),
   image: Object.freeze({ w: 200, h: 200 }),
 });
+// Legacy UI footprints intentionally use truthiness, unlike validated placement.
+const LEGACY_FOOTPRINT_SIZE_PX = new Map([
+  ['sticky', ITEM_SIZE.sticky], ['text', ITEM_SIZE.text], ['image', ITEM_SIZE.image],
+]);
+const EMPTY_ITEM_SIZE_PX = Object.freeze({ w: 0, h: 0 });
+
+function sizeWithTruthyDimensions(item, fallback) {
+  return { w: item.w || fallback.w, h: item.h || fallback.h };
+}
+
+export function sizeForResize(item) {
+  return sizeWithTruthyDimensions(item, LEGACY_FOOTPRINT_SIZE_PX.get(item.type) || ITEM_SIZE.image);
+}
+
+export function sizeForGroupBounds(item) {
+  return sizeWithTruthyDimensions(item, LEGACY_FOOTPRINT_SIZE_PX.get(item.type) || EMPTY_ITEM_SIZE_PX);
+}
+
+export function sizeForStickySignature(item) {
+  return sizeWithTruthyDimensions(item, ITEM_SIZE.sticky);
+}
+
 const RECOVERY_GAP = 48;
 const RECOVERY_ROW_WIDTH = 6000;
 

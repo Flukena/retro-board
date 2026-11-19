@@ -1,3 +1,4 @@
+import { createStickyItem, createTextItem, createZoneItem, createImageItem } from './src/domain/item-factory.js';
 import { filterLockedZoneMoves } from './src/domain/zone-move-lock.js';
 import BoardLoading from './src/client/app/BoardLoading.jsx';
 import { FOLLOW_VIEWPORT_COMMIT_MS } from './src/client/board/follow-timing.js';
@@ -28,7 +29,7 @@ import { MoodCheckDialog } from './src/client/board/MoodCheck.jsx';
 import { useFollowMotion } from './src/client/board/use-follow-motion.js';
 import { usePresenterFollow } from './src/client/board/use-presenter-follow.js';
 import { actionTogglePatch } from './src/domain/action-item.js';
-import { geometryErrorForItem, geometryErrorForPatch, sizeForPlacement } from './src/domain/board-geometry.js';
+import { geometryErrorForItem, geometryErrorForPatch, sizeForPlacement, sizeForResize, sizeForGroupBounds, sizeForStickySignature } from './src/domain/board-geometry.js';
 import {
   BOARD_TEXT_MAX_LENGTH,
   IMAGE_MAX_BYTES,
@@ -1187,23 +1188,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     const color = enclosingZone
       ? enclosingZone.color
       : Math.floor(Math.random() * PALETTE.length);
-    const { w, h, fontSize } = stickyCreationSize(enclosingZone);
-    const it = {
-      id: uid(),
-      type: 'sticky',
-      x: wx - w / 2,
-      y: wy - h / 2,
-      w,
-      h,
-      authorId: userId,
-      authorName: userName,
-      createdAt: Date.now(),
-      text: '',
-      color,
-      parentZoneId: enclosingZone?.id ?? null,
-      private: !publicMode,
-      ...(fontSize ? { fontSize } : {}),
-    };
+    const size = stickyCreationSize(enclosingZone);
+    const it = createStickyItem({
+      id: uid(), authorId: userId, authorName: userName, createdAt: Date.now(),
+      wx, wy, size, enclosingZone, color, publicMode,
+    });
     if (!addItemLocal(it)) return;
     setSelectedId(it.id);
     updateFocusedText(`${it.id}:text`);
@@ -1211,19 +1200,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
   }, [userId, userName, addItemLocal, setSelectedId, updateFocusedText, publicMode]);
 
   const addText = useCallback((wx, wy) => {
-    const it = {
-      id: uid(),
-      type: 'text',
-      x: wx,
-      y: wy,
-      w: TEXT_W,
-      h: TEXT_H,
-      authorId: userId,
-      authorName: userName,
-      createdAt: Date.now(),
-      text: t('tool.text'),
-    };
-    it.parentZoneId = resolveOwnerZone(it, boardRef.current.items)?.id ?? null;
+    const it = createTextItem({
+      id: uid(), authorId: userId, authorName: userName, createdAt: Date.now(),
+      wx, wy, text: t('tool.text'),
+    }, boardRef.current.items);
     if (!addItemLocal(it)) return;
     setSelectedId(it.id);
     updateFocusedText(`${it.id}:text`);
@@ -1234,46 +1214,20 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
   }, [userId, userName, addItemLocal, setSelectedId, updateFocusedText]);
 
   const addZone = useCallback((x, y, w, h, title = 'Untitled', color = 0) => {
-    const it = {
-      id: uid(),
-      type: 'zone',
-      x, y, w, h,
-      title,
-      color,
-      authorId: userId,
-      authorName: userName,
-      createdAt: Date.now(),
-    };
-    it.parentZoneId = resolveOwnerZone(it, boardRef.current.items)?.id ?? null;
+    const it = createZoneItem({
+      id: uid(), authorId: userId, authorName: userName, createdAt: Date.now(),
+      x, y, w, h, title, color,
+    }, boardRef.current.items);
     if (!addItemLocal(it)) return;
     setSelectedId(it.id);
     return it.id;
   }, [userId, userName, addItemLocal, setSelectedId]);
 
   const addImage = useCallback((wx, wy, src, natW, natH) => {
-    // Scale display size down if huge
-    let dispW = natW;
-    let dispH = natH;
-    if (dispW > 480) {
-      const r = 480 / dispW;
-      dispW = 480;
-      dispH = Math.round(natH * r);
-    }
-    const it = {
-      id: uid(),
-      type: 'image',
-      x: wx - dispW / 2,
-      y: wy - dispH / 2,
-      w: dispW,
-      h: dispH,
-      natW,
-      natH,
-      src,
-      authorId: userId,
-      authorName: userName,
-      createdAt: Date.now(),
-    };
-    it.parentZoneId = resolveOwnerZone(it, boardRef.current.items)?.id ?? null;
+    const it = createImageItem({
+      id: uid(), authorId: userId, authorName: userName, createdAt: Date.now(),
+      wx, wy, src, natW, natH,
+    }, boardRef.current.items);
     if (!addItemLocal(it)) return;
     setSelectedId(it.id);
     return it.id;
@@ -1347,7 +1301,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     const stickies = board.items.filter((i) => i.type === 'sticky');
     return [
       ...zones.map((z) => `z:${z.id}:${z.x}:${z.y}:${z.w}:${z.h}:${z.voteTimer?.endsAt || 0}:${z.voteTimer?.voteLimit ?? ''}:${z.voteTimer?.hideResults ? 1 : 0}:${z.votingLocked ? 1 : 0}:${z.revealed == null ? '' : z.revealed ? 1 : 0}:${z.parentZoneId ?? ''}`),
-      ...stickies.map((s) => `s:${s.id}:${s.x}:${s.y}:${s.w || STICKY_W}:${s.h || STICKY_H}:${s.revealed === false}:${Object.prototype.hasOwnProperty.call(s, 'parentZoneId') ? (s.parentZoneId || 'null') : 'unset'}`),
+      ...stickies.map((s) => {
+        const { w, h } = sizeForStickySignature(s);
+        return `s:${s.id}:${s.x}:${s.y}:${w}:${h}:${s.revealed === false}:${Object.prototype.hasOwnProperty.call(s, 'parentZoneId') ? (s.parentZoneId || 'null') : 'unset'}`;
+      }),
     ]
       .sort()
       .join('|');
@@ -2403,8 +2360,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     if (item.type === 'zone' && item.locked) return;
     e.stopPropagation();
     const aspectLock = item.type === 'image' && !e.altKey;
-    const w0 = item.w || (item.type === 'sticky' ? STICKY_W : item.type === 'text' ? TEXT_W : 200);
-    const h0 = item.h || (item.type === 'sticky' ? STICKY_H : item.type === 'text' ? TEXT_H : 200);
+    const { w: w0, h: h0 } = sizeForResize(item);
     const start = { x: e.clientX, y: e.clientY };
     const initial = { x: item.x, y: item.y, w: w0, h: h0 };
     const bounds = itemSizeBounds(item.type, initial);
@@ -2514,8 +2470,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     let maxX = -Infinity; let maxY = -Infinity;
     const seeds = new Map();
     items.forEach((it) => {
-      const w = it.w || (it.type === 'sticky' ? STICKY_W : it.type === 'image' ? 200 : it.type === 'text' ? TEXT_W : 0);
-      const h = it.h || (it.type === 'sticky' ? STICKY_H : it.type === 'image' ? 200 : it.type === 'text' ? TEXT_H : 0);
+      const { w, h } = sizeForGroupBounds(it);
       seeds.set(it.id, { type: it.type, x: it.x, y: it.y, w, h });
       if (it.x < minX) minX = it.x;
       if (it.y < minY) minY = it.y;
@@ -3196,8 +3151,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     let minX = Infinity; let minY = Infinity;
     let maxX = -Infinity; let maxY = -Infinity;
     items.forEach((it) => {
-      const w = it.w || (it.type === 'sticky' ? STICKY_W : it.type === 'image' ? 200 : it.type === 'text' ? TEXT_W : 0);
-      const h = it.h || (it.type === 'sticky' ? STICKY_H : it.type === 'image' ? 200 : it.type === 'text' ? TEXT_H : 0);
+      const { w, h } = sizeForGroupBounds(it);
       if (it.x < minX) minX = it.x;
       if (it.y < minY) minY = it.y;
       if (it.x + w > maxX) maxX = it.x + w;
@@ -3363,8 +3317,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     if (selectedItem.type === 'zone' && selectedItem.locked) return null;
     const resizable = selectedItem.type === 'zone' || selectedItem.type === 'sticky' || selectedItem.type === 'image' || selectedItem.type === 'text';
     if (!resizable) return null;
-    const w = selectedItem.w || (selectedItem.type === 'sticky' ? STICKY_W : selectedItem.type === 'text' ? TEXT_W : 200);
-    const h = selectedItem.h || (selectedItem.type === 'sticky' ? STICKY_H : selectedItem.type === 'text' ? TEXT_H : 200);
+    const { w, h } = sizeForResize(selectedItem);
     const corners = [
       { k: 'nw', sx: selectedItem.x,     sy: selectedItem.y,     cursor: 'nwse-resize' },
       { k: 'ne', sx: selectedItem.x + w, sy: selectedItem.y,     cursor: 'nesw-resize' },
@@ -3630,7 +3583,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
               scaled so names stay readable at every board zoom level. */}
           {editingIndicators.map(({ item, editor }) => {
             const zoom = Math.max(viewport.zoom, 0.01);
-            const height = item.h || (item.type === 'sticky' ? STICKY_H : item.type === 'text' ? TEXT_H : 200);
+            const height = sizeForResize(item).h;
             const editorHue = hueFromId(editor.userId);
             const color = playerAccentColor(editorHue);
             const glow = playerAccentColor(editorHue, 0.18);
