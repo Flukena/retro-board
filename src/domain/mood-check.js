@@ -1,5 +1,6 @@
 import { isSafeId } from './comment-schema.js';
 import { BOARD_MODE } from './public-wall-contract.js';
+export { MOOD_PREFIX, moodKey, parseMoodKey } from './vote-comment-keys.js';
 
 // Mood check: the admin opens a round (`meta.moodCheck`), each person answers
 // once on a 1-5 scale under their own kv key, and the closed round shows an
@@ -12,20 +13,8 @@ export const MOOD_SCALE = Object.freeze([
 ]);
 /** Cap on answers per round, for both the live read and imported backups. */
 export const MOOD_MAX_ANSWERS = 1_000;
-export const MOOD_PREFIX = 's||mood:';
 const AVERAGE_DECIMALS = 1;
 const AVERAGE_ROUNDING = 10 ** AVERAGE_DECIMALS;
-
-export const moodKey = (roundId, userId) => `${MOOD_PREFIX}${roundId}:${userId}`;
-
-export function parseMoodKey(key) {
-  if (typeof key !== 'string' || !key.startsWith(MOOD_PREFIX)) return null;
-  const rest = key.slice(MOOD_PREFIX.length);
-  const separator = rest.indexOf(':');
-  const roundId = rest.slice(0, separator);
-  const userId = rest.slice(separator + 1);
-  return separator > 0 && isSafeId(roundId) && isSafeId(userId) ? { roundId, userId } : null;
-}
 
 export const isMoodScore = (value) => Number.isInteger(value) && value >= 1 && value <= MOOD_SCALE.length;
 

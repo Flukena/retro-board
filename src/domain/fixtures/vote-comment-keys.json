@@ -1,0 +1,139 @@
+[
+  {
+    "first": "card",
+    "second": "alice",
+    "vote": "s||vote:card:alice",
+    "comment": "s||comment:card:alice",
+    "mood": "s||mood:card:alice",
+    "storedVote": {
+      "itemId": "card",
+      "userId": "alice"
+    },
+    "storedComment": {
+      "itemId": "card",
+      "commentId": "alice"
+    },
+    "canonicalVote": {
+      "itemId": "card",
+      "userId": "alice"
+    },
+    "parsedMood": {
+      "roundId": "card",
+      "userId": "alice"
+    }
+  },
+  {
+    "first": "a_b-1",
+    "second": "b_2",
+    "vote": "s||vote:a_b-1:b_2",
+    "comment": "s||comment:a_b-1:b_2",
+    "mood": "s||mood:a_b-1:b_2",
+    "storedVote": {
+      "itemId": "a_b-1",
+      "userId": "b_2"
+    },
+    "storedComment": {
+      "itemId": "a_b-1",
+      "commentId": "b_2"
+    },
+    "canonicalVote": {
+      "itemId": "a_b-1",
+      "userId": "b_2"
+    },
+    "parsedMood": {
+      "roundId": "a_b-1",
+      "userId": "b_2"
+    }
+  },
+  {
+    "first": "ไทย",
+    "second": "ผู้ใช้",
+    "vote": "s||vote:ไทย:ผู้ใช้",
+    "comment": "s||comment:ไทย:ผู้ใช้",
+    "mood": "s||mood:ไทย:ผู้ใช้",
+    "storedVote": {
+      "itemId": "ไทย",
+      "userId": "ผู้ใช้"
+    },
+    "storedComment": {
+      "itemId": "ไทย",
+      "commentId": "ผู้ใช้"
+    },
+    "canonicalVote": {
+      "itemId": "ไทย",
+      "userId": "ผู้ใช้"
+    },
+    "parsedMood": null
+  },
+  {
+    "first": "",
+    "second": "",
+    "vote": "s||vote::",
+    "comment": "s||comment::",
+    "mood": "s||mood::",
+    "storedVote": {
+      "itemId": "",
+      "userId": ""
+    },
+    "storedComment": {
+      "itemId": "",
+      "commentId": ""
+    },
+    "canonicalVote": null,
+    "parsedMood": null
+  },
+  {
+    "first": "card:extra",
+    "second": "alice",
+    "vote": "s||vote:card:extra:alice",
+    "comment": "s||comment:card:extra:alice",
+    "mood": "s||mood:card:extra:alice",
+    "storedVote": {
+      "itemId": "card",
+      "userId": "extra:alice"
+    },
+    "storedComment": {
+      "itemId": "card",
+      "commentId": "extra:alice"
+    },
+    "canonicalVote": null,
+    "parsedMood": null
+  },
+  {
+    "first": "card",
+    "second": "user:extra",
+    "vote": "s||vote:card:user:extra",
+    "comment": "s||comment:card:user:extra",
+    "mood": "s||mood:card:user:extra",
+    "storedVote": {
+      "itemId": "card",
+      "userId": "user:extra"
+    },
+    "storedComment": {
+      "itemId": "card",
+      "commentId": "user:extra"
+    },
+    "canonicalVote": null,
+    "parsedMood": null
+  },
+  {
+    "first": "constructor",
+    "second": "__proto__",
+    "vote": "s||vote:constructor:__proto__",
+    "comment": "s||comment:constructor:__proto__",
+    "mood": "s||mood:constructor:__proto__",
+    "storedVote": {
+      "itemId": "constructor",
+      "userId": "__proto__"
+    },
+    "storedComment": {
+      "itemId": "constructor",
+      "commentId": "__proto__"
+    },
+    "canonicalVote": {
+      "itemId": "constructor",
+      "userId": "__proto__"
+    },
+    "parsedMood": null
+  }
+]

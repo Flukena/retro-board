@@ -31,7 +31,7 @@ COPY --from=maintainer-ui --chown=node:node /build/dist-maintainer ./dist-mainta
 COPY --chown=node:node \
     src/domain/awareness-liveness.js src/domain/board-coordinates.js src/domain/board-geometry.js \
     src/domain/board-ownership.js src/domain/board-reconciliation.js src/domain/board-state.js \
-    src/domain/board-visibility.js src/domain/canonical-votes.js src/domain/comment-schema.js \
+    src/domain/board-visibility.js src/domain/canonical-votes.js src/domain/vote-comment-keys.js src/domain/comment-schema.js \
     src/domain/csv-import.js src/domain/import-schema.js src/domain/item-appearance.js \
     src/domain/minimap.js src/domain/move-concealment.js src/domain/move-reparenting.js \
     src/domain/pending-local-items.js src/domain/public-board-permissions.js src/domain/public-wall-contract.js \
