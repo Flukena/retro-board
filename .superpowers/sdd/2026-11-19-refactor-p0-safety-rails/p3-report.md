@@ -67,3 +67,18 @@ Browser checks are intentionally not run, as requested. Owed before release: `ui
 - Ceiling: 846 → 794. Planning is split into named item/vote/comment validators with the shared board-item validator; new-module ESLint complexity ≤15 and unused-variable checks PASS.
 - Full gate: `p3-gate-6.log`; build PASS (`p3-build-6.log`).
 - RULE CONFORMANCE: Code shape PASS; Tests PASS; Logging and disk writes N/A; Data location PASS; Karpathy guidelines PASS; repo style PASS; failure-path tests PASS.
+- Task 6 commit: `6a891b8`; full gate **2864/2864**, build PASS.
+
+## Task 7 — S8 method maps and contribution composition
+
+- Files: `bridge/{board-methods,contribution-store,storage-access,room-methods}.{js,test.js}`, `bridge/fixtures/storage-keys.json`, bridge, ratchet, report.
+- Before move: unchanged bridge/contract plus four module characterizations **54/54** (`p3-before-7.log`). Key insertion order was captured from **6a891b8** for board/public/landing/locked routes, then asserted passing before the move (`p3-keys-before-7.log`, 5/5). Expected fixture values were captured from unmoved method assembly, never generated from the extraction. Canonical sticky/vote/comment deletion assertions also passed against the unmoved source restored temporarily (`p3-contributions-before-7.log`).
+- After move: all eight new cases pass (`p3-after-7.log`). The bridge composes maps in the original property order. The contribution store registers vote → comment → template → mood observers after the bridge's change-dispatch observer; board deep/meta observers remain registered in the bridge in original order. No root callbacks are passed to modules; modules consume lower-owned document/store handles.
+- RED proofs, all restored before the gate:
+  - `board-methods.js:64`: force metadata origin to `local`; silent admin metadata disappears on undo instead of remaining Alice (`p3-red-7-board-methods.log`).
+  - `contribution-store.js:122`: retain the deleted Y.Item; canonical deletion assertion fails `true !== false` (`p3-red-7-contribution-store.log`).
+  - `storage-access.js:50`: write null instead of the shared value; read returns null instead of own (`p3-red-7-storage-access.log`).
+  - `room-methods.js:68`: invoke sync subscriber on false; assertion fails `1 !== 0` (`p3-red-7-room-methods.log`).
+- Ceiling: 794 → 368. New modules and remaining bridge functions satisfy ESLint complexity ≤15 / unused-variable checks. Only an inherited unused no-console suppression remains in the old diagnostics block, removed when that block moves in task 8.
+- Full gate: `p3-gate-7.log`; build PASS (`p3-build-7.log`).
+- RULE CONFORMANCE: Code shape PASS; Tests PASS; Logging and disk writes N/A; Data location PASS; Karpathy guidelines PASS; repo style PASS; failure-path tests PASS.
