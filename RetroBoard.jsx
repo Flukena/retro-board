@@ -1,4 +1,4 @@
-import { createLatestThrottle } from './src/client/session/latest-throttle.js';
+import { usePresenceBroadcastState, usePresenceBroadcast } from './src/client/session/use-presence-broadcast.js';
 import { useEditingPresenceState, useEditingPresence, createLocalEditingPresence } from './src/client/session/use-editing-presence.js';
 import { BoardDialogs } from './src/client/ui/BoardDialogs.jsx';
 import { useTopBarProps } from './src/client/chrome/use-topbar-props.js';
@@ -12,7 +12,6 @@ import { createStickyItem, createTextItem, createZoneItem, createImageItem } fro
 import { filterLockedZoneMoves } from './src/domain/zone-move-lock.js';
 import BoardLoading from './src/client/app/BoardLoading.jsx';
 import { FOLLOW_VIEWPORT_COMMIT_MS } from './src/client/board/follow-timing.js';
-import { CURSOR_BROADCAST_MS } from './src/client/board/cursor-timing.js';
 import { MINIMAP_IDLE_MS } from './src/client/board/minimap-timing.js';
 import { DRAG_THRESHOLD, DRAG_FLUSH_MS, DRAG_TRAILING_MS, RECENT_MOVE_WINDOW_MS } from './src/client/board/drag-timing.js';
 import { useToast } from './src/client/ui/use-toast.js';
@@ -97,7 +96,6 @@ import {
 } from './src/domain/minimap.js';
 import {
   cursorScreenPosition,
-  playerViewFromViewport,
   visiblePlayerCursors,
 } from './src/client/session/player-cursors.js';
 import { summarizeRemoteEditors, summarizeRemoteSelectors } from './src/client/session/editing-presence.js';
@@ -303,14 +301,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
   const worldMeasureRef = useRef(null);
   const gridRef = useRef(null);
   const cursorLayerRef = useRef(null);
-  const cursorBroadcastRef = useRef(null);
-  if (!cursorBroadcastRef.current) cursorBroadcastRef.current = createLatestThrottle({
-    intervalMs: CURSOR_BROADCAST_MS, publish: (point) => window.storage?.setLocalCursor?.(point),
-  });
-  const viewLastSentAtRef = useRef(0);
-  const viewPendingRef = useRef(null);
-  const viewBroadcastTimerRef = useRef(null);
-  const viewLastPublishedRef = useRef(null);
+  const presenceBroadcastRef = usePresenceBroadcastState();
   const followedUserIdRef = useRef(null);
   const followViewportCommitRef = useRef(null);
   const followLastCommitAtRef = useRef(0);
@@ -336,12 +327,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     activeViewportFinalizerRef.current?.();
     storage.setLocalBusyItems('geometry', []);
     localEditingPresence.dispose();
-    cursorBroadcastRef.current.cancel();
-    if (viewBroadcastTimerRef.current != null) clearTimeout(viewBroadcastTimerRef.current);
+    presenceBroadcastRef.current.cancel();
     if (followViewportCommitRef.current != null) clearTimeout(followViewportCommitRef.current);
     if (followMotionFrameRef.current != null) cancelAnimationFrame(followMotionFrameRef.current);
-    cursorBroadcastRef.current.dispose();
-    window.storage?.setLocalView?.(null);
+    presenceBroadcastRef.current.dispose();
   }, []);
 
   /* ---------- Derived ---------- */
@@ -449,48 +438,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     minimapHideTimerRef.current = setTimeout(hideWhenIdle, MINIMAP_IDLE_MS);
   }, []);
 
-  const publishLocalCursor = useCallback((point) => cursorBroadcastRef.current.push(point), []);
-  const clearLocalCursor = useCallback(() => cursorBroadcastRef.current.clear(), []);
-
-  const flushLocalView = useCallback(() => {
-    viewBroadcastTimerRef.current = null;
-    const view = viewPendingRef.current;
-    viewPendingRef.current = null;
-    if (!view) return;
-    viewLastSentAtRef.current = performance.now();
-    viewLastPublishedRef.current = view;
-    window.storage?.setLocalView?.(view);
-  }, []);
-
-  const publishLocalView = useCallback((viewportValue) => {
-    const view = playerViewFromViewport(viewportValue, viewportSize);
-    if (!view) return;
-    const previous = viewLastPublishedRef.current;
-    if (previous
-      && Math.abs(previous.x - view.x) < 0.05
-      && Math.abs(previous.y - view.y) < 0.05
-      && Math.abs(previous.zoom - view.zoom) < 0.0001) {
-      viewPendingRef.current = null;
-      if (viewBroadcastTimerRef.current != null) {
-        clearTimeout(viewBroadcastTimerRef.current);
-        viewBroadcastTimerRef.current = null;
-      }
-      return;
-    }
-    viewPendingRef.current = view;
-    const elapsed = performance.now() - viewLastSentAtRef.current;
-    if (elapsed >= CURSOR_BROADCAST_MS) {
-      if (viewBroadcastTimerRef.current != null) {
-        clearTimeout(viewBroadcastTimerRef.current);
-        viewBroadcastTimerRef.current = null;
-      }
-      flushLocalView();
-      return;
-    }
-    if (viewBroadcastTimerRef.current == null) {
-      viewBroadcastTimerRef.current = setTimeout(flushLocalView, CURSOR_BROADCAST_MS - elapsed);
-    }
-  }, [flushLocalView, viewportSize]);
+  const { publishLocalCursor, clearLocalCursor, publishLocalView } = usePresenceBroadcast(presenceBroadcastRef, viewportSize);
 
   useEffect(() => {
     if (!loaded || followedUserIdRef.current) return;
