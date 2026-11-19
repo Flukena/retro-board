@@ -5,6 +5,7 @@ import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { t, setLang } from '../src/client/ui/i18n.js';
+import { waitForEditorCaretAtEnd } from './board-live-helpers.mjs';
 import { ZONE_ICON_BUTTON_SIZE_PX, ZONE_ICON_GLYPH_SIZE_PX } from '../src/domain/zone-title.js';
 import { ZONE_HEADER_TOOLS_BASE_FONT_PX } from '../src/client/board/zone-header-layout.js';
 
@@ -48,7 +49,16 @@ const browser = await playwright[engine].launch({ headless: true });
 const report = { engine, steps: [], errors: [], measurements: [] };
 const contexts = [];
 function word(user, key) { setLang(user.lang); return t(key); }
-async function step(name, action) { await action(); report.steps.push(name); console.log(`PASS ${name}`); }
+async function step(name, action) {
+  try {
+    await action();
+  } catch (error) {
+    console.log(`FAIL ${name}`);
+    throw error;
+  }
+  report.steps.push(name);
+  console.log(`PASS ${name}`);
+}
 async function participant(mobile, lang) {
   const context = await browser.newContext({ viewport: mobile ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT, isMobile: mobile, hasTouch: mobile, reducedMotion: 'reduce' });
   contexts.push(context);
@@ -65,6 +75,11 @@ async function dismiss(user, method) {
   if (method === 'escape') await user.page.keyboard.press('Escape');
   if (method === 'close') await activate(user, dialog(user).getByRole('button', { name: word(user, 'common.close'), exact: true }));
   await user.page.locator('.rb-modal').waitFor({ state: 'hidden' });
+}
+// a7505a9 dropped the mobile Done button: the inline editor closes on Escape.
+async function finishMobileEdit(user) {
+  await user.page.locator('.rb-mobile-editor__input').press('Escape');
+  await user.page.locator('.rb-mobile-editor__input').waitFor({ state: 'detached' });
 }
 async function dismissBackdrop(user) {
   const target = dialog(user);
@@ -108,6 +123,18 @@ async function checkTransparentFrames(target) {
     assert.equal(frame.background, 'rgba(0, 0, 0, 0)', `${frame.selector} outer frame must be transparent`);
     assert.equal(frame.border, 'rgba(0, 0, 0, 0)');
     assert.equal(frame.shadow, 'none');
+  }
+  return frames;
+}
+// b471dc2 gave the zone options popup the opaque popover surface so cards never show through its rows.
+// Computed colors serialize as rgb(...) when opaque and rgba(...) when they carry any transparency.
+async function checkOpaqueFrames(target) {
+  const frames = await frameMeasurements(target);
+  assert.ok(frames.length > 0);
+  for (const frame of frames) {
+    assert.match(frame.background, /^rgb\(/, `${frame.selector} must have an opaque surface`);
+    assert.notEqual(frame.border, 'rgba(0, 0, 0, 0)', `${frame.selector} must keep a visible border`);
+    assert.notEqual(frame.shadow, 'none', `${frame.selector} must keep its popover shadow`);
   }
   return frames;
 }
@@ -315,7 +342,7 @@ async function checkPopupFrame(user, popup) {
   for (const theme of ['light', 'dark']) {
     await user.page.emulateMedia({ colorScheme: theme });
     await user.page.waitForFunction(value => document.documentElement.dataset.theme === value, theme);
-    const frames = await checkTransparentFrames(popup);
+    const frames = await checkOpaqueFrames(popup);
     const colors = await popup.locator('.rb-color-swatch').evaluateAll(nodes => nodes.map(node => getComputedStyle(node).backgroundColor));
     assert.ok(colors.length > 0);
     for (const color of colors) assert.notEqual(color, 'rgba(0, 0, 0, 0)', 'Palette colors must remain visible');
@@ -384,11 +411,15 @@ async function checkZone(user, peer) {
   await dismiss(user, 'close');
   report.measurements.push({ name: 'zone-options', popupBounds });
 }
+async function replaceEditedText(editor, current, next) {
+  await waitForEditorCaretAtEnd(editor, current);
+  await editor.fill(next);
+}
 async function checkCommentsAndSync(mobile, desktop) {
   const text = `Modal regression ${Date.now()}`;
   await mobile.page.locator('[data-tool="sticky"]').tap();
   await mobile.page.locator('.rb-mobile-editor__input').fill(text);
-  await mobile.page.getByRole('button', { name: word(mobile, 'mobile.done'), exact: true }).tap();
+  await finishMobileEdit(mobile);
   await mobile.page.getByTitle(word(mobile, 'sticky.privacyToggle.off'), { exact: true }).tap();
   await desktop.page.getByText(text, { exact: true }).waitFor();
   const sticky = desktop.page.locator('.rb-sticky').filter({ hasText: text });
@@ -400,7 +431,7 @@ async function checkCommentsAndSync(mobile, desktop) {
   await dismiss(desktop, 'escape');
   await sticky.dblclick();
   const editor = sticky.locator('textarea');
-  await editor.fill(`${text} peer`);
+  await replaceEditedText(editor, text, `${text} peer`);
   await editor.press('Escape');
   await mobile.page.getByText(`${text} peer`, { exact: true }).waitFor();
   await desktop.page.getByTitle(word(desktop, 'topbar.undo'), { exact: true }).click();
@@ -420,14 +451,14 @@ async function checkPrivateEditingLock(owner, peer) {
   await owner.page.locator('[data-tool="sticky"]').tap();
   const text = `Private owner locked edit ${Date.now()}`;
   await owner.page.locator('.rb-mobile-editor__input').fill(text);
-  await activate(owner, owner.page.getByRole('button', { name: word(owner, 'mobile.done'), exact: true }));
+  await finishMobileEdit(owner);
   await owner.page.getByTitle(word(owner, 'sticky.privacyToggle.off'), { exact: true }).tap();
   await peer.page.getByText(text, { exact: true }).waitFor();
   await activate(owner, owner.page.getByRole('button', { name: word(owner, 'topbar.unlockEdit'), exact: true }));
   await peer.page.waitForFunction(async () => (await window.storage.get('boardState', true)).value.editingLocked === false);
   const added = peer.page.locator('.rb-sticky').filter({ hasText: text });
   await added.dblclick();
-  await added.locator('textarea').fill(`${text} guest`);
+  await replaceEditedText(added.locator('textarea'), text, `${text} guest`);
   await added.locator('textarea').press('Escape');
   await owner.page.getByText(`${text} guest`, { exact: true }).waitFor();
 }
@@ -458,7 +489,8 @@ try {
   const desktop = await participant(false, 'th');
   await desktop.page.goto(mobile.page.url());
   await nameInput(desktop).waitFor();
-  await activate(desktop, desktop.page.getByRole('button', { name: word(desktop, 'name.skip'), exact: true }));
+  // 0b8e164 removed the first-name dialog's "Continue as guest" button: Escape dismisses it.
+  await dismiss(desktop, 'escape');
   await closeTemplates(desktop);
   await checkPageBoundary(desktop);
   await checkIconPresentation(desktop);

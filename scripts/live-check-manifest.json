@@ -142,9 +142,7 @@
       "relayEnv": {},
       "checkEnv": {},
       "timeoutSec": 900,
-      "baseline": "known-red",
-      "reason": "Stale since 0b8e164, which removed \"Continue as guest\" (name.skip) — unguarded until repaired (controller ruling T2-REPAIR)",
-      "failingStep": null
+      "baseline": "pass"
     },
     {
       "id": "mobile",

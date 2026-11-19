@@ -416,6 +416,20 @@ export async function pollUntil(read, accept, message, timeoutMs = SYNC_TIMEOUT_
   return last;
 }
 
+/**
+ * Waits until `editor` is focused with its caret after `current`. Opening an editor places the caret at the end of
+ * its text 10 ms later (RetroBoard.jsx `beginFocus`); a select-all `fill` that lands first is collapsed by that move
+ * and the new text is appended to the old instead of replacing it.
+ */
+export async function waitForEditorCaretAtEnd(editor, current) {
+  const node = await editor.elementHandle();
+  await editor.page().waitForFunction(
+    ([target, expected]) => document.activeElement === target && target.value === expected
+      && target.selectionStart === expected.length && target.selectionEnd === expected.length,
+    [node, current],
+  );
+}
+
 /** The last step of a check: no page errors were recorded in `mode`. */
 export async function errorsStep({ report }, mode) {
   await step(report, `${mode}: no page errors`, async () => {
