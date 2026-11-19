@@ -42,8 +42,8 @@
   .rb-drawing-toolbar .rb-drawing-swatch,
   .rb-drawing-toolbar .rb-drawing-size { width: var(--draw-mobile-option-size); min-width: var(--draw-mobile-option-size); height: var(--draw-mobile-option-size); min-height: var(--draw-mobile-option-size); }
   .rb-drawing-toolbar .rb-drawing-swatch { background-clip: content-box; padding: var(--space-1); border-color: transparent; }
-  /* Anchored to the (fixed) toolbar so it stays just above it however many rows the toolbar has. */
-  .rb-drawing-status { position: absolute; left: 0; right: 0; bottom: calc(100% + var(--space-2)); padding: var(--space-1) var(--space-2); border-radius: var(--radius-md); background: var(--tool-section-bg); }
+  /* Anchored to the (fixed) toolbar so it stays just above it however many rows it has, and right of the tool rail. */
+  .rb-drawing-status { position: absolute; left: calc(var(--rb-mobile-canvas-left-px) - var(--rb-mobile-left-px)); right: 0; bottom: calc(100% + var(--space-2)); padding: var(--space-1) var(--space-2); border-radius: var(--radius-md); background: var(--tool-section-bg); }
   :root:has(.rb-drawing-toolbar) .rb-zoom-controls,
   :root:has(.rb-drawing-toolbar) .rb-minimap { display: none; }
 }

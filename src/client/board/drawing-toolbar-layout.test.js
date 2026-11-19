@@ -69,7 +69,8 @@ test('mobile Draw toolbar: the status is anchored to the toolbar edge, not to a 
   assert.equal(mobileDeclarations('.rb-drawing-toolbar').position, undefined, 'the toolbar stays fixed (base rule) and so contains the status');
   assert.match(css.split('@media')[0], /\.rb-drawing-toolbar \{[^}]*position: fixed/);
   assert.match(status.bottom, /^calc\(100% \+ var\(--[a-z0-9-]+\)\)$/, 'sits just above the toolbar whatever its height');
-  assert.equal(status.left, '0');
+  // The status starts where the canvas starts, to the right of the tool rail, expressed in the toolbar's own coordinates.
+  assert.equal(status.left, 'calc(var(--rb-mobile-canvas-left-px) - var(--rb-mobile-left-px))', 'on short phones the rail runs down to the status');
   assert.equal(status.right, '0');
   assert.doesNotMatch(status.bottom, /touch-target|mobile-bottom/, 'a constant offset cannot clear a two or three row toolbar');
 });
