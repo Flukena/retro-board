@@ -33,3 +33,14 @@ Browser checks are intentionally not run, as requested. Owed before release: `ui
 - RED: `awareness-presence.js:34`, replace the text `slice(0, 1)` branch with all normalized IDs. Tests failed because busy state included extra `d` (`p3-red-3.log`). Restored.
 - Ceiling: 1348 → 1130. Full gate: `p3-gate-3.log`; build PASS (`p3-build-3.log`). ESLint complexity ≤15 and unused-variable checks PASS. A transient extraction-range syntax error was corrected before the passing post-move test and before the full gate; it is not claimed as a mutation proof.
 - RULE CONFORMANCE: Code shape PASS; Tests PASS; Logging and disk writes N/A; Data location PASS; Karpathy guidelines PASS; repo style PASS; failure-path tests PASS.
+- Task 3 commit: `e3b3d5f`; full gate **2836/2836**, build PASS.
+
+## Task 4 — S6 snapshot-doc
+
+- Files: `bridge/snapshot-doc.{js,test.js}`, bridge, ratchet, report.
+- Before move: unchanged bridge/contract plus snapshot characterization **52/52** (`p3-before-4.log`). Same assertions then pass on the new module using a bare Y.Doc: text becomes Y.Text, internal metadata stays hidden, exact repeated writes make no document change, invalid geometry does not write, null metadata deletes, only `local` origin enters undo.
+- Additional legacy-migration test also passed against the unmoved source restored temporarily from task 3 (`p3-maintenance-before-4.log`), then passed after restoration of the extraction (`p3-after-4.log`, 3/3). Sync maintenance retains migration → geometry repair → collaborative text → templates order, with repeated work named once.
+- RED: `snapshot-doc.js:41`, make equal fields compare unequal; idempotence assertion failed on changed encoded Yjs state (`p3-red-4.log`). Restored.
+- Ceiling: 1130 → 869. New-module ESLint complexity ≤15 and unused-variable checks PASS. The old bridge importBundle complexity remains for its owning task 6.
+- Full gate: `p3-gate-4.log`; build PASS (`p3-build-4.log`).
+- RULE CONFORMANCE: Code shape PASS; Tests PASS; Logging and disk writes N/A; Data location PASS; Karpathy guidelines PASS; repo style PASS; failure-path tests PASS.

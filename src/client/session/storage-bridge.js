@@ -1,3 +1,5 @@
+import { createSnapshotDoc, boardItemWriteError, boardItemsWriteError, LEGACY_BOARD_KEY,
+  META_INTERNAL_PREFIX, IMAGE_REPAIR_ORIGIN, originOf } from './bridge/snapshot-doc.js';
 import { createAwarenessPresence } from './bridge/awareness-presence.js';
 import { createUserPreferences } from './bridge/user-prefs.js';
 // window.storage polyfill backed by Yjs over WebSocket.
@@ -32,7 +34,6 @@ import { createUserPreferences } from './bridge/user-prefs.js';
 //   translated into a granular field-level diff against the current Yjs
 //   state, so the UI code stays unchanged.
 
-import { protectedItemEntries, concealEntriesForMove } from '../../domain/move-concealment.js';
 import { CLEARED_VOTE_RESULTS } from '../../domain/vote-session-lifecycle.js';
 import { readCanonicalVotes } from '../../domain/canonical-votes.js';
 import { planVoteFinalization } from '../../domain/vote-finalization.js';
@@ -44,7 +45,6 @@ import { attachClientSync } from './client-sync.js';
 import { createPublicPermit } from './bridge/public-permit.js';
 import { PublicCreationGuard } from './public-creation-guard.js';
 import { attachPublicCreationBudget } from './public-creation-budget.js';
-import { decodeRemoteBoard } from '../board/remote-board-decoder.js';
 import { LOCAL_ONLY_KEYS, readLocalPreference, writeLocalPreference } from './local-preferences.js';
 import { createRoomProvider, isEncryptedRoom } from './room-provider.js';
 import { attachE2ERoom } from './e2e-room.js';
@@ -62,18 +62,11 @@ import {
   roomFetch,
 } from './room-session.js';
 import { COMMENT_MAX_LEN, isSafeId, normalizeComment } from '../../domain/comment-schema.js';
-import {
-  collaborativeTextToString,
-  isCollaborativeTextField,
-  setCollaborativeTextField,
-} from './collaborative-text.js';
 import { normalizeRuntimeImageSource } from '../../domain/security-boundaries.js';
-import { repairStoredBoardGeometry } from '../board/stored-geometry-repair.js';
 import { isMoodKey, moodImportWrites, moodKeys, readMoods } from './mood-store.js';
 import { isMoodScore, moodKey } from '../../domain/mood-check.js';
 import {
   isTemplateKey,
-  migrateLegacyTemplates,
   normalizeTemplateEntries,
   putTemplate,
   readTemplates,
@@ -81,7 +74,6 @@ import {
   replaceTemplates,
 } from '../../domain/template-store.js';
 import {
-  geometryErrorForBoard,
   geometryErrorForItem,
   geometryErrorForPatch,
 } from '../../domain/board-geometry.js';
@@ -164,10 +156,10 @@ if (publicCreationGuard) {
   yItems.observe(observeCreations);
   ydoc.on('destroy', () => yItems.unobserve(observeCreations));
 }
-const { permitPublicCreations, consumePublicCreationFailure } = createPublicPermit({
+const publicPermit = createPublicPermit({
   publicCreationGuard, syncStatus, eventTarget: window,
 });
-const newSnapshotItems = items => items.filter(item => item?.id && !(yItems.get(item.id) instanceof Y.Map));
+const { permitPublicCreations, consumePublicCreationFailure } = publicPermit;
 if (provider) provider.connect();
 const motionPublisher = provider ? createMotionPublisher(provider.awareness) : null;
 ydoc.on('destroy', () => motionPublisher?.destroy());
@@ -186,265 +178,12 @@ let undoManager = null;
 // during migration; this guard ensures any rogue write to it (e.g. from a
 // stale client tab still running the old code) doesn't trample the granular
 // React state.
-const LEGACY_BOARD_KEY = 's||boardState';
-const BOARD_ITEM_TYPES = new Set(['sticky', 'zone', 'text', 'image']);
-
-const boardItemWriteError = (item) => {
-  if (!item || typeof item !== 'object' || Array.isArray(item)) return 'item must be an object';
-  if (!isSafeId(item.id)) return 'item has an invalid id';
-  if (!BOARD_ITEM_TYPES.has(item.type)) return `item ${item.id} has an invalid type`;
-  return null;
-};
-
-const boardItemsWriteError = (items) => {
-  if (!Array.isArray(items)) return 'board items must be an array';
-  const ids = new Set();
-  for (const item of items) {
-    const error = boardItemWriteError(item);
-    if (error) return error;
-    if (ids.has(item.id)) return `duplicate item id: ${item.id}`;
-    ids.add(item.id);
-  }
-  return geometryErrorForBoard(items);
-};
-
-// ---------------------------------------------------------------------------
-// Board snapshot helpers — convert between the React-friendly flat shape and
-// the nested Y.Map representation.
-// ---------------------------------------------------------------------------
-const META_INTERNAL_PREFIX = '__';
-
-const valuesEqual = (a, b) => {
-  if (a === b) return true;
-  if (a == null || b == null) return a === b;
-  if (typeof a !== typeof b) return false;
-  if (typeof a !== 'object') return false;
-  // JSON-equality is sufficient for board fields (primitives + small arrays).
-  try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; }
-};
-
-const setItemField = (yItem, field, value) => {
-  if (value === undefined) {
-    yItem.delete(field);
-    return;
-  }
-  if (isCollaborativeTextField(field) && typeof value === 'string') {
-    setCollaborativeTextField(yItem, field, value);
-    return;
-  }
-  yItem.set(field, value);
-};
-
-const readItemSnapshot = (yItem, id) => {
-  if (!(yItem instanceof Y.Map)) return null;
-  if (yItem.has('id') && yItem.get('id') !== id) return null;
-  const item = Object.assign(Object.create(null), { id });
-  yItem.forEach((value, key) => { item[key] = collaborativeTextToString(value); });
-  return item;
-};
-
-const readBoardSnapshot = () => {
-  const items = [];
-  // Y.Map iterates in insertion order, which matches the order items were
-  // added across the doc's history — deterministic on all peers.
-  yItems.forEach((yItem, id) => {
-    const item = readItemSnapshot(yItem, id);
-    if (item) items.push(item);
-  });
-  const meta = Object.create(null);
-  yMeta.forEach((val, key) => {
-    if (key.startsWith(META_INTERNAL_PREFIX)) return;
-    meta[key] = val;
-  });
-  return { ...meta, items };
-};
-
-const readRemoteBoardSnapshot = () => {
-  const { items, ...meta } = readBoardSnapshot();
-  return decodeRemoteBoard(items, meta);
-};
-
-const writeBoardSnapshot = (newBoard, origin = 'local') => {
-  if (!newBoard || typeof newBoard !== 'object' || !Array.isArray(newBoard.items)) return false;
-  if (boardItemsWriteError(newBoard.items)) return false;
-  if (!permitPublicCreations(newSnapshotItems(newBoard.items))) return false;
-  const cur = readBoardSnapshot();
-  const curById = new Map();
-  cur.items.forEach((it) => curById.set(it.id, it));
-  const newById = new Map();
-  (newBoard.items || []).forEach((it) => {
-    if (it && it.id) newById.set(it.id, it);
-  });
-
-  ydoc.transact(() => {
-    // Deletions
-    curById.forEach((_oldItem, id) => {
-      if (!newById.has(id)) yItems.delete(id);
-    });
-    // Upserts + per-field diffs
-    newById.forEach((nItem, id) => {
-      const oItem = curById.get(id);
-      let yItem = yItems.get(id);
-      if (!(yItem instanceof Y.Map)) {
-        // Brand-new item — seed a fresh Y.Map with all fields.
-        yItem = new Y.Map();
-        Object.entries(nItem).forEach(([k, v]) => {
-          if (k === 'id' || v === undefined) return;
-          setItemField(yItem, k, v);
-        });
-        yItems.set(id, yItem);
-        return;
-      }
-      const allFields = new Set([
-        ...Object.keys(oItem || {}),
-        ...Object.keys(nItem),
-      ]);
-      allFields.forEach((field) => {
-        if (field === 'id') return;
-        const ov = oItem ? oItem[field] : undefined;
-        const nv = nItem[field];
-        if (valuesEqual(ov, nv)) return;
-        setItemField(yItem, field, nv);
-      });
-    });
-    // Board-level meta diff (everything except `items`)
-    const allMetaKeys = new Set([
-      ...Object.keys(cur).filter((k) => k !== 'items'),
-      ...Object.keys(newBoard).filter((k) => k !== 'items'),
-    ]);
-    allMetaKeys.forEach((key) => {
-      if (key.startsWith(META_INTERNAL_PREFIX)) return;
-      const ov = cur[key];
-      const nv = newBoard[key];
-      if (valuesEqual(ov, nv)) return;
-      if (nv === undefined || nv === null) yMeta.delete(key);
-      else yMeta.set(key, nv);
-    });
-  }, origin);
-  return true;
-};
-
-// ---------------------------------------------------------------------------
-// Granular board writes. The UI sends only the delta it changed instead of the
-// whole board, so a single text edit or a per-frame drag no longer pays the
-// O(items × fields) cost of reading + diffing the entire board. Each runs in
-// one transaction; `origin` decides undo-stack membership, exactly as
-// writeBoardSnapshot did — 'local' = user action (undoable), 'system' = derived
-// / automatic change (skipped by the UndoManager).
-// ---------------------------------------------------------------------------
-// Not a tracked undo origin: a repair rewrites sources without becoming an undo step.
-const IMAGE_REPAIR_ORIGIN = 'image-repair';
-const originOf = (opts) => (opts && opts.silent ? 'system' : 'local');
-
-// Seed a brand-new item as its own Y.Map (mirrors writeBoardSnapshot's
-// create branch). Populated before attaching so peers see it complete.
-const seedItem = (id, fields) => {
-  const yItem = new Y.Map();
-  Object.entries(fields).forEach(([k, v]) => {
-    if (k === 'id' || v === undefined) return;
-    setItemField(yItem, k, v);
-  });
-  yItems.set(id, yItem);
-};
-
-const createItem = (id, fields) => {
-  if (yItems.has(id) || geometryErrorForItem({ ...fields, id })) return false;
-  seedItem(id, fields);
-  return true;
-};
-
-const patchExistingItem = (id, patch) => {
-  const yItem = yItems.get(id);
-  if (!(yItem instanceof Y.Map)) return false;
-  const current = readItemSnapshot(yItem, id);
-  if (!current || geometryErrorForPatch(current, patch)) return false;
-  Object.entries(patch).forEach(([k, v]) => {
-    if (k === 'id') return;
-    setItemField(yItem, k, v);
-  });
-  return true;
-};
-
-// Called inside the same transaction as every granular geometry/reveal write.
-const patchProtectedItems = (entries) => {
-  const { items, allRevealed } = readBoardSnapshot();
-  protectedItemEntries(items, entries, allRevealed).forEach(({ id, patch }) => patchExistingItem(id, patch));
-};
-const concealForAdditions = (additions) => {
-  const { items, allRevealed } = readBoardSnapshot();
-  return concealEntriesForMove(items, [...items, ...additions], allRevealed);
-};
-
-// ---------------------------------------------------------------------------
-// One-time migration of the legacy `s||boardState` JSON blob into yItems/yMeta.
-// Idempotent — guarded by a `__migrated` flag in yMeta. Runs as origin 'system'
-// so the migration itself never appears on the undo stack.
-// ---------------------------------------------------------------------------
-let migrationDone = false;
-const tryMigrate = () => {
-  if (migrationDone) return;
-  if (yMeta.get('__migrated')) { migrationDone = true; return; }
-  const legacy = ymap.get(LEGACY_BOARD_KEY);
-  if (!legacy || typeof legacy !== 'object') {
-    ydoc.transact(() => { yMeta.set('__migrated', true); }, 'system');
-    migrationDone = true;
-    return;
-  }
-  if (yItems.size > 0) {
-    // Another tab already migrated — just mark.
-    ydoc.transact(() => { yMeta.set('__migrated', true); }, 'system');
-    migrationDone = true;
-    return;
-  }
-  ydoc.transact(() => {
-    (legacy.items || []).forEach((it) => {
-      if (!it || !it.id) return;
-      seedItem(it.id, it);
-    });
-    Object.entries(legacy).forEach(([k, v]) => {
-      if (k === 'items' || v === undefined || v === null) return;
-      yMeta.set(k, v);
-    });
-    yMeta.set('__migrated', true);
-    // Drop the legacy blob so it can't drift out of sync with yItems.
-    ymap.delete(LEGACY_BOARD_KEY);
-  }, 'system');
-  migrationDone = true;
-};
-
-// Existing boards stored editable fields as scalar strings. Upgrade them
-// after every sync (a no-op once upgraded) so both old boards and items added
-// by a stale client gain character-level CRDT merging without a manual reset.
-const ensureCollaborativeTextFields = () => {
-  ydoc.transact(() => {
-    yItems.forEach((yItem) => {
-      if (!(yItem instanceof Y.Map)) return;
-      const type = yItem.get('type');
-      const fields = type === 'zone' ? ['title'] : (type === 'sticky' || type === 'text' ? ['text'] : []);
-      fields.forEach((field) => {
-        const value = yItem.get(field);
-        if (typeof value === 'string') setItemField(yItem, field, value);
-      });
-    });
-  }, 'system');
-};
-
-if (provider) {
-  provider.on('sync', (isSynced) => {
-    if (isSynced) {
-      tryMigrate();
-      repairStoredBoardGeometry(ydoc, yItems);
-      ensureCollaborativeTextFields();
-      migrateLegacyTemplates(ydoc, ymap);
-    }
-  });
-  if (provider.synced) {
-    tryMigrate();
-    repairStoredBoardGeometry(ydoc, yItems);
-    ensureCollaborativeTextFields();
-    migrateLegacyTemplates(ydoc, ymap);
-  }
-}
+const snapshot = createSnapshotDoc({ ydoc, yItems, yMeta, publicPermit });
+const {
+  readBoardSnapshot, readRemoteBoardSnapshot, writeBoardSnapshot,
+  readItemSnapshot, createItem, patchExistingItem, patchProtectedItems, concealForAdditions, newSnapshotItems,
+} = snapshot;
+snapshot.attachMaintenance({ provider, ymap });
 
 // ---------------------------------------------------------------------------
 // Event dispatch — fan changes out to RetroBoard's storage.on('change') handler.

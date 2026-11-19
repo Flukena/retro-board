@@ -7,7 +7,7 @@ const REPO_ROOT = new URL('../', import.meta.url);
 // AGENTS.md: frozen in size. These line ceilings may only be lowered, never raised.
 const RETRO_BOARD_MAX_LINES = 3803;
 const YJS_SERVER_MAX_LINES = 1294;
-const STORAGE_BRIDGE_MAX_LINES = 1130;
+const STORAGE_BRIDGE_MAX_LINES = 869;
 const I18N_MAX_LINES = 92;
 const UNCEILINGED_MAX_LINES = 1250;
 // P1 retained source-scan owners: this explicit map owns all size ceilings.
