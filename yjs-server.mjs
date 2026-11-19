@@ -1,3 +1,4 @@
+import { createRelayRuntime, logRelayBanner } from './src/server/relay-runtime.js';
 import { createHttpDispatch } from './src/server/relay-http-dispatch.js';
 import { createUpgradeHandler } from './src/server/relay-upgrade.js';
 import { createWsAdmission } from './src/server/relay-ws-admission.js';
@@ -25,12 +26,9 @@ import { roomLogId } from './src/server/relay-log-id.js';
 import { createUploadState, scanUploadUsage, createRelayUploads, createImageReadBudgets, UPLOAD_STORAGE_FAILURE_EVENT, ROOM_UPLOAD_USAGE_META } from './src/server/relay-uploads.js';
 import http from 'http';
 import fs from 'fs';
-import { createRequire } from 'module';
 import { randomBytes } from 'crypto';
 import { isIP } from 'net';
 import { WebSocketServer } from 'ws';
-import { fileURLToPath } from 'url';
-import { dirname, resolve, join } from 'path';
 import {
   createRelayLifecycle, drainRelay, isRelayReady, STORAGE_FAILURE_LOG, STORAGE_FAILURE_REASON,
   UNHANDLED_REJECTION_EVENT, UNCAUGHT_EXCEPTION_EVENT,
@@ -64,21 +62,7 @@ import { createRoomSummaryReader, createRoomTitleWriter } from './src/server/roo
 import { orphanRoomsOfDeletedAccounts } from './src/server/room-orphaning.js';
 import { registerPublicQuotaClient, notifyPublicQuota } from './src/server/public-action-limit.js';
 
-// yjs, y-leveldb, and y-websocket must all resolve to the SAME yjs module
-// instance. y-websocket's bin/utils.js (below) is CJS and does
-// `require('yjs')`, which its package.json "exports" map sends to
-// dist/yjs.cjs. If we instead `import * as Y from 'yjs'` here, the "exports"
-// map sends that to dist/yjs.mjs — a separate module with separate Item/GC/
-// etc. classes. Structs created by one instance fail `instanceof` checks in
-// the other's merge/sync code, silently corrupting a doc's struct store; it
-// surfaces later as "Cannot read properties of undefined (reading 'splice')"
-// once enough concurrent edits force a merge over the tainted region.
-// Routing everything through this one `require` keeps it a single instance.
-const require = createRequire(import.meta.url);
-const Y = require('yjs');
-const { LeveldbPersistence } = require('y-leveldb');
-
-
+const { Y, LeveldbPersistence, loadUtils } = createRelayRuntime();
 
 Object.assign(process.env, publicRelayEnvironment(process.env));
 const PUBLIC_WALL = isPublicWallEnabled(process.env);
@@ -99,25 +83,7 @@ const clientIpFromRequest = req => requestClientIp(req, TRUST_PROXY);
 
 const SESSION_SIGNING_KEY = loadSessionSigningKey(DB_DIR);
 
-// y-websocket v1 ships server utils at bin/utils.js but doesn't expose them
-// in its package "exports" map, so we import the file directly.
-const here = dirname(fileURLToPath(import.meta.url));
-const utilsPath = resolve(here, 'node_modules/y-websocket/bin/utils.js');
-const { setupWSConnection, setPersistence, docs, getYDoc } = await import(utilsPath);
-
-// y-websocket calls syncProtocol.readSyncMessage without the optional
-// errorHandler, so corrupt-state errors fall through to a console.error that
-// doesn't include the doc name — we never know which room broke. y-websocket
-// uses CJS `require('y-protocols/sync')`, which resolves to dist/sync.cjs and
-// is cached, so mutating exports on the cached module reaches that call site.
-const syncProtocol = require('y-protocols/sync');
-const awarenessProtocol = require('y-protocols/awareness');
-const origReadSyncMessage = syncProtocol.readSyncMessage;
-syncProtocol.readSyncMessage = (decoder, encoder, doc, origin) =>
-  origReadSyncMessage(decoder, encoder, doc, origin, () => {
-    console.warn('[yjs] invalid sync message', { docName: roomLogId(doc.name) });
-    try { origin?.close?.(1008, 'invalid sync message'); } catch { /* already closing */ }
-  });
+const { setupWSConnection, setPersistence, docs, getYDoc, awarenessProtocol } = await loadUtils();
 
 // Comma-separated exact Origin allowlist. Empty is fail-closed unless the
 // explicit dev-only YJS_ALLOW_INSECURE_HTTP flag is enabled, in which case
@@ -922,20 +888,7 @@ process.on(UNHANDLED_REJECTION_EVENT, (err) => { lifecycle.fatal(UNHANDLED_REJEC
 process.on(UNCAUGHT_EXCEPTION_EVENT, (err) => { lifecycle.fatal(UNCAUGHT_EXCEPTION_EVENT, err); });
 await roomDeletion.recover();
 if (await e2eBlobs.reconcileOrphans() > 0) await reconcileUploadUsage();
-server.listen(PORT, HOST, () => {
-  const address = server.address();
-  const boundPort = typeof address === 'object' && address ? address.port : PORT;
-  const displayHost = HOST.includes(':') ? `[${HOST}]` : HOST;
-  console.log(`[yjs] listening on ws://${displayHost}:${boundPort}  (db: ${DB_DIR})`);
-  if (ALLOWED_ORIGINS.length) {
-    console.log(`[yjs] origin allowlist: ${ALLOWED_ORIGINS.join(', ')}`);
-  } else if (ALLOW_INSECURE_HTTP) {
-    console.warn('[yjs] dev HTTP mode: accepting localhost origins only');
-  } else {
-    console.warn('[yjs] no allowed origins configured; APIs and WebSockets are fail-closed');
-  }
-  if (ALLOW_LEGACY_ROOMS) console.warn('[yjs] legacy tokenless rooms enabled');
-  if (ALLOW_LEGACY_URL_TOKENS) console.warn('[yjs] legacy URL-token WebSockets enabled');
-  if (TRUST_PROXY) console.warn('[yjs] trusted proxy headers enabled; block direct origin access');
-  if (accounting.dbUsageBytes > MAX_DB_BYTES) markStorageFailure(new Error('configured database quota exceeded'));
-});
+server.listen(PORT, HOST, () => logRelayBanner({
+  server, PORT, HOST, DB_DIR, ALLOWED_ORIGINS, ALLOW_INSECURE_HTTP,
+  ALLOW_LEGACY_ROOMS, ALLOW_LEGACY_URL_TOKENS, TRUST_PROXY, accounting, MAX_DB_BYTES, markStorageFailure,
+}));
