@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { withChromeModule } from '../../test-support/chrome-test-helper.js';
 import { pageDocument } from './page-document.js';
-import { SEO_LANGS, SEO_PAGES, localizedPath } from './seo-pages.js';
+import { LEGAL_CONTACT_EMAIL } from '../legal/legal-content.js';
+import { SEO_LANGS, SEO_PAGES, SEO_PAGE_KIND, localizedPath } from './seo-pages.js';
 
 const TEMPLATE = readFileSync(new URL('../../../index.html', import.meta.url), 'utf8');
 const NON_PAGE_PREFIXES = Object.freeze(['/public', '/b/', '/p/', '/assets/']);
@@ -66,5 +67,18 @@ test('the language links name their language, mark the current one and are label
     assert.match(html, /<a href="\/th\/privacy" hrefLang="th" lang="th" aria-current="page">ไทย<\/a>/i);
     assert.match(html, /<a href="\/privacy" hrefLang="en" lang="en">English<\/a>/i);
     assert.equal((html.match(/aria-current="page"/g) || []).length, 1);
+  });
+});
+
+test('the contact email appears only inside email_off markers, on every legal page', async () => {
+  const wrapped = `<!--email_off-->${LEGAL_CONTACT_EMAIL}<!--/email_off-->`;
+  await renderAll((pages) => {
+    let pagesWithEmail = 0;
+    for (const [file, html] of pages) {
+      assert.ok(!html.split(wrapped).join('').includes(LEGAL_CONTACT_EMAIL), `${file}: email outside markers`);
+      if (html.includes(wrapped)) pagesWithEmail += 1;
+    }
+    const legalPageCount = SEO_PAGES.filter(({ kind }) => kind === SEO_PAGE_KIND.LEGAL).length;
+    assert.equal(pagesWithEmail, SEO_LANGS.length * legalPageCount);
   });
 });

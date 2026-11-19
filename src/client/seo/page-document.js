@@ -1,6 +1,8 @@
 // Turns the built index.html into one page's HTML: its own head (title,
 // description, canonical, robots) and, for content pages, the pre-rendered body.
 
+import { LEGAL_CONTACT_EMAIL } from '../legal/legal-content.js';
+
 const ESCAPES = Object.freeze({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' });
 export const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ESCAPES[char]);
 
@@ -55,6 +57,25 @@ const replaceOnce = (html, pattern, replacement, label) => {
   return html.replace(pattern, () => replacement);
 };
 
+// Cloudflare's Email Address Obfuscation skips text between these markers.
+// Without them it rewrites the address into a link to /cdn-cgi/l/email-protection, which is a 404.
+const EMAIL_OFF_OPEN = '<!--email_off-->';
+const EMAIL_OFF_CLOSE = '<!--/email_off-->';
+const HTML_TAG = /(<[^>]*>)/;
+
+/**
+ * Wraps each occurrence of `email` in body text in the email_off markers.
+ * An address inside a tag (an href) cannot be wrapped from inside the attribute, so it fails the build.
+ */
+export function markEmailOff(body, email = LEGAL_CONTACT_EMAIL) {
+  if (!body.includes(email)) return body;
+  return body.split(HTML_TAG).map((part, index) => {
+    const isTag = index % 2 === 1;
+    if (isTag && part.includes(email)) throw new Error(`the contact email sits inside a tag: ${part.slice(0, 80)}`);
+    return isTag ? part : part.split(email).join(`${EMAIL_OFF_OPEN}${email}${EMAIL_OFF_CLOSE}`);
+  }).join('');
+}
+
 /** Build one page's HTML from the built index.html template. */
 export function pageDocument(template, {
   lang, title, description = null, canonical = null, robots = null, image = null, alternates = [], body = '', css = '', structuredData = null,
@@ -63,5 +84,5 @@ export function pageDocument(template, {
   html = replaceOnce(html, TITLE_ELEMENT, headTags({ title, description, canonical, robots, image, alternates })
     + (css ? `\n    <style>${css}</style>` : '')
     + (structuredData ? `\n    ${structuredDataTag(structuredData)}` : ''), '<title>');
-  return replaceOnce(html, ROOT_ELEMENT, `<div id="root">${body}</div>`, 'root element');
+  return replaceOnce(html, ROOT_ELEMENT, `<div id="root">${markEmailOff(body)}</div>`, 'root element');
 }
