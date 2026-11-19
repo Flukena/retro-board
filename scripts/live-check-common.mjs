@@ -462,7 +462,7 @@ export function summarizeRun(stdout, exitCode) {
 
 /**
  * A failed attempt is the known red only when its first failed step equals `failingStep`. Scripts that print no
- * `FAIL <step>` line (mobile, modal, public-tools, landing, spacing, ui) fail with failedStep null, which matches
+ * `FAIL <step>` line (landing, ui) fail with failedStep null, which matches
  * only a recorded `failingStep: null`.
  */
 function judgeKnownRed(entry, attempts) {

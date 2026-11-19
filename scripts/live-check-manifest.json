@@ -160,8 +160,8 @@
       "checkEnv": {},
       "timeoutSec": 900,
       "baseline": "known-red",
-      "reason": "Stale since e1f7f51 (Text click-to-place) and a7505a9 (Done/Edit dropped) — unguarded until repaired (controller ruling T2-REPAIR)",
-      "failingStep": null
+      "reason": "NEEDS_CONTEXT (owner): after the repairs for e1f7f51 (click-to-place Text, swatch/size Draw controls, hidden mobile zoom) and a7505a9 (no Edit/Done buttons), the Draw toolbar at 360px puts its Close button at right=397 > 360 (e1f7f51 two-row layout, drawing-tool.css:27-30), so 'Drawing toolbar/control must fit width' fails; the steps after it have not run",
+      "failingStep": "private: freehand draft/history/pinch/save/transparent PNG/sync/cancel"
     },
     {
       "id": "spacing",
@@ -181,8 +181,8 @@
       "checkEnv": {},
       "timeoutSec": 900,
       "baseline": "known-red",
-      "reason": "Stale since d40741b (Landing uses the hero variant): .rb-public-wall exists only in the card variant — unguarded until repaired (controller ruling T2-REPAIR)",
-      "failingStep": null
+      "reason": "NEEDS_CONTEXT (owner): after the repairs for d40741b (hero landing wait, header Start-vote button) and 0b8e164 (Thai Create label), the check's own rule 'landing card content inset is 20px' fails on 360/390px: c53c0fd set --landing-card-padding to var(--space-4) (16px) below the mobile breakpoint (landing.css:540). 768/1440px pass; unguarded until the owner decides whether the rule or the design wins",
+      "failingStep": "spacing is consistent across equivalent UI roles"
     },
     {
       "id": "pan",
@@ -203,9 +203,7 @@
       "relayEnv": {},
       "checkEnv": {},
       "timeoutSec": 900,
-      "baseline": "known-red",
-      "reason": "Public creation limit from 2d698a1 (10 items and 1 image per 60 s) rejects the 24-item, 2-image fixture — unguarded until repaired (controller ruling T2-REPAIR)",
-      "failingStep": null
+      "baseline": "pass"
     },
     {
       "id": "public-tools",

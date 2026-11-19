@@ -4,7 +4,9 @@ import assert from 'node:assert/strict';
 import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { PUBLIC_PATH } from '../src/domain/public-wall-contract.js';
+import {
+  PUBLIC_CREATION_WINDOW_MS, PUBLIC_CREATIONS_PER_WINDOW, PUBLIC_IMAGES_PER_WINDOW, PUBLIC_PATH,
+} from '../src/domain/public-wall-contract.js';
 import { wheelDeltaForZoomFactor } from '../src/domain/viewport-zoom.js';
 
 const SSD_ROOT = '/Volumes/ssd-fluke/BaseData';
@@ -48,6 +50,8 @@ const TOUCH_FINGER_IDS = [1, 2];
 const RASTER_TRACE_CATEGORIES = 'devtools.timeline,disabled-by-default-devtools.timeline,cc';
 const RASTER_TRACE_MODES = ['zoom', 'cards-zoom', 'zoom-sweep', 'pinch'];
 const MICROSECONDS_PER_MS = 1000;
+// The relay opens its own creation window when a chunk arrives, a little after the client stamped it.
+const CREATION_WINDOW_MARGIN_MS = 5_000;
 const FIXTURE_PROFILES = {
   images: { noteCount: 20, noteColumns: 5, stepXPx: 1100, stepYPx: 900, cpuSlowdown: 1,
     modes: ['fit', 'image', 'zoom'] },
@@ -78,8 +82,33 @@ const fixturePrefix = `pan-${Date.now()}`;
 let fixturePage;
 
 
-async function seedFixture(page) {
-  await page.evaluate(async ({ prefix, fixture, colorCount }) => {
+/**
+ * Splits items into chunks that each fit one Public creation window (2d698a1): at most
+ * PUBLIC_CREATIONS_PER_WINDOW creations and PUBLIC_IMAGES_PER_WINDOW images. An item that does not fit the open
+ * chunk is deferred to a later one, so the fewest windows are needed.
+ */
+function chunkForCreationWindow(items) {
+  const chunks = [];
+  let rest = items;
+  while (rest.length) {
+    const chunk = [];
+    let images = 0;
+    const deferred = [];
+    for (const item of rest) {
+      const isImage = item.type === 'image';
+      if (chunk.length < PUBLIC_CREATIONS_PER_WINDOW && images + Number(isImage) <= PUBLIC_IMAGES_PER_WINDOW) {
+        chunk.push(item);
+        images += Number(isImage);
+      } else deferred.push(item);
+    }
+    chunks.push(chunk);
+    rest = deferred;
+  }
+  return chunks;
+}
+
+async function uploadFixtureImage(page) {
+  return page.evaluate(async () => {
     const board = (await window.storage.get('boardState', true)).value;
     if (board.items.length) throw new Error('Pan check requires an empty dedicated Public board');
     const canvas = document.createElement('canvas');
@@ -89,20 +118,55 @@ async function seedFixture(page) {
     gradient.addColorStop(0, 'teal'); gradient.addColorStop(1, 'orange');
     context.fillStyle = gradient; context.fillRect(0, 0, canvas.width, canvas.height);
     const blob = await new Promise(resolveBlob => canvas.toBlob(resolveBlob, 'image/png'));
-    const src = await window.storage.uploadImage(blob);
-    const items = [
-      { id: `${prefix}-zone`, type: 'zone', x: 2960.375, y: 6340.625, w: 12440, h: 4640, title: 'Pan fixture', color: 0 },
-      { id: `${prefix}-overlap-zone`, type: 'zone', x: 3300.375, y: 7250.625, w: 1860.5, h: 2880.5, title: 'Image edge fixture', color: 1 },
-      { id: `${prefix}-image-a`, type: 'image', x: 4130.125, y: 8080.375, w: 700.5, h: 1230.25, src },
-      { id: `${prefix}-image-b`, type: 'image', x: 7000, y: 7500, w: 940, h: 1670, src },
-    ];
-    for (let index = 0; index < fixture.noteCount; index += 1) items.push({
-      id: `${prefix}-note-${index}`, type: 'sticky', text: `Performance note ${index}`, private: false,
-      x: 2500 + index % fixture.noteColumns * fixture.stepXPx, y: 5500 + Math.floor(index / fixture.noteColumns) * fixture.stepYPx,
-      w: 280, h: 240, color: index % colorCount,
-    });
-    if (!window.storage.addItems(items, { silent: true })) throw new Error('Pan fixture rejected');
-  }, { prefix: fixturePrefix, fixture, colorCount: FIXTURE_COLOR_COUNT });
+    return window.storage.uploadImage(blob);
+  });
+}
+
+function fixtureItems(prefix, src) {
+  const items = [
+    { id: `${prefix}-zone`, type: 'zone', x: 2960.375, y: 6340.625, w: 12440, h: 4640, title: 'Pan fixture', color: 0 },
+    { id: `${prefix}-overlap-zone`, type: 'zone', x: 3300.375, y: 7250.625, w: 1860.5, h: 2880.5, title: 'Image edge fixture', color: 1 },
+    { id: `${prefix}-image-a`, type: 'image', x: 4130.125, y: 8080.375, w: 700.5, h: 1230.25, src },
+    { id: `${prefix}-image-b`, type: 'image', x: 7000, y: 7500, w: 940, h: 1670, src },
+  ];
+  for (let index = 0; index < fixture.noteCount; index += 1) items.push({
+    id: `${prefix}-note-${index}`, type: 'sticky', text: `Performance note ${index}`, private: false,
+    x: 2500 + index % fixture.noteColumns * fixture.stepXPx, y: 5500 + Math.floor(index / fixture.noteColumns) * fixture.stepYPx,
+    w: 280, h: 240, color: index % FIXTURE_COLOR_COUNT,
+  });
+  return items;
+}
+
+async function addChunk(page, chunk) {
+  await page.evaluate(items => {
+    if (!window.storage.addItems(items, { silent: true })) throw new Error('Pan fixture chunk rejected');
+  }, chunk);
+  await page.waitForFunction(async ids => {
+    const board = (await window.storage.get('boardState', true)).value;
+    const present = new Set(board.items.map(item => item.id));
+    return ids.every(id => present.has(id));
+  }, chunk.map(item => item.id));
+}
+
+async function step(name, action) {
+  try {
+    await action();
+  } catch (error) {
+    console.log(`FAIL ${name}`);
+    throw error;
+  }
+  console.log(`PASS ${name}`);
+}
+
+async function seedFixture(page) {
+  const src = await uploadFixtureImage(page);
+  const chunks = chunkForCreationWindow(fixtureItems(fixturePrefix, src));
+  const started = Date.now();
+  for (const [index, chunk] of chunks.entries()) {
+    if (index) await page.waitForTimeout(PUBLIC_CREATION_WINDOW_MS + CREATION_WINDOW_MARGIN_MS);
+    await addChunk(page, chunk);
+  }
+  report.seed = { chunks: chunks.map(chunk => chunk.length), durationMs: Date.now() - started };
 }
 
 async function participant(viewport) {
@@ -413,19 +477,20 @@ try {
   }
   for (const viewport of fixture.mobileOnly ? VIEWPORTS.slice(1) : VIEWPORTS) {
     const page = await participant(viewport);
-    if (!fixturePage) { fixturePage = page; await seedFixture(page); }
+    if (!fixturePage) { fixturePage = page; await step('seed the fixture within the Public creation limit', () => seedFixture(page)); }
     await page.getByTitle('Fit to content', { exact: true }).click();
     await page.waitForFunction(() => [...document.querySelectorAll('.rb-no-select img')].some(image => image.complete && image.naturalWidth));
     for (const mode of fixture.modes) {
-      if (mode === 'zoom-sweep') await measureZoomSweep(page, viewport);
-      else if (mode === 'pinch') await measurePinch(page, viewport);
-      else await measure(page, viewport, mode);
+      await step(`${viewport.width}px ${mode}`, () => {
+        if (mode === 'zoom-sweep') return measureZoomSweep(page, viewport);
+        return mode === 'pinch' ? measurePinch(page, viewport) : measure(page, viewport, mode);
+      });
     }
     await page.waitForTimeout(SETTLE_MS);
     await page.screenshot({ path: join(output, `public-${viewport.width}.png`) });
-    if (fixture.gpu && viewport.width === VIEWPORTS[0].width) await checkRasterInteraction(page);
+    if (fixture.gpu && viewport.width === VIEWPORTS[0].width) await step('raster interaction', () => checkRasterInteraction(page));
   }
-  assert.deepEqual(report.errors, []);
+  await step('no page errors', async () => assert.deepEqual(report.errors, []));
 } finally {
   try {
     if (fixturePage) await fixturePage.evaluate(async prefix => {
