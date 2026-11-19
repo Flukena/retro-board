@@ -312,6 +312,48 @@ export async function visibleBox(page, selector) {
   return locator.boundingBox();
 }
 
+// Intermediate mouse events per drag, so the board's drag handlers see a gesture rather than a jump.
+export const DRAG_STEPS = 12;
+const STICKY_SELECTOR = '[data-sticky-id]';
+
+/** The board's canonical items, read through `window.storage` like the app's own sync; throws off a board. */
+export async function boardItems(page) {
+  return page.evaluate(async () => {
+    const record = await window.storage.get('boardState', true);
+    if (!record?.value) throw new Error('window.storage has no boardState; open a board first.');
+    return record.value.items;
+  });
+}
+
+export const itemById = (items, id) => items.find((item) => item.id === id);
+
+export const boxCenter = (box) => ({ x: box.x + box.width / 2, y: box.y + box.height / 2 });
+
+export const withinPx = (actual, expected, tolerancePx) => Math.abs(actual - expected) <= tolerancePx;
+
+/** The page box of the sticky whose element contains `text`; throws when no such sticky is shown. */
+export async function stickyBox(page, text) {
+  const box = await page.locator(STICKY_SELECTOR).filter({ hasText: text }).first().boundingBox();
+  if (!box) throw new Error(`no sticky containing "${text}" is shown`);
+  return box;
+}
+
+/**
+ * Presses at `from` and moves by `by` in `steps` mouse events. The button is released in `finally`, so a failed step
+ * never leaves a stuck drag; with `hold` it stays down after a completed move and the caller must `page.mouse.up()`.
+ */
+export async function dragBy(page, from, by, { steps = DRAG_STEPS, hold = false } = {}) {
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  let moved = false;
+  try {
+    await page.mouse.move(from.x + by.x, from.y + by.y, { steps });
+    moved = true;
+  } finally {
+    if (!hold || !moved) await page.mouse.up();
+  }
+}
+
 /** A (English, board creator) and B (Thai) on one new board. */
 async function sharedBoard(browser, baseUrl, report) {
   const a = await participant(browser, 'en', report, 'A');

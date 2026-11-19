@@ -1,0 +1,327 @@
+{
+  "entries": [
+    {
+      "id": "ui",
+      "script": "scripts/ui-live-check.mjs",
+      "args": [
+        "--base-url",
+        "{base}",
+        "--out",
+        "{out}"
+      ],
+      "stack": "plain",
+      "viteHost": "127.0.0.1",
+      "ports": {},
+      "publicRelay": false,
+      "maintainer": false,
+      "relayEnv": {},
+      "checkEnv": {},
+      "timeoutSec": 900,
+      "baseline": "unrun"
+    },
+    {
+      "id": "facilitation",
+      "script": "scripts/facilitation-live-check.mjs",
+      "args": [
+        "{base}",
+        "{out}"
+      ],
+      "stack": "plain",
+      "viteHost": "127.0.0.1",
+      "ports": {},
+      "publicRelay": false,
+      "maintainer": false,
+      "relayEnv": {},
+      "checkEnv": {},
+      "timeoutSec": 900,
+      "baseline": "unrun"
+    },
+    {
+      "id": "retro-outcomes",
+      "script": "scripts/retro-outcomes-live-check.mjs",
+      "args": [
+        "{base}",
+        "{out}"
+      ],
+      "stack": "plain",
+      "viteHost": "127.0.0.1",
+      "ports": {},
+      "publicRelay": false,
+      "maintainer": false,
+      "relayEnv": {},
+      "checkEnv": {},
+      "timeoutSec": 900,
+      "baseline": "unrun"
+    },
+    {
+      "id": "board-reactions",
+      "script": "scripts/board-reactions-live-check.mjs",
+      "args": [
+        "{base}",
+        "{out}",
+        "plain"
+      ],
+      "stack": "plain",
+      "viteHost": "localhost",
+      "ports": {},
+      "publicRelay": false,
+      "maintainer": false,
+      "relayEnv": {},
+      "checkEnv": {},
+      "timeoutSec": 900,
+      "baseline": "unrun"
+    },
+    {
+      "id": "writing-timer",
+      "script": "scripts/writing-timer-live-check.mjs",
+      "args": [
+        "{base}",
+        "{out}",
+        "plain"
+      ],
+      "stack": "plain",
+      "viteHost": "localhost",
+      "ports": {},
+      "publicRelay": false,
+      "maintainer": false,
+      "relayEnv": {},
+      "checkEnv": {},
+      "timeoutSec": 900,
+      "baseline": "unrun"
+    },
+    {
+      "id": "poker",
+      "script": "scripts/poker-live-check.mjs",
+      "args": [
+        "{base}",
+        "{out}"
+      ],
+      "stack": "plain",
+      "viteHost": "127.0.0.1",
+      "ports": {},
+      "publicRelay": false,
+      "maintainer": false,
+      "relayEnv": {},
+      "checkEnv": {},
+      "timeoutSec": 900,
+      "baseline": "unrun"
+    },
+    {
+      "id": "landing",
+      "script": "scripts/landing-live-check.mjs",
+      "args": [
+        "{base}",
+        "{out}",
+        "chromium"
+      ],
+      "stack": "plain",
+      "viteHost": "127.0.0.1",
+      "ports": {},
+      "publicRelay": false,
+      "maintainer": false,
+      "relayEnv": {},
+      "checkEnv": {},
+      "timeoutSec": 900,
+      "baseline": "unrun"
+    },
+    {
+      "id": "modal",
+      "script": "scripts/modal-live-check.mjs",
+      "args": [
+        "{base}",
+        "{out}",
+        "chromium"
+      ],
+      "stack": "plain",
+      "viteHost": "127.0.0.1",
+      "ports": {},
+      "publicRelay": false,
+      "maintainer": false,
+      "relayEnv": {},
+      "checkEnv": {},
+      "timeoutSec": 900,
+      "baseline": "unrun"
+    },
+    {
+      "id": "mobile",
+      "script": "scripts/mobile-live-check.mjs",
+      "args": [
+        "{base}",
+        "{out}",
+        "chromium",
+        "all"
+      ],
+      "stack": "plain",
+      "viteHost": "127.0.0.1",
+      "ports": {},
+      "publicRelay": true,
+      "maintainer": false,
+      "relayEnv": {},
+      "checkEnv": {},
+      "timeoutSec": 900,
+      "baseline": "unrun"
+    },
+    {
+      "id": "spacing",
+      "script": "scripts/spacing-live-check.mjs",
+      "args": [
+        "{base}",
+        "{out}",
+        "chromium",
+        "check"
+      ],
+      "stack": "plain",
+      "viteHost": "127.0.0.1",
+      "ports": {},
+      "publicRelay": true,
+      "maintainer": false,
+      "relayEnv": {},
+      "checkEnv": {},
+      "timeoutSec": 900,
+      "baseline": "unrun"
+    },
+    {
+      "id": "pan",
+      "script": "scripts/pan-live-check.mjs",
+      "args": [
+        "{base}",
+        "{out}",
+        "chromium",
+        "images"
+      ],
+      "stack": "plain",
+      "viteHost": "127.0.0.1",
+      "ports": {
+        "vite": 5188
+      },
+      "publicRelay": true,
+      "maintainer": false,
+      "relayEnv": {},
+      "checkEnv": {},
+      "timeoutSec": 900,
+      "baseline": "unrun"
+    },
+    {
+      "id": "public-tools",
+      "script": "scripts/public-tools-live-check.mjs",
+      "args": [
+        "{base}",
+        "{out}",
+        "chromium"
+      ],
+      "stack": "plain",
+      "viteHost": "127.0.0.1",
+      "ports": {
+        "vite": 5187
+      },
+      "publicRelay": true,
+      "maintainer": false,
+      "relayEnv": {},
+      "checkEnv": {},
+      "timeoutSec": 900,
+      "baseline": "unrun"
+    },
+    {
+      "id": "room-lock",
+      "script": "scripts/room-lock-live-check.mjs",
+      "args": [
+        "{base}",
+        "{out}"
+      ],
+      "stack": "oidc",
+      "viteHost": "localhost",
+      "ports": {},
+      "publicRelay": false,
+      "maintainer": false,
+      "relayEnv": {
+        "YJS_ROOM_SESSION_TTL_SECONDS": "60"
+      },
+      "checkEnv": {},
+      "timeoutSec": 900,
+      "baseline": "unrun"
+    },
+    {
+      "id": "account",
+      "script": "scripts/account-live-check.mjs",
+      "args": [
+        "{base}",
+        "{out}"
+      ],
+      "stack": "oidc",
+      "viteHost": "localhost",
+      "ports": {},
+      "publicRelay": false,
+      "maintainer": true,
+      "relayEnv": {},
+      "checkEnv": {},
+      "timeoutSec": 900,
+      "baseline": "unrun"
+    },
+    {
+      "id": "room-management",
+      "script": "scripts/room-management-live-check.mjs",
+      "args": [
+        "{base}",
+        "{out}"
+      ],
+      "stack": "oidc",
+      "viteHost": "localhost",
+      "ports": {},
+      "publicRelay": true,
+      "maintainer": false,
+      "relayEnv": {
+        "YJS_COLD_ROOM_OPEN_IP_BURST": "100",
+        "YJS_COLD_ROOM_OPENS_PER_IP_PER_MINUTE": "1000",
+        "YJS_COLD_ROOM_OPEN_ROOM_BURST": "100",
+        "YJS_COLD_ROOM_OPENS_PER_ROOM_PER_MINUTE": "1000",
+        "YJS_GUEST_ROOM_RETENTION_MS": "20000",
+        "YJS_GUEST_SWEEP_INTERVAL_MS": "1000"
+      },
+      "checkEnv": {
+        "FAKE_OIDC_PORT": "{oidcPort}",
+        "YJS_GUEST_ROOM_RETENTION_MS": "20000"
+      },
+      "oidcInCheck": true,
+      "timeoutSec": 900,
+      "baseline": "unrun"
+    },
+    {
+      "id": "board-reactions-locked",
+      "script": "scripts/board-reactions-live-check.mjs",
+      "args": [
+        "{base}",
+        "{out}",
+        "locked"
+      ],
+      "stack": "oidc",
+      "viteHost": "localhost",
+      "ports": {},
+      "publicRelay": false,
+      "maintainer": false,
+      "relayEnv": {
+        "YJS_ROOM_SESSION_TTL_SECONDS": "60"
+      },
+      "checkEnv": {},
+      "timeoutSec": 900,
+      "baseline": "unrun"
+    },
+    {
+      "id": "writing-timer-locked",
+      "script": "scripts/writing-timer-live-check.mjs",
+      "args": [
+        "{base}",
+        "{out}",
+        "locked"
+      ],
+      "stack": "oidc",
+      "viteHost": "localhost",
+      "ports": {},
+      "publicRelay": false,
+      "maintainer": false,
+      "relayEnv": {},
+      "checkEnv": {},
+      "timeoutSec": 900,
+      "baseline": "unrun"
+    }
+  ]
+}
