@@ -81,7 +81,7 @@ test('top bar preserves undo, admin, claim and follow contracts', async (context
       );
     });
     // Source-scan owners: TopBar.jsx, TopBarPopovers.jsx, Avatar.jsx.
-    // R8 (use-topbar-props) must preserve this presentational boundary and update owners.
+    // use-topbar-props.js owns board-derived props; these three views stay presentational.
     for (const file of ['./TopBar.jsx', './TopBarPopovers.jsx', '../ui/Avatar.jsx']) {
       const source = readFileSync(new URL(file, import.meta.url), 'utf8');
       for (const signature of source.matchAll(/function \w+\(\{([^}]+)\}/g)) {

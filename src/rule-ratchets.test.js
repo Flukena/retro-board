@@ -5,7 +5,7 @@ import { filesUnder, productionSources } from '../scripts/project-files.mjs';
 
 const REPO_ROOT = new URL('../', import.meta.url);
 // AGENTS.md: frozen in size. These line ceilings may only be lowered, never raised.
-const RETRO_BOARD_MAX_LINES = 3636;
+const RETRO_BOARD_MAX_LINES = 3592;
 const YJS_SERVER_MAX_LINES = 441;
 const STORAGE_BRIDGE_MAX_LINES = 295;
 const I18N_MAX_LINES = 92;

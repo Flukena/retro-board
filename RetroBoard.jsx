@@ -1,3 +1,4 @@
+import { useTopBarProps } from './src/client/chrome/use-topbar-props.js';
 import { ZonePreview, EmptyCanvasHint, MarqueeSelection } from './src/client/board/CanvasOverlays.jsx';
 import { RemoteCollaborationLabels } from './src/client/board/RemoteCollaborationLabels.jsx';
 import { useBrowserZoomGuard } from './src/client/board/use-browser-zoom-guard.js';
@@ -69,10 +70,10 @@ import { zoneEffectiveRevealed, zoneGroupIds, nestedZoneCount } from './src/doma
 import { useZoneHeaderActions } from './src/client/board/useZoneHeaderActions.js';
 import { Toast } from './src/client/ui/Toast.jsx';
 import { TopBar } from './src/client/chrome/TopBar.jsx';
-import { adminPillModel, playerRows, shareLinkModel } from './src/client/chrome/topbar-model.js';
+import { shareLinkModel } from './src/client/chrome/topbar-model.js';
 import { hueFromId, playerAccentColor } from './src/client/board/player-colors.js';
 import { t, useLang } from './src/client/ui/i18n.js';
-import { useTheme, nextThemePref } from './src/client/ui/theme.js';
+import { useTheme } from './src/client/ui/theme.js';
 import { PALETTE } from './src/client/ui/palette.js';
 import { BoardCanvasStyles } from './src/client/board/BoardCanvasStyles.jsx';
 import { stickyCreationSize } from './src/client/board/sticky-font.js';
@@ -3241,59 +3242,14 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
       setToast({ msg: t('topbar.shareLink', { code: share.manualCode }), type: 'info', sticky: true });
     }
   };
-  const topbarAdminAction = (action) => {
-    if (!isAdmin) { setToast({ msg: t('common.adminOnly'), type: 'warn' }); return; }
-    action();
-  };
-  const renderTopBar = () => (
-    <TopBar mode={mode}
-      code={boardCode}
-      title={board.title}
-      canUndo={undoState.canUndo}
-      canRedo={undoState.canRedo}
-      editingLocked={board.editingLocked}
-      isAdmin={isAdmin}
-      canClaim={canClaim}
-      admin={adminPillModel({
-        adminUserId: board.adminUserId,
-        adminName: board.adminName,
-        presence,
-        onlineUsers,
-        fallbackName: t('common.admin'),
-      })}
-      players={playerRows({
-        onlineUsers,
-        userId,
-        adminUserId: board.adminUserId,
-        followedUserId,
-        votesUsedByUser,
-        limit: activeZoneVoteLimit,
-      })}
-      userId={userId}
-      userName={userName}
-      themePref={themePref}
-      presenter={presenter} phase={retroPhase} mood={mood}
-      exports={{ ...boardExports, onActionItems: actionItems.show, openActionCount: actionItems.openCount }}
-      scrollWheelZoomEnabled={scrollWheelZoomEnabled}
-      onHome={() => { window.location.href = '/'; }}
-      onCopyLink={copyRoomLink}
-      onUndo={doUndo}
-      onRedo={doRedo}
-      onToggleEditingLock={() => adminToggle('editingLocked')}
-      onClaimAdmin={adminClaim}
-      onEditName={() => { setNameDraft(userName); setNameModalOpen(true); }}
-      onToggleTheme={() => setThemePref(nextThemePref(themePref))}
-      onToggleScrollWheelZoom={toggleScrollWheelZoom}
-      onImport={onImportPick}
-      onHelp={() => setHelpOpen(true)}
-      onUnlockAll={() => topbarAdminAction(() => setConfirmUnlockAll(true))}
-      onResetVotes={() => topbarAdminAction(() => setConfirmResetVotes(true))}
-      onClear={() => topbarAdminAction(() => setConfirmClear(true))}
-      onTransferAdmin={(targetUserId) => requirePrivateAdminPin(() => adminTransfer(targetUserId))}
-      onFollow={startFollowing}
-      onStopFollowing={stopFollowing}
-    />
-  );
+  const topbarProps = useTopBarProps({
+    boardState: { board, undoState },
+    session: { mode, boardCode, isAdmin, canClaim, userId, userName },
+    collaboration: { presence, onlineUsers, followedUserId, votesUsedByUser, activeZoneVoteLimit },
+    appearance: { themePref, setThemePref, scrollWheelZoomEnabled, toggleScrollWheelZoom },
+    workflow: { presenter, retroPhase, mood, boardExports, actionItems },
+    actions: { setToast, copyRoomLink, doUndo, doRedo, adminToggle, adminClaim, setNameDraft, setNameModalOpen, onImportPick, setHelpOpen, setConfirmUnlockAll, setConfirmResetVotes, setConfirmClear, requirePrivateAdminPin, adminTransfer, startFollowing, stopFollowing },
+  });
 
   const renderMinimap = () => (
     <MinimapPanel
@@ -3495,7 +3451,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
       {/* Floating UI */}
       <input ref={fileInputRef} type="file" accept="application/zip,.zip,application/json,.json,text/csv,.csv"
         onChange={onImportFileChange} style={{ display: 'none' }} />
-      {renderTopBar()}
+      <TopBar {...topbarProps} />
       <TopCenterStack
         board={board} userId={userId} roomHandle={window.storage.getRoomHandle?.()} now={now}
         follow={stackFollow} presenter={stackPresenter} phase={stackPhase} mood={stackMood}
