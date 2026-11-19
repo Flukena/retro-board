@@ -1,3 +1,4 @@
+import BoardLoading from './src/client/app/BoardLoading.jsx';
 import { FOLLOW_VIEWPORT_COMMIT_MS } from './src/client/board/follow-timing.js';
 import { CURSOR_BROADCAST_MS } from './src/client/board/cursor-timing.js';
 import { MINIMAP_IDLE_MS } from './src/client/board/minimap-timing.js';
@@ -3559,18 +3560,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
      Render
      ============================================================ */
 
-  if (!loaded) {
-    return (
-      <div style={{
-        position: 'fixed', inset: 0, display: 'flex',
-        alignItems: 'center', justifyContent: 'center',
-        background: 'var(--bg)', color: 'var(--text-muted)',
-        fontFamily: 'var(--font-ui)',
-      }}
-      >{t('loading') || 'Loading…'}
-      </div>
-    );
-  }
+  if (!loaded) return <BoardLoading />;
 
   return (
     <div
