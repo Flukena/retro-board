@@ -1,3 +1,4 @@
+import { RemoteCollaborationLabels } from './src/client/board/RemoteCollaborationLabels.jsx';
 import { useBrowserZoomGuard } from './src/client/board/use-browser-zoom-guard.js';
 import { resizeGeometry } from './src/domain/resize-geometry.js';
 import { routeBoardKey } from './src/client/board/board-key-router.js';
@@ -108,7 +109,7 @@ import {
   visiblePlayerCursors,
 } from './src/client/session/player-cursors.js';
 import { summarizeRemoteEditors, summarizeRemoteSelectors } from './src/client/session/editing-presence.js';
-import { remoteSelectionLabels, selectionLabelMessage } from './src/client/board/selection-labels.js';
+import { remoteSelectionLabels } from './src/client/board/selection-labels.js';
 import { copyTextToClipboard } from './src/client/transfer/clipboard.js';
 import { MinimapPanel } from './src/client/board/MinimapPanel.jsx';
 import { zoomViewportAt, fitViewportToItems } from './src/domain/viewport-framing.js';
@@ -116,7 +117,6 @@ import { ZOOM_STEP_FACTOR, wheelZoomFactor, viewportNeedsCullRefresh } from './s
 import { selectionLayerAttributes } from './src/client/board/selection-overlay.js';
 import { paintViewport } from './src/client/board/viewport-renderer.js';
 import { visibleBoardItems, preloadsOverview, detailedStickyIds, usesCompactStickyPaint } from './src/domain/board-render-visibility.js';
-import { remoteEditingFrameStyle } from './src/client/board/editing-presence-look.js';
 import { BoardRasterLayer } from './src/client/board/BoardRasterLayer.jsx';
 import { useSettledViewport } from './src/client/board/use-settled-viewport.js';
 import { useProgressiveStickyDetails } from './src/client/board/use-progressive-sticky-details.js';
@@ -3429,86 +3429,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
           {renderedItems}
           <LiveDrawingPreviews />
 
-          {/* Remote card selection label. The glow itself is applied directly
-              to each selected card instead of drawing a second card-sized
-              layer over it. */}
-          {selectionLabels.map((group) => {
-            const zoom = Math.max(viewport.zoom, 0.01);
-            const color = playerAccentColor(hueFromId(group.selector.userId));
-            const label = t(...selectionLabelMessage(group));
-            return (
-              <React.Fragment key={`selection:${group.key}`}>
-                <div
-                  role="status"
-                  aria-label={label}
-                  style={{
-                    position: 'absolute', left: group.x,
-                    top: group.y - (34 / zoom),
-                    transform: `scale(${1 / zoom})`, transformOrigin: 'top left',
-                    display: 'inline-flex', alignItems: 'center', gap: 7,
-                    maxWidth: 240, padding: '5px 9px 5px 7px',
-                    borderRadius: 'var(--radius-pill)', background: color, color: 'var(--collaboration-foreground)',
-                    boxShadow: 'var(--shadow-remote-selection-label)',
-                    fontFamily: 'var(--font-ui)',
-                    fontSize: 13, lineHeight: 1.2, fontWeight: 700,
-                    whiteSpace: 'nowrap', pointerEvents: 'none',
-                    zIndex: Z.REMOTE_SELECTION_LABEL,
-                  }}
-                >
-                  <MousePointer2 size={13} style={{ flex: '0 0 auto' }} />
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
-                </div>
-              </React.Fragment>
-            );
-          })}
-
-          {/* Collaboration editing presence. Kept outside each card so the
-              badge is never clipped by card paint-containment, and counter-
-              scaled so names stay readable at every board zoom level. */}
-          {editingIndicators.map(({ item, editor }) => {
-            const zoom = Math.max(viewport.zoom, 0.01);
-            const height = sizeForResize(item).h;
-            const editorHue = hueFromId(editor.userId);
-            const color = playerAccentColor(editorHue);
-            const glow = playerAccentColor(editorHue, 0.18);
-            const label = editor.extraCount > 0
-              ? t('editing.byMany', { name: editor.name, n: editor.extraCount })
-              : t('editing.by', { name: editor.name });
-            return (
-              <React.Fragment key={`editing:${item.id}`}>
-                <div
-                  aria-hidden="true"
-                  style={remoteEditingFrameStyle(item, { zoom, color, glow })}
-                />
-                <div
-                  role="status"
-                  aria-label={label}
-                  style={{
-                    position: 'absolute', left: item.x,
-                    top: item.y + height + (8 / zoom),
-                    transform: `scale(${1 / zoom})`, transformOrigin: 'top left',
-                    display: 'inline-flex', alignItems: 'center', gap: 7,
-                    maxWidth: 240, padding: '5px 9px 5px 7px',
-                    borderRadius: 'var(--radius-pill)', background: color, color: 'var(--collaboration-foreground)',
-                    boxShadow: 'var(--shadow-remote-editor-label)',
-                    fontFamily: 'var(--font-ui)',
-                    fontSize: 13, lineHeight: 1.2, fontWeight: 700,
-                    whiteSpace: 'nowrap', pointerEvents: 'none',
-                    zIndex: Z.REMOTE_EDITOR_LABEL,
-                  }}
-                >
-                  <span
-                    className="rb-editing-dot"
-                    style={{
-                      width: 7, height: 7, borderRadius: 'var(--radius-round)',
-                      background: 'var(--collaboration-foreground)', flex: '0 0 auto',
-                    }}
-                  />
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
-                </div>
-              </React.Fragment>
-            );
-          })}
+          <RemoteCollaborationLabels selectionLabels={selectionLabels} editingIndicators={editingIndicators} viewport={viewport} />
 
           {/* Zone-creation preview */}
           {zonePreview && (
