@@ -1,3 +1,4 @@
+import { useEditingPresenceState, useEditingPresence, createLocalEditingPresence } from './src/client/session/use-editing-presence.js';
 import { BoardDialogs } from './src/client/ui/BoardDialogs.jsx';
 import { useTopBarProps } from './src/client/chrome/use-topbar-props.js';
 import { ZonePreview, EmptyCanvasHint, MarqueeSelection } from './src/client/board/CanvasOverlays.jsx';
@@ -217,8 +218,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
 
   /* ---------- Presence (shared map) ---------- */
   const [presence, setPresence] = useState({});
-  const [remoteEditingItems, setRemoteEditingItems] = useState(() => storage.getRemoteEditingItems());
-  const [remoteSelectedItems, setRemoteSelectedItems] = useState(() => storage.getRemoteSelectedItems());
+  const { remoteEditingItems, setRemoteEditingItems, remoteSelectedItems, setRemoteSelectedItems } = useEditingPresenceState(storage);
+  const localEditingPresence = createLocalEditingPresence(storage);
 
   /* ---------- UI state ---------- */
   const [selectedIds, setSelectedIds] = useState(() => new Set());
@@ -332,8 +333,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     activeGeometryFinalizerRef.current?.();
     activeViewportFinalizerRef.current?.();
     storage.setLocalBusyItems('geometry', []);
-    storage.setLocalBusyItems('text', []);
-    storage.setLocalSelectedItems([]);
+    localEditingPresence.dispose();
     if (cursorBroadcastTimerRef.current != null) clearTimeout(cursorBroadcastTimerRef.current);
     if (viewBroadcastTimerRef.current != null) clearTimeout(viewBroadcastTimerRef.current);
     if (followViewportCommitRef.current != null) clearTimeout(followViewportCommitRef.current);
@@ -385,36 +385,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
 
   const selectionLabels = useMemo(() => remoteSelectionLabels(board.items, remoteSelectorsByItem), [board.items, remoteSelectorsByItem]);
 
-  useEffect(() => {
-    if (!loaded) return undefined;
-    const refresh = (event) => {
-      const next = event?.detail instanceof Map
-        ? event.detail
-        : storage.getRemoteEditingItems();
-      setRemoteEditingItems(new Map(next));
-    };
-    refresh();
-    const unsubscribe = storage.onEditingChange(refresh);
-    return () => unsubscribe?.();
-  }, [loaded]);
-
-  useEffect(() => {
-    if (!loaded) return undefined;
-    const refresh = (event) => {
-      const next = event?.detail instanceof Map
-        ? event.detail
-        : storage.getRemoteSelectedItems();
-      setRemoteSelectedItems(new Map(next));
-    };
-    refresh();
-    const unsubscribe = storage.onSelectionChange(refresh);
-    return () => unsubscribe?.();
-  }, [loaded]);
-
-  useEffect(() => {
-    if (!loaded) return;
-    storage.setLocalSelectedItems(selectedIds);
-  }, [loaded, selectedIds]);
+  useEditingPresence({ loaded, storage, selectedIds, setRemoteEditingItems, setRemoteSelectedItems });
 
   const sortedItems = useMemo(() => {
     return board.items
