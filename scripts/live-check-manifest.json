@@ -160,7 +160,7 @@
       "checkEnv": {},
       "timeoutSec": 900,
       "baseline": "known-red",
-      "reason": "NEEDS_CONTEXT (owner): after the repairs for e1f7f51 (click-to-place Text, swatch/size Draw controls, hidden mobile zoom) and a7505a9 (no Edit/Done buttons), the Draw toolbar at 360px puts its Close button at right=397 > 360 (e1f7f51 two-row layout, drawing-tool.css:27-30), so 'Drawing toolbar/control must fit width' fails; the steps after it have not run",
+      "reason": "T2b-CLOSE app fix pending on branch fix/mobile-draw-toolbar-fit: at 360px the Draw toolbar's Close button sits at right=397 > 360 (e1f7f51 two-row layout, drawing-tool.css:27-30), so 'Drawing toolbar/control must fit inside its frame' fails in checkDrawingBounds; the options row (scrolls by design) and its 34px floor already pass. Steps after it have not run",
       "failingStep": "private: freehand draft/history/pinch/save/transparent PNG/sync/cancel"
     },
     {

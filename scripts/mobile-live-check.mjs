@@ -59,6 +59,10 @@ const DRAWING_RED = '#dc2626';
 const DRAWING_MIN_INK_PIXELS = 20;
 const DRAWING_STROKE_WIDTH_PX = 8;
 const DRAWING_SHAPE_WIDTH_PX = 4;
+// Longer than tap-to-edit's 500 ms tap window (tap-to-edit.js) plus a React commit, so a late editor would be seen.
+const EDITOR_ABSENCE_WINDOW_MS = 1_000;
+const PINCH_RESTORE_ZOOM_TOLERANCE = 0.02;
+const DRAWING_MOBILE_OPTION_MIN_PX = 34; // --draw-mobile-option-size (theme.js:98), T2b-TOUCH
 const ORDINARY_IMAGE_MAX_WORLD_PX = 480;
 const PREVIEW_IMAGE_WIDTH_PX = 1200;
 const PREVIEW_IMAGE_HEIGHT_PX = 720;
@@ -617,6 +621,13 @@ async function checkTemplates(mobile, desktop, mode) {
     await eventually(async () => JSON.stringify(await zoneSnapshot(user)) === JSON.stringify(originalZones));
   }
 }
+async function assertAbsentThroughout(locator, message) {
+  const deadline = Date.now() + EDITOR_ABSENCE_WINDOW_MS;
+  do {
+    assert.equal(await locator.count(), 0, message);
+    await new Promise(resolve => setTimeout(resolve, RETRY_INTERVAL_MS));
+  } while (Date.now() < deadline);
+}
 async function checkHiddenCard(mobile, desktop, text) {
   await addDesktopCard(desktop, text, false);
   const hidden = mobile.page.locator('.rb-sticky').filter({ has: mobile.page.locator('.rb-sticky__hidden-title') });
@@ -628,10 +639,10 @@ async function checkHiddenCard(mobile, desktop, text) {
   await eventually(async () => await targetUsable(mobile, await locatorBounds(hidden)),
     'Hidden fixture must be reachable before selection');
   await hidden.tap();
-  assert.equal(await mobile.page.getByText(text, { exact: true }).count(), 0, 'Hidden text must not render');
+  await assertAbsentThroughout(mobile.page.getByText(text, { exact: true }), 'Hidden text must not render');
   // a7505a9 replaced the Edit button with a second tap: it must not open the editor on another user's hidden card.
   await hidden.tap();
-  assert.equal(await mobile.page.locator('.rb-mobile-editor__input').count(), 0, 'Other-user hidden card must not open the editor');
+  await assertAbsentThroughout(mobile.page.locator('.rb-mobile-editor__input'), 'Other-user hidden card must not open the editor');
   await cleanup(desktop, text);
   await hidden.waitFor({ state: 'hidden' });
 }
@@ -1174,14 +1185,36 @@ async function drawStroke(user) {
   await send('touchEnd', []);
   await settleDrawingPaint(user);
 }
+const boxOf = locator => locator.evaluate(node => node.getBoundingClientRect().toJSON());
+function assertInside(box, frame, label) {
+  assert.ok(box.left >= frame.left - EDGE_TOLERANCE_PX && box.right <= frame.right + EDGE_TOLERANCE_PX
+    && box.top >= frame.top - EDGE_TOLERANCE_PX && box.bottom <= frame.bottom + EDGE_TOLERANCE_PX, `${label} must fit inside its frame`);
+}
+// e1f7f51: the mobile options row (sizes and colours) scrolls sideways (drawing-tool.css:31), so every option must
+// be reachable and, once scrolled into view, sit fully inside the row's scrollport at its own touch floor.
+async function checkMobileOptionsRow(user) {
+  const row = drawingToolbar(user).locator('.rb-drawing-options');
+  assert.equal(await row.evaluate(node => getComputedStyle(node).overflowX), 'auto', 'The Draw options row must scroll horizontally');
+  const options = row.locator('button');
+  for (let index = 0; index < await options.count(); index++) {
+    await options.nth(index).scrollIntoViewIfNeeded();
+    const box = await boxOf(options.nth(index));
+    assertInside(box, await boxOf(row), `Draw option ${index} after scrolling into view`);
+    assert.ok(Math.min(box.width, box.height) >= DRAWING_MOBILE_OPTION_MIN_PX, `Draw option ${index} must be at least ${DRAWING_MOBILE_OPTION_MIN_PX}px: ${box.width}x${box.height}`);
+  }
+}
 async function checkDrawingBounds(user) {
   await drawingToolbar(user).evaluate(element => Promise.allSettled(element.getAnimations().map(animation => animation.finished)));
   for (const width of user.mobile ? [360, 390] : [1440]) {
     const size = user.mobile ? { ...MOBILE_VIEWPORT, width } : DESKTOP_VIEWPORT;
     await user.page.setViewportSize(size);
-    const boxes = await drawingToolbar(user).evaluate(element => [element, ...element.querySelectorAll('button')].map(node => node.getBoundingClientRect().toJSON()));
+    const frame = { left: 0, top: 0, right: size.width, bottom: size.height };
+    const controls = user.mobile ? drawingToolbar(user).locator('.rb-drawing-tools button, .rb-drawing-actions button')
+      : drawingToolbar(user).locator('button');
+    const boxes = [await boxOf(drawingToolbar(user)), ...await controls.evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().toJSON()))];
     report.measurements.push({ mode: 'drawing-toolbar', mobile: user.mobile, lang: user.lang, viewport: size, boxes });
-    for (const box of boxes) assertWithinViewport(box, size, 'Drawing toolbar/control');
+    if (user.mobile) await checkMobileOptionsRow(user);
+    for (const box of boxes) assertInside(box, frame, 'Drawing toolbar/control');
     if (user.mobile) for (const box of boxes.slice(1)) assert.ok(box.height >= TOUCH_TARGET_MIN_PX, `Drawing controls must be touch sized: ${box.height}px`);
     await user.page.screenshot({ path: join(output, `draw-${user.lang}-${width}.png`) });
   }
@@ -1208,7 +1241,13 @@ async function checkDrawingPinch(user) {
   await send('touchMove', [{ id: 1, x: 130, y: 550 }, { id: 2, x: 280, y: 550 }]);
   await send('touchEnd', []);
   assert.ok((await viewport(user)).zoom > before.zoom, 'Two fingers must zoom the live board');
-  // e1f7f51 hides the mobile zoom controls while drawing, so the draft must survive the pinch itself.
+  // e1f7f51 hides the mobile zoom controls while drawing: the pinch back (same centre, reversed fingers) is the control
+  // that restores the starting zoom for the shape and save steps.
+  await send('touchStart', [{ id: 1, x: 130, y: 550 }]);
+  await send('touchStart', [{ id: 1, x: 130, y: 550 }, { id: 2, x: 280, y: 550 }]);
+  await send('touchMove', [{ id: 1, x: 150, y: 550 }, { id: 2, x: 250, y: 550 }]);
+  await send('touchEnd', []);
+  assert.ok(Math.abs((await viewport(user)).zoom - before.zoom) <= PINCH_RESTORE_ZOOM_TOLERANCE, 'Pinching back must restore the starting zoom');
   await eventually(async () => await drawingInk(user) > DRAWING_MIN_INK_PIXELS, 'Pinch zoom repaints the retained draft');
   await activate(user, drawingToolbar(user).getByRole('button', { name: drawingWord(user, 'topbar.undo'), exact: true }));
   await eventually(async () => await drawingInk(user) === 0, 'Pinch must not leave an extra stroke after one Undo');
@@ -1613,12 +1652,12 @@ async function checkRoom(mode) {
   await step(`${mode}: freehand draft/history/pinch/save/transparent PNG/sync/cancel`, () => roomMode === 'realtime' ? checkRealtimeDrawing(mobile, desktop, mode) : checkDrawing(mobile, desktop, mode));
   const textA = `mobile-${mode}-${Date.now()}`;
   const textB = `desktop-${mode}-${Date.now()}`;
-  await step(`${mode}: mobile create/Done/sync`, async () => { await addMobileCard(mobile, textA, mode === 'private'); await showText(desktop, textA); });
+  await step(`${mode}: mobile create/tap-away/sync`, async () => { await addMobileCard(mobile, textA, mode === 'private'); await showText(desktop, textA); });
   await step(`${mode}: touch drag`, () => checkDrag(mobile, desktop, textA));
   await step(`${mode}: touch resize/header Undo/Redo/sync`, () => checkResize(mobile, desktop, textA));
   await step(`${mode}: single selection stays attached during live pan/zoom`, () => checkSelectionFollowsViewport(mobile, textA));
   await step(`${mode}: anchored pinch/native buttons`, () => checkPinch(mobile));
-  await step(`${mode}: inline Edit/simulated keyboard/Done/sync`, () => checkEditing(mobile, desktop, textA, mode));
+  await step(`${mode}: second-tap edit/simulated keyboard/tap-away/sync`, () => checkEditing(mobile, desktop, textA, mode));
   await step(`${mode}: desktop create/sync`, async () => { await addDesktopCard(desktop, textB, mode === 'private'); await showText(mobile, textB); });
   await step(`${mode}: group selection and toolbar stay attached during live pan/zoom`, () => checkSelectionFollowsViewport(desktop, `${textA} edited`, textB));
   await step(`${mode}: Template sheet/apply/sync/undo own zones`, () => checkTemplates(mobile, desktop, mode));
