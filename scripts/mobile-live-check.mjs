@@ -6,7 +6,7 @@ import { mkdir, stat, writeFile, readFile } from 'node:fs/promises';
 import { BlobReader, TextWriter, ZipReader } from '@zip.js/zip.js/index-native.js';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { PALETTE, paletteIndexByName } from '../src/client/ui/palette.js';
+import { FONT_COLORS, PALETTE, paletteIndexByName } from '../src/client/ui/palette.js';
 import { t, setLang } from '../src/client/ui/i18n.js';
 import { SELECTION_TOOLBAR_GAP_PX, TOOLBAR_MIN_ANCHOR_PX } from '../src/client/chrome/chrome-layout.js';
 import { Z } from '../src/client/chrome/chrome-layout.js';
@@ -42,6 +42,9 @@ const TOUCH_MOVE_PX = 36;
 const TOUCH_TARGET_MIN_PX = 44;
 const INLINE_SCROLL_LINE_COUNT = 24;
 const TEXT_HIGH_ZOOM_CLICK_COUNT = 2;
+const BLANK_SEARCH_STEP_PX = 80;
+const BLANK_SEARCH_TOP_INSET_PX = 120;
+const BLANK_SEARCH_BOTTOM_INSET_PX = 200;
 const IMAGE_FIXTURE_WIDTH_PX = 128;
 const IMAGE_FIXTURE_HEIGHT_PX = 96;
 const IMAGE_FIXTURE_COLORS = [[230, 30, 190], [20, 210, 235]];
@@ -55,6 +58,7 @@ const MOBILE_INPUT_MIN_FONT_PX = 16;
 const DRAWING_RED = '#dc2626';
 const DRAWING_MIN_INK_PIXELS = 20;
 const DRAWING_STROKE_WIDTH_PX = 8;
+const DRAWING_SHAPE_WIDTH_PX = 4;
 const ORDINARY_IMAGE_MAX_WORLD_PX = 480;
 const PREVIEW_IMAGE_WIDTH_PX = 1200;
 const PREVIEW_IMAGE_HEIGHT_PX = 720;
@@ -74,10 +78,10 @@ const LAYOUT_VIEWPORTS = [
   { width: 844, height: 390 }, { width: 768, height: 1024 },
 ];
 const WORDS = {
-  en: { zoomIn: 'Zoom in', create: 'Create', name: 'e.g. "Fluke"', enter: 'Enter room', done: 'Done', edit: 'Edit text', close: 'Close', fit: 'Fit to content',
+  en: { zoomIn: 'Zoom in', create: 'Create', name: 'e.g. "Fluke"', enter: 'Enter room', close: 'Close', fit: 'Fit to content',
     undo: 'Undo (Ctrl+Z)', redo: 'Redo (Ctrl+Shift+Z)',
     privacy: 'Off: hide in the normal UI (not encrypted)', sticky: 'Double-click to edit', remove: 'Delete' },
-  th: { zoomIn: 'ซูมเข้า', create: 'Create', name: 'เช่น "ฟลุค"', enter: 'เข้าห้อง', done: 'เสร็จสิ้น', edit: 'แก้ไขข้อความ', close: 'ปิด', fit: 'พอดีกับเนื้อหา',
+  th: { zoomIn: 'ซูมเข้า', create: 'Create', name: 'เช่น "ฟลุค"', enter: 'เข้าห้อง', close: 'ปิด', fit: 'พอดีกับเนื้อหา',
     undo: 'ย้อนกลับ (Ctrl+Z)', redo: 'ทำซ้ำ (Ctrl+Shift+Z)',
     privacy: 'ปิด: ซ่อนในหน้าจอปกติ (ไม่ได้เข้ารหัส)', sticky: 'ดับเบิลคลิกเพื่อแก้ไข', remove: 'ลบ' },
 };
@@ -96,7 +100,12 @@ const browser = await playwright[engine].launch({ headless: true });
 const report = { engine, roomMode, pageErrors: [], steps: [], measurements: [], fixtureIds: [], pages: [] };
 
 async function step(name, action) {
-  await action();
+  try {
+    await action();
+  } catch (error) {
+    console.log(`FAIL ${name}`);
+    throw error;
+  }
   report.steps.push(name);
   console.log(`PASS ${name}`);
 }
@@ -336,26 +345,33 @@ async function showLocator(user, target) {
 async function showText(user, text) {
   await showLocator(user, user.page.getByText(text, { exact: true }));
 }
-async function addMobileCard(user, text, privateRoom) {
-  await user.page.locator('[data-tool="sticky"]').tap();
-  await user.page.locator('.rb-mobile-editor__input').fill(text);
-  await user.page.getByRole('button', { name: WORDS[user.lang].done, exact: true }).tap();
-  await user.page.locator('.rb-mobile-editor__input').waitFor({ state: 'hidden' });
-  if (privateRoom) await user.page.getByTitle(WORDS[user.lang].privacy, { exact: true }).tap();
-}
-async function addDesktopCard(user, text, privateRoom) {
-  const position = await user.page.locator('.rb-no-select').evaluate(canvas => {
+/** A point on the bare canvas (not under a card, toolbar or panel), relative to the canvas. */
+async function blankCanvasPosition(user) {
+  return user.page.locator('.rb-no-select').evaluate((canvas, { stepPx, topInsetPx, bottomInsetPx }) => {
     const rect = canvas.getBoundingClientRect();
-    const STEP_PX = 80;
-    const TOP_INSET_PX = 120;
-    const BOTTOM_INSET_PX = 200;
-    for (let y = TOP_INSET_PX; y < rect.height - BOTTOM_INSET_PX; y += STEP_PX) {
-      for (let x = STEP_PX; x < rect.width - STEP_PX; x += STEP_PX) {
+    for (let y = topInsetPx; y < rect.height - bottomInsetPx; y += stepPx) {
+      for (let x = stepPx; x < rect.width - stepPx; x += stepPx) {
         if (document.elementFromPoint(rect.left + x, rect.top + y) === canvas) return { x, y };
       }
     }
     throw new Error('No blank fixture position');
-  });
+  }, { stepPx: BLANK_SEARCH_STEP_PX, topInsetPx: BLANK_SEARCH_TOP_INSET_PX, bottomInsetPx: BLANK_SEARCH_BOTTOM_INSET_PX });
+}
+/** a7505a9 dropped the mobile Done button: the inline editor finishes when the user taps bare canvas. */
+async function tapAway(user) {
+  const canvas = await user.page.locator('.rb-no-select').boundingBox();
+  const position = await blankCanvasPosition(user);
+  await user.page.touchscreen.tap(canvas.x + position.x, canvas.y + position.y);
+  await user.page.locator('.rb-mobile-editor__input').waitFor({ state: 'hidden' });
+}
+async function addMobileCard(user, text, privateRoom) {
+  await user.page.locator('[data-tool="sticky"]').tap();
+  await user.page.locator('.rb-mobile-editor__input').fill(text);
+  await tapAway(user);
+  if (privateRoom) await user.page.getByTitle(WORDS[user.lang].privacy, { exact: true }).tap();
+}
+async function addDesktopCard(user, text, privateRoom) {
+  const position = await blankCanvasPosition(user);
   await user.page.locator('.rb-no-select').dblclick({ position });
   const input = user.page.getByPlaceholder(WORDS.en.sticky, { exact: true });
   await input.fill(text);
@@ -613,7 +629,9 @@ async function checkHiddenCard(mobile, desktop, text) {
     'Hidden fixture must be reachable before selection');
   await hidden.tap();
   assert.equal(await mobile.page.getByText(text, { exact: true }).count(), 0, 'Hidden text must not render');
-  assert.equal(await mobile.page.getByRole('button', { name: WORDS[mobile.lang].edit, exact: true }).count(), 0, 'Other-user hidden card must not offer Edit');
+  // a7505a9 replaced the Edit button with a second tap: it must not open the editor on another user's hidden card.
+  await hidden.tap();
+  assert.equal(await mobile.page.locator('.rb-mobile-editor__input').count(), 0, 'Other-user hidden card must not open the editor');
   await cleanup(desktop, text);
   await hidden.waitFor({ state: 'hidden' });
 }
@@ -636,10 +654,6 @@ async function simulateKeyboard(mobile, itemType = 'sticky') {
       && editor.top >= KEYBOARD_VIEWPORT_TOP_PX - EDGE_TOLERANCE_PX
       && editor.bottom <= KEYBOARD_VIEWPORT_TOP_PX + KEYBOARD_VIEWPORT_HEIGHT_PX + EDGE_TOLERANCE_PX;
   }, 'Inline editor must remain inside its card above the simulated keyboard');
-  const done = await mobile.page.locator('.rb-mobile-editor__done').evaluate(node => node.getBoundingClientRect().toJSON());
-  assert.ok(done.top >= KEYBOARD_VIEWPORT_TOP_PX && done.bottom <= KEYBOARD_VIEWPORT_TOP_PX + KEYBOARD_VIEWPORT_HEIGHT_PX,
-    'Done must remain visible above simulated keyboard');
-  assert.ok(done.width < MOBILE_VIEWPORT.width, 'Done must remain a compact control');
   const input = await mobile.page.locator('.rb-mobile-editor__input').evaluate(node => ({
     focused: document.activeElement === node, ...node.getBoundingClientRect().toJSON(),
   }));
@@ -650,7 +664,6 @@ async function simulateKeyboard(mobile, itemType = 'sticky') {
   }));
   for (const box of chrome) {
     assert.equal(overlap(input, box), false, `Inline input must not overlap ${box.selector}`);
-    assert.equal(overlap(done, box), false, `Done must not overlap ${box.selector}`);
   }
 
 }
@@ -817,7 +830,7 @@ async function checkRemoteEditorCorners(observer, text) {
 async function checkEditing(mobile, desktop, text, mode) {
   await showText(mobile, text); await card(mobile, text).tap();
   const beforeKeyboard = await geometry(mobile, text);
-  await mobile.page.getByRole('button', { name: WORDS[mobile.lang].edit, exact: true }).tap();
+  await card(mobile, text).tap();
   const inline = await mobile.page.locator('.rb-mobile-editor__input').evaluate(node => ({ inCard: !!node.closest('.rb-sticky'), inDialog: !!node.closest('[role="dialog"]') }));
   assert.equal(inline.inCard, true, 'Mobile editing must stay inline in its sticky');
   assert.equal(inline.inDialog, false, 'Mobile editing must not open a modal');
@@ -834,8 +847,7 @@ async function checkEditing(mobile, desktop, text, mode) {
     const selection=await editor.evaluate(node=>({start:node.selectionStart,end:node.selectionEnd,length:node.value.length}));
     assert.equal(selection.start,0);assert.equal(selection.end,selection.length,'Native text selection still spans the editor value');
     await mobile.page.keyboard.insertText(`${text} edited`);
-    await mobile.page.getByRole('button', { name: WORDS[mobile.lang].done, exact: true }).tap();
-    await mobile.page.locator('.rb-mobile-editor__input').waitFor({ state: 'hidden' });
+    await tapAway(mobile);
   } finally {
     await restoreViewport(mobile);
   }
@@ -854,22 +866,32 @@ async function checkTextHighZoom(mobile, desktop, mode) {
     await mobile.page.getByTitle(WORDS[mobile.lang].zoomIn, { exact: true }).tap();
   }
   assert.ok((await viewport(mobile)).zoom > 1, 'Text fixture must exercise zoom above 100%');
+  // e1f7f51: Text is click-to-place, so arm the tool and tap the bare canvas where the text goes.
   await mobile.page.locator('[data-tool="text"]').tap();
+  const canvas = await mobile.page.locator('.rb-no-select').boundingBox();
+  const place = await blankCanvasPosition(mobile);
+  await mobile.page.touchscreen.tap(canvas.x + place.x, canvas.y + place.y);
   await mobile.page.locator('.rb-mobile-editor__input').fill(text);
-  await mobile.page.getByRole('button', { name: WORDS[mobile.lang].done, exact: true }).tap();
-  await mobile.page.locator('.rb-mobile-editor__input').waitFor({ state: 'hidden' });
-  await mobile.page.getByRole('button', { name: WORDS[mobile.lang].edit, exact: true }).tap();
+  await tapAway(mobile);
+  // a7505a9: the first tap selects the text and the second tap edits it (no Edit button).
+  const placed = mobile.page.getByText(text, { exact: true });
+  await placed.tap();
+  await mobile.page.locator('.rb-selection-toolbar').waitFor();
+  await placed.tap();
+  await mobile.page.locator('.rb-mobile-editor__input').waitFor();
   const before = await textEditorGeometry(mobile);
   try {
     await simulateKeyboard(mobile, 'text');
     assert.deepEqual(await textEditorGeometry(mobile), before, 'Keyboard must not change canonical TextCard geometry');
     await mobile.page.screenshot({ path: join(output, `${mode}-text-high-zoom-keyboard.png`) });
-    await mobile.page.getByRole('button', { name: WORDS[mobile.lang].done, exact: true }).tap();
-    await mobile.page.locator('.rb-mobile-editor__input').waitFor({ state: 'hidden' });
+    await tapAway(mobile);
   } finally {
     await restoreViewport(mobile);
   }
   await showText(desktop, text);
+  // Tapping away deselected the text; one tap selects it again for the Delete key.
+  await mobile.page.getByText(text, { exact: true }).tap();
+  await mobile.page.locator('.rb-selection-toolbar').waitFor();
   await mobile.page.keyboard.press('Delete');
   for (const user of [mobile, desktop]) {
     await eventually(async () => await user.page.getByText(text, { exact: true }).count() === 0,
@@ -1105,7 +1127,16 @@ async function exitDrawing(user) {
   await activate(user, user.page.locator('[data-tool="draw"]'));
 }
 const drawingToolbar = user => user.page.locator('.rb-drawing-toolbar');
-function drawingWord(user, key) { setLang(user.lang); return t(key); }
+function drawingWord(user, key, params) { setLang(user.lang); return t(key, params); }
+// e1f7f51 replaced the colour and width dropdowns with swatch and size buttons labelled by colour name and px.
+async function chooseDrawingColor(user, hex) {
+  const entry = FONT_COLORS.find(color => color.value === hex);
+  assert.ok(entry, `Unknown drawing colour ${hex}`);
+  await activate(user, drawingToolbar(user).getByRole('button', { name: drawingWord(user, `font.color.${entry.label}`), exact: true }));
+}
+async function chooseDrawingWidth(user, widthPx) {
+  await activate(user, drawingToolbar(user).getByRole('button', { name: drawingWord(user, 'draw.widthPx', { n: widthPx }), exact: true }));
+}
 async function canonicalItems(user) { return user.page.evaluate(async () => (await window.storage.get('boardState', true)).value.items); }
 async function drawingInk(user) {
   return user.page.locator('.rb-drawing-canvas').evaluate(canvas => {
@@ -1121,7 +1152,8 @@ async function openDrawing(user) {
   await drawingToolbar(user).waitFor();
   assert.equal(await drawingToolbar(user).locator('.lucide-check').count(), 0, 'Drawing has no Done button');
   assert.equal(await user.page.locator('.rb-no-select').getByText(drawingWord(user, user.mobile ? 'mobile.emptyHint' : 'empty.hint'), { exact: true }).isVisible(), false, 'Empty-board hint must not cover the drawing surface');
-  await activate(user, user.page.locator('.rb-zoom-percentage'));
+  // e1f7f51: the mobile Draw toolbar hides the zoom controls.
+  if (!user.mobile) await activate(user, user.page.locator('.rb-zoom-percentage'));
 }
 async function settleDrawingPaint(user) {
   await user.page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
@@ -1147,19 +1179,18 @@ async function checkDrawingBounds(user) {
   for (const width of user.mobile ? [360, 390] : [1440]) {
     const size = user.mobile ? { ...MOBILE_VIEWPORT, width } : DESKTOP_VIEWPORT;
     await user.page.setViewportSize(size);
-    const boxes = await drawingToolbar(user).evaluate(element => [element, ...element.querySelectorAll('button, select')].map(node => node.getBoundingClientRect().toJSON()));
+    const boxes = await drawingToolbar(user).evaluate(element => [element, ...element.querySelectorAll('button')].map(node => node.getBoundingClientRect().toJSON()));
     report.measurements.push({ mode: 'drawing-toolbar', mobile: user.mobile, lang: user.lang, viewport: size, boxes });
     for (const box of boxes) assertWithinViewport(box, size, 'Drawing toolbar/control');
     if (user.mobile) for (const box of boxes.slice(1)) assert.ok(box.height >= TOUCH_TARGET_MIN_PX, `Drawing controls must be touch sized: ${box.height}px`);
-    if (user.mobile) assert.ok(await drawingToolbar(user).locator('select').evaluateAll(elements => elements.every(element => parseFloat(getComputedStyle(element).fontSize) >= 16)), 'Mobile drawing selectors must avoid focus zoom');
     await user.page.screenshot({ path: join(output, `draw-${user.lang}-${width}.png`) });
   }
 }
 async function checkDraftHistory(user, peer, initialIds) {
   await openDrawing(user); await checkDrawingBounds(user);
   const toolbar = drawingToolbar(user);
-  await toolbar.getByLabel(drawingWord(user, 'draw.color'), { exact: true }).selectOption(DRAWING_RED);
-  await toolbar.getByLabel(drawingWord(user, 'draw.width'), { exact: true }).selectOption(String(DRAWING_STROKE_WIDTH_PX));
+  await chooseDrawingColor(user, DRAWING_RED);
+  await chooseDrawingWidth(user, DRAWING_STROKE_WIDTH_PX);
   await drawStroke(user);
   await eventually(async () => await drawingInk(user) > DRAWING_MIN_INK_PIXELS, 'Freehand draft must paint actual pixels');
   const ink = await drawingInk(user);
@@ -1177,8 +1208,8 @@ async function checkDrawingPinch(user) {
   await send('touchMove', [{ id: 1, x: 130, y: 550 }, { id: 2, x: 280, y: 550 }]);
   await send('touchEnd', []);
   assert.ok((await viewport(user)).zoom > before.zoom, 'Two fingers must zoom the live board');
-  await activate(user, user.page.locator('.rb-zoom-percentage'));
-  await eventually(async () => await drawingInk(user) > DRAWING_MIN_INK_PIXELS, 'Header zoom repaints the retained draft');
+  // e1f7f51 hides the mobile zoom controls while drawing, so the draft must survive the pinch itself.
+  await eventually(async () => await drawingInk(user) > DRAWING_MIN_INK_PIXELS, 'Pinch zoom repaints the retained draft');
   await activate(user, drawingToolbar(user).getByRole('button', { name: drawingWord(user, 'topbar.undo'), exact: true }));
   await eventually(async () => await drawingInk(user) === 0, 'Pinch must not leave an extra stroke after one Undo');
   await activate(user, drawingToolbar(user).getByRole('button', { name: drawingWord(user, 'topbar.redo'), exact: true }));
@@ -1256,7 +1287,7 @@ async function shapeGesture(user, tool, start, end) {
 }
 async function checkShapeTools(user, peer = null) {
   const x = user.mobile ? 130 : 220;
-  await drawingToolbar(user).getByLabel(drawingWord(user, 'draw.width'), { exact: true }).selectOption('4');
+  await chooseDrawingWidth(user, DRAWING_SHAPE_WIDTH_PX);
   await shapeGesture(user, 'rectangle', { x, y: 500 }, { x: x + 90, y: 560 });
   await eventually(async () => await canvasPointInk(user, { x, y: 530 }) > 0, 'Rectangle must paint its outline');
   assert.equal(await canvasPointInk(user, { x: x + 45, y: 530 }), 0, 'Rectangle interior stays transparent');
@@ -1521,8 +1552,8 @@ async function checkRealtimeDrawing(mobile, desktop, mode) {
     let fixture;
     try {
       await openDrawing(user); await checkDrawingBounds(user);
-      await drawingToolbar(user).getByLabel(drawingWord(user, 'draw.color'), { exact: true }).selectOption(DRAWING_RED);
-      await drawingToolbar(user).getByLabel(drawingWord(user, 'draw.width'), { exact: true }).selectOption(String(DRAWING_STROKE_WIDTH_PX));
+      await chooseDrawingColor(user, DRAWING_RED);
+      await chooseDrawingWidth(user, DRAWING_STROKE_WIDTH_PX);
       await checkRealtimeDrag(user, peer);
       await eventually(async () => {
         fixture = (await canonicalItems(peer)).find(item => !before.has(item.id)); return !!fixture;
