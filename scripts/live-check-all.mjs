@@ -23,7 +23,8 @@ const MAINTAINER_BUILD_DIR = 'dist-maintainer';
 // 32 random bytes are 43 base64url characters, the relay's minimum maintainer key length (maintainer-server.js).
 const MAINTAINER_KEY_BYTES = 32;
 const JSON_INDENT_SPACES = 2;
-const SHUTDOWN_SIGNALS = Object.freeze(['SIGINT', 'SIGTERM', 'SIGHUP']);
+// SIGALRM is what an outer `perl -e 'alarm N; exec @ARGV'` bound sends; without a handler it would orphan the servers.
+const SHUTDOWN_SIGNALS = Object.freeze(['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGALRM']);
 const RUN_ENV_SKIP = 'env-skip';
 const RUN_FAILED_EXIT_CODE = 1;
 const USAGE = 'usage: node scripts/live-check-all.mjs --out-root <fresh dir on a data volume> [--only id,id] [--attempts n] | --list';
@@ -152,8 +153,8 @@ export async function main(argv, { manifest: json = readManifest(), signal } = {
   return verdicts.some(runFailed) || signal?.aborted ? RUN_FAILED_EXIT_CODE : 0;
 }
 
-const isCli = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-if (isCli) {
+/** An AbortController that aborts on the first shutdown signal, so the running check and its servers stop cleanly. */
+export function abortOnShutdownSignals() {
   const controller = new AbortController();
   for (const name of SHUTDOWN_SIGNALS) {
     process.once(name, () => {
@@ -161,6 +162,12 @@ if (isCli) {
       controller.abort();
     });
   }
+  return controller;
+}
+
+const isCli = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isCli) {
+  const controller = abortOnShutdownSignals();
   try {
     process.exitCode = await main(process.argv.slice(2), { signal: controller.signal });
   } catch (error) {

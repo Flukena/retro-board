@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -26,6 +28,12 @@ const MAINTAINER_KEY_BYTES = 32;
 const FIRST_VITE_PORT = 5301;
 // pan-live-check.mjs asserts its own fixed Vite port.
 const PAN_VITE_PORT = 5188;
+// A perl path that cannot exist, standing in for a host without perl.
+const MISSING_PERL_PATH = '/nonexistent-live-check-dir/perl';
+const READY_LINE = 'ready';
+const KEEP_ALIVE_MS = 60_000;
+// Errors a ::1 listen gives on a host without IPv6 loopback; anything else is a real failure.
+const NO_IPV6_CODES = Object.freeze(['EADDRNOTAVAIL', 'EAFNOSUPPORT']);
 
 const spawnTest = { timeout: SPAWN_TEST_TIMEOUT_MS };
 
@@ -65,8 +73,9 @@ async function hostHasIpv6Loopback() {
   try {
     await close(await listen(IPV6_LOOPBACK));
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if (NO_IPV6_CODES.includes(error.code)) return false;
+    throw error;
   }
 }
 const NO_IPV6_LOOPBACK_REASON = 'this host has no IPv6 loopback (::1), so no ::1 listener can exist';
@@ -225,7 +234,15 @@ const httpServerPlan = (port, host) => [{
   env: {}, port, host,
 }];
 
-const pidFrom = async (path) => Number.parseInt(await readFile(path, 'utf8').catch(() => ''), 10);
+/** The pid a spawned test process wrote to `path`, or NaN when it never wrote one. */
+async function pidFrom(path) {
+  try {
+    return Number.parseInt(await readFile(path, 'utf8'), 10);
+  } catch (error) {
+    if (error.code === 'ENOENT') return Number.NaN;
+    throw error;
+  }
+}
 
 async function killLeftovers(dir) {
   for (const name of LEFTOVER_PID_FILES) {
@@ -265,6 +282,52 @@ test('stop() kills the process group it started and frees the port', spawnTest, 
   });
 });
 
+/** A child that holds startServers' servers until the runner's shutdown wiring aborts, then stops them and exits. */
+function runnerStandIn(plan, dir) {
+  const imports = {
+    runner: new URL('./live-check-all.mjs', import.meta.url).href,
+    common: new URL('./live-check-common.mjs', import.meta.url).href,
+  };
+  const source = `import { abortOnShutdownSignals } from ${JSON.stringify(imports.runner)};
+import { startServers } from ${JSON.stringify(imports.common)};
+const keepAlive = setInterval(() => {}, ${KEEP_ALIVE_MS});
+const controller = abortOnShutdownSignals();
+const servers = await startServers(${JSON.stringify(plan)}, ${JSON.stringify(dir)}, { readyTimeoutMs: ${READY_TIMEOUT_MS} });
+controller.signal.addEventListener('abort', async () => { await servers.stop(); clearInterval(keepAlive); }, { once: true });
+console.log(${JSON.stringify(READY_LINE)});`;
+  return spawn(process.execPath, ['--input-type=module', '-e', source], { stdio: ['ignore', 'pipe', 'ignore'] });
+}
+
+async function untilLine(stream, line) {
+  stream.setEncoding('utf8');
+  let seen = '';
+  for await (const chunk of stream) {
+    seen += chunk;
+    if (seen.split('\n').includes(line)) return;
+  }
+  throw new Error(`stream ended before "${line}"`);
+}
+
+// The live-check constraints bound every run with `perl -e 'alarm N; exec @ARGV'`, whose SIGALRM reaches the runner.
+for (const signal of ['SIGTERM', 'SIGALRM']) {
+  test(`${signal} to the runner stops the servers it started`, spawnTest, async () => {
+    await withTempDir(async (dir) => {
+      const port = await freePort();
+      const child = runnerStandIn(httpServerPlan(port, '127.0.0.1'), dir);
+      const exited = once(child, 'exit');
+      try {
+        await untilLine(child.stdout, READY_LINE);
+        child.kill(signal);
+        const [code, killedBy] = await exited;
+        assert.deepEqual({ code, killedBy }, { code: 0, killedBy: null }, 'the runner exits on its own after cleanup');
+        await assertPortsFree([port]);
+      } finally {
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      }
+    });
+  });
+}
+
 test('runWithHardTimeout kills a sleeping child after timeoutSec', spawnTest, async () => {
   const started = Date.now();
   const result = await runWithHardTimeout([process.execPath, '-e', SLEEP_FOR_MINUTE], { timeoutSec: HARD_TIMEOUT_SEC });
@@ -301,9 +364,15 @@ setTimeout(() => process.stdout.write(bytes.subarray(6)), 100);`;
 
 test('runWithHardTimeout reports a missing perl', spawnTest, async () => {
   await assert.rejects(
-    runWithHardTimeout([process.execPath, '-e', ''], { timeoutSec: HARD_TIMEOUT_SEC, env: { PATH: '/nonexistent-live-check-path' } }),
+    runWithHardTimeout([process.execPath, '-e', ''], { timeoutSec: HARD_TIMEOUT_SEC, perlPath: MISSING_PERL_PATH }),
     /perl is required for the live-check hard timeout/,
   );
+});
+
+test('runWithHardTimeout finds perl without searching PATH', spawnTest, async () => {
+  const result = await runWithHardTimeout([process.execPath, '-e', 'console.log("ran")'],
+    { timeoutSec: HARD_TIMEOUT_SEC, env: { PATH: '/nonexistent-live-check-dir' } });
+  assert.deepEqual({ exitCode: result.exitCode, stdout: result.stdout }, { exitCode: 0, stdout: 'ran\n' });
 });
 
 test('summarizeRun counts PASS and FAIL lines and names the first failing step', () => {
@@ -314,6 +383,7 @@ test('summarizeRun counts PASS and FAIL lines and names the first failing step',
     { passed: false, passLines: 2, failLines: 2, failedStep: 'th: undo reaches A' });
   assert.deepEqual(summarizeRun('PASS only step\n', 0), { passed: true, passLines: 1, failLines: 0, failedStep: null });
   assert.equal(summarizeRun('PASS only step\n', null).passed, false, 'a killed check did not pass');
+  assert.equal(summarizeRun('FAIL x\n', 0).passed, false, 'a FAIL line fails the run even when the check exits 0');
 });
 
 test('judgeRun: pass entry that fails once is a regression', () => {

@@ -27,6 +27,8 @@ const GROUP_EXIT_POLL_INTERVAL_MS = 50;
 const MS_PER_SECOND = 1_000;
 // The perl alarm is only a backstop behind the JavaScript timer and its SIGTERM/SIGKILL grace.
 const PERL_ALARM_MARGIN_SEC = 10;
+// An absolute path, so no PATH lookup can pick another perl (Sonar S4036); present on macOS and ubuntu-latest.
+const PERL_PATH = '/usr/bin/perl';
 const PERL_ALARM_EXEC = 'alarm shift; exec @ARGV';
 const PERL_MISSING = 'perl is required for the live-check hard timeout';
 
@@ -373,8 +375,8 @@ export async function startServers(plan, outDir, { readyTimeoutMs = SERVER_READY
   return { stop };
 }
 
-function spawnUnderAlarm(argv, { timeoutSec, env, cwd }) {
-  return spawn('perl', ['-e', PERL_ALARM_EXEC, String(timeoutSec + PERL_ALARM_MARGIN_SEC), ...argv], {
+function spawnUnderAlarm(argv, { timeoutSec, env, cwd, perlPath }) {
+  return spawn(perlPath, ['-e', PERL_ALARM_EXEC, String(timeoutSec + PERL_ALARM_MARGIN_SEC), ...argv], {
     cwd, env: { ...process.env, ...env }, detached: true, stdio: ['ignore', 'pipe', 'pipe'],
   });
 }
@@ -414,11 +416,13 @@ function onAbort(signal, action) {
  * `signal` aborts), SIGKILL after the grace, and a perl alarm as a backstop. Any process left in that group is killed
  * before this resolves. Playwright starts Chromium in a group of its own and closes it on SIGTERM (its default
  * `handleSIGTERM`), so the grace is what keeps a second Chromium from meeting the next check. `env` is added to the
- * runner's.
+ * runner's; `perlPath` exists so a test can point at a missing perl.
  */
-export function runWithHardTimeout(argv, { timeoutSec = DEFAULT_CHECK_TIMEOUT_SEC, env = {}, cwd = PROJECT_ROOT, signal } = {}) {
+export function runWithHardTimeout(argv, {
+  timeoutSec = DEFAULT_CHECK_TIMEOUT_SEC, env = {}, cwd = PROJECT_ROOT, signal, perlPath = PERL_PATH,
+} = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawnUnderAlarm(argv, { timeoutSec, env, cwd });
+    const child = spawnUnderAlarm(argv, { timeoutSec, env, cwd, perlPath });
     const output = collectOutput(child);
     const terminator = groupTerminator(child);
     let timedOut = false;
@@ -442,14 +446,14 @@ export function runWithHardTimeout(argv, { timeoutSec = DEFAULT_CHECK_TIMEOUT_SE
 // ---------------------------------------------------------------- verdict
 
 /**
- * Reads the `PASS <step>` / `FAIL <step>` lines runLiveCheck prints. The exit code alone decides `passed`, so a
- * timeout (no exit code) or a non-zero exit fails even when the script prints no FAIL line.
+ * Reads the `PASS <step>` / `FAIL <step>` lines runLiveCheck prints. A run passes only when it exits 0 and prints no
+ * FAIL line (fail-closed), so a timeout (no exit code) or a non-zero exit fails even when the script prints no FAIL.
  */
 export function summarizeRun(stdout, exitCode) {
   const steps = stdout.split('\n').map((line) => STEP_LINE.exec(line.trimEnd())).filter(Boolean);
   const failed = steps.filter(([, word]) => word === FAIL_WORD);
   return {
-    passed: exitCode === 0,
+    passed: exitCode === 0 && failed.length === 0,
     passLines: steps.length - failed.length,
     failLines: failed.length,
     failedStep: failed[0]?.[2] ?? null,
