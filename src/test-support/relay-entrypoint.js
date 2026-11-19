@@ -11,6 +11,8 @@ import * as maintenance from '../server/relay-maintenance.js';
 const ENTRYPOINT = new URL('../../yjs-server.mjs', import.meta.url);
 const SESSION_EVENTS = ['SIGTERM', 'SIGINT', 'unhandledRejection', 'uncaughtException'];
 const TEST_SIGNING_KEY_BYTES = 32;
+const SERVER_ROOT = new URL('../server/', import.meta.url).href;
+const ISOLATED_MODULES = new Set(['relay-room-accounting.js']);
 const require = createRequire(ENTRYPOINT);
 let nextSessionId = 0;
 
@@ -69,10 +71,19 @@ export async function relayEntrypoint(t, { modules = {}, env = {} } = {}) {
 function injectionHooks(bindings, bindingKey) {
   return registerHooks({
     resolve(specifier, context, nextResolve) {
-      if (context.parentURL?.startsWith(ENTRYPOINT.href) && Object.hasOwn(bindings, specifier)) {
-        return { url: `retro-test:${bindingKey}/${specifier}`, shortCircuit: true };
+      const serverParent = context.parentURL?.startsWith(SERVER_ROOT);
+      const entryParent = context.parentURL?.startsWith(ENTRYPOINT.href);
+      const key = serverParent && specifier.startsWith('./')
+        ? `./src/server/${specifier.slice(2)}` : specifier;
+      if ((entryParent || serverParent) && Object.hasOwn(bindings, key)) {
+        return { url: `retro-test:${bindingKey}/${key}`, shortCircuit: true };
       }
-      return nextResolve(specifier, context);
+      const result = nextResolve(specifier, context);
+      if ((entryParent || serverParent) && result.url.startsWith(SERVER_ROOT)
+          && ISOLATED_MODULES.has(result.url.slice(SERVER_ROOT.length).split('?')[0])) {
+        return { ...result, url: `${result.url.split('?')[0]}?session=${bindingKey}` };
+      }
+      return result;
     },
     load(url, context, nextLoad) {
       const prefix = `retro-test:${bindingKey}/`;
