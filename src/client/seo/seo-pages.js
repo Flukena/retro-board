@@ -1,5 +1,5 @@
 import { LEGAL_PAGE, LEGAL_PATH } from '../legal/legal-content.js';
-import { LANGUAGE_OPTIONS } from '../ui/i18n.js';
+import { LANGUAGE_OPTIONS } from '../ui/language-options.js';
 import { STARTER_FORMAT, templatePath } from '../templates/starter-formats.js';
 
 // Public pages that search engines may index. The sitemap lists exactly these,

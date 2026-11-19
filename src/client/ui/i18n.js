@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react';
 import th from './locales/th.js';
 import en from './locales/en.js';
+export { LANGUAGE_OPTIONS } from './language-options.js';
 
 const STORAGE_KEY = 'rb_lang';
 const DEFAULT_LANG = 'en';
@@ -24,20 +25,6 @@ export const LOCALE_LOADERS = Object.freeze({
   id: () => import('./locales/id.js'),
 });
 
-// Shown in each language's own name, so anyone can find theirs.
-export const LANGUAGE_OPTIONS = Object.freeze([
-  { code: 'en', name: 'English' },
-  { code: 'th', name: 'ไทย' },
-  { code: 'zh', name: '简体中文' },
-  { code: 'ja', name: '日本語' },
-  { code: 'ko', name: '한국어' },
-  { code: 'es', name: 'Español' },
-  { code: 'pt', name: 'Português' },
-  { code: 'de', name: 'Deutsch' },
-  { code: 'fr', name: 'Français' },
-  { code: 'vi', name: 'Tiếng Việt' },
-  { code: 'id', name: 'Bahasa Indonesia' },
-].map(Object.freeze));
 
 const isSupported = (code) => Object.hasOwn(dict, code) || Object.hasOwn(LOCALE_LOADERS, code);
 
