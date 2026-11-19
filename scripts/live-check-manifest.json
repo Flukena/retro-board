@@ -373,6 +373,23 @@
       "checkEnv": {},
       "timeoutSec": 900,
       "baseline": "pass"
+    },
+    {
+      "id": "presence",
+      "script": "scripts/presence-live-check.mjs",
+      "args": [
+        "{base}",
+        "{out}"
+      ],
+      "stack": "plain",
+      "viteHost": "127.0.0.1",
+      "ports": {},
+      "publicRelay": false,
+      "maintainer": false,
+      "relayEnv": {},
+      "checkEnv": {},
+      "timeoutSec": 900,
+      "baseline": "pass"
     }
   ]
 }

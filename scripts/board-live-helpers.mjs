@@ -86,7 +86,10 @@ function watchPage(page, report, name) {
 export async function participant(browser, lang, report, name) {
   const context = await browser.newContext({ viewport: VIEWPORT, acceptDownloads: true });
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-  await context.addInitScript((value) => { if (!localStorage.getItem('rb_lang')) localStorage.setItem('rb_lang', value); }, lang);
+  await context.addInitScript((value) => {
+    // A page the check sends to about:blank has an opaque origin, where localStorage throws.
+    if (window.origin !== 'null' && !localStorage.getItem('rb_lang')) localStorage.setItem('rb_lang', value);
+  }, lang);
   return watchPage(await context.newPage(), report, name);
 }
 
@@ -401,9 +404,9 @@ export const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms);
 
 const POLL_INTERVAL_MS = 100;
 
-/** Polls `read` until `accept` holds for its value; fails with `message` and the last value after SYNC_TIMEOUT_MS. */
-export async function pollUntil(read, accept, message) {
-  const deadline = Date.now() + SYNC_TIMEOUT_MS;
+/** Polls `read` until `accept` holds for its value; fails with `message` and the last value after `timeoutMs`. */
+export async function pollUntil(read, accept, message, timeoutMs = SYNC_TIMEOUT_MS) {
+  const deadline = Date.now() + timeoutMs;
   let last = await read();
   while (!accept(last)) {
     if (Date.now() > deadline) throw new Error(`${message}; last read ${JSON.stringify(last)}`);
