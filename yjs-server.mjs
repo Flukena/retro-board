@@ -1,3 +1,4 @@
+import { createHttpDispatch } from './src/server/relay-http-dispatch.js';
 import { createUpgradeHandler } from './src/server/relay-upgrade.js';
 import { createWsAdmission } from './src/server/relay-ws-admission.js';
 import { createAwarenessPolicy } from './src/server/relay-awareness-policy.js';
@@ -12,7 +13,7 @@ import { RelayProtocol } from './src/server/relay-protocol.js';
 // Yjs WebSocket relay with LevelDB persistence.
 // Single source of truth for collaborative state.
 
-import { envInt, envBool, readGuestSweepTiming, readRelayConfig, ROOM_BLOCK_TTL_MS, BLOCKED_ROOM_ENTRIES_PER_ACTIVE_ROOM, LARGE_UPDATE_LOG_THRESHOLD_BYTES, MAINTENANCE_INTERVAL_MS, STORE_OPERATION_OVERHEAD_BYTES, MAX_HTTP_TARGET_CHARACTERS, MAX_REQUESTS_PER_SOCKET, RETRY_AFTER_SHORT_SECONDS, RETRY_AFTER_LONG_SECONDS } from './src/server/relay-config.js';
+import { envInt, envBool, readGuestSweepTiming, readRelayConfig, ROOM_BLOCK_TTL_MS, BLOCKED_ROOM_ENTRIES_PER_ACTIVE_ROOM, LARGE_UPDATE_LOG_THRESHOLD_BYTES, MAINTENANCE_INTERVAL_MS, STORE_OPERATION_OVERHEAD_BYTES, MAX_REQUESTS_PER_SOCKET, RETRY_AFTER_LONG_SECONDS } from './src/server/relay-config.js';
 import { RelayWsTraffic, closeOnSessionExpiry } from './src/server/relay-ws-traffic.js';
 import { createE2ERelay } from './src/server/e2e-relay.js';
 import { E2ERoomLog } from './src/server/e2e-room-log.js';
@@ -20,7 +21,6 @@ import { migrateLegacyImages } from './src/server/legacy-image-migration.js';
 import { E2EBlobStore } from './src/server/e2e-blob-store.js';
 import { createE2EBlobs } from './src/server/e2e-blobs.js';
 import { sendUpgradeRejection } from './src/server/relay-http.js';
-import { handleRoomRoute } from './src/server/relay-room-routes.js';
 import { roomLogId } from './src/server/relay-log-id.js';
 import { createUploadState, scanUploadUsage, createRelayUploads, createImageReadBudgets, UPLOAD_STORAGE_FAILURE_EVENT, ROOM_UPLOAD_USAGE_META } from './src/server/relay-uploads.js';
 import http from 'http';
@@ -42,7 +42,7 @@ import { AccountStore, ACCOUNT_STORAGE_FAILURE_EVENT } from './src/server/accoun
 import { AccountSessions } from './src/server/auth-session.js';
 import { FlowLedger } from './src/server/auth-google.js';
 import { createAuthRoutes, enabledOAuthConfig } from './src/server/auth-routes.js';
-import { publicRelayEnvironment, isPublicWallEnabled, PUBLIC_RELAY_PREFIX, PUBLIC_SNAPSHOT_DIRECTORY, PUBLIC_ACTION_LIMIT_REASON } from './src/server/public-wall-config.js';
+import { publicRelayEnvironment, isPublicWallEnabled,  PUBLIC_SNAPSHOT_DIRECTORY, PUBLIC_ACTION_LIMIT_REASON } from './src/server/public-wall-config.js';
 import { claimPublicDirectory, PublicWallHistory } from './src/server/public-wall-history.js';
 import { provisionPublicWall, RelayPublicWall, retainPublicDocument } from './src/server/relay-public-wall.js';
 import { createRejectionCounters } from './src/server/relay-rejection-counters.js';
@@ -747,68 +747,15 @@ const runMaintenance = () => maintenance.run({
 const maintenanceTimer = setInterval(() => { roomLockVerifier.sweep(); runMaintenance(); void roomDeletion.recover(); void guestSweep.tick(); }, MAINTENANCE_INTERVAL_MS);
 maintenanceTimer.unref();
 
-const server = http.createServer({ maxHeaderSize: MAX_HEADER_BYTES }, (req, res) => {
-  rejectionCounters.observeResponse(res);
-  const clientIp = clientIpFromRequest(req);
-  const reservation = reserveHttpRequest(clientIp);
-  if (reservation.status) {
-    res.writeHead(reservation.status, { 'retry-after': RETRY_AFTER_SHORT_SECONDS });
-    res.end();
-    return;
-  }
-  res.once('finish', reservation.release);
-  res.once('close', reservation.release);
-  let pathname;
-  let hasQueryOrFragment = false;
-  try {
-    if (!req.url || req.url.length > MAX_HTTP_TARGET_CHARACTERS) throw new Error('invalid request target');
-    const parsed = new URL(req.url, 'http://localhost');
-    ({ pathname } = parsed);
-    hasQueryOrFragment = Boolean(parsed.search || parsed.hash);
-  } catch {
-    res.writeHead(400);
-    res.end();
-    return;
-  }
-  // Cloudflare Tunnel forwards the /yjs prefix through unstripped in prod;
-  // capability, session and room-upload routes answer in bare and prefixed
-  // forms so dev and production use the same server.
-  const prefix = PUBLIC_WALL ? PUBLIC_RELAY_PREFIX : '/yjs';
-  const prefixed = pathname === prefix || pathname.startsWith(`${prefix}/`);
-  const routePath = (prefixed ? pathname.slice(prefix.length) : pathname) || '/';
-  if (publicWall && publicWall.handleRequest(req, res, routePath, prefixed, {
-    allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, uploads, clientIp, hasQueryOrFragment,
-    unavailable: hasQueryOrFragment || accounting.shuttingDown || Boolean(accounting.storageFailure),
-    doc: docs.get(publicWall.docName), writerCount: wsTraffic.connectionsByRoom.get(publicWall.docName) || 0,
-    takeSessionExchangeToken: () => takeSessionExchangeToken(clientIp),
-    sessionTtlMs: ROOM_SESSION_TTL_MS, createSessionCookie, sessionAuthenticated: Boolean(authenticatedDocFromRequest(req, publicWall.roomHandle)),
-  })) return;
-  // Readiness is separate from liveness: the process can be perfectly alive
-  // while LevelDB is unwritable, and the catch-all below answers 200 either
-  // way. An orchestrator polling this stops routing new traffic here instead
-  // of accepting work the relay can no longer persist.
-  if (req.method === 'GET' && routePath === '/readyz') {
-    const ok = isRelayReady(accounting.storageFailure, accounting.shuttingDown);
-    res.writeHead(ok ? 200 : 503, { 'content-type': 'text/plain' });
-    res.end(ok ? 'ready' : 'not ready');
-    return;
-  }
-  if (roomSessionRoutes.handle(req, res, routePath, { clientIp, prefixed, hasQueryOrFragment })) return;
-  if (roomLockRoutes.handle(req, res, routePath, { clientIp, hasQueryOrFragment })) return;
-  if (authRoutes.handle(req, res, routePath, { prefixed, clientIp, unavailable: () => accounting.shuttingDown || Boolean(accounting.storageFailure) })) return;
-  if (handleRoomRoute(req, res, routePath, {
-    hasQueryOrFragment, allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP,
-    unavailable: accounting.shuttingDown || Boolean(accounting.storageFailure), rooms: registeredRoomsByHandle,
-    authenticate: authenticatedDocFromRequest, uploads, clientIp, lockFor: lockForDoc, e2eBlobs,
-  })) return;
-  if (req.method === 'GET' && routePath === '/') {
-    res.writeHead(200, { 'content-type': 'text/plain' });
-    res.end('yjs-ws ok');
-    return;
-  }
-  res.writeHead(404, { 'content-type': 'text/plain' });
-  res.end('not found');
+const { dispatch } = createHttpDispatch({
+  settings: { PUBLIC_WALL, ALLOWED_ORIGINS, ALLOW_INSECURE_HTTP, ROOM_SESSION_TTL_MS }, accounting, rejectionCounters,
+  traffic: { clientIpFromRequest, reserveHttpRequest, wsTraffic },
+  sessions: { takeSessionExchangeToken, createSessionCookie, authenticatedDocFromRequest },
+  rooms: { publicWall, docs, registeredRoomsByHandle },
+  routes: { roomSessionRoutes, authRoutes, get roomLockRoutes() { return roomLockRoutes; } },
+  assets: { uploads, lockForDoc, get e2eBlobs() { return e2eBlobs; } },
 });
+const server = http.createServer({ maxHeaderSize: MAX_HEADER_BYTES }, dispatch);
 
 server.requestTimeout = REQUEST_TIMEOUT_MS;
 server.headersTimeout = HEADERS_TIMEOUT_MS;
