@@ -399,6 +399,20 @@ export function liveMode(argv = process.argv) {
 
 export const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
+const POLL_INTERVAL_MS = 100;
+
+/** Polls `read` until `accept` holds for its value; fails with `message` and the last value after SYNC_TIMEOUT_MS. */
+export async function pollUntil(read, accept, message) {
+  const deadline = Date.now() + SYNC_TIMEOUT_MS;
+  let last = await read();
+  while (!accept(last)) {
+    if (Date.now() > deadline) throw new Error(`${message}; last read ${JSON.stringify(last)}`);
+    await sleep(POLL_INTERVAL_MS);
+    last = await read();
+  }
+  return last;
+}
+
 /** The last step of a check: no page errors were recorded in `mode`. */
 export async function errorsStep({ report }, mode) {
   await step(report, `${mode}: no page errors`, async () => {

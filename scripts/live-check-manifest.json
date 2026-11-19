@@ -339,6 +339,23 @@
       "checkEnv": {},
       "timeoutSec": 900,
       "baseline": "pass"
+    },
+    {
+      "id": "board-resize",
+      "script": "scripts/board-resize-live-check.mjs",
+      "args": [
+        "{base}",
+        "{out}"
+      ],
+      "stack": "plain",
+      "viteHost": "127.0.0.1",
+      "ports": {},
+      "publicRelay": false,
+      "maintainer": false,
+      "relayEnv": {},
+      "checkEnv": {},
+      "timeoutSec": 900,
+      "baseline": "pass"
     }
   ]
 }
