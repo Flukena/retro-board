@@ -1,3 +1,4 @@
+import { createRoomPolicy, createRoomState } from './src/server/relay-room-state.js';
 import { createRelayPersistence } from './src/server/relay-persistence.js';
 import { createRelayRuntime, logRelayBanner } from './src/server/relay-runtime.js';
 import { createHttpDispatch } from './src/server/relay-http-dispatch.js';
@@ -15,7 +16,7 @@ import { RelayProtocol } from './src/server/relay-protocol.js';
 // Yjs WebSocket relay with LevelDB persistence.
 // Single source of truth for collaborative state.
 
-import { envInt, envBool, readGuestSweepTiming, readRelayConfig, ROOM_BLOCK_TTL_MS, BLOCKED_ROOM_ENTRIES_PER_ACTIVE_ROOM, MAINTENANCE_INTERVAL_MS, MAX_REQUESTS_PER_SOCKET, RETRY_AFTER_LONG_SECONDS } from './src/server/relay-config.js';
+import { envInt, envBool, readGuestSweepTiming, readRelayConfig, MAINTENANCE_INTERVAL_MS, MAX_REQUESTS_PER_SOCKET, RETRY_AFTER_LONG_SECONDS } from './src/server/relay-config.js';
 import { RelayWsTraffic, closeOnSessionExpiry } from './src/server/relay-ws-traffic.js';
 import { createE2ERelay } from './src/server/e2e-relay.js';
 import { E2ERoomLog } from './src/server/e2e-room-log.js';
@@ -137,7 +138,7 @@ const uploadBuckets = uploadState.buckets;
 
 const ldb = new LeveldbPersistence(DB_DIR);
 const accounting = createRoomAccounting({ databaseSizeBytes, MAX_DB_BYTES, MAX_PENDING_STORE_OPS, MAX_PENDING_STORE_BYTES, MAX_ACTIVE_DOCUMENT_BYTES });
-const { roomUsage, commitRoomUsage, tryCommitRoomUsage, releaseRoomUsage } = accounting;
+const { roomUsage } = accounting;
 
 // Marks the one update we apply from disk during hydration, so the listener
 // below can skip writing it straight back.
@@ -222,40 +223,8 @@ const reconcileUploadUsage = async () => {
   }
 };
 
-// `upperBytes` is a conservative in-memory document bound. It starts at the
-// exact hydrated size and grows by each accepted update until a separately
-// throttled measurement refreshes it. This avoids synchronously encoding a
-// near-limit document on every tiny edit or every persistence compaction.
-const destroyedDocs = new WeakSet();
-const capacityRejectedDocs = new WeakSet();
-
-const blockedRooms = new Map();
-const MAX_BLOCKED_ROOM_ENTRIES = MAX_ACTIVE_ROOMS * BLOCKED_ROOM_ENTRIES_PER_ACTIVE_ROOM;
-
-const blockRoom = (docName, ydoc, reason) => {
-  const now = Date.now();
-  blockedRooms.delete(docName);
-  blockedRooms.set(docName, now + ROOM_BLOCK_TTL_MS);
-  while (blockedRooms.size > MAX_BLOCKED_ROOM_ENTRIES) {
-    blockedRooms.delete(blockedRooms.keys().next().value);
-  }
-  console.warn('[yjs] room policy close', { docName: roomLogId(docName), reason });
-  if (ydoc) {
-    for (const conn of ydoc.conns.keys()) {
-      try { conn.close(1009, 'room resource limit'); } catch { /* already closing */ }
-    }
-  }
-};
-
-const isRoomBlocked = (docName) => {
-  const expiresAt = blockedRooms.get(docName);
-  if (!expiresAt) return false;
-  if (expiresAt <= Date.now()) {
-    blockedRooms.delete(docName);
-    return false;
-  }
-  return true;
-};
+const roomPolicy = createRoomPolicy(relayConfig);
+const { destroyedDocs, capacityRejectedDocs, blockedRooms, blockRoom, isRoomBlocked } = roomPolicy;
 
 const { roomPersistenceChurn, persistenceChurnFor, scheduleRoomCompaction, storeWrites, queueStoreUpdate } = createRelayPersistence({
   config: relayConfig, accounting, docs, Y, blockRoom, markStorageFailure,
@@ -266,145 +235,12 @@ const { finalizeExpiredVotes, armVoteExpiry, voteExpiryTimers } = createVoteExpi
   Y, accounting, destroyedDocs, isRoomBlocked,
 });
 
-// Hydration promise per room. y-websocket calls bindState without awaiting it
-// and starts answering the sync protocol immediately, so a client connecting
-// to a cold room is told "synced" against an empty doc while the LevelDB read
-// is still in flight — it then sees a blank board and can write over real
-// state. The upgrade handler awaits this before letting the socket through.
-const roomReady = new WeakMap();
-
-setPersistence({
-  bindState: (docName, ydoc) => {
-    // Aggregate accounting follows the Y.Doc lifetime. This covers normal
-    // last-peer teardown as well as a failed first-upgrade cleanup exactly
-    // once, without depending on each caller to mirror the bookkeeping.
-    ydoc.on('destroy', () => {
-      const timer = voteExpiryTimers.get(ydoc);
-      if (timer) clearTimeout(timer);
-      voteExpiryTimers.delete(ydoc);
-      destroyedDocs.add(ydoc);
-      releaseRoomUsage(ydoc);
-    });
-    ydoc.getMap('items').observeDeep((events) => {
-      const itemMap = ydoc.getMap('items');
-      if (events.some((event) => event.keysChanged?.has('voteTimer')
-          || (event.target === itemMap && [...event.keysChanged].some((id) => (
-            itemMap.get(id) instanceof Y.Map && itemMap.get(id).get('voteTimer')
-          ))))) {
-        armVoteExpiry(docName, ydoc);
-      }
-    });
-    // The listener must be registered BEFORE the first await. y-websocket
-    // calls bindState without awaiting it, so the room already accepts and
-    // broadcasts client updates while the LevelDB read is in flight. Any
-    // update applied during that gap was never handed to storeUpdate — it
-    // reaches every peer, then vanishes on the next server restart.
-    ydoc.on('update', (u, origin) => {
-      if (origin === HYDRATION_ORIGIN) return;
-      if (u.byteLength > MAX_UPDATE_BYTES) {
-        blockRoom(docName, ydoc, 'update too large');
-        return;
-      }
-      const usage = roomUsage.get(ydoc) || {
-        upperBytes: 0,
-        exactBytes: 0,
-        lastMeasuredAt: Date.now(),
-      };
-      const nextUsage = {
-        ...usage,
-        upperBytes: usage.upperBytes + u.byteLength,
-      };
-      if (nextUsage.upperBytes > MAX_DOCUMENT_BYTES) {
-        // Network updates are conservatively admitted before y-websocket
-        // applies them. Reaching this branch means a non-network origin or an
-        // unexpected encoding expansion escaped that guard; never turn it
-        // into an attacker-controlled full-document encode loop.
-        commitRoomUsage(ydoc, nextUsage);
-        blockRoom(docName, ydoc, 'document conservative limit');
-        return;
-      }
-      if (!tryCommitRoomUsage(ydoc, nextUsage)) {
-        // A non-network update is already resident by this point. Account for
-        // the temporary excess, then evict; network updates are rejected by
-        // the protocol preflight before they can reach this branch.
-        commitRoomUsage(ydoc, nextUsage);
-        blockRoom(docName, ydoc, 'active document capacity exceeded');
-        return;
-      }
-      queueStoreUpdate(docName, u, ydoc);
-    });
-    // y-websocket calls bindState as a floating promise (bin/utils.js:149) with
-    // no .catch(), so anything thrown here becomes an unhandled rejection and
-    // kills the process. Contain it: latch the failure and drain for restart.
-    const ready = (async () => {
-      try {
-        const persisted = await checkedGetYDoc(docName);
-        let persistedUpdate;
-        try {
-          persistedUpdate = Y.encodeStateAsUpdate(persisted);
-        } finally {
-          persisted.destroy();
-        }
-        if (persistedUpdate.byteLength > MAX_DOCUMENT_BYTES) {
-          blockRoom(docName, ydoc, 'persisted document too large');
-          return;
-        }
-        if (destroyedDocs.has(ydoc)) return;
-        const hydratedUsage = {
-          upperBytes: persistedUpdate.byteLength,
-          exactBytes: persistedUpdate.byteLength,
-          lastMeasuredAt: Date.now(),
-        };
-        if (!tryCommitRoomUsage(ydoc, hydratedUsage)) {
-          // Aggregate pressure is transient. Reject this cold-room admission
-          // without poisoning the room for the blocked-room TTL or declaring
-          // the persistence layer globally unhealthy.
-          capacityRejectedDocs.add(ydoc);
-          console.warn('[yjs] active document capacity reached', {
-            docName: roomLogId(docName),
-          });
-          return;
-        }
-        Y.applyUpdate(ydoc, persistedUpdate, HYDRATION_ORIGIN);
-        try { finalizeExpiredVotes(docName, ydoc); }
-        catch (err) {
-          console.error('[yjs] vote finalization failed', { docName: roomLogId(docName), err: err.message });
-        }
-        armVoteExpiry(docName, ydoc);
-      } catch (err) {
-        markStorageFailure(err);
-        console.error('[yjs] hydrate failed', { docName: roomLogId(docName), err: err.message });
-      }
-    })();
-    // Runs before the IIFE's first await yields, so the entry is in place by
-    // the time y-websocket's getYDoc returns this doc to the upgrade handler.
-    roomReady.set(ydoc, ready);
-    return ready;
-  },
-  // y-websocket invokes writeState in closeConn when the last client of a
-  // room disconnects. Updates are already stored individually; consolidation
-  // is thresholded and rate-limited separately so disconnect cannot force a
-  // full-document merge.
-  // Rethrowing here would also be fatal: the caller does
-  // `writeState(...).then(() => doc.destroy())` with no .catch()
-  // (bin/utils.js:205), so the rejection would go unhandled.
-  writeState: async (docName) => {
-    try {
-      const churn = roomPersistenceChurn.get(docName);
-      // Every update is already durable through storeUpdate. Do not force a
-      // full-room merge merely because the last peer disconnected: repeated
-      // connect/disconnect would otherwise be an unbounded CPU amplifier.
-      // If a threshold-triggered merge is already running, wait before the
-      // library destroys its Y.Doc so our completion path cannot race it.
-      if (churn?.compactionPromise) await churn.compactionPromise;
-    }
-    catch (err) {
-      markStorageFailure(err);
-      console.error('[yjs] flushDocument failed', { docName: roomLogId(docName), err: err.message });
-    }
-  },
-  provider: ldb,
+const { roomReady, persistence: roomPersistence } = createRoomState({
+  Y, config: relayConfig, accounting, policy: roomPolicy,
+  votes: { finalizeExpiredVotes, armVoteExpiry, voteExpiryTimers },
+  storage: { checkedGetYDoc, ldb }, queueStoreUpdate, roomPersistenceChurn, markStorageFailure, HYDRATION_ORIGIN,
 });
+setPersistence(roomPersistence);
 
 await migrateLegacyImages((process.env.YJS_MIGRATE_DOCS || '').split(',').map((entry) => entry.trim()).filter(Boolean), {
   Y, registry: roomRegistry, roomUploadUsage, uploadState, config: relayConfig,

@@ -18,7 +18,7 @@ export const deferred = () => {
   return { promise, resolve, reject };
 };
 
-export async function persistenceFixture(t, { store, flush, drain, hydrate, bind = true } = {}) {
+export async function persistenceFixture(t, { store, flush, drain, hydrate, bind = true, limits = {} } = {}) {
   const stores = [];
   const flushes = [];
   class FakeLevelDB {
@@ -37,7 +37,7 @@ export async function persistenceFixture(t, { store, flush, drain, hydrate, bind
       ? { ...require(name), LeveldbPersistence: FakeLevelDB } : require(name) },
     './src/server/relay-config.js': { ...config, readRelayConfig: () => ({ ...config.readRelayConfig(),
       ROOM_COMPACT_AFTER_UPDATES: COMPACTION_UPDATE_COUNT, ROOM_COMPACTION_MIN_INTERVAL_MS: COMPACTION_INTERVAL_MS,
-      DOCUMENT_REMEASURE_MIN_INTERVAL_MS: REMEASURE_INTERVAL_MS,
+      DOCUMENT_REMEASURE_MIN_INTERVAL_MS: REMEASURE_INTERVAL_MS, ...limits,
     }) },
     ...(drain ? { './src/server/relay-lifecycle.js': { drainRelay: drain } } : {}),
   } });

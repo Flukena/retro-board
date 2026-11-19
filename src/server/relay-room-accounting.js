@@ -2,6 +2,10 @@ import { databaseCapacityError } from './relay-room-registry.js';
 
 export function createRoomAccounting({ databaseSizeBytes, MAX_DB_BYTES, MAX_PENDING_STORE_OPS, MAX_PENDING_STORE_BYTES, MAX_ACTIVE_DOCUMENT_BYTES }) {
   const state = { dbUsageBytes: databaseSizeBytes(), pendingStoreOps: 0, pendingStoreBytes: 0, storageFailure: null, shuttingDown: false, activeDocumentBytes: 0 };
+  // `upperBytes` is a conservative in-memory document bound. It starts at the
+  // exact hydrated size and grows by each accepted update until a separately
+  // throttled measurement refreshes it. This avoids synchronously encoding a
+  // near-limit document on every tiny edit or every persistence compaction.
   const roomUsage = new WeakMap();
   const projectedActiveDocumentBytes = (ydoc, nextUpperBytes) => {
     const previous = roomUsage.get(ydoc);
