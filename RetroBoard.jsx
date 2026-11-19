@@ -1,3 +1,4 @@
+import { useAdminToggle, useAdminStartTimer, useAdminExtendTimer, useAdminStopTimer, useAdminClearBoard, useAdminResetVotes, useAdminUnlockAll } from './src/client/board/use-admin-actions.js';
 import { createVoteSnapshotController, useVoteSnapshotsState, useVoteFlashes, useToggleVote, useRemoveItem } from './src/client/board/use-vote-state.js';
 import { useSelection, useFocusedSelection, useSingleSelection } from './src/client/board/use-selection.js';
 import { useImageImport } from './src/client/transfer/use-image-import.js';
@@ -39,7 +40,6 @@ import {
   BOARD_TEXT_MAX_LENGTH,
   ZONE_TITLE_MAX_LENGTH,
 } from './src/domain/security-boundaries.js';
-import { CLEARED_VOTE_RESULTS, voteSessionScope, resetVoteSessionEntries } from './src/domain/vote-session-lifecycle.js';
 import { boardEditingAllowed, boardManagementPermissions, runSharedBoardAction } from './src/domain/public-board-permissions.js';
 import { publicZoneCreationSize } from './src/domain/public-zone-layout.js';
 import { itemSizeBounds, groupScaleRange } from './src/domain/item-size-limits.js';
@@ -119,7 +119,6 @@ import {
   normalizeViewport,
 } from './src/client/session/local-preferences.js';
 import { boardVoteIsOpen, timerDockModel, voteTimerPhaseSignature } from './src/domain/vote-timing.js';
-import { extendedDeadline } from './src/domain/countdown.js';
 import { storage, adminRoleStorage } from './src/client/session/room-storage.js';
 import { DEFAULT_BOARD } from './src/domain/board-state.js';
 import { applyRemoteSnapshot, shouldDropSnapshotFocus } from './src/domain/apply-remote-snapshot.js';
@@ -2484,137 +2483,24 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
   /* ============================================================
      Admin actions
      ============================================================ */
-  const adminToggle = useCallback((key) => {
-    if (!isAdmin) { setToast({ msg: t('common.adminOnly'), type: 'warn' }); return; }
-    // patchMeta writes the single flipped flag immediately — no debounce window
-    // for applyRemoteBoard to re-spread DEFAULT_BOARD over the local toggle.
-    patchMeta({ [key]: !boardRef.current[key] });
-  }, [isAdmin, patchMeta]);
+  const adminActionsOptions = { isAdmin, setToast, patchMeta, boardRef, reportWriteFailure, setBoard, setTimerSetupZoneId, updateItem, finalizeVotingSession, replaceBoardLocal, setConfirmClear, storage, setConfirmResetVotes, setConfirmUnlockAll };
+  const adminToggle = useAdminToggle(adminActionsOptions, [isAdmin, patchMeta]);
 
-  const adminStartTimer = useCallback((zoneId, minutes, voteLimit, hideResults, showNonVoters) => {
-    if (!isAdmin) return;
-    const items = boardRef.current.items;
-    const rootZone = items.find((i) => i.id === zoneId && i.type === 'zone');
-    if (!rootZone) return;
-    const nowMs = Date.now();
-    // Expired-but-unfinalized timers still block related starts.
-    const { relatedActive, capturedIds, staleResultZoneIds } = voteSessionScope(rootZone, items);
-    if (relatedActive) {
-      setToast({ msg: t('vote.session.relatedActive'), type: 'warn' });
-      return;
-    }
-    const startedAt = nowMs;
-    const endsAt = minutes && minutes > 0 ? startedAt + minutes * 60000 : null;
-    const limit = voteLimit && voteLimit > 0 ? voteLimit : null;
-    const timerPatch = {
-      voteTimer: {
-        startedAt, endsAt, voteLimit: limit, hideResults: !!hideResults, showNonVoters: !!showNonVoters,
-      },
-      ...CLEARED_VOTE_RESULTS,
-      votingLocked: false,
-    };
-    try {
-      if (window.storage.startVoteSession(zoneId, timerPatch, staleResultZoneIds, capturedIds) !== true) {
-        reportWriteFailure();
-        return;
-      }
-    } catch {
-      reportWriteFailure();
-      return;
-    }
-    setBoard((prev) => ({
-      ...prev,
-      items: prev.items.map((it) => {
-        if (it.id === zoneId) return { ...it, ...timerPatch };
-        if (staleResultZoneIds.includes(it.id)) return { ...it, ...CLEARED_VOTE_RESULTS };
-        return it;
-      }),
-    }));
-    setTimerSetupZoneId(null);
-    setToast({
-      msg: t('vote.session.started', {
-        limit: limit ? t('vote.session.votesLimit', { n: limit }) : t('vote.session.unlimited'),
-        time: minutes ? t('vote.session.minutes', { n: minutes }) : t('vote.session.noTime'),
-      }),
-      type: 'info',
-    });
-  }, [isAdmin, t, reportWriteFailure]);
+  const adminStartTimer = useAdminStartTimer(adminActionsOptions, [isAdmin, t, reportWriteFailure]);
 
-  const adminExtendTimer = useCallback((zoneId, minutes) => {
-    if (!isAdmin) return;
-    const zone = boardRef.current.items.find((i) => i.id === zoneId && i.type === 'zone');
-    if (!zone?.voteTimer) return;
-    updateItem(zoneId, { voteTimer: { ...zone.voteTimer, endsAt: extendedDeadline(zone.voteTimer.endsAt, Date.now(), minutes) } });
-  }, [isAdmin, updateItem]);
+  const adminExtendTimer = useAdminExtendTimer(adminActionsOptions, [isAdmin, updateItem]);
 
-  const adminStopTimer = useCallback((zoneId) => {
-    if (!isAdmin) return;
-    const zone = boardRef.current.items.find((i) => i.id === zoneId && i.type === 'zone');
-    if (!zone?.voteTimer) return;
-    finalizeVotingSession(zoneId);
-  }, [isAdmin, finalizeVotingSession]);
+  const adminStopTimer = useAdminStopTimer(adminActionsOptions, [isAdmin, finalizeVotingSession]);
 
-  const adminClearBoard = useCallback(() => {
-    if (!isAdmin) return;
-    window.storage?.clearAllVotes?.();
-    window.storage?.clearAllComments?.();
-    // Full replace: drop every item, reset session meta, preserve admin identity.
-    if (!replaceBoardLocal({
-      ...boardRef.current,
-      items: [],
-      timer: null,
-      lastResultsAt: null,
-      allRevealed: false,
-      votingLocked: false,
-      editingLocked: false,
-      phase: null, moodCheck: null,
-    })) return;
-    setConfirmClear(false);
-  }, [isAdmin, replaceBoardLocal]);
+  const adminClearBoard = useAdminClearBoard(adminActionsOptions, [isAdmin, replaceBoardLocal]);
 
-  const adminResetVotes = useCallback(() => {
-    if (!isAdmin) return;
-    // Votes live in CRDT keys; clearing them re-renders via the vote subscription.
-    window.storage?.clearAllVotes?.();
-    const zoneEntries = resetVoteSessionEntries(boardRef.current.items);
-    if (zoneEntries.length) {
-      if (!storage.updateItems(zoneEntries)) { reportWriteFailure(); return; }
-      const patchById = new Map(zoneEntries.map((entry) => [entry.id, entry.patch]));
-      setBoard((prev) => ({
-        ...prev,
-        items: prev.items.map((it) => (
-          patchById.has(it.id) ? { ...it, ...patchById.get(it.id) } : it
-        )),
-      }));
-    }
-    patchMeta({ lastResultsAt: null });
-    setConfirmResetVotes(false);
-    setToast({ msg: t('reset.done'), type: 'info' });
-  }, [isAdmin, patchMeta, reportWriteFailure]);
+  const adminResetVotes = useAdminResetVotes(adminActionsOptions, [isAdmin, patchMeta, reportWriteFailure]);
 
   // Clears every protective flag on the board in one go: per-zone locks,
   // per-sticky privacy, and the board-wide edit lock. A durable reset (not a
   // display-only override like "reveal all cards") so the objects stay
   // unlocked/public after a reload, not just for the current view.
-  const adminUnlockAll = useCallback(() => {
-    if (!isAdmin) return;
-    const entries = boardRef.current.items
-      .filter((i) => (i.type === 'zone' && i.locked) || (i.type === 'sticky' && i.private))
-      .map((i) => ({ id: i.id, patch: i.type === 'zone' ? { locked: false } : { private: false } }));
-    if (entries.length) {
-      if (!storage.updateItems(entries)) { reportWriteFailure(); return; }
-      const patchById = new Map(entries.map((entry) => [entry.id, entry.patch]));
-      setBoard((prev) => ({
-        ...prev,
-        items: prev.items.map((it) => (
-          patchById.has(it.id) ? { ...it, ...patchById.get(it.id) } : it
-        )),
-      }));
-    }
-    patchMeta({ editingLocked: false });
-    setConfirmUnlockAll(false);
-    setToast({ msg: t('unlockAll.done'), type: 'info' });
-  }, [isAdmin, patchMeta, reportWriteFailure]);
+  const adminUnlockAll = useAdminUnlockAll(adminActionsOptions, [isAdmin, patchMeta, reportWriteFailure]);
 
   /* ----- Export / Import ----- */
   const boardExports = useBoardExports({ boardRef, boardCode, userId, setToast });
