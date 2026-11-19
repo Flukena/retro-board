@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { boardTitleToSeed } from '../../domain/board-title.js';
-import { t } from '../ui/i18n.js';
+import { documentTitleFor } from './document-title.js';
 import { boardTitleEvents, serveBoardTitle } from './board-title-requests.js';
 
 // Names the room with the title its creator typed on the landing page.
@@ -11,8 +11,6 @@ export const seedBoardTitle = async ({ storage, pendingTitle, patchMeta }) => {
   if (title) patchMeta({ title }, { silent: true });
   return title;
 };
-
-export const documentTitleFor = (title) => (title ? `${title} · ${t('app.title')}` : t('app.title'));
 
 export function useBoardTitle({ storage, liveStorage, title, pendingTitle, patchMeta }) {
   useEffect(() => {

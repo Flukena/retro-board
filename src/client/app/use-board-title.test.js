@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { documentTitleFor, seedBoardTitle } from './use-board-title.js';
+import { documentTitleFor } from './document-title.js';
+import { seedBoardTitle } from './use-board-title.js';
 import { t } from '../ui/i18n.js';
 
 const fakeStorage = (boardState) => ({ get: async () => (boardState ? { value: boardState } : null) });

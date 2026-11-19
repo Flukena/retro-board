@@ -100,7 +100,7 @@ const ROUTE_VIEWS = {
   template: () => <TemplatePage slug={route.slug} />,
   notFound: () => <NotFoundPage />,
 };
-const renderRoute = ROUTE_VIEWS[route.kind] ?? (() => <HomeRoute />);
+const renderRoute = ROUTE_VIEWS[route.kind] ?? (() => <HomeRoute landingTitleKey={pageTitleKey} />);
 
 // Subscribes once for every page, so switching language re-renders the whole view,
 // not only the component that owns the language button.
@@ -115,8 +115,11 @@ function PageHead() {
   usePageHead(pageTitleKey);
   return null;
 }
+// The home view sets its own title (the workspace has a different one), so it is the only head there.
+const NoHead = () => null;
+const RouteHead = ROUTE_VIEWS[route.kind] ? PageHead : NoHead;
 
 // A saved or path language (/ja/...) loads first, so the page never flashes English.
 Promise.all([languageReady, routeLanguageReady]).then(() => createRoot(document.getElementById('root')).render(
-  <React.StrictMode><BoardErrorBoundary><PageHead /><App /></BoardErrorBoundary></React.StrictMode>,
+  <React.StrictMode><BoardErrorBoundary><RouteHead /><App /></BoardErrorBoundary></React.StrictMode>,
 ));

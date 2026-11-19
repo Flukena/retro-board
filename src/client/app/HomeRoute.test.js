@@ -195,3 +195,55 @@ test('an unavailable relay keeps a hinted visitor on the workspace without offer
     }
   }, { plugins: [stubHomeViews()] });
 });
+
+const LANDING_TITLE_KEY = 'seo.home.title';
+const WORKSPACE_TITLE_KEY = 'workspace.title';
+
+// Mounts HomeRoute the way main.jsx does for a home path and hands the check what a tab shows.
+async function checkHomeHead(context, { hinted = true } = {}, check) {
+  const { document, values } = installHintedPage(context);
+  if (!hinted) values.delete(SIGNED_IN_HINT_KEY);
+  await withChromeModule(MODULE, async ({ default: HomeRoute }, i18n, { load }) => {
+    const { accountSessionStore } = await load('/src/client/account/account-session-store.js');
+    const { documentTitleFor } = await load('/src/client/app/document-title.js');
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    try {
+      flushSync(() => root.render(React.createElement(HomeRoute, { landingTitleKey: LANDING_TITLE_KEY })));
+      await check({ document, i18n, accountSessionStore, documentTitleFor });
+    } finally {
+      flushSync(() => root.unmount());
+    }
+  }, { plugins: [stubHomeViews()] });
+}
+
+test('the workspace names its own tab and follows a language switch', async (context) => {
+  await checkHomeHead(context, {}, ({ document, i18n, documentTitleFor }) => {
+    i18n.setLang('en');
+    assert.equal(document.title, documentTitleFor(i18n.t(WORKSPACE_TITLE_KEY)));
+    assert.notEqual(document.title, i18n.t(LANDING_TITLE_KEY), 'not the guest landing title');
+    flushSync(() => i18n.setLang('th'));
+    assert.equal(document.title, documentTitleFor(i18n.t(WORKSPACE_TITLE_KEY)));
+    assert.match(document.title, /^บอร์ดของฉัน · /, 'the Thai workspace title');
+    assert.equal(document.documentElement.lang, 'th');
+  });
+});
+
+test('signing out gives the tab back the page search title', async (context) => {
+  await checkHomeHead(context, {}, ({ document, i18n, accountSessionStore }) => {
+    i18n.setLang('en');
+    flushSync(() => accountSessionStore.markSignedOut());
+    assert.equal(document.title, i18n.t(LANDING_TITLE_KEY));
+  });
+});
+
+test('a guest at the home page keeps the translated search title, and <html lang> follows the language', async (context) => {
+  await checkHomeHead(context, { hinted: false }, ({ document, i18n }) => {
+    flushSync(() => i18n.setLang('th'));
+    assert.equal(document.title, i18n.t(LANDING_TITLE_KEY));
+    assert.equal(document.documentElement.lang, 'th');
+    flushSync(() => i18n.setLang('en'));
+    assert.equal(document.title, i18n.t(LANDING_TITLE_KEY));
+    assert.equal(document.documentElement.lang, 'en');
+  });
+});
