@@ -104,9 +104,7 @@
       "relayEnv": {},
       "checkEnv": {},
       "timeoutSec": 900,
-      "baseline": "known-red",
-      "reason": "Every step passes, but the check demands zero console errors and the relay answers 404 on /api/account by design when sign-in is off (3 errors, no stack is clean); the Public relay is now running, so the earlier 502 is gone — unguarded until repaired (controller ruling T2-REPAIR)",
-      "failingStep": null
+      "baseline": "pass"
     },
     {
       "id": "landing",
