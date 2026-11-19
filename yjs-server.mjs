@@ -1,3 +1,4 @@
+import { createWsConnectionHandler } from './src/server/relay-ws-connection.js';
 import { createRoomPolicy, createRoomState } from './src/server/relay-room-state.js';
 import { createRelayPersistence } from './src/server/relay-persistence.js';
 import { createRelayRuntime, logRelayBanner } from './src/server/relay-runtime.js';
@@ -10,14 +11,13 @@ import { createRoomAccounting } from './src/server/relay-room-accounting.js';
 import { createAdmissionLimits } from './src/server/relay-admission-limits.js';
 import { readAllowedOrigins } from './src/server/relay-origins.js';
 import { clientIpFromRequest as requestClientIp } from './src/server/relay-client-ip.js';
-import { coalesceAwarenessSends } from './src/server/relay-awareness-fanout.js';
 import { RoomSessions } from './src/server/relay-session.js';
 import { RelayProtocol } from './src/server/relay-protocol.js';
 // Yjs WebSocket relay with LevelDB persistence.
 // Single source of truth for collaborative state.
 
 import { envInt, envBool, readGuestSweepTiming, readRelayConfig, MAINTENANCE_INTERVAL_MS, MAX_REQUESTS_PER_SOCKET, RETRY_AFTER_LONG_SECONDS } from './src/server/relay-config.js';
-import { RelayWsTraffic, closeOnSessionExpiry } from './src/server/relay-ws-traffic.js';
+import { RelayWsTraffic } from './src/server/relay-ws-traffic.js';
 import { createE2ERelay } from './src/server/e2e-relay.js';
 import { E2ERoomLog } from './src/server/e2e-room-log.js';
 import { migrateLegacyImages } from './src/server/legacy-image-migration.js';
@@ -42,7 +42,7 @@ import { AccountStore, ACCOUNT_STORAGE_FAILURE_EVENT } from './src/server/accoun
 import { AccountSessions } from './src/server/auth-session.js';
 import { FlowLedger } from './src/server/auth-google.js';
 import { createAuthRoutes, enabledOAuthConfig } from './src/server/auth-routes.js';
-import { publicRelayEnvironment, isPublicWallEnabled,  PUBLIC_SNAPSHOT_DIRECTORY, PUBLIC_ACTION_LIMIT_REASON } from './src/server/public-wall-config.js';
+import { publicRelayEnvironment, isPublicWallEnabled,  PUBLIC_SNAPSHOT_DIRECTORY } from './src/server/public-wall-config.js';
 import { claimPublicDirectory, PublicWallHistory } from './src/server/public-wall-history.js';
 import { provisionPublicWall, RelayPublicWall, retainPublicDocument } from './src/server/relay-public-wall.js';
 import { createRejectionCounters } from './src/server/relay-rejection-counters.js';
@@ -62,7 +62,6 @@ import { createHttpRequestSlots } from './src/server/relay-http-slots.js';
 import { createAccountRoomRoutes } from './src/server/account-room-routes.js';
 import { createRoomSummaryReader, createRoomTitleWriter } from './src/server/room-title-writer.js';
 import { orphanRoomsOfDeletedAccounts } from './src/server/room-orphaning.js';
-import { registerPublicQuotaClient, notifyPublicQuota } from './src/server/public-action-limit.js';
 
 const { Y, LeveldbPersistence, loadUtils } = createRelayRuntime();
 
@@ -429,81 +428,11 @@ const plainUpgrades = createPlainUpgrades({
   docs, getYDoc, roomReady, wss, fence: roomFence, reject: rejectUpgrade, timeoutMs: UPGRADE_TIMEOUT_MS, refusal: plainRoomRefusal,
 });
 roomRegistry.activity.watch(e2eRelay.wss, (error) => roomRegistry.reportStorageFailure(error));
-wss.on('connection', (conn, req) => {
-  const context = req.wsSecurityContext;
-  if (!context?.docName) {
-    conn.close(1011, 'server setup error');
-    return;
-  }
-  const { docName, clientIp, expiresAt } = context;
-  const doc = docs.get(docName);
-  if (!doc) {
-    conn.close(1011, 'server setup error');
-    return;
-  }
-  context.awarenessClientIds = new Set();
-  console.log('[yjs] conn open', { docName: roomLogId(docName), client: roomLogId(`ip:${clientIp}`), origin: req.headers.origin });
-  conn.on('error', (err) => {
-    console.warn('[yjs] conn error', { docName: roomLogId(docName), err: err.message, code: err.code });
-    try { conn.terminate(); } catch { /* already closed */ }
-  });
-  closeOnSessionExpiry(conn, expiresAt);
-  // Ingress closes the WS when over budget; egress mediates conn.send, which y-websocket
-  // funnels sync replies, awareness snapshots and broadcasts through.
-  let limited = false;
-  const meter = wsTraffic.attach(conn, docName);
-
-  if (PUBLIC_WALL) coalesceAwarenessSends(conn, doc, MAX_AWARENESS_MESSAGE_BYTES);
-  if (PUBLIC_WALL && context.supportsQuota) registerPublicQuotaClient(Y, doc, clientIp, conn);
-
-  const before = new Set(conn.listeners('message'));
-  setupWSConnection(conn, req, { docName, gc: true });
-  // setupWSConnection registers its close handler synchronously. Registering
-  // after it guarantees states/controlled IDs are removed before we delete
-  // y-protocols' otherwise-retained metadata and our byte accounting.
-  conn.once('close', () => releaseAwarenessForConnection(doc, conn, context));
-  const parsers = conn.listeners('message').filter((listener) => !before.has(listener));
-  if (parsers.length !== 1) {
-    console.error('[yjs] unexpected message-listener count', { docName: roomLogId(docName), count: parsers.length });
-    conn.close(1011, 'server setup error');
-    return;
-  }
-  const [parseYjsMessage] = parsers;
-  conn.off('message', parseYjsMessage);
-  conn.on('message', (data) => {
-    if (limited || roomFence.isFenced(docName)) return;
-    const size = data?.byteLength ?? data?.length ?? 0;
-    if (!meter.admitIngress(size)
-        || accounting.pendingStoreOps >= MAX_PENDING_STORE_OPS
-        || accounting.pendingStoreBytes >= MAX_PENDING_STORE_BYTES) {
-      limited = true;
-      rejectionCounters.observeBacklog(accounting.pendingStoreOps, accounting.pendingStoreBytes, MAX_PENDING_STORE_OPS, MAX_PENDING_STORE_BYTES);
-      console.warn('[yjs] rate-limit close', { docName: roomLogId(docName), origin: req.headers.origin, size });
-      try { conn.close(1008, 'rate-limit'); } catch { /* already closing */ }
-      return;
-    }
-    let inspection;
-    let awarenessPlan = null;
-    try {
-      ({ inspection, awarenessPlan } = inspectMessage(data, { doc, docName, conn, context, meter, clientIp }));
-      if (awarenessPlan?.dropFrame) return;
-    } catch (err) {
-      limited = true;
-      if (err.closeReason === PUBLIC_ACTION_LIMIT_REASON) rejectionCounters.increment(PUBLIC_ACTION_LIMIT_REASON, 1008);
-      else console.warn('[yjs] protocol-policy close', {
-        docName: roomLogId(docName),
-        reason: err.message,
-        size,
-      });
-      try { conn.close(err.closeCode || 1008, err.closeReason || 'protocol policy'); } catch { /* already closing */ }
-      return;
-    }
-    parseYjsMessage(data);
-    if (PUBLIC_WALL && inspection.kind === 'sync-update') notifyPublicQuota(doc, clientIp, conn);
-    if (awarenessPlan) commitAwarenessPlan(context, awarenessPlan);
-    wsTraffic.closeSlowConsumers(doc.conns.keys());
-  });
+const { handleConnection } = createWsConnectionHandler({
+  config: relayConfig, accounting, docs, Y, PUBLIC_WALL, roomFence, wsTraffic, rejectionCounters,
+  setupWSConnection, releaseAwarenessForConnection, inspectMessage, commitAwarenessPlan,
 });
+wss.on('connection', handleConnection);
 
 const { handleUpgrade } = createUpgradeHandler({
   settings: { PUBLIC_WALL, ALLOWED_ORIGINS, ALLOW_INSECURE_HTTP, ALLOW_LEGACY_URL_TOKENS, ALLOW_LEGACY_ROOMS },

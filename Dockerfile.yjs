@@ -65,6 +65,7 @@ COPY --chown=node:node \
     src/server/relay-runtime.js \
     src/server/relay-persistence.js \
     src/server/relay-room-state.js \
+    src/server/relay-ws-connection.js \
     ./src/server/
 
 COPY --chown=node:node scripts/public-wall-restore.mjs scripts/public-wall-restore.sh ./scripts/

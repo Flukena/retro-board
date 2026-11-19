@@ -24,7 +24,7 @@ export async function connectionFixture(t, { inspection = () => ({ kind: 'other'
     ...modules,
   } });
   const wss = servers[0];
-  const connect = (doc, context = {}) => {
+  const connect = (doc, context = {}, messageListeners = []) => {
     docs.set(TEST_DOC_NAME, doc);
     const conn = Object.assign(new EventEmitter(), {
       readyState: 1, bufferedAmount: 0, closes: [],
@@ -35,6 +35,7 @@ export async function connectionFixture(t, { inspection = () => ({ kind: 'other'
       docName: TEST_DOC_NAME, clientIp: '127.0.0.1', expiresAt: null,
       expectedAwarenessClientId: null, ...context,
     } };
+    for (const listener of messageListeners) conn.on('message', listener);
     wss.emit('connection', conn, req);
     return { conn, context: req.wsSecurityContext };
   };
