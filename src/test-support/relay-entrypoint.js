@@ -12,7 +12,7 @@ const ENTRYPOINT = new URL('../../yjs-server.mjs', import.meta.url);
 const SESSION_EVENTS = ['SIGTERM', 'SIGINT', 'unhandledRejection', 'uncaughtException'];
 const TEST_SIGNING_KEY_BYTES = 32;
 const SERVER_ROOT = new URL('../server/', import.meta.url).href;
-const ISOLATED_MODULES = new Set(['relay-room-accounting.js']);
+const ISOLATED_MODULES = new Set(['relay-vote-expiry.js', 'relay-room-accounting.js']);
 const require = createRequire(ENTRYPOINT);
 let nextSessionId = 0;
 
@@ -98,7 +98,13 @@ function injectionHooks(bindings, bindingKey) {
 }
 
 function boundaryModules(state, overrides) {
+  const utilsPath = new URL('../../node_modules/y-websocket/bin/utils.js', import.meta.url).pathname;
+  const utils = require(utilsPath);
   const modules = {
+    [utilsPath]: { ...utils, setPersistence: persistence => {
+      state.runtimePersistence = persistence;
+      utils.setPersistence(persistence);
+    } },
     http: { default: { createServer(_options, dispatch) {
       state.dispatch = dispatch;
       state.server = Object.assign(new EventEmitter(), { listen() {} });

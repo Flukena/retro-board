@@ -1,3 +1,4 @@
+import { createVoteExpiry } from './src/server/relay-vote-expiry.js';
 import { createRoomAccounting } from './src/server/relay-room-accounting.js';
 import { createAdmissionLimits } from './src/server/relay-admission-limits.js';
 import { readAllowedOrigins } from './src/server/relay-origins.js';
@@ -8,7 +9,7 @@ import { RelayProtocol } from './src/server/relay-protocol.js';
 // Yjs WebSocket relay with LevelDB persistence.
 // Single source of truth for collaborative state.
 
-import { envInt, envBool, readGuestSweepTiming, readRelayConfig, ROOM_BLOCK_TTL_MS, BLOCKED_ROOM_ENTRIES_PER_ACTIVE_ROOM, LARGE_UPDATE_LOG_THRESHOLD_BYTES, VOTE_EXPIRY_RETRY_INTERVAL_MS, MAINTENANCE_INTERVAL_MS, STORE_OPERATION_OVERHEAD_BYTES, MAX_HTTP_TARGET_CHARACTERS, MAX_REQUESTS_PER_SOCKET, RETRY_AFTER_SHORT_SECONDS, RETRY_AFTER_LONG_SECONDS } from './src/server/relay-config.js';
+import { envInt, envBool, readGuestSweepTiming, readRelayConfig, ROOM_BLOCK_TTL_MS, BLOCKED_ROOM_ENTRIES_PER_ACTIVE_ROOM, LARGE_UPDATE_LOG_THRESHOLD_BYTES, MAINTENANCE_INTERVAL_MS, STORE_OPERATION_OVERHEAD_BYTES, MAX_HTTP_TARGET_CHARACTERS, MAX_REQUESTS_PER_SOCKET, RETRY_AFTER_SHORT_SECONDS, RETRY_AFTER_LONG_SECONDS } from './src/server/relay-config.js';
 import { roomTargetFromRequest, tokenDocNameFromRequest } from './src/server/relay-room-target.js';
 import { RelayWsTraffic, closeOnSessionExpiry } from './src/server/relay-ws-traffic.js';
 import { createE2ERelay } from './src/server/e2e-relay.js';
@@ -32,7 +33,6 @@ import {
   createRelayLifecycle, drainRelay, isRelayReady, STORAGE_FAILURE_LOG, STORAGE_FAILURE_REASON,
   UNHANDLED_REJECTION_EVENT, UNCAUGHT_EXCEPTION_EVENT,
 } from './src/server/relay-lifecycle.js';
-import { finalizeRelayVotes } from './src/server/relay-vote-maintenance.js';
 import { RoomRegistry, REGISTRY_STORAGE_FAILURE_EVENT } from './src/server/relay-room-registry.js';
 import { RelayMaintenance, MAINTENANCE_STORAGE_FAILURE_EVENT } from './src/server/relay-maintenance.js';
 import { directorySizeSync, loadSessionSigningKey, loadSigningKey, ACCOUNT_SESSION_KEY } from './src/server/relay-local-files.js';
@@ -471,44 +471,9 @@ const queueStoreUpdate = (docName, update, ydoc) => {
   }
 };
 
-// The relay is the durable fallback for deadlines. Connected clients also
-// finalize promptly for immediate UI feedback; this pass covers a room whose
-// creator is gone and a room reopened after everyone was offline.
-const finalizeExpiredVotes = (docName, ydoc, atTime = Date.now()) => {
-  if (accounting.storageFailure || accounting.shuttingDown || isRoomBlocked(docName)) return;
-  finalizeRelayVotes(ydoc, Y, atTime, () => {
-    console.warn('[yjs] vote finalization skipped invalid geometry', { docName: roomLogId(docName) });
-  });
-};
-
-const voteExpiryTimers = new WeakMap();
-const armVoteExpiry = (docName, ydoc, deferExpired = false) => {
-  const existing = voteExpiryTimers.get(ydoc);
-  if (existing) clearTimeout(existing);
-  voteExpiryTimers.delete(ydoc);
-  if (destroyedDocs.has(ydoc) || accounting.storageFailure || accounting.shuttingDown) return;
-  let earliest = Infinity;
-  ydoc.getMap('items').forEach((yItem) => {
-    if (!(yItem instanceof Y.Map) || yItem.get('type') !== 'zone') return;
-    const deadline = yItem.get('voteTimer')?.endsAt;
-    if (Number.isFinite(deadline)) earliest = Math.min(earliest, deadline);
-  });
-  if (!Number.isFinite(earliest)) return;
-  // A malformed unfinalizable room must not create a zero-delay retry loop.
-  const waitMs = earliest <= Date.now()
-    ? (deferExpired ? VOTE_EXPIRY_RETRY_INTERVAL_MS : 1)
-    : Math.max(1, Math.min(earliest - Date.now(), 2_147_483_647));
-  const timer = setTimeout(() => {
-    voteExpiryTimers.delete(ydoc);
-    try { finalizeExpiredVotes(docName, ydoc); }
-    catch (err) {
-      console.error('[yjs] vote finalization failed', { docName: roomLogId(docName), err: err.message });
-    }
-    armVoteExpiry(docName, ydoc, true);
-  }, waitMs);
-  timer.unref();
-  voteExpiryTimers.set(ydoc, timer);
-};
+const { finalizeExpiredVotes, armVoteExpiry, voteExpiryTimers } = createVoteExpiry({
+  Y, accounting, destroyedDocs, isRoomBlocked,
+});
 
 // Hydration promise per room. y-websocket calls bindState without awaiting it
 // and starts answering the sync protocol immediately, so a client connecting

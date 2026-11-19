@@ -57,6 +57,7 @@ COPY --chown=node:node \
     src/server/room-activity.js src/server/room-owner-index.js src/server/room-fence.js src/server/room-deletion.js src/server/plain-room-teardown.js src/server/plain-upgrade.js src/server/relay-http-slots.js src/server/account-room-routes.js src/server/room-title-writer.js src/server/room-links.js src/server/room-orphaning.js src/server/board-preview-reader.js \
     src/server/relay-session.js src/server/relay-uploads.js src/server/relay-vote-maintenance.js \
     src/server/relay-room-accounting.js \
+    src/server/relay-vote-expiry.js \
     ./src/server/
 
 COPY --chown=node:node scripts/public-wall-restore.mjs scripts/public-wall-restore.sh ./scripts/
