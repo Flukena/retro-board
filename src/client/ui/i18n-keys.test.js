@@ -59,3 +59,25 @@ test('every on-demand language has exactly the English keys and keeps their plac
   }
 });
 
+
+// The browser-storage paragraph is one line per fact: what is kept, the signed-in hint, then how to remove it.
+const PRIVACY_BROWSER_KEY = 'legal.privacy.browser.body';
+const PRIVACY_BROWSER_LINES = Object.freeze({ STORED: 0, SIGNED_IN_HINT: 1, REMOVAL: 2 });
+
+test('every language lists the signed-in hint in the browser-storage paragraph and keeps the removal line last', async () => {
+  const lazyCodes = LANGUAGE_OPTIONS.map(({ code }) => code).filter((code) => !Object.hasOwn(dictionaries, code));
+  const bodies = { th: dictionaries.th[PRIVACY_BROWSER_KEY], en: dictionaries.en[PRIVACY_BROWSER_KEY] };
+  for (const code of lazyCodes) bodies[code] = (await import(`./locales/${code}.js`)).default[PRIVACY_BROWSER_KEY];
+  const lineCount = Object.keys(PRIVACY_BROWSER_LINES).length;
+  for (const [code, body] of Object.entries(bodies)) {
+    const lines = body.split('\n');
+    assert.equal(lines.length, lineCount, `${code}: one line per fact`);
+    assert.ok(lines.every((line) => line.trim()), `${code}: no empty line`);
+    assert.equal(new Set(lines).size, lineCount, `${code}: the lines say different things`);
+  }
+  // Only the signed-in line may mention signing in, so the removal line stays the closing line.
+  const english = bodies.en.split('\n');
+  assert.match(english[PRIVACY_BROWSER_LINES.SIGNED_IN_HINT], /sign/i);
+  assert.doesNotMatch(english[PRIVACY_BROWSER_LINES.REMOVAL], /sign/i);
+  assert.match(english[PRIVACY_BROWSER_LINES.REMOVAL], /remove/i);
+});
