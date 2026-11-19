@@ -335,6 +335,7 @@ export default Object.freeze({
   "topbar.importTitle": "Tải bảng từ ZIP, JSON hoặc CSV (ghi đè bảng hiện tại)",
   "export.done": "Đã tải xuống {file}",
   "export.repaired": "Đã tải xuống {file} (đã định vị lại {positions} mục; đặt kích thước mặc định cho {zones} vùng)",
+  "export.flattened": "Đã tải {file} — {count} ảnh động hoặc quá giới hạn đã được lưu thành ảnh tĩnh ({ids})",
   "export.processing": "Đang chuẩn bị bản sao lưu và ảnh…",
   "export.fail": "Không thể tạo bản sao lưu có thể nhập lại — {err}",
   "import.confirm.head": "Tải bảng từ tệp?",

@@ -5,6 +5,7 @@ import {
   IMAGE_SOURCE_MAX_DIMENSION,
   classifyImportedImageSource,
   imageInfoIsWithinLimits,
+  isDecodeSafeLegacyImage,
   inspectRasterImageBytes,
   RETIRED_APP_ORIGINS,
   normalizeRuntimeImageSource,
@@ -238,4 +239,17 @@ test('the runtime normalizer never accepts an encrypted source, the room-aware r
   assert.equal(resolveRoomImageSource(E2E_PATH, RUNTIME, E2E_HANDLE), E2E_PATH);
   const plain = `/rooms/${E2E_HANDLE}/images/01234567-abcd.png`;
   assert.equal(resolveRoomImageSource(plain, RUNTIME, E2E_HANDLE), normalizeRuntimeImageSource(plain, RUNTIME));
+});
+
+test('isDecodeSafeLegacyImage accepts only parsed, decodable-size images that fail the import limits', () => {
+  const apng = { mime: 'image/png', width: 100, height: 100, animated: true };
+  assert.equal(isDecodeSafeLegacyImage(apng), true);
+  assert.equal(isDecodeSafeLegacyImage({ ...apng, animated: false }), false);
+  assert.equal(isDecodeSafeLegacyImage(null), false);
+  assert.equal(isDecodeSafeLegacyImage({ ...apng, width: IMAGE_SOURCE_MAX_DIMENSION }), true);
+  assert.equal(isDecodeSafeLegacyImage({ ...apng, width: IMAGE_SOURCE_MAX_DIMENSION + 1 }), false);
+  assert.equal(isDecodeSafeLegacyImage({ ...apng, width: 60000, height: 60000 }), false);
+  assert.equal(isDecodeSafeLegacyImage({ ...apng, width: 8000, height: 8000 }), false);
+  assert.equal(isDecodeSafeLegacyImage({ ...apng, width: 0 }), false);
+  assert.equal(isDecodeSafeLegacyImage({ ...apng, width: 1.5 }), false);
 });

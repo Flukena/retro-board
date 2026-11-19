@@ -335,6 +335,7 @@ export default Object.freeze({
   "topbar.importTitle": "Muat board dari ZIP, JSON, atau CSV (menimpa yang sekarang)",
   "export.done": "{file} diunduh",
   "export.repaired": "{file} diunduh (memosisikan ulang {positions} item; ukuran {zones} zona diatur ke default)",
+  "export.flattened": "{file} diunduh — {count} gambar animasi atau melebihi batas disimpan sebagai gambar diam ({ids})",
   "export.processing": "Menyiapkan cadangan dan gambar…",
   "export.fail": "Tidak dapat membuat cadangan yang bisa diimpor ulang — {err}",
   "import.confirm.head": "Muat board dari file?",

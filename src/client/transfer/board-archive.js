@@ -2,7 +2,7 @@ import {
   BlobReader, BlobWriter, TextReader, TextWriter, ZipReader, ZipWriter,
 } from '@zip.js/zip.js/index-native.js';
 import { createJsonBackupArtifact } from './board-backup.js';
-import { checkedImageBlob } from './backup-images.js';
+import { createStillFallbackReader } from './backup-images.js';
 import {
   IMPORT_MAX_ARCHIVE_FILE_BYTES,
   IMPORT_MAX_ITEMS,
@@ -23,23 +23,24 @@ export function assertArchiveSize(size) {
 
 // Images are already compressed raster files. Store their binary bytes in ZIP
 // without base64 or re-compression, and stream entries through Blob readers.
-export async function createBoardArchiveArtifact(options, readImage) {
+export async function createBoardArchiveArtifact(options, readImage, flattenToStill) {
   const artifact = createJsonBackupArtifact(options);
   const writer = new ZipWriter(new BlobWriter('application/zip'), ZIP_OPTIONS);
   const assets = new Map();
   const items = [];
+  const reader = createStillFallbackReader(async src => {
+    const source = classifyImportedImageSource(src);
+    if (source.kind !== 'data') return readImage(src);
+    const binary = atob(source.payload);
+    return new Blob([Uint8Array.from(binary, char => char.charCodeAt(0))], { type: source.mime });
+  }, flattenToStill);
   let imageBytes = 0;
   for (const item of artifact.payload.board.items) {
     if (item.type !== 'image') { items.push(item); continue; }
     try {
+      if (!classifyImportedImageSource(item.src)) fail('invalid image source');
+      const blob = await reader.read(item);
       if (!assets.has(item.src)) {
-        const source = classifyImportedImageSource(item.src);
-        if (!source) fail('invalid image source');
-        const blob = await checkedImageBlob(item.src, async src => {
-          if (source.kind !== 'data') return readImage(src);
-          const binary = atob(source.payload);
-          return new Blob([Uint8Array.from(binary, char => char.charCodeAt(0))], { type: source.mime });
-        });
         const name = `images/${assets.size.toString(16).padStart(8, '0')}.${blob.type.split('/')[1]}`;
         imageBytes += blob.size;
         // Reserve a bounded manifest and enough space for ZIP entry headers.
@@ -70,6 +71,7 @@ export async function createBoardArchiveArtifact(options, readImage) {
     mimeType: 'application/zip',
     blob,
     geometryRepairs: artifact.geometryRepairs,
+    flattenedImageIds: reader.flattenedIds,
   };
 }
 
