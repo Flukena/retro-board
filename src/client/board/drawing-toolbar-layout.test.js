@@ -61,5 +61,15 @@ test('mobile Draw toolbar: direct children outside the named areas take a full r
   // Left to auto-place it falls into the first auto track and stretches Undo and squeezes the options.
   assert.equal(mobileDeclarations('.rb-drawing-toolbar > button')['grid-column'], '1 / -1');
   // The status line must stay out of the grid flow, or it becomes another auto-placed item.
-  assert.equal(mobileDeclarations('.rb-drawing-status').position, 'fixed');
+  assert.equal(mobileDeclarations('.rb-drawing-status').position, 'absolute');
+});
+
+test('mobile Draw toolbar: the status is anchored to the toolbar edge, not to a viewport constant that a taller toolbar covers', () => {
+  const status = mobileDeclarations('.rb-drawing-status');
+  assert.equal(mobileDeclarations('.rb-drawing-toolbar').position, undefined, 'the toolbar stays fixed (base rule) and so contains the status');
+  assert.match(css.split('@media')[0], /\.rb-drawing-toolbar \{[^}]*position: fixed/);
+  assert.match(status.bottom, /^calc\(100% \+ var\(--[a-z0-9-]+\)\)$/, 'sits just above the toolbar whatever its height');
+  assert.equal(status.left, '0');
+  assert.equal(status.right, '0');
+  assert.doesNotMatch(status.bottom, /touch-target|mobile-bottom/, 'a constant offset cannot clear a two or three row toolbar');
 });
