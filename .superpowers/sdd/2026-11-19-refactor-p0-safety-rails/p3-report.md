@@ -55,3 +55,15 @@ Browser checks are intentionally not run, as requested. Owed before release: `ui
 - Ceiling: 869 → 846. New-module ESLint complexity ≤15 and unused-variable checks PASS.
 - Full gate: `p3-gate-5.log`; build PASS (`p3-build-5.log`).
 - RULE CONFORMANCE: Code shape PASS; Tests PASS; Logging and disk writes N/A; Data location PASS; Karpathy guidelines PASS; repo style PASS; failure-path tests PASS.
+- Task 5 commit: `8d57d14`; full gate **2864/2864**, build PASS.
+
+## Task 6 — S2 import-plan and deferred key wiring
+
+- Files: `bridge/import-plan.{js,test.js}`, bridge, ratchet, report.
+- Before move: unchanged bridge/contract, import characterization and original key-schema fixtures **77/77** (`p3-before-6.log`). Each rejection has its own subtest and asserts unchanged canonical bytes. Valid intake is one local update; permit-order characterization verifies invalid input consumes no permit and valid input yields permit → transaction → nested permit.
+- After move: import/key tests **27/27** (`p3-after-6.log`). Existing export → import → export exact-round-trip tests remain unchanged and are included in every full gate. Validation returns a plan only; outer transaction, related-key deletion and nested snapshot transaction remain in the bridge, in original order.
+- The bridge now imports key constructors, prefixes and `parseStoredVoteKey`/`parseStoredCommentKey` from domain `vote-comment-keys.js`. The permissive legacy stored parser is retained; canonical-vote parsing remains separate. This finishes the P2 deferred bridge wiring.
+- RED: `import-plan.js:41`, remove duplicate-vote rejection; “duplicate vote” fails `true !== false` at `import-plan.test.js:36` (`p3-red-6.log`). Later unchanged-state assertions also catch that mutant's document writes. Restored.
+- Ceiling: 846 → 794. Planning is split into named item/vote/comment validators with the shared board-item validator; new-module ESLint complexity ≤15 and unused-variable checks PASS.
+- Full gate: `p3-gate-6.log`; build PASS (`p3-build-6.log`).
+- RULE CONFORMANCE: Code shape PASS; Tests PASS; Logging and disk writes N/A; Data location PASS; Karpathy guidelines PASS; repo style PASS; failure-path tests PASS.

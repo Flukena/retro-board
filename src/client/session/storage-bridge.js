@@ -1,3 +1,6 @@
+import { planImportBundle } from './bridge/import-plan.js';
+import { voteKey as VOTE_KEY, commentKey as COMMENT_KEY, VOTE_PREFIX, COMMENT_PREFIX,
+  parseStoredVoteKey as parseVoteKey, parseStoredCommentKey as parseCommentKey } from '../../domain/vote-comment-keys.js';
 import { createUndoController } from './bridge/undo-controller.js';
 import { createSnapshotDoc, boardItemWriteError, boardItemsWriteError, LEGACY_BOARD_KEY,
   META_INTERNAL_PREFIX, IMAGE_REPAIR_ORIGIN, originOf } from './bridge/snapshot-doc.js';
@@ -64,11 +67,10 @@ import {
 } from './room-session.js';
 import { COMMENT_MAX_LEN, isSafeId, normalizeComment } from '../../domain/comment-schema.js';
 import { normalizeRuntimeImageSource } from '../../domain/security-boundaries.js';
-import { isMoodKey, moodImportWrites, moodKeys, readMoods } from './mood-store.js';
+import { isMoodKey, moodKeys, readMoods } from './mood-store.js';
 import { isMoodScore, moodKey } from '../../domain/mood-check.js';
 import {
   isTemplateKey,
-  normalizeTemplateEntries,
   putTemplate,
   readTemplates,
   removeTemplate,
@@ -255,31 +257,10 @@ yMeta.observe((event) => {
 // Votes and comments live at independent keys in `ymap`, so concurrent writes
 // never trample-overwrite another user's contribution.
 // ---------------------------------------------------------------------------
-const VOTE_KEY = (itemId, userId) => keyOf('s', `vote:${itemId}:${userId}`, '');
-const VOTE_PREFIX = 's||vote:';
-const COMMENT_KEY = (itemId, commentId) => keyOf('s', `comment:${itemId}:${commentId}`, '');
-const COMMENT_PREFIX = 's||comment:';
-
 const isLiveSticky = (itemId) => {
   if (!isSafeId(itemId)) return false;
   const item = yItems.get(itemId);
   return item instanceof Y.Map && item.get('type') === 'sticky';
-};
-
-const parseVoteKey = (mapKey) => {
-  if (!mapKey.startsWith(VOTE_PREFIX)) return null;
-  const rest = mapKey.slice(VOTE_PREFIX.length);
-  const sep = rest.indexOf(':');
-  if (sep < 0) return null;
-  return { itemId: rest.slice(0, sep), userId: rest.slice(sep + 1) };
-};
-
-const parseCommentKey = (mapKey) => {
-  if (!mapKey.startsWith(COMMENT_PREFIX)) return null;
-  const rest = mapKey.slice(COMMENT_PREFIX.length);
-  const sep = rest.indexOf(':');
-  if (sep < 0) return null;
-  return { itemId: rest.slice(0, sep), commentId: rest.slice(sep + 1) };
 };
 
 // Keep the flat persisted key format for existing rooms, but index its hot
@@ -513,42 +494,9 @@ if (provider) {
     // imports and prevents one WebSocket update / O(N) snapshot rebuild per
     // comment. Validate again here because window.storage is a public seam.
     importBundle(board, voteEntries, commentEntries, customTemplates, moodEntries = []) {
-      if (!board || typeof board !== 'object' || !Array.isArray(board.items)) return false;
-      if (!Array.isArray(voteEntries) || !Array.isArray(commentEntries)) return false;
-      const moodWrites = moodImportWrites(moodEntries);
-      if (!moodWrites) return false;
-      const normalizedTemplates = normalizeTemplateEntries(customTemplates);
-      if (customTemplates != null && !normalizedTemplates) return false;
-      if (boardItemsWriteError(board.items)) return false;
-
-      const itemTypes = new Map();
-      for (const item of board.items) {
-        if (!item || typeof item !== 'object' || !isSafeId(item.id) || itemTypes.has(item.id)) return false;
-        if (!['sticky', 'zone', 'text', 'image'].includes(item.type)) return false;
-        itemTypes.set(item.id, item.type);
-      }
-
-      const normalizedVotes = [];
-      const seenVotes = new Set();
-      for (const entry of voteEntries) {
-        if (!entry || itemTypes.get(entry.itemId) !== 'sticky' || !isSafeId(entry.userId)) return false;
-        const key = VOTE_KEY(entry.itemId, entry.userId);
-        if (seenVotes.has(key)) return false;
-        seenVotes.add(key);
-        normalizedVotes.push(key);
-      }
-
-      const normalizedComments = [];
-      const seenComments = new Set();
-      for (const entry of commentEntries) {
-        if (!entry || itemTypes.get(entry.itemId) !== 'sticky') return false;
-        const comment = normalizeComment(entry.comment, entry.comment?.id);
-        if (!comment) return false;
-        const key = COMMENT_KEY(entry.itemId, comment.id);
-        if (seenComments.has(key)) return false;
-        seenComments.add(key);
-        normalizedComments.push({ key, comment });
-      }
+      const plan = planImportBundle(board, voteEntries, commentEntries, customTemplates, moodEntries);
+      if (!plan) return false;
+      const { moodWrites, normalizedTemplates, normalizedVotes, normalizedComments } = plan;
 
       if (!permitPublicCreations(newSnapshotItems(board.items))) return false;
       const relatedKeys = [];
