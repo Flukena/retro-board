@@ -146,20 +146,12 @@ import { worldMotionProps } from './src/client/board/world-motion.js';
    ============================================================ */
 
 const { w: TEXT_W, h: TEXT_H } = sizeForPlacement({ type: 'text' });
-// A full board import writes every item in one Yjs transaction, which the
-// WebsocketProvider then sends as a single WS frame. Must stay safely under
-// the server's per-frame cap (RL_MAX_BYTES in yjs-server.mjs, 2MB) — legacy
-// exports with embedded base64 images get converted back to short URLs
-// before this check (see sanitizeImportedImages), but this is the
-// belt-and-suspenders net for anything that still doesn't fit.
 const DRAG_THRESHOLD = 4;
 const MINIMAP_IDLE_MS = 1100;
 const CURSOR_BROADCAST_MS = 24;
 const FOLLOW_VIEWPORT_COMMIT_MS = 96;
 const SCROLL_WHEEL_ZOOM_KEY = 'rb_scroll_wheel_zoom';
 const POLL_SAFETY = 15000; // safety net only — Realtime push is primary
-const SAVE_DEBOUNCE = 200;
-const TEXT_SAVE_DEBOUNCE = 350;
 // Drag/resize push cadence: send granular geometry at most every DRAG_FLUSH_MS
 // while moving, plus a trailing flush DRAG_TRAILING_MS after the last move so
 // the final position always lands even if the throttle swallowed it.
@@ -196,8 +188,6 @@ const HELP_SECTIONS = [
 
 const uid = () =>
   Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
-
-const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
 const readScrollWheelZoomEnabled = () => {
   try {
