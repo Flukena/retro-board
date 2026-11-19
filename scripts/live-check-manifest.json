@@ -17,7 +17,7 @@
       "relayEnv": {},
       "checkEnv": {},
       "timeoutSec": 900,
-      "baseline": "unrun"
+      "baseline": "pass"
     },
     {
       "id": "facilitation",
@@ -34,7 +34,9 @@
       "relayEnv": {},
       "checkEnv": {},
       "timeoutSec": 900,
-      "baseline": "unrun"
+      "baseline": "known-red",
+      "reason": "Round ZIP export then import: after import \"Average 4.5 / 5\" never appears within 15 s (identical in both attempts)",
+      "failingStep": "ZIP export then import keeps the round and its answers"
     },
     {
       "id": "retro-outcomes",
@@ -51,7 +53,7 @@
       "relayEnv": {},
       "checkEnv": {},
       "timeoutSec": 900,
-      "baseline": "unrun"
+      "baseline": "pass"
     },
     {
       "id": "board-reactions",
@@ -69,7 +71,7 @@
       "relayEnv": {},
       "checkEnv": {},
       "timeoutSec": 900,
-      "baseline": "unrun"
+      "baseline": "pass"
     },
     {
       "id": "writing-timer",
@@ -87,7 +89,7 @@
       "relayEnv": {},
       "checkEnv": {},
       "timeoutSec": 900,
-      "baseline": "unrun"
+      "baseline": "pass"
     },
     {
       "id": "poker",
@@ -104,7 +106,9 @@
       "relayEnv": {},
       "checkEnv": {},
       "timeoutSec": 900,
-      "baseline": "unrun"
+      "baseline": "known-red",
+      "reason": "Every step passes but the script counts 404/502 console resource errors from the isolated stack and exits 1 (identical in both attempts)",
+      "failingStep": null
     },
     {
       "id": "landing",
@@ -122,7 +126,7 @@
       "relayEnv": {},
       "checkEnv": {},
       "timeoutSec": 900,
-      "baseline": "unrun"
+      "baseline": "pass"
     },
     {
       "id": "modal",
@@ -140,7 +144,9 @@
       "relayEnv": {},
       "checkEnv": {},
       "timeoutSec": 900,
-      "baseline": "unrun"
+      "baseline": "known-red",
+      "reason": "Times out waiting for the name dialog button \"name.skip\" (identical in both attempts); script prints no FAIL line",
+      "failingStep": null
     },
     {
       "id": "mobile",
@@ -159,7 +165,9 @@
       "relayEnv": {},
       "checkEnv": {},
       "timeoutSec": 900,
-      "baseline": "unrun"
+      "baseline": "known-red",
+      "reason": "Times out waiting for .rb-mobile-editor__input after 4 passing steps (identical in both attempts); script prints no FAIL line",
+      "failingStep": null
     },
     {
       "id": "spacing",
@@ -178,7 +186,9 @@
       "relayEnv": {},
       "checkEnv": {},
       "timeoutSec": 900,
-      "baseline": "unrun"
+      "baseline": "known-red",
+      "reason": "Times out waiting for .rb-public-wall at its first case (identical in both attempts); script prints no FAIL line",
+      "failingStep": null
     },
     {
       "id": "pan",
@@ -199,7 +209,9 @@
       "relayEnv": {},
       "checkEnv": {},
       "timeoutSec": 900,
-      "baseline": "unrun"
+      "baseline": "known-red",
+      "reason": "seedFixture throws \"Pan fixture rejected\": the check needs its own dedicated Public relay on 5188, not the runner stack (identical in both attempts)",
+      "failingStep": null
     },
     {
       "id": "public-tools",
@@ -219,7 +231,9 @@
       "relayEnv": {},
       "checkEnv": {},
       "timeoutSec": 900,
-      "baseline": "unrun"
+      "baseline": "known-red",
+      "reason": "Times out waiting for the \"mobile.done\" button after 4 passing steps (identical in both attempts); script prints no FAIL line",
+      "failingStep": null
     },
     {
       "id": "room-lock",
@@ -238,7 +252,7 @@
       },
       "checkEnv": {},
       "timeoutSec": 900,
-      "baseline": "unrun"
+      "baseline": "pass"
     },
     {
       "id": "account",
@@ -255,7 +269,7 @@
       "relayEnv": {},
       "checkEnv": {},
       "timeoutSec": 900,
-      "baseline": "unrun"
+      "baseline": "pass"
     },
     {
       "id": "room-management",
@@ -283,7 +297,7 @@
       },
       "oidcInCheck": true,
       "timeoutSec": 900,
-      "baseline": "unrun"
+      "baseline": "pass"
     },
     {
       "id": "board-reactions-locked",
@@ -303,7 +317,7 @@
       },
       "checkEnv": {},
       "timeoutSec": 900,
-      "baseline": "unrun"
+      "baseline": "pass"
     },
     {
       "id": "writing-timer-locked",
@@ -321,7 +335,7 @@
       "relayEnv": {},
       "checkEnv": {},
       "timeoutSec": 900,
-      "baseline": "unrun"
+      "baseline": "pass"
     },
     {
       "id": "board-drag-peer",
@@ -408,5 +422,104 @@
       "timeoutSec": 900,
       "baseline": "pass"
     }
-  ]
+  ],
+  "baselines": {
+    "unitTests": {
+      "atBaseline": {
+        "commit": "c923049",
+        "tests": 2602,
+        "pass": 2602,
+        "fail": 0
+      }
+    },
+    "bundle": {
+      "commit": "8cfdecd",
+      "entries": [
+        {
+          "prefix": "index-",
+          "ext": "css",
+          "kB": 125.44,
+          "gzipKB": 19.83
+        },
+        {
+          "prefix": "zip-reader-",
+          "ext": "js",
+          "kB": 0.05,
+          "gzipKB": 0.07
+        },
+        {
+          "prefix": "storage-bridge-",
+          "ext": "js",
+          "kB": 36.48,
+          "gzipKB": 12.71
+        },
+        {
+          "prefix": "zh-",
+          "ext": "js",
+          "kB": 75.57,
+          "gzipKB": 26.52
+        },
+        {
+          "prefix": "id-",
+          "ext": "js",
+          "kB": 81.29,
+          "gzipKB": 24.58
+        },
+        {
+          "prefix": "pt-",
+          "ext": "js",
+          "kB": 83.45,
+          "gzipKB": 26.26
+        },
+        {
+          "prefix": "es-",
+          "ext": "js",
+          "kB": 84.76,
+          "gzipKB": 26.34
+        },
+        {
+          "prefix": "de-",
+          "ext": "js",
+          "kB": 86.45,
+          "gzipKB": 27.71
+        },
+        {
+          "prefix": "fr-",
+          "ext": "js",
+          "kB": 89.83,
+          "gzipKB": 27.35
+        },
+        {
+          "prefix": "ko-",
+          "ext": "js",
+          "kB": 90.18,
+          "gzipKB": 27.07
+        },
+        {
+          "prefix": "vi-",
+          "ext": "js",
+          "kB": 93.33,
+          "gzipKB": 26.14
+        },
+        {
+          "prefix": "ja-",
+          "ext": "js",
+          "kB": 98.58,
+          "gzipKB": 28.32
+        },
+        {
+          "prefix": "board-archive-",
+          "ext": "js",
+          "kB": 163.04,
+          "gzipKB": 72.47
+        },
+        {
+          "prefix": "index-",
+          "ext": "js",
+          "kB": 1008.29,
+          "gzipKB": 308.59
+        }
+      ]
+    }
+  }
 }

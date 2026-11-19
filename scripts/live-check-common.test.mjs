@@ -3,11 +3,12 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { randomBytes } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { createServer, connect } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { PUBLIC_RELAY_PORT } from '../src/server/public-wall-config.js';
 import {
   BASELINE, assertPortsFree, checkCommand, checkEnv, entryPorts, judgeRun, parseManifest, portsFor, runWithHardTimeout,
@@ -134,6 +135,31 @@ test('an entry whose script file is missing is rejected', () => {
 test('the committed manifest decodes', () => {
   const manifest = parseManifest(JSON.parse(readFileSync(new URL('./live-check-manifest.json', import.meta.url), 'utf8')));
   assert.ok(manifest.entries.length > 0);
+});
+
+// The 22 live checks the design (§7.5) and task 1 + 1b.1-1b.5 list; the baseline manifest must cover each exactly once.
+const LIVE_CHECK_IDS = Object.freeze([
+  'ui', 'facilitation', 'retro-outcomes', 'board-reactions', 'writing-timer', 'poker', 'landing', 'modal', 'mobile',
+  'spacing', 'pan', 'public-tools', 'room-lock', 'account', 'room-management', 'board-reactions-locked',
+  'writing-timer-locked', 'board-drag-peer', 'board-resize', 'board-undo-middrag', 'presence', 'board-import-ui',
+]);
+const PROJECT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..');
+const committedManifestJson = () => JSON.parse(readFileSync(new URL('./live-check-manifest.json', import.meta.url), 'utf8'));
+
+test('the committed manifest has no unrun entry', () => {
+  assert.doesNotThrow(() => parseManifest(committedManifestJson(), { requireRun: true }));
+});
+
+test("every committed entry's script exists", () => {
+  for (const entry of committedManifestJson().entries) {
+    assert.ok(existsSync(join(PROJECT_DIR, entry.script)), `${entry.id}: ${entry.script}`);
+  }
+});
+
+test('the manifest lists all 22 live checks', () => {
+  const ids = committedManifestJson().entries.map((entry) => entry.id);
+  assert.equal(ids.length, LIVE_CHECK_IDS.length);
+  assert.deepEqual([...ids].sort(), [...LIVE_CHECK_IDS].sort());
 });
 
 test('requireRun rejects any entry still unrun', () => {
