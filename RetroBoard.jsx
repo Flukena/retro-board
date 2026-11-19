@@ -1,3 +1,4 @@
+import { useSelection, useFocusedSelection, useSingleSelection } from './src/client/board/use-selection.js';
 import { useImageImport } from './src/client/transfer/use-image-import.js';
 import { useOnImportPick, useOnImportFileChange, useConfirmImport } from './src/client/transfer/use-board-import.js';
 import { RemoteCursorLayer } from './src/client/session/RemoteCursorLayer.jsx';
@@ -218,12 +219,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
   const localEditingPresence = createLocalEditingPresence(storage);
 
   /* ---------- UI state ---------- */
-  const [selectedIds, setSelectedIds] = useState(() => new Set());
-  // Mirror selectedIds in a ref so drag callbacks don't need to depend on it.
-  // Without this, every click that flips selection would invalidate
-  // startItemDrag → invalidate renderedItems → re-build every card's JSX.
-  const selectedIdsRef = useRef(selectedIds);
-  useEffect(() => { selectedIdsRef.current = selectedIds; }, [selectedIds]);
+  const { selectedIds, setSelectedIds, selectedIdsRef } = useSelection();
   const [focusedTextId, setFocusedTextId] = useState(null);
   const [marquee, setMarquee] = useState(null); // {x1,y1,x2,y2} in screen coords
   // Vote state lives in Yjs as per-user-per-item keys (CRDT — no LWW race).
@@ -270,22 +266,13 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
   const [confirmUnlockAll, setConfirmUnlockAll] = useState(false);
   const [undoState, setUndoState] = useState({ canUndo: false, canRedo: false });
 
-  const focusedTextIdRef = useRef(null);
-  const updateFocusedText = useCallback((next) => {
-    focusedTextIdRef.current = next;
-    setFocusedTextId(next);
-    const itemId = typeof next === 'string' ? next.split(':')[0] : null;
-    storage.setLocalBusyItems('text', itemId ? [itemId] : []);
-  }, []);
+  const { focusedTextIdRef, updateFocusedText } = useFocusedSelection(storage, setFocusedTextId);
 
   const shortcutToolHandlersRef = useRef({});
   const spaceHeldRef = useRef(false);
 
   // single-select helpers
-  const selectedId = selectedIds.size === 1 ? [...selectedIds][0] : null;
-  const setSelectedId = useCallback((id) => {
-    setSelectedIds(id == null ? new Set() : new Set([id]));
-  }, []);
+  const { selectedId, setSelectedId } = useSingleSelection(selectedIds, setSelectedIds);
 
   /* ---------- Refs ---------- */
   const canvasRef = useRef(null);
