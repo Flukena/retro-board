@@ -1,3 +1,7 @@
+import { FOLLOW_VIEWPORT_COMMIT_MS } from './src/client/board/follow-timing.js';
+import { CURSOR_BROADCAST_MS } from './src/client/board/cursor-timing.js';
+import { MINIMAP_IDLE_MS } from './src/client/board/minimap-timing.js';
+import { DRAG_THRESHOLD, DRAG_FLUSH_MS, DRAG_TRAILING_MS, RECENT_MOVE_WINDOW_MS } from './src/client/board/drag-timing.js';
 import { useToast } from './src/client/ui/use-toast.js';
 // RetroBoard.jsx — application coordinator for the collaborative board
 // Yjs-backed realtime board with character-level collaborative text editing.
@@ -147,24 +151,8 @@ import { worldMotionProps } from './src/client/board/world-motion.js';
    ============================================================ */
 
 const { w: TEXT_W, h: TEXT_H } = sizeForPlacement({ type: 'text' });
-const DRAG_THRESHOLD = 4;
-const MINIMAP_IDLE_MS = 1100;
-const CURSOR_BROADCAST_MS = 24;
-const FOLLOW_VIEWPORT_COMMIT_MS = 96;
 const SCROLL_WHEEL_ZOOM_KEY = 'rb_scroll_wheel_zoom';
 const POLL_SAFETY = 15000; // safety net only — Realtime push is primary
-// Drag/resize push cadence: send granular geometry at most every DRAG_FLUSH_MS
-// while moving, plus a trailing flush DRAG_TRAILING_MS after the last move so
-// the final position always lands even if the throttle swallowed it.
-const DRAG_FLUSH_MS = 60;
-const DRAG_TRAILING_MS = 80;
-// A just-finished drag stays protected against remote-snapshot overwrite for
-// this long after mouseup — covers the window where a concurrent peer write
-// (e.g. the vote-finalize auto-sort) can land on the same item with a Yjs
-// clock that outranks this client's, even though it happened earlier in
-// real time. Mirrors RECENT_AUTHOR_WINDOW_MS below (same class of problem:
-// a remote snapshot that doesn't yet reflect what this client just did).
-const RECENT_MOVE_WINDOW_MS = 8000;
 // Above this many paintable cards (sticky+image) on the board, drop the blurred
 // per-card shadows/filters — overlapping blur kernels are the dominant paint
 // cost when cards cluster. Cards stay separated by their borders.
