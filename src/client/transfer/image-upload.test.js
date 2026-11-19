@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createPortableJsonBackupArtifact } from './board-backup.js';
 import { canvasToBlob, prepareImageBlob, uploadWithRetry, readBackupImage, sanitizeImportedImages } from './image-upload.js';
 
 const GIF_BASE64 = 'R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
@@ -94,6 +95,37 @@ test('backup reads reject foreign sources and sanitization preserves non-image i
   await assert.rejects(readBackupImage('https://foreign.example/image.png'), /another room or server/);
   const items = [{ id: 'sticky', type: 'sticky', text: 'keep' }];
   assert.deepEqual(await sanitizeImportedImages(items), items);
+});
+
+const RETIRED_IMAGE_ID = 'f98dcb70-f794-4b1a-9d4d-09fd5b4cd9a4';
+const OTHER_ROOM_HANDLE = 'z'.repeat(32);
+const retiredImageItem = (src) => ({ id: 'old', type: 'image', x: 0, y: 0, w: 120, h: 120, src, natW: 1, natH: 1 });
+const exportOptions = (items) => ({ fallbackBoardCode: 'ROOMA', board: { items }, votes: new Map(), comments: new Map(), moods: {}, customTemplates: [] });
+
+test('export embeds an image stored under the retired origin by reading it from the current server', async (t) => {
+  const fetched = [];
+  installGlobals(t, {
+    window: { location: { origin: 'https://retroroom.party', hostname: 'retroroom.party', protocol: 'https:', pathname: '/' } },
+    fetch: async (url) => { fetched.push(String(url)); return new Response(imageBlob(PNG_BASE64, 'image/png')); },
+  });
+  const stored = `https://retro.sagonzis.space/yjs/images/${RETIRED_IMAGE_ID}.png`;
+  const artifact = await createPortableJsonBackupArtifact(exportOptions([retiredImageItem(stored)]), readBackupImage);
+  assert.deepEqual(fetched, [`https://retroroom.party/yjs/images/${RETIRED_IMAGE_ID}.png`]);
+  assert.match(artifact.contents, /data:image\/png;base64,/);
+});
+
+test('export still refuses a retired-origin image that names another room', async (t) => {
+  const fetched = [];
+  installGlobals(t, {
+    window: { location: { origin: 'https://retroroom.party', hostname: 'retroroom.party', protocol: 'https:', pathname: '/' } },
+    fetch: async (url) => { fetched.push(String(url)); return new Response(imageBlob(PNG_BASE64, 'image/png')); },
+  });
+  const stored = `https://retro.sagonzis.space/yjs/rooms/${OTHER_ROOM_HANDLE}/images/${RETIRED_IMAGE_ID}.png`;
+  await assert.rejects(
+    createPortableJsonBackupArtifact(exportOptions([retiredImageItem(stored)]), readBackupImage),
+    /another room or server/,
+  );
+  assert.deepEqual(fetched, []);
 });
 
 test('image creation preflight stops over-quota uploads without hiding file validation errors', async () => {

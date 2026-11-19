@@ -1,7 +1,8 @@
-import { IMAGE_MAX_BYTES, IMAGE_OUTPUT_MAX_DIMENSION, imageInfoIsWithinLimits, inspectRasterImageBlob, isE2EImageSource, isSafeImageMime, resolveRoomImageSource } from '../../domain/security-boundaries.js';
+import { IMAGE_MAX_BYTES, imageInfoIsWithinLimits, inspectRasterImageBlob, isE2EImageSource, isSafeImageMime, resolveRoomImageSource } from '../../domain/security-boundaries.js';
 import { getActiveRoomSession, getRelayHttpBaseUrl, roomFetch } from '../session/room-session.js';
 import { canonicalPublicImageSource } from '../../domain/public-wall-image-source.js';
 import { restoreBackupImages } from './backup-images.js';
+import { canvasToBlob, decodedDimensionsMatch, drawBoundedCanvas, encodeImageCanvas, withDecodedImage } from './image-canvas.js';
 import { decryptImageResponse } from '../room-lock/e2e-images.js';
 import { getRoomKey } from '../room-lock/lock-session.js';
 
@@ -11,14 +12,7 @@ export const IMAGE_MAX_MIB_LABEL = (IMAGE_MAX_BYTES / BYTES_PER_MIB).toFixed(0);
 const IMAGE_RETRY_ATTEMPTS = 6;
 const IMAGE_RETRY_DELAY_MS = 1100;
 const RATE_LIMIT_STATUS = 429;
-const IMAGE_ENCODER_QUALITY = 0.85;
-const JPEG_FALLBACK_QUALITY = 0.8;
-const MIN_IMAGE_DIMENSION_PX = 1;
-const MIN_IMAGE_BYTES = 1;
-const MIME_PNG = 'image/png';
-const MIME_JPEG = 'image/jpeg';
 const MIME_GIF = 'image/gif';
-const CANVAS_CONTEXT = '2d';
 const ROOM_IMAGE_ROUTE = /^\/(?:(?:yjs|yjs-public)\/)?rooms\/[A-Za-z0-9_-]{32}\/((?:images|e2e-blobs)\/[^/]+)$/;
 const UPLOAD_RATE_LIMIT_ERROR = /: 429$/;
 const delayImageRetry = () => new Promise((resolve) => { setTimeout(resolve, IMAGE_RETRY_DELAY_MS); });
@@ -32,25 +26,6 @@ export function canStartImageImport(blob, storage) {
   return canCreateImageItem(storage);
 }
 
-const decodedDimensionsMatch = (width, height, info) => (
-  Number.isSafeInteger(width) && Number.isSafeInteger(height)
-  && width >= MIN_IMAGE_DIMENSION_PX && height >= MIN_IMAGE_DIMENSION_PX
-  && ((width === info.width && height === info.height) || (width === info.height && height === info.width))
-);
-const encodedImageIsValid = (blob, inputMime) => (
-  !!blob && (blob.type === MIME_JPEG || blob.type === inputMime)
-  && blob.size >= MIN_IMAGE_BYTES && blob.size <= IMAGE_MAX_BYTES
-);
-
-const encodeImageCanvas = async (canvas, mime) => {
-  let blob = await canvasToBlob(canvas, mime, mime === MIME_PNG ? undefined : IMAGE_ENCODER_QUALITY);
-  if (!blob || !isSafeImageMime(blob.type) || blob.size > IMAGE_MAX_BYTES) {
-    // Preserve the bounded JPEG fallback, including its loss of transparency.
-    blob = await canvasToBlob(canvas, MIME_JPEG, JPEG_FALLBACK_QUALITY);
-  }
-  return encodedImageIsValid(blob, mime) ? blob : null;
-};
-
 export const safeRuntimeImageSource = (value, { publicPreview = false } = {}) => {
   if (publicPreview) return canonicalPublicImageSource(value);
   if (typeof window === 'undefined') return null;
@@ -62,9 +37,7 @@ export const safeRuntimeImageSource = (value, { publicPreview = false } = {}) =>
   }, getRoomKey()?.roomHandle ?? null);
 };
 
-export const canvasToBlob = (canvas, type, quality) => (
-  new Promise((resolve) => canvas.toBlob(resolve, type, quality))
-);
+export { canvasToBlob };
 
 // Inspect headers before decode so malformed/decompression-bomb inputs are
 // rejected early. PNG/JPEG/WebP are always redrawn through a bounded canvas,
@@ -73,40 +46,17 @@ export const canvasToBlob = (canvas, type, quality) => (
 export const prepareImageBlob = async (blob) => {
   const info = await inspectRasterImageBlob(blob);
   if (!imageInfoIsWithinLimits(info)) return null;
-  const objectUrl = URL.createObjectURL(blob);
-  const img = new Image();
-  try {
-    await new Promise((res, rej) => {
-      img.onload = res;
-      img.onerror = rej;
-      img.src = objectUrl;
-    });
-    let nw = img.naturalWidth;
-    let nh = img.naturalHeight;
+  return withDecodedImage(blob, async (img) => {
+    const nw = img.naturalWidth;
+    const nh = img.naturalHeight;
     // Browser JPEG orientation may swap the header dimensions.
     if (!decodedDimensionsMatch(nw, nh, info)) return null;
-
     if (info.mime === MIME_GIF) return { blob, nw, nh };
-
-    const maxEdge = Math.max(nw, nh);
-    const scale = Math.min(1, IMAGE_OUTPUT_MAX_DIMENSION / maxEdge);
-    const cw = Math.max(MIN_IMAGE_DIMENSION_PX, Math.round(nw * scale));
-    const ch = Math.max(MIN_IMAGE_DIMENSION_PX, Math.round(nh * scale));
-    const canvas = document.createElement('canvas');
-    canvas.width = cw;
-    canvas.height = ch;
-    const ctx = canvas.getContext(CANVAS_CONTEXT);
-    if (!ctx) return null;
-    ctx.drawImage(img, 0, 0, cw, ch);
-
-    const finalBlob = await encodeImageCanvas(canvas, info.mime);
-    nw = cw;
-    nh = ch;
-    if (!finalBlob) return null;
-    return { blob: finalBlob, nw, nh };
-  } finally {
-    URL.revokeObjectURL(objectUrl);
-  }
+    const drawn = drawBoundedCanvas(img, nw, nh);
+    if (!drawn) return null;
+    const finalBlob = await encodeImageCanvas(drawn.canvas, info.mime);
+    return finalBlob ? { blob: finalBlob, nw: drawn.width, nh: drawn.height } : null;
+  });
 };
 
 // Read only validated image routes. Room reads refresh the authenticated

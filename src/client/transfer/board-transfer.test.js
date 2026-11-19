@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readBoardImport, prepareBoardImport, ImportBundleLimitError } from './board-transfer.js';
+import { createBoardExport, readBoardImport, prepareBoardImport, ImportBundleLimitError } from './board-transfer.js';
 import { IMPORT_MAX_FILE_BYTES } from '../../domain/import-schema.js';
 import { BOARD_TEXT_MAX_LENGTH } from '../../domain/security-boundaries.js';
 
@@ -71,4 +71,17 @@ test('import keeps the backed-up mood round, closed, and its answers', async () 
   assert.deepEqual(manifest.moodEntries, [{ roundId: 'round1', userId: 'user-a', score: 3 }]);
   const plain = await prepareBoardImport(await readBoardImport(file(), IMPORTED_AT_MS), { moodCheck });
   assert.equal(plain.moodCheck, null);
+});
+
+test('a shown mood round exports and re-imports closed with its result hidden', async (context) => {
+  const previousWindow = globalThis.window;
+  globalThis.window = { storage: {}, location: { pathname: '/ROOM1', origin: 'http://localhost' } };
+  context.after(() => { globalThis.window = previousWindow; });
+  const moodCheck = { id: 'round1', startedAt: IMPORTED_AT_MS, open: false, resultShownAt: IMPORTED_AT_MS + 1 };
+  const artifact = await createBoardExport({ items: [zone], moodCheck }, { boardCode: 'ROOM1', userId: 'user-a' });
+  const manifest = await readBoardImport(new File([artifact.blob], artifact.fileName, { type: artifact.mimeType }), IMPORTED_AT_MS);
+  const board = await prepareBoardImport(manifest, {});
+  assert.equal(board.moodCheck.open, false);
+  assert.equal(board.moodCheck.id, 'round1');
+  assert.equal('resultShownAt' in board.moodCheck, false);
 });

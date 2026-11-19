@@ -281,7 +281,8 @@ const normalizeBoardMeta = (board) => ({
   title: importedBoardTitle(board.title),
 });
 
-// A restored round is closed: its answers are history, not a live check.
+// A restored round is closed and its result hidden (resultShownAt dropped): its answers are history,
+// not a live check, and a restore must not pop the result up for everyone.
 const normalizeImportedMoodCheck = (value) => {
   if (value == null) return null;
   if (!isMoodCheckState(value)) fail('invalid moodCheck');

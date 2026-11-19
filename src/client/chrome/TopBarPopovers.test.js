@@ -89,5 +89,10 @@ test('mood check menu: only admins open or close a round, public rooms hide it',
     assert.deepEqual(events, ['start', 'close']);
     assert.equal(find({ isAdmin: false, mood }, t('mood.start')).props.disabled, true);
     assert.equal(find({ isAdmin: true, mood: { ...mood, available: false } }, t('mood.start')), undefined);
+    const show = { ...mood, canShowResult: true, showResult: () => events.push('show') };
+    find({ isAdmin: true, mood: show }, t('mood.showResult')).props.onClick();
+    assert.equal(events.at(-1), 'show');
+    assert.equal(find({ isAdmin: true, mood }, t('mood.showResult')), undefined);
+    assert.equal(find({ isAdmin: true, mood: { ...show, available: false } }, t('mood.showResult')), undefined);
   } finally { await server.close(); }
 });

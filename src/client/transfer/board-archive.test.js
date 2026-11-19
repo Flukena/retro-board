@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { BlobReader, BlobWriter, TextReader, ZipReader, ZipWriter } from '@zip.js/zip.js/index-native.js';
 import { assertArchiveSize, createBoardArchiveArtifact, readBoardArchive } from './board-archive.js';
 import { restoreBackupImages } from './backup-images.js';
+import { apngBlob, stillPngBlob } from '../../test-support/apng-fixture.js';
 import { IMPORT_MAX_ARCHIVE_FILE_BYTES, importBundleByteLength } from '../../domain/import-schema.js';
 
 const gif = new Blob([Buffer.from('R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==', 'base64')], { type: 'image/gif' });
@@ -95,4 +96,16 @@ test('archive image reads stay bounded and never read the entire backup as text 
   }
   const manifest = await readBoardArchive(new LazyArchive([artifact.blob]));
   assert.deepEqual(await (await manifest.readImageBlob(manifest.items[1])).arrayBuffer(), await png.arrayBuffer());
+});
+
+test('ZIP export of a board holding an APNG stores a still PNG, reports every id, and re-imports', async () => {
+  const apngSrc = '/images/12345678-abcd.png';
+  const legacy = { ...board.items[1], parentZoneId: null, src: apngSrc };
+  const options = { board: { items: [legacy, { ...legacy, id: 'image-2' }] } };
+  const artifact = await createBoardArchiveArtifact(options, async () => apngBlob(), async () => stillPngBlob());
+  assert.deepEqual(artifact.flattenedImageIds, ['image-1', 'image-2']);
+  const manifest = await readBoardArchive(artifact.blob);
+  assert.equal(manifest.items.length, 2);
+  const stored = await manifest.readImageBlob(manifest.items[0]);
+  assert.deepEqual(Buffer.from(await stored.arrayBuffer()), Buffer.from(await stillPngBlob().arrayBuffer()));
 });

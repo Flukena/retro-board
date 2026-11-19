@@ -85,17 +85,17 @@ export const createJsonBackupArtifact = ({
   };
 };
 
-export async function createPortableJsonBackupArtifact(options, readImage) {
+export async function createPortableJsonBackupArtifact(options, readImage, flattenToStill) {
   const artifact = createJsonBackupArtifact(options);
   const remainingBytes = IMPORT_MAX_FILE_BYTES - new TextEncoder().encode(artifact.contents).byteLength;
   if (remainingBytes < 0) throw new Error(`backup exceeds ${IMPORT_MAX_FILE_BYTES / 1024 / 1024} MB`);
-  const items = await embedBackupImages(artifact.payload.board.items, readImage, remainingBytes);
+  const { items, flattenedIds } = await embedBackupImages(artifact.payload.board.items, readImage, remainingBytes, flattenToStill);
   const payload = { ...artifact.payload, board: { ...artifact.payload.board, items } };
   const contents = JSON.stringify(payload, null, 2);
   if (new TextEncoder().encode(contents).byteLength > IMPORT_MAX_FILE_BYTES) {
     throw new Error(`backup exceeds ${IMPORT_MAX_FILE_BYTES / 1024 / 1024} MB`);
   }
-  return { ...artifact, payload, contents };
+  return { ...artifact, payload, contents, flattenedImageIds: flattenedIds };
 }
 
 /** `retro-<code>[-zone]-<YYYY-MM-DD-HH-MM>.<extension>` for every non-backup export. */
