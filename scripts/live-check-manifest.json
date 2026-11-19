@@ -227,9 +227,7 @@
       "relayEnv": {},
       "checkEnv": {},
       "timeoutSec": 900,
-      "baseline": "known-red",
-      "reason": "Stale since a7505a9, which removed mobile.done — unguarded until repaired (controller ruling T2-REPAIR)",
-      "failingStep": null
+      "baseline": "pass"
     },
     {
       "id": "room-lock",

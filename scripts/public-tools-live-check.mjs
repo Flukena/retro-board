@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { BlobReader, TextWriter, ZipReader } from '@zip.js/zip.js/index-native.js';
 import { createJsonBackupArtifact } from '../src/client/transfer/board-backup.js';
 import { t, setLang } from '../src/client/ui/i18n.js';
+import { waitForEditorCaretAtEnd } from './board-live-helpers.mjs';
 
 const SSD_ROOT = '/Volumes/ssd-fluke/BaseData';
 const PLAYWRIGHT_MODULE = '/opt/homebrew/lib/node_modules/playwright/index.mjs';
@@ -54,9 +55,14 @@ async function activate(user, target) {
 }
 async function noPin(user) { assert.equal(await user.page.getByPlaceholder('••••', { exact: true }).count(), 0, 'Public shared tools must never request a private admin PIN'); }
 async function step(name, action) {
-  await action();
-  await noPin(mobile);
-  await noPin(desktop);
+  try {
+    await action();
+    await noPin(mobile);
+    await noPin(desktop);
+  } catch (error) {
+    console.log(`FAIL ${name}`);
+    throw error;
+  }
   report.steps.push(name);
   console.log(`PASS ${name}`);
 }
@@ -145,13 +151,14 @@ async function resultsBounds() {
   await activate(mobile, panel.locator('.rb-results__close'));
   await panel.waitFor({ state: 'hidden' });
 }
-async function editPublicNote(user, text) {
+async function editPublicNote(user, text, current) {
   await frame(user, note(user));
   await note(user).dblclick();
   const editor = user.mobile ? user.page.locator('.rb-mobile-editor__input') : note(user).locator('textarea');
+  await waitForEditorCaretAtEnd(editor, current);
   await editor.fill(text);
-  if (user.mobile) await activate(user, user.page.getByRole('button', { name: word(user, 'mobile.done'), exact: true }));
-  else await editor.press('Escape');
+  // a7505a9 dropped the mobile Done button: the editor closes on Escape like the desktop one.
+  await editor.press('Escape');
 }
 async function expectNote(user, text) {
   await wait(async () => (await state(user)).items.find(item => item.id === ids.note)?.text === text, 'Public note text must sync');
@@ -170,7 +177,7 @@ async function publicEditing() {
     const before = (await state(user)).items.find(item => item.id === ids.note).text;
     const text = `${ids.note} ${user.lang}`;
     const peer = user === mobile ? desktop : mobile;
-    await editPublicNote(user, text);
+    await editPublicNote(user, text, before);
     await expectNote(peer, text);
     await activate(user, user.page.getByTitle(word(user, 'topbar.undo'), { exact: true }));
     await expectNote(peer, before);
