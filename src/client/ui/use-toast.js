@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 
 const TOAST_DISMISS_MS = 3200;
+const DEFAULT_TOAST_CLOCK = Object.freeze({
+  setTimeout: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
+  clearTimeout: (timer) => globalThis.clearTimeout(timer),
+});
 
-export function scheduleToastDismiss(toast, setToast, clock = { setTimeout, clearTimeout }) {
+export function scheduleToastDismiss(toast, setToast, clock = DEFAULT_TOAST_CLOCK) {
   if (!toast || toast.sticky) return undefined;
   const timer = clock.setTimeout(() => setToast(null), TOAST_DISMISS_MS);
   return () => clock.clearTimeout(timer);

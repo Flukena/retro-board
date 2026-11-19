@@ -2,6 +2,7 @@ import React from 'react';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { scheduleToastDismiss } from './use-toast.js';
 import { withChromeModule } from '../../test-support/chrome-test-helper.js';
 
 const AUTO_DISMISS_MS = 3200;
@@ -50,3 +51,37 @@ test('dismiss scheduling skips absent/sticky messages, clears on disposal, and d
     assert.deepEqual(cancelled, [timerId]);
   });
 });
+
+for (const enforceScheduleReceiver of [true, false]) {
+  const operation = enforceScheduleReceiver ? 'scheduling' : 'cleanup';
+  test(`default toast clock preserves the host receiver during ${operation}`, () => {
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalClearTimeout = globalThis.clearTimeout;
+    const timerId = Symbol('host timer');
+    const scheduled = [];
+    const cancelled = [];
+    const dismissed = [];
+    try {
+      globalThis.setTimeout = function (callback, delayMs) {
+        if (enforceScheduleReceiver && this !== globalThis) throw new TypeError('Illegal invocation');
+        scheduled.push({ callback, delayMs });
+        return timerId;
+      };
+      globalThis.clearTimeout = function (id) {
+        if (this !== globalThis) throw new TypeError('Illegal invocation');
+        cancelled.push(id);
+      };
+      const dispose = scheduleToastDismiss({ msg: 'Saved' }, value => dismissed.push(value));
+      assert.equal(scheduled.length, 1);
+      assert.equal(scheduled[0].delayMs, AUTO_DISMISS_MS);
+      assert.deepEqual(dismissed, []);
+      scheduled[0].callback();
+      assert.deepEqual(dismissed, [null]);
+      dispose();
+      assert.deepEqual(cancelled, [timerId]);
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+      globalThis.clearTimeout = originalClearTimeout;
+    }
+  });
+}
