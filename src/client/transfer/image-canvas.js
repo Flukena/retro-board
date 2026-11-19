@@ -59,18 +59,22 @@ export const drawBoundedCanvas = (img, nw, nh) => {
   return { canvas, width, height };
 };
 
-const stillMimeFor = (mime) => (mime === MIME_JPEG ? MIME_JPEG : MIME_PNG);
-const hasDecodedSize = (img) => (
-  Number.isSafeInteger(img.naturalWidth) && Number.isSafeInteger(img.naturalHeight)
-  && img.naturalWidth >= MIN_IMAGE_DIMENSION_PX && img.naturalHeight >= MIN_IMAGE_DIMENSION_PX
+// Browser JPEG orientation may swap the header dimensions.
+export const decodedDimensionsMatch = (width, height, info) => (
+  Number.isSafeInteger(width) && Number.isSafeInteger(height)
+  && width >= MIN_IMAGE_DIMENSION_PX && height >= MIN_IMAGE_DIMENSION_PX
+  && ((width === info.width && height === info.height) || (width === info.height && height === info.width))
 );
+
+const stillMimeFor = (mime) => (mime === MIME_JPEG ? MIME_JPEG : MIME_PNG);
 
 /**
  * Re-encode the first frame of a legacy image as a still: JPEG stays JPEG,
- * PNG/WebP/GIF become PNG. Returns null when the browser cannot draw it.
+ * PNG/WebP/GIF become PNG. Returns null when the browser cannot draw it or the
+ * decoded size differs from the inspected header `info`.
  */
-export const flattenToStillImage = (blob) => withDecodedImage(blob, async (img) => {
-  if (!hasDecodedSize(img)) return null;
+export const flattenToStillImage = (blob, info) => withDecodedImage(blob, async (img) => {
+  if (!decodedDimensionsMatch(img.naturalWidth, img.naturalHeight, info)) return null;
   const drawn = drawBoundedCanvas(img, img.naturalWidth, img.naturalHeight);
   return drawn ? encodeImageCanvas(drawn.canvas, stillMimeFor(blob.type)) : null;
 });

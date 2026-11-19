@@ -2,7 +2,7 @@ import { IMAGE_MAX_BYTES, imageInfoIsWithinLimits, inspectRasterImageBlob, isE2E
 import { getActiveRoomSession, getRelayHttpBaseUrl, roomFetch } from '../session/room-session.js';
 import { canonicalPublicImageSource } from '../../domain/public-wall-image-source.js';
 import { restoreBackupImages } from './backup-images.js';
-import { canvasToBlob, drawBoundedCanvas, encodeImageCanvas, withDecodedImage } from './image-canvas.js';
+import { canvasToBlob, decodedDimensionsMatch, drawBoundedCanvas, encodeImageCanvas, withDecodedImage } from './image-canvas.js';
 import { decryptImageResponse } from '../room-lock/e2e-images.js';
 import { getRoomKey } from '../room-lock/lock-session.js';
 
@@ -12,7 +12,6 @@ export const IMAGE_MAX_MIB_LABEL = (IMAGE_MAX_BYTES / BYTES_PER_MIB).toFixed(0);
 const IMAGE_RETRY_ATTEMPTS = 6;
 const IMAGE_RETRY_DELAY_MS = 1100;
 const RATE_LIMIT_STATUS = 429;
-const MIN_IMAGE_DIMENSION_PX = 1;
 const MIME_GIF = 'image/gif';
 const ROOM_IMAGE_ROUTE = /^\/(?:(?:yjs|yjs-public)\/)?rooms\/[A-Za-z0-9_-]{32}\/((?:images|e2e-blobs)\/[^/]+)$/;
 const UPLOAD_RATE_LIMIT_ERROR = /: 429$/;
@@ -26,12 +25,6 @@ export function canStartImageImport(blob, storage) {
   if (!isSafeImageMime(blob.type) || blob.size > IMAGE_MAX_BYTES) return true;
   return canCreateImageItem(storage);
 }
-
-const decodedDimensionsMatch = (width, height, info) => (
-  Number.isSafeInteger(width) && Number.isSafeInteger(height)
-  && width >= MIN_IMAGE_DIMENSION_PX && height >= MIN_IMAGE_DIMENSION_PX
-  && ((width === info.width && height === info.height) || (width === info.height && height === info.width))
-);
 
 export const safeRuntimeImageSource = (value, { publicPreview = false } = {}) => {
   if (publicPreview) return canonicalPublicImageSource(value);

@@ -2,7 +2,7 @@ import {
   classifyImportedImageSource,
   imageInfoIsWithinLimits,
   inspectRasterImageBlob,
-  isSafeImageMime,
+  isDecodeSafeLegacyImage,
 } from '../../domain/security-boundaries.js';
 import { flattenToStillImage } from './image-canvas.js';
 
@@ -19,9 +19,10 @@ export const checkedImageBlob = async (src, readImage) => {
 // Owner exception to the export round trip (CONTEXT.md, Backup manifest): a
 // legacy image that fails today's rules is exported as a still of its first frame.
 export const checkedImageOrStill = async (blob, flattenToStill) => {
-  if (imageInfoIsWithinLimits(await inspectRasterImageBlob(blob))) return { blob, flattened: false };
-  if (!isSafeImageMime(blob?.type)) throw new Error(INVALID_IMAGE_MESSAGE);
-  const still = await flattenToStill(blob);
+  const info = await inspectRasterImageBlob(blob);
+  if (imageInfoIsWithinLimits(info)) return { blob, flattened: false };
+  if (!isDecodeSafeLegacyImage(info)) throw new Error(INVALID_IMAGE_MESSAGE);
+  const still = await flattenToStill(blob, info);
   if (!still || !imageInfoIsWithinLimits(await inspectRasterImageBlob(still))) throw new Error(INVALID_IMAGE_MESSAGE);
   return { blob: still, flattened: true };
 };

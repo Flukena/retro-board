@@ -354,6 +354,18 @@ export function imageInfoIsWithinLimits(info) {
     && pixels <= IMAGE_SOURCE_MAX_PIXELS;
 }
 
+// Owner exception (CONTEXT.md, Backup manifest): a legacy image that fails
+// today's limits may still be flattened to a still, but only when its parsed
+// header is small enough for the browser to decode as safely as the upload path.
+export function isDecodeSafeLegacyImage(info) {
+  if (!info || imageInfoIsWithinLimits(info)) return false;
+  return Number.isSafeInteger(info.width) && Number.isSafeInteger(info.height)
+    && info.width >= 1 && info.height >= 1
+    && info.width <= IMAGE_SOURCE_MAX_DIMENSION
+    && info.height <= IMAGE_SOURCE_MAX_DIMENSION
+    && info.width * info.height <= IMAGE_SOURCE_MAX_PIXELS;
+}
+
 export const stickyTextForDom = (item, hidden) => (
   hidden ? null : (typeof item?.text === 'string' ? item.text : '')
 );

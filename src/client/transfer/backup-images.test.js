@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { checkedImageOrStill, createStillFallbackReader, embedBackupImages, restoreBackupImages } from './backup-images.js';
-import { apngBlob, stillPngBlob } from '../../test-support/apng-fixture.js';
-import { IMAGE_MAX_BYTES, imageInfoIsWithinLimits, inspectRasterImageBlob } from '../../domain/security-boundaries.js';
+import { apngBlob, stillPngBlob, STILL_PNG_BYTES } from '../../test-support/apng-fixture.js';
+import { GIF_MAX_DIMENSION, IMAGE_MAX_BYTES, IMAGE_SOURCE_MAX_DIMENSION, imageInfoIsWithinLimits, inspectRasterImageBlob } from '../../domain/security-boundaries.js';
 import { createPortableJsonBackupArtifact } from './board-backup.js';
 import {
   IMPORT_MAX_FILE_BYTES,
@@ -115,6 +115,20 @@ const apngSrc = '/images/12345678-abcd.png';
 const apngItem = (id, src = apngSrc) => ({ ...image, id, src, parentZoneId: null });
 const oversizedPng = () => new Blob([Buffer.alloc(IMAGE_MAX_BYTES + 1)], { type: 'image/png' });
 // Stands in for the browser canvas: always yields a valid still PNG.
+const pngWithHeader = (width, height) => {
+  const bytes = Buffer.from(STILL_PNG_BYTES);
+  bytes.writeUInt32BE(width, 16);
+  bytes.writeUInt32BE(height, 20);
+  return new Blob([bytes], { type: 'image/png' });
+};
+// A 1x1 GIF whose screen and frame are widened past GIF_MAX_DIMENSION.
+const bigGifBlob = () => {
+  const bytes = Buffer.from('R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==', 'base64');
+  bytes.writeUInt16LE(GIF_MAX_DIMENSION + 1, 6);
+  bytes.writeUInt16LE(1, 8);
+  bytes.writeUInt16LE(GIF_MAX_DIMENSION + 1, bytes.indexOf(0x2c) + 5);
+  return new Blob([bytes], { type: 'image/gif' });
+};
 const stillFlatten = async () => stillPngBlob();
 
 test('the APNG fixture is really rejected by the import limits', async () => {
@@ -131,13 +145,31 @@ test('a passing image is returned byte-identical and never converted', async () 
   assert.equal(result.flattened, false);
 });
 
-test('an animated or oversized legacy image is converted to a still that passes the limits', async () => {
-  for (const legacy of [apngBlob(), oversizedPng()]) {
+test('an animated PNG or a GIF over its own limits is converted to a still that passes the limits', async () => {
+  for (const legacy of [apngBlob(), bigGifBlob()]) {
     const result = await checkedImageOrStill(legacy, stillFlatten);
     assert.equal(result.flattened, true);
     assert.notEqual(result.blob, legacy);
     assert.equal(imageInfoIsWithinLimits(await inspectRasterImageBlob(result.blob)), true);
   }
+});
+
+test('a header beyond the decode bounds or an unparsed header aborts without decoding', async () => {
+  const neverDecode = async () => assert.fail('must not decode');
+  const bad = [
+    pngWithHeader(60000, 60000),
+    pngWithHeader(IMAGE_SOURCE_MAX_DIMENSION + 1, 10),
+    pngWithHeader(8000, 8000),
+    oversizedPng(),
+    new Blob([Buffer.from('not a png')], { type: 'image/png' }),
+  ];
+  for (const blob of bad) await assert.rejects(checkedImageOrStill(blob, neverDecode), /invalid or oversized image/);
+});
+
+test('the flatten step receives the inspected header so the decoded size can be checked', async () => {
+  let seen;
+  await checkedImageOrStill(apngBlob(), async (blob, info) => { seen = info; return stillPngBlob(); });
+  assert.deepEqual([seen.width, seen.height, seen.animated], [1, 1, true]);
 });
 
 test('an unsafe MIME, an undecodable blob, or a conversion that still fails the limits aborts', async () => {

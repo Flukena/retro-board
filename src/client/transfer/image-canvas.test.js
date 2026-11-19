@@ -28,11 +28,11 @@ const fakeCanvasEnv = (log, { context = true } = {}) => {
   return { document: { createElement: () => canvas }, canvas };
 };
 
-const flatten = async (t, { width, height, blob, context }) => {
+const flatten = async (t, { width, height, headerWidth, headerHeight, blob, context }) => {
   const log = { drawn: [], encoded: [] };
   const env = fakeCanvasEnv(log, { context });
   installGlobals(t, { Image: decodedImage(width, height), document: env.document });
-  const result = await flattenToStillImage(blob);
+  const result = await flattenToStillImage(blob, { width: headerWidth ?? width, height: headerHeight ?? height });
   return { result, log, canvas: env.canvas };
 };
 
@@ -55,5 +55,10 @@ test('an image the browser cannot draw yields null, and a decode failure rejects
   assert.equal((await flatten(t, { width: 0, height: 0, blob: apngBlob() })).result, null);
   assert.equal((await flatten(t, { width: 10, height: 10, blob: apngBlob(), context: false })).result, null);
   installGlobals(t, { Image: decodedImage(1, 1, true) });
-  await assert.rejects(flattenToStillImage(apngBlob()), /could not be decoded/);
+  await assert.rejects(flattenToStillImage(apngBlob(), { width: 1, height: 1 }), /could not be decoded/);
+});
+
+test('a decoded size that differs from the header size yields null, a swapped one is accepted', async (t) => {
+  assert.equal((await flatten(t, { width: 50, height: 40, headerWidth: 10, headerHeight: 10, blob: apngBlob() })).result, null);
+  assert.equal((await flatten(t, { width: 40, height: 50, headerWidth: 50, headerHeight: 40, blob: apngBlob() })).result.type, 'image/png');
 });
