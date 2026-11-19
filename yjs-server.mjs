@@ -1,3 +1,4 @@
+import { clientIpFromRequest as requestClientIp } from './src/server/relay-client-ip.js';
 import { coalesceAwarenessSends } from './src/server/relay-awareness-fanout.js';
 import { RoomSessions } from './src/server/relay-session.js';
 import { RelayProtocol } from './src/server/relay-protocol.js';
@@ -90,25 +91,7 @@ const ALLOW_INSECURE_HTTP = envBool('YJS_ALLOW_INSECURE_HTTP');
 // reverse proxy. Otherwise a direct client can forge CF-Connecting-IP/XFF.
 const TRUST_PROXY = envBool('YJS_TRUST_PROXY');
 
-const normalizeIp = (value) => {
-  if (typeof value !== 'string') return null;
-  let candidate = value.trim();
-  if (candidate.startsWith('::ffff:') && isIP(candidate.slice(7)) === 4) candidate = candidate.slice(7);
-  return isIP(candidate) ? candidate : null;
-};
-
-const clientIpFromRequest = (req) => {
-  const socketIp = normalizeIp(req.socket?.remoteAddress) || 'unknown';
-  if (!TRUST_PROXY) return socketIp;
-  const cfIp = normalizeIp(Array.isArray(req.headers['cf-connecting-ip'])
-    ? req.headers['cf-connecting-ip'][0]
-    : req.headers['cf-connecting-ip']);
-  if (cfIp) return cfIp;
-  const forwarded = Array.isArray(req.headers['x-forwarded-for'])
-    ? req.headers['x-forwarded-for'][0]
-    : req.headers['x-forwarded-for'];
-  return normalizeIp(typeof forwarded === 'string' ? forwarded.split(',')[0] : '') || socketIp;
-};
+const clientIpFromRequest = req => requestClientIp(req, TRUST_PROXY);
 
 const SESSION_SIGNING_KEY = loadSessionSigningKey(DB_DIR);
 
