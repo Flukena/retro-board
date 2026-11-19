@@ -1,3 +1,4 @@
+import { readAllowedOrigins } from './src/server/relay-origins.js';
 import { clientIpFromRequest as requestClientIp } from './src/server/relay-client-ip.js';
 import { coalesceAwarenessSends } from './src/server/relay-awareness-fanout.js';
 import { RoomSessions } from './src/server/relay-session.js';
@@ -118,21 +119,7 @@ syncProtocol.readSyncMessage = (decoder, encoder, doc, origin) =>
 // Comma-separated exact Origin allowlist. Empty is fail-closed unless the
 // explicit dev-only YJS_ALLOW_INSECURE_HTTP flag is enabled, in which case
 // only localhost/127.0.0.1 HTTP origins are accepted.
-const ALLOWED_ORIGINS = (process.env.YJS_ALLOWED_ORIGINS || '')
-  .split(',').map((s) => s.trim()).filter(Boolean);
-for (const origin of ALLOWED_ORIGINS) {
-  let parsed;
-  try { parsed = new URL(origin); }
-  catch { throw new Error('YJS_ALLOWED_ORIGINS must contain exact URL origins'); }
-  const localHttp = parsed.protocol === 'http:'
-    && ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname);
-  if (parsed.origin !== origin
-      || parsed.username || parsed.password
-      || parsed.pathname !== '/' || parsed.search || parsed.hash
-      || (parsed.protocol !== 'https:' && !(ALLOW_INSECURE_HTTP && localHttp))) {
-    throw new Error('YJS_ALLOWED_ORIGINS must contain exact HTTPS origins (or localhost HTTP in dev mode)');
-  }
-}
+const ALLOWED_ORIGINS = readAllowedOrigins(process.env.YJS_ALLOWED_ORIGINS, ALLOW_INSECURE_HTTP);
 
 const relayConfig = readRelayConfig();
 const {
