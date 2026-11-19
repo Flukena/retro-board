@@ -322,6 +322,23 @@
       "checkEnv": {},
       "timeoutSec": 900,
       "baseline": "unrun"
+    },
+    {
+      "id": "board-drag-peer",
+      "script": "scripts/board-drag-peer-live-check.mjs",
+      "args": [
+        "{base}",
+        "{out}"
+      ],
+      "stack": "plain",
+      "viteHost": "127.0.0.1",
+      "ports": {},
+      "publicRelay": false,
+      "maintainer": false,
+      "relayEnv": {},
+      "checkEnv": {},
+      "timeoutSec": 900,
+      "baseline": "pass"
     }
   ]
 }
