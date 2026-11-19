@@ -25,11 +25,13 @@
 
 @media (max-width: 767px), (max-width: 1024px) and (pointer: coarse) {
   /* Two rows under the thumb: tools and history on top, sizes and colours below. */
-  .rb-drawing-toolbar { top: auto; bottom: var(--rb-mobile-bottom-px); left: var(--rb-mobile-left-px); right: var(--rb-mobile-right-px); max-width: none; display: grid; grid-template-columns: 1fr auto; grid-template-areas: "tools actions" "options options"; padding: var(--space-1) var(--space-2); gap: var(--space-1); }
-  .rb-drawing-tools { grid-area: tools; }
+  .rb-drawing-toolbar { top: auto; bottom: var(--rb-mobile-bottom-px); left: var(--rb-mobile-left-px); right: var(--rb-mobile-right-px); max-width: none; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "tools actions" "options options"; padding: var(--space-1) var(--space-2); gap: var(--space-1); }
+  .rb-drawing-tools { grid-area: tools; min-width: 0; overflow-x: auto; overscroll-behavior-x: contain; }
   .rb-drawing-actions { grid-area: actions; }
   .rb-drawing-options { grid-area: options; overflow-x: auto; overscroll-behavior-x: contain; }
-  .rb-drawing-options > * { flex-shrink: 0; }
+  .rb-drawing-options > *,
+  .rb-drawing-tools > *,
+  .rb-drawing-actions > * { flex-shrink: 0; }
   .rb-drawing-tools button,
   .rb-drawing-actions button { min-width: var(--modal-touch-target); min-height: var(--modal-touch-target); }
   .rb-drawing-group:first-child { padding-left: 0; border-left: none; }
