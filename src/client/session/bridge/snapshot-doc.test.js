@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as Y from 'yjs';
-import { VALID_ITEM } from '../../../test-support/bridge-harness.js';
+import { withStorage, VALID_ITEM } from '../../../test-support/bridge-harness.js';
 import { createSnapshotDoc } from './snapshot-doc.js';
 import { createPublicPermit } from './public-permit.js';
 
@@ -55,7 +55,6 @@ test('only local snapshot transactions enter undo tracking', async () => {
 });
 
 test('sync migrates the legacy blob once, preserving fields and excluding migration from undo', async () => {
-  const { withStorage } = await import('../../../test-support/bridge-harness.js');
   await withStorage((browser) => {
     const kv = browser.__rbYDoc.getMap('kv');
     kv.set('s||boardState', { items: [VALID_ITEM], adminUserId: 'admin' });

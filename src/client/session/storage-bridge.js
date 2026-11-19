@@ -1,13 +1,3 @@
-import { createContributionStore } from './bridge/contribution-store.js';
-import { createBoardMethods } from './bridge/board-methods.js';
-import { createStorageAccess } from './bridge/storage-access.js';
-import { createRoomMethods } from './bridge/room-methods.js';
-import { planImportBundle } from './bridge/import-plan.js';
-import { VOTE_PREFIX, COMMENT_PREFIX } from '../../domain/vote-comment-keys.js';
-import { createUndoController } from './bridge/undo-controller.js';
-import { createSnapshotDoc, LEGACY_BOARD_KEY, META_INTERNAL_PREFIX } from './bridge/snapshot-doc.js';
-import { createAwarenessPresence } from './bridge/awareness-presence.js';
-import { createUserPreferences } from './bridge/user-prefs.js';
 // window.storage polyfill backed by Yjs over WebSocket.
 //
 // Two storage layers live on the same Y.Doc:
@@ -40,33 +30,30 @@ import { createUserPreferences } from './bridge/user-prefs.js';
 //   translated into a granular field-level diff against the current Yjs
 //   state, so the UI code stays unchanged.
 
-
-
-
+import { attachRoomEncryption, attachRoomCollaboration } from './bridge/room-services.js';
+import { attachRoomDiagnostics, installBridgeDebugHandles } from './bridge/bridge-diagnostics.js';
+import { createContributionStore } from './bridge/contribution-store.js';
+import { createBoardMethods } from './bridge/board-methods.js';
+import { createStorageAccess } from './bridge/storage-access.js';
+import { createRoomMethods } from './bridge/room-methods.js';
+import { planImportBundle } from './bridge/import-plan.js';
+import { VOTE_PREFIX, COMMENT_PREFIX } from '../../domain/vote-comment-keys.js';
+import { createUndoController } from './bridge/undo-controller.js';
+import { createSnapshotDoc, LEGACY_BOARD_KEY, META_INTERNAL_PREFIX } from './bridge/snapshot-doc.js';
+import { createAwarenessPresence } from './bridge/awareness-presence.js';
+import { createUserPreferences } from './bridge/user-prefs.js';
 import * as Y from 'yjs';
-import { createDrawingPreviews } from './drawing-previews.js';
-import { createReactionChannel } from '../reactions/reaction-channel.js';
-import { createWritingTimerStore } from '../writing-timer/writing-timer-store.js';
 import { attachClientSync } from './client-sync.js';
 import { createPublicPermit } from './bridge/public-permit.js';
 import { PublicCreationGuard } from './public-creation-guard.js';
 import { attachPublicCreationBudget } from './public-creation-budget.js';
-
-import { createRoomProvider, isEncryptedRoom } from './room-provider.js';
-import { attachE2ERoom } from './e2e-room.js';
+import { createRoomProvider } from './room-provider.js';
 import { getRoomKey } from '../room-lock/lock-session.js';
-
-import { repairOldEpochImages } from '../room-lock/e2e-image-repair.js';
-
 import { createMotionPublisher, sendOnlyLocalAwareness } from './awareness-transport.js';
 import { parseRoute } from '../app/router.js';
 import { getActiveRoomSession, getRoomWebSocketBaseUrl, refreshActiveRoomSession } from './room-session.js';
-
-
 import { isMoodKey } from './mood-store.js';
-
 import { replaceTemplates } from '../../domain/template-store.js';
-
 
 const route = parseRoute();
 if (!['board', 'public'].includes(route.kind)) {
@@ -162,6 +149,7 @@ const emitter = new EventTarget();
 // Declared up front so the various ymap/yItems observers below can safely
 // reference it in their closures even though it's instantiated later.
 let undoManager = null;
+const isUndoOrigin = origin => undoManager && origin === undoManager;
 
 // `boardState` now flows through yItems/yMeta. We delete the legacy ymap key
 // during migration; this guard ensures any rogue write to it (e.g. from a
@@ -193,7 +181,7 @@ ymap.observe((event) => {
   // Skip echoes from our own writes — React state is already in sync.
   // Exception: undo/redo transactions are also "local" from Yjs's perspective,
   // but they revert state behind React's back, so they DO need to dispatch.
-  const isUndoRedo = undoManager && event.transaction.origin === undoManager;
+  const isUndoRedo = isUndoOrigin(event.transaction.origin);
   if (event.transaction.local && !isUndoRedo) return;
   event.keysChanged.forEach((mapKey) => dispatchKey(mapKey));
 });
@@ -201,7 +189,7 @@ ymap.observe((event) => {
 // Board changes flow through yItems / yMeta. Emit a synthetic boardState
 // change event so RetroBoard's existing applyRemoteBoard handler keeps working.
 const fireBoardChange = (origin, deletedItemIds = []) => {
-  const isUndoRedo = undoManager && origin === undoManager;
+  const isUndoRedo = isUndoOrigin(origin);
   // 'local' = our own write that's already reflected in React state.
   // 'system' = migration seed; we DO want React to pick it up.
   // remote (provider as origin) and undoRedo: dispatch.
@@ -244,8 +232,9 @@ const contributions = createContributionStore({ ydoc, ymap, yItems, snapshot });
 
 const presence = createAwarenessPresence({ provider, motionPublisher, emitter });
 
+let roomMethods = null;
 if (provider) {
-  const roomMethods = createRoomMethods({ provider, syncStatus, activeRoomSession, ydoc, yItems, yMeta });
+  roomMethods = createRoomMethods({ provider, syncStatus, activeRoomSession, ydoc, yItems, yMeta });
   window.storage = {
     ...createStorageAccess({ ydoc, ymap, userPreferences, presence, snapshot, emitter }),
     ...presence.methods,
@@ -287,82 +276,20 @@ if (provider) {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Undo / Redo via Y.UndoManager.
-//
-// Tracks operations on yItems, yMeta, and ymap (per-vote, comment, and template keys).
-// `trackedOrigins: ['local']` means:
-//   - Local board edits, vote/comment changes, template puts/removes → tracked.
-//   - Remote peer writes (origin = WebsocketProvider) → ignored, so undo
-//     never reverses another user's work.
-//   - Per-device settings + presence (origin = 'system') → ignored.
-//   - Migration (origin = 'system') → ignored.
-//
-// Because yItems is tracked as a parent type, Y.UndoManager auto-tracks ops
-// on the nested per-item Y.Maps too — so a sticky-text edit and a sticky drag
-// produce independent stack entries that can be undone individually without
-// touching any peer's concurrent changes.
-// ---------------------------------------------------------------------------
+// Assign only after observers and method assembly; their closures read the live binding.
 if (provider) {
   const undoController = createUndoController({ yItems, yMeta, ymap });
   undoManager = undoController.undoManager;
   Object.assign(window.storage, undoController.methods);
 }
 
-if (provider && isEncryptedRoom(roomKey, ROOM)) {
-  const e2eRoom = attachE2ERoom({
-    provider, ydoc, eventTarget: window, getRoomKey, clearUndo: () => undoManager?.clear(),
-    repairImages: () => repairOldEpochImages({ storage: window.storage }),
-  });
-  window.storage.rotationSource = e2eRoom.rotationSource;
-}
+Object.assign(window.storage, attachRoomEncryption({
+  provider, ydoc, roomKey, roomHandle: ROOM, undoManager, images: roomMethods?.images,
+}));
 
-// Use the visible board code in diagnostics. The actual provider room handle
-// is non-secret, but omitting it keeps logs stable and easy to correlate.
-const ROOM_LABEL = `board-${route.code || 'unused'}`;
-
-if (provider) {
-  provider.on('status', (ev) => {
-    // eslint-disable-next-line no-console
-    console.debug('[yjs]', ROOM_LABEL, ev.status);
-  });
-}
-
-// Debug handles are dev-only — exposing them in prod prints the room name
-// (with token) into any extension that reads `window`.
+attachRoomDiagnostics({ provider, route });
 if (import.meta.env && import.meta.env.DEV) {
-  window.__rbYDoc = ydoc;
-  window.__rbClientId = clientId;
-  window.__rbRoom = ROOM;
-  window.__rbYItems = yItems;
-  window.__rbYMeta = yMeta;
-  window.__rbProvider = provider;
-  window.__rbDebug = () => ({
-    room: ROOM,
-    clientId,
-    yClientID: ydoc.clientID,
-    synced: !!provider?.synced,
-    yMetaAdminUserId: yMeta.get('adminUserId') || null,
-    yMetaAdminName: yMeta.get('adminName') || null,
-    yMetaAll: Array.from(yMeta.entries()).filter(([k]) => !k.startsWith('__')),
-    uScopeKeys: Array.from(ymap.entries()).filter(([k]) => k.startsWith(`u|${clientId}|`)),
-    awareness: Array.from((provider?.awareness?.getStates?.() || new Map()).entries()),
-    yItemsCount: yItems.size,
-  });
+  installBridgeDebugHandles({ provider, ydoc, ymap, yItems, yMeta, clientId, roomHandle: ROOM });
 }
 
-if (provider) {
-  const previews = createDrawingPreviews(ydoc, provider.awareness);
-  window.storage.drawingPreviews = previews;
-  ydoc.on('destroy', () => previews.destroy());
-}
-
-// Emoji reactions and the card-writing timer are for retro boards only: the Public Wall gets neither.
-if (provider && route.kind === 'board') {
-  const reactions = createReactionChannel(provider.awareness);
-  window.storage.boardReactions = reactions;
-  ydoc.on('destroy', () => reactions.destroy());
-  const writingTimer = createWritingTimerStore({ doc: ydoc, isLive: () => provider.synced });
-  window.storage.writingTimer = writingTimer;
-  ydoc.on('destroy', () => writingTimer.destroy());
-}
+Object.assign(window.storage, attachRoomCollaboration({ provider, ydoc, routeKind: route.kind }));

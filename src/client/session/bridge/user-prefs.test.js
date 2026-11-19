@@ -52,3 +52,45 @@ test('cache misses share a bounded wait and remove the sync listener on recovery
     assert.equal(provider._observers.get('sync').size, baseline);
   });
 });
+
+const RECOVERY_SYNC_TIMEOUT_MS = 3000;
+test('a dead relay times out once, recovers durable data, and removes its listener', async () => {
+  await withStorage(async (browser, cache) => {
+    const provider = browser.__rbProvider;
+    const baseline = provider._observers.get('sync')?.size || 0;
+    browser.__rbYDoc.getMap('kv').set(`u|${browser.__rbClientId}|userId`, 'returning');
+    cache.set(`rb_local_userName__${ROOM_HANDLE}`, '{corrupt');
+    const nativeSetTimeout = globalThis.setTimeout;
+    const nativeClearTimeout = globalThis.clearTimeout;
+    const timerHandle = {};
+    let finish;
+    let scheduled = 0;
+    let cleared = 0;
+    globalThis.setTimeout = (handler, delay, ...args) => {
+      if (delay !== RECOVERY_SYNC_TIMEOUT_MS) return Reflect.apply(nativeSetTimeout, globalThis, [handler, delay, ...args]);
+      scheduled += 1;
+      finish = handler;
+      return timerHandle;
+    };
+    globalThis.clearTimeout = handle => {
+      if (handle !== timerHandle) return Reflect.apply(nativeClearTimeout, globalThis, [handle]);
+      cleared += 1;
+    };
+    try {
+      const first = browser.storage.get('userId', false);
+      const second = browser.storage.get('userName', false);
+      assert.equal(scheduled, 1);
+      assert.equal(provider._observers.get('sync').size, baseline + 1);
+      finish();
+      assert.equal((await first).value, 'returning');
+      assert.equal((await second).value, null);
+      assert.equal(cleared, 1);
+      assert.equal(provider._observers.get('sync').size, baseline);
+      assert.equal((await browser.storage.get('anotherMissingPreference', false)).value, null);
+      assert.equal(scheduled, 1);
+    } finally {
+      globalThis.setTimeout = nativeSetTimeout;
+      globalThis.clearTimeout = nativeClearTimeout;
+    }
+  });
+});

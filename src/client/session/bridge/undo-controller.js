@@ -1,5 +1,21 @@
 import * as Y from 'yjs';
 
+// ---------------------------------------------------------------------------
+// Undo / Redo via Y.UndoManager.
+//
+// Tracks operations on yItems, yMeta, and ymap (per-vote, comment, and template keys).
+// `trackedOrigins: ['local']` means:
+//   - Local board edits, vote/comment changes, template puts/removes → tracked.
+//   - Remote peer writes (origin = WebsocketProvider) → ignored, so undo
+//     never reverses another user's work.
+//   - Per-device settings + presence (origin = 'system') → ignored.
+//   - Migration (origin = 'system') → ignored.
+//
+// Because yItems is tracked as a parent type, Y.UndoManager auto-tracks ops
+// on the nested per-item Y.Maps too — so a sticky-text edit and a sticky drag
+// produce independent stack entries that can be undone individually without
+// touching any peer's concurrent changes.
+// ---------------------------------------------------------------------------
 export const UNDO_CAPTURE_TIMEOUT_MS = 500;
 
 export function createUndoController({ yItems, yMeta, ymap }) {

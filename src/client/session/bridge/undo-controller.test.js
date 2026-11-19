@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import * as Y from 'yjs';
+import { createUndoController } from './undo-controller.js';
 import { withStorage, VALID_ITEM } from '../../../test-support/bridge-harness.js';
 
 const NEXT_ITEM = { ...VALID_ITEM, id: 'next' };
@@ -25,9 +27,7 @@ test('rapid local commands share capture until an explicit stop, and system writ
   });
 });
 
-test('the controller configures the specified 500ms capture window on a bare document', async () => {
-  const Y = await import('yjs');
-  const { createUndoController } = await import('./undo-controller.js');
+test('the controller configures the specified 500ms capture window on a bare document', () => {
   const doc = new Y.Doc();
   try {
     const { undoManager, methods } = createUndoController({

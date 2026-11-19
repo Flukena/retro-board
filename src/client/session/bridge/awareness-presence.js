@@ -151,7 +151,10 @@ export function createAwarenessPresence({ provider, motionPublisher, emitter }) 
     }
   };
 
-  return { readPresenceMap, writeLegacyPresence, methods: {
+  return {
+    readPresenceMap,
+    writeLegacyPresence,
+    methods: {
       getPresenceSnapshot() { return readPresenceMap(); },
       getVoteResultParticipants(atTime = Date.now()) { return readVoteResultParticipants(provider?.awareness, atTime); },
       onPresenceChange(handler) {
@@ -214,5 +217,6 @@ export function createAwarenessPresence({ provider, motionPublisher, emitter }) 
         if (normalized) motionPublisher.set('view', normalized);
       },
 
-  } };
+    },
+  };
 }

@@ -3,6 +3,8 @@ const CLIENT_ID_RANDOM_START = 2;
 const CLIENT_ID_RANDOM_END = 14;
 const CLIENT_ID_TIME_SUFFIX_LENGTH = 4;
 
+const randomClientId = () => Math.random().toString(CLIENT_ID_RADIX).slice(CLIENT_ID_RANDOM_START, CLIENT_ID_RANDOM_END);
+
 export function createUserPreferences({ ydoc, ymap, provider, activeRoomSession, route }) {
   // Some per-device prefs (display name) are scoped per-board so identity
   // doesn't leak across rooms — moving from board A (where you're admin "Alice")
@@ -29,11 +31,11 @@ export function createUserPreferences({ ydoc, ymap, provider, activeRoomSession,
   try {
     clientId = localStorage.getItem(CLIENT_ID_KEY) || '';
     if (!clientId) {
-      clientId = Math.random().toString(CLIENT_ID_RADIX).slice(CLIENT_ID_RANDOM_START, CLIENT_ID_RANDOM_END) + Date.now().toString(CLIENT_ID_RADIX).slice(-CLIENT_ID_TIME_SUFFIX_LENGTH);
+      clientId = randomClientId() + Date.now().toString(CLIENT_ID_RADIX).slice(-CLIENT_ID_TIME_SUFFIX_LENGTH);
       localStorage.setItem(CLIENT_ID_KEY, clientId);
     }
   } catch {
-    clientId = Math.random().toString(CLIENT_ID_RADIX).slice(CLIENT_ID_RANDOM_START, CLIENT_ID_RANDOM_END);
+    clientId = randomClientId();
   }
 
   // Bounded wait for the initial WebSocket sync, used by get()'s recovery path
@@ -104,16 +106,16 @@ export function createUserPreferences({ ydoc, ymap, provider, activeRoomSession,
   };
 
   const writeUserPreference = (key, value) => {
-          // Best-effort cache — instant reads next load.
-          try {
-            localStorage.setItem(localStorageKeyFor(key), JSON.stringify(value));
-          } catch { /* quota / private-mode / disabled — durable copy below covers it */ }
-          // Durable copy — written on every set, not only on cache failure, so
-          // per-device prefs survive a cleared/broken localStorage. 'system' keeps
-          // it off the undo stack; transact is synchronous, nothing to await.
-          try {
-            ydoc.transact(() => { ymap.set(`u|${clientId}|${key}`, value); }, 'system');
-          } catch { /* Yjs refused — cache above is the fallback */ }
+    // Best-effort cache — instant reads next load.
+    try {
+      localStorage.setItem(localStorageKeyFor(key), JSON.stringify(value));
+    } catch { /* quota / private-mode / disabled — durable copy below covers it */ }
+    // Durable copy — written on every set, not only on cache failure, so
+    // per-device prefs survive a cleared/broken localStorage. 'system' keeps
+    // it off the undo stack; transact is synchronous, nothing to await.
+    try {
+      ydoc.transact(() => { ymap.set(`u|${clientId}|${key}`, value); }, 'system');
+    } catch { /* Yjs refused — cache above is the fallback */ }
   };
   return { clientId, localStorageKeyFor, readUserPreference, writeUserPreference };
 }

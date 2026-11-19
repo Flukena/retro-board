@@ -1,11 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createAwarenessPresence } from './awareness-presence.js';
 import { withStorage } from '../../../test-support/bridge-harness.js';
 
 const REMOTE_CLIENT_A = 101;
 const REMOTE_CLIENT_B = 102;
 const STALE_AFTER_MS = 30_000;
-const OVERLONG_ITEM_ID = 'x'.repeat(129);
+const OVERLONG_ITEM_ID_LENGTH = 129;
+const OVERLONG_ITEM_ID = 'x'.repeat(OVERLONG_ITEM_ID_LENGTH);
 const SHARED_USER = { userId: 'peer', name: 'Peer', lastSeen: 1 };
 
 test('presence expires at 30s while busy, editing and selection keep distinct per-connection readers', async () => {
@@ -13,22 +15,32 @@ test('presence expires at 30s while busy, editing and selection keep distinct pe
     const { storage } = browser;
     const awareness = browser.__rbProvider.awareness;
     const now = Date.now();
-    for (const clientId of [REMOTE_CLIENT_A, REMOTE_CLIENT_B]) {
-      awareness.states.set(clientId, { user: SHARED_USER, busyItems: ['card', OVERLONG_ITEM_ID],
-        editingItemId: OVERLONG_ITEM_ID, selectedItems: ['card', OVERLONG_ITEM_ID] });
-      awareness.meta.set(clientId, { clock: 1, lastUpdated: now });
+    const nativeNow = Date.now;
+    Date.now = () => now;
+    try {
+      for (const clientId of [REMOTE_CLIENT_A, REMOTE_CLIENT_B]) {
+        awareness.states.set(clientId, { user: SHARED_USER, busyItems: ['card', OVERLONG_ITEM_ID],
+          editingItemId: OVERLONG_ITEM_ID, selectedItems: ['card', OVERLONG_ITEM_ID] });
+        awareness.meta.set(clientId, { clock: 1, lastUpdated: now });
+      }
+      assert.equal(storage.getRemoteBusyItems().get('card').size, 2);
+      assert.equal(storage.getRemoteSelectedItems().get('card').size, 2);
+      assert.equal(storage.getRemoteBusyItems().has(OVERLONG_ITEM_ID), false);
+      assert.equal(storage.getRemoteSelectedItems().has(OVERLONG_ITEM_ID), false);
+      assert.equal(storage.getRemoteEditingItems().get(OVERLONG_ITEM_ID).size, 2);
+      assert.equal(storage.getPresenceSnapshot().peer.name, 'Peer');
+      for (const clientId of [REMOTE_CLIENT_A, REMOTE_CLIENT_B]) {
+        awareness.meta.get(clientId).lastUpdated = now - STALE_AFTER_MS + 1;
+      }
+      assert.equal(storage.getPresenceSnapshot().peer.name, 'Peer');
+      for (const clientId of [REMOTE_CLIENT_A, REMOTE_CLIENT_B]) {
+        awareness.meta.get(clientId).lastUpdated = now - STALE_AFTER_MS;
+      }
+      assert.equal(storage.getPresenceSnapshot().peer, undefined);
+      assert.equal(storage.getRemoteBusyItems().get('card').size, 2);
+    } finally {
+      Date.now = nativeNow;
     }
-    assert.equal(storage.getRemoteBusyItems().get('card').size, 2);
-    assert.equal(storage.getRemoteSelectedItems().get('card').size, 2);
-    assert.equal(storage.getRemoteBusyItems().has(OVERLONG_ITEM_ID), false);
-    assert.equal(storage.getRemoteSelectedItems().has(OVERLONG_ITEM_ID), false);
-    assert.equal(storage.getRemoteEditingItems().get(OVERLONG_ITEM_ID).size, 2);
-    assert.equal(storage.getPresenceSnapshot().peer.name, 'Peer');
-    for (const clientId of [REMOTE_CLIENT_A, REMOTE_CLIENT_B]) {
-      awareness.meta.get(clientId).lastUpdated = now - STALE_AFTER_MS;
-    }
-    assert.equal(storage.getPresenceSnapshot().peer, undefined);
-    assert.equal(storage.getRemoteBusyItems().get('card').size, 2);
   });
 });
 
@@ -50,8 +62,7 @@ test('text and geometry busy claims merge, text stays singular, and document des
   });
 });
 
-test('the extracted controller reads fake Awareness slots without combining their owners', async () => {
-  const { createAwarenessPresence } = await import('./awareness-presence.js');
+test('the extracted controller reads fake Awareness slots without combining their owners', () => {
   let localState = {};
   const states = new Map([
     [REMOTE_CLIENT_A, { user: SHARED_USER, busyItems: ['card'], selectedItems: ['card'] }],

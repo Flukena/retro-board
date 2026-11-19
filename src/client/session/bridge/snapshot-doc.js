@@ -107,15 +107,10 @@ export function createSnapshotDoc({ ydoc, yItems, yMeta, publicPermit }) {
       // Upserts + per-field diffs
       newById.forEach((nItem, id) => {
         const oItem = curById.get(id);
-        let yItem = yItems.get(id);
+        const yItem = yItems.get(id);
         if (!(yItem instanceof Y.Map)) {
           // Brand-new item — seed a fresh Y.Map with all fields.
-          yItem = new Y.Map();
-          Object.entries(nItem).forEach(([k, v]) => {
-            if (k === 'id' || v === undefined) return;
-            setItemField(yItem, k, v);
-          });
-          yItems.set(id, yItem);
+          seedItem(id, nItem);
           return;
         }
         const allFields = new Set([
@@ -202,13 +197,8 @@ export function createSnapshotDoc({ ydoc, yItems, yMeta, publicPermit }) {
       if (migrationDone) return;
       if (yMeta.get('__migrated')) { migrationDone = true; return; }
       const legacy = ymap.get(LEGACY_BOARD_KEY);
-      if (!legacy || typeof legacy !== 'object') {
-        ydoc.transact(() => { yMeta.set('__migrated', true); }, 'system');
-        migrationDone = true;
-        return;
-      }
-      if (yItems.size > 0) {
-        // Another tab already migrated — just mark.
+      // Empty legacy state and an already-populated item map both only need the flag.
+      if (!legacy || typeof legacy !== 'object' || yItems.size > 0) {
         ydoc.transact(() => { yMeta.set('__migrated', true); }, 'system');
         migrationDone = true;
         return;
@@ -258,6 +248,6 @@ export function createSnapshotDoc({ ydoc, yItems, yMeta, publicPermit }) {
     }
 
   };
-  return { readBoardSnapshot, readRemoteBoardSnapshot, writeBoardSnapshot, readItemSnapshot, setItemField,
-    seedItem, createItem, patchExistingItem, patchProtectedItems, concealForAdditions, newSnapshotItems, attachMaintenance };
+  return { readBoardSnapshot, readRemoteBoardSnapshot, writeBoardSnapshot, readItemSnapshot,
+    createItem, patchExistingItem, patchProtectedItems, concealForAdditions, newSnapshotItems, attachMaintenance };
 }
