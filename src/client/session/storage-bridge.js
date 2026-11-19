@@ -40,8 +40,8 @@ import { createDrawingPreviews } from './drawing-previews.js';
 import { createReactionChannel } from '../reactions/reaction-channel.js';
 import { createWritingTimerStore } from '../writing-timer/writing-timer-store.js';
 import { attachClientSync } from './client-sync.js';
-import { SYNC_STATE } from './sync-status.js';
-import { PublicCreationGuard, PUBLIC_CREATION_LIMIT_EVENT } from './public-creation-guard.js';
+import { createPublicPermit } from './bridge/public-permit.js';
+import { PublicCreationGuard } from './public-creation-guard.js';
 import { attachPublicCreationBudget } from './public-creation-budget.js';
 import { decodeRemoteBoard } from '../board/remote-board-decoder.js';
 import { LOCAL_ONLY_KEYS, readLocalPreference, writeLocalPreference } from './local-preferences.js';
@@ -188,22 +188,9 @@ if (publicCreationGuard) {
   yItems.observe(observeCreations);
   ydoc.on('destroy', () => yItems.unobserve(observeCreations));
 }
-let publicCreationFailure = false;
-const rejectPublicCreation = () => {
-  publicCreationFailure = true;
-  queueMicrotask(() => { publicCreationFailure = false; });
-  return false;
-};
-const permitPublicCreations = (items) => {
-  if (!publicCreationGuard || items.length === 0) return true;
-  if (syncStatus?.getSnapshot().status === SYNC_STATE.ACTION_LIMIT) return rejectPublicCreation();
-  const result = publicCreationGuard.check(items);
-  if (!result.allowed) {
-    window.dispatchEvent(new CustomEvent(PUBLIC_CREATION_LIMIT_EVENT, { detail: result }));
-    return rejectPublicCreation();
-  }
-  return true;
-};
+const { permitPublicCreations, consumePublicCreationFailure } = createPublicPermit({
+  publicCreationGuard, syncStatus, eventTarget: window,
+});
 const newSnapshotItems = items => items.filter(item => item?.id && !(yItems.get(item.id) instanceof Y.Map));
 if (provider) provider.connect();
 const motionPublisher = provider ? createMotionPublisher(provider.awareness) : null;
@@ -1040,11 +1027,7 @@ if (provider) {
 
     // --- Granular board writes (delta-only; see helpers above) ---
     canCreateItems(items) { return Array.isArray(items) && permitPublicCreations(items); },
-    consumePublicCreationFailure() {
-      const failed = publicCreationFailure;
-      publicCreationFailure = false;
-      return failed;
-    },
+    consumePublicCreationFailure,
     addItem(item, opts) {
       if (boardItemWriteError(item) || geometryErrorForItem(item) || yItems.has(item.id)) return false;
       if (!permitPublicCreations([item])) return false;
