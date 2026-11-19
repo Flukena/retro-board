@@ -9,6 +9,10 @@ import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { relayEntrypoint } from './src/test-support/relay-entrypoint.js';
+import { RoomSessions } from './src/server/relay-session.js';
+import { RelayWsTraffic } from './src/server/relay-ws-traffic.js';
+import { createRejectionCounters } from './src/server/relay-rejection-counters.js';
 import WebSocket from 'ws';
 import { planVoteFinalization } from './src/domain/vote-finalization.js';
 import { zoneHeaderClearancePx } from './src/domain/zone-title.js';
@@ -1707,4 +1711,35 @@ test('32-client capacity profile still disconnects a flooding sender without evi
   assert.equal(healthy.readyState, WebSocket.OPEN);
   assert.match(server.output(), /rate-limit close/);
   assert.equal((await fetch(`${server.httpUrl}/readyz`)).status, 200);
+});
+
+test('security rejectionCounters preserve exact upgrade status totals', async t => {
+  const handle = 'a'.repeat(32);
+  const docName = 'counter-fixture';
+  let authenticated = false;
+  t.mock.method(RoomSessions.prototype, 'authenticate', () => authenticated ? { docName } : null);
+  const summaries = [];
+  let counters;
+  const state = await relayEntrypoint(t, { modules: {
+    './src/server/relay-rejection-counters.js': { createRejectionCounters: () => {
+      counters = createRejectionCounters((_message, values) => summaries.push(values));
+      return counters;
+    } },
+  } });
+  const socket = { end() {}, destroy() {} };
+  const upgrade = (origin, target = handle) => state.server.emit('upgrade', {
+    url: `/rooms/${target}`, headers: { origin },
+  }, socket, Buffer.alloc(0));
+  state.registry.registeredRoomsByHandle.set(handle, docName);
+  upgrade('https://hostile.example');
+  upgrade('https://allowed.example', 'b'.repeat(32));
+  upgrade('https://allowed.example');
+  authenticated = true;
+  t.mock.method(RelayWsTraffic.prototype, 'reserve', () => ({ status: 429 }));
+  upgrade('https://allowed.example');
+  state.lifecycle.onStart('SIGTERM');
+  upgrade('https://allowed.example');
+  counters.flush();
+  assert.deepEqual(summaries, [{ 'upgrade:403': 1, 'upgrade:404': 1, 'upgrade:401': 1, 'upgrade:429': 1, 'upgrade:503': 1 }]);
+  t.diagnostic(`rejectionCounters=${JSON.stringify(summaries[0])}`);
 });

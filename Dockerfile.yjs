@@ -60,6 +60,7 @@ COPY --chown=node:node \
     src/server/relay-vote-expiry.js \
     src/server/relay-awareness-policy.js \
     src/server/relay-ws-admission.js \
+    src/server/relay-upgrade.js \
     ./src/server/
 
 COPY --chown=node:node scripts/public-wall-restore.mjs scripts/public-wall-restore.sh ./scripts/

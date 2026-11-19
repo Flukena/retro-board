@@ -1,3 +1,4 @@
+import { createUpgradeHandler } from './src/server/relay-upgrade.js';
 import { createWsAdmission } from './src/server/relay-ws-admission.js';
 import { createAwarenessPolicy } from './src/server/relay-awareness-policy.js';
 import { createVoteExpiry } from './src/server/relay-vote-expiry.js';
@@ -12,14 +13,13 @@ import { RelayProtocol } from './src/server/relay-protocol.js';
 // Single source of truth for collaborative state.
 
 import { envInt, envBool, readGuestSweepTiming, readRelayConfig, ROOM_BLOCK_TTL_MS, BLOCKED_ROOM_ENTRIES_PER_ACTIVE_ROOM, LARGE_UPDATE_LOG_THRESHOLD_BYTES, MAINTENANCE_INTERVAL_MS, STORE_OPERATION_OVERHEAD_BYTES, MAX_HTTP_TARGET_CHARACTERS, MAX_REQUESTS_PER_SOCKET, RETRY_AFTER_SHORT_SECONDS, RETRY_AFTER_LONG_SECONDS } from './src/server/relay-config.js';
-import { roomTargetFromRequest, tokenDocNameFromRequest } from './src/server/relay-room-target.js';
 import { RelayWsTraffic, closeOnSessionExpiry } from './src/server/relay-ws-traffic.js';
 import { createE2ERelay } from './src/server/e2e-relay.js';
 import { E2ERoomLog } from './src/server/e2e-room-log.js';
 import { migrateLegacyImages } from './src/server/legacy-image-migration.js';
 import { E2EBlobStore } from './src/server/e2e-blob-store.js';
 import { createE2EBlobs } from './src/server/e2e-blobs.js';
-import { isExactAllowedOrigin, sendUpgradeRejection } from './src/server/relay-http.js';
+import { sendUpgradeRejection } from './src/server/relay-http.js';
 import { handleRoomRoute } from './src/server/relay-room-routes.js';
 import { roomLogId } from './src/server/relay-log-id.js';
 import { createUploadState, scanUploadUsage, createRelayUploads, createImageReadBudgets, UPLOAD_STORAGE_FAILURE_EVENT, ROOM_UPLOAD_USAGE_META } from './src/server/relay-uploads.js';
@@ -214,7 +214,7 @@ const journaledDeletions = await deletionJournal.load();
 await roomRegistry.hydrate(initialUploadUsage, new Set(journaledDeletions.keys()));
 const publicWall = PUBLIC_WALL ? new RelayPublicWall(await provisionPublicWall(roomRegistry)) : null;
 const publicHistory = PUBLIC_WALL ? new PublicWallHistory(DB_DIR, Y) : null;
-const { registeredDocs, registeredRoomsByHandle, roomUploadUsage, existingDocNames } = roomRegistry;
+const { registeredRoomsByHandle, roomUploadUsage } = roomRegistry;
 const roomHandleForDoc = (docName) => roomRegistry.roomHandleForDoc(docName);
 
 // Flipped by the first storage failure. Existing clients are closed as well as
@@ -933,80 +933,12 @@ wss.on('connection', (conn, req) => {
   });
 });
 
-server.on('upgrade', (req, socket, head) => {
-  // Origin allowlist — set YJS_ALLOWED_ORIGINS in prod to lock the relay to
-  // the public site. Browsers always send Origin on WS handshakes; non-browser
-  // clients can spoof it but at least defeats opportunistic CSRF-style abuse
-  // from a malicious site running a ws() in the user's tab.
-  const origin = req.headers.origin || '';
-  if (!isExactAllowedOrigin(origin, ALLOWED_ORIGINS, ALLOW_INSECURE_HTTP)) {
-    rejectUpgrade(socket, 403);
-    return;
-  }
-  const roomTarget = roomTargetFromRequest(req, { publicWall: PUBLIC_WALL });
-  const handle = roomTarget?.handle || null;
-  // Resolve the canonical room first, on every route, so the lock check below covers legacy URLs too.
-  const legacyDoc = !handle && ALLOW_LEGACY_URL_TOKENS ? tokenDocNameFromRequest(req, { allowLegacyRooms: ALLOW_LEGACY_ROOMS }) : null;
-  const docName = handle ? registeredRoomsByHandle.get(handle)
-    : legacyDoc && (registeredDocs.has(legacyDoc) || (ALLOW_LEGACY_ROOMS && existingDocNames.has(legacyDoc))) && legacyDoc;
-  if (!docName) {
-    rejectUpgrade(socket, 404);
-    return;
-  }
-  // Locked rooms are served only on /e2e and normal rooms never are; an unreadable lock is never served.
-  const lock = roomRegistry.lockFor(docName);
-  if (lock === CORRUPT_LOCK || Boolean(lock) !== Boolean(roomTarget?.e2e)) {
-    rejectUpgrade(socket, lock === CORRUPT_LOCK ? 503 : 404);
-    return;
-  }
-  const session = handle ? authenticatedDocFromRequest(req, handle) : null;
-  if (handle && !session) {
-    rejectUpgrade(socket, 401);
-    return;
-  }
-  const expiresAt = session?.expiresAt || null;
-  // Reject known-doomed upgrades before getYDoc can allocate and hydrate a
-  // room that will never receive a connection.
-  if (accounting.shuttingDown || accounting.storageFailure || isRoomBlocked(docName)) {
-    rejectUpgrade(socket, 503);
-    return;
-  }
-  const e2e = Boolean(roomTarget?.e2e);
-  const coldRoom = e2e ? e2eRelay.connectionsFor(docName) === 0 : !docs.has(docName);
-  if (coldRoom && !hasActiveRoomCapacity()) {
-    rejectUpgrade(socket, 503);
-    return;
-  }
-  const clientIp = clientIpFromRequest(req);
-  if (!takeWsUpgradeToken(clientIp, docName, coldRoom)) {
-    rejectUpgrade(socket, 429);
-    return;
-  }
-  // Taken in the same tick as the room lookup and held until attach: a room being deleted answers like a missing one.
-  const leave = roomFence.enter(docName);
-  const reservation = leave ? wsTraffic.reserve(clientIp, docName) : { status: 404 };
-  if (reservation.status) {
-    leave?.();
-    rejectUpgrade(socket, reservation.status);
-    return;
-  }
-  socket.once('close', reservation.release);
-  req.wsSecurityContext = {
-    docName,
-    clientIp,
-    expiresAt,
-    expectedAwarenessClientId: roomTarget?.awarenessClientId ?? null,
-    supportsQuota: roomTarget?.supportsQuota ?? false,
-    e2e, keyEpoch: roomKeyEpoch(docName),
-  };
-  if (e2e) {
-    e2eRelay.handleUpgrade(req, socket, head);
-    leave();
-    return;
-  }
-  // Same canonical name as setupWSConnection, so hydration and the attachment cannot diverge between path forms.
-  plainUpgrades.attach(req, socket, head, docName, leave);
+const { handleUpgrade } = createUpgradeHandler({
+  settings: { PUBLIC_WALL, ALLOWED_ORIGINS, ALLOW_INSECURE_HTTP, ALLOW_LEGACY_URL_TOKENS, ALLOW_LEGACY_ROOMS },
+  roomRegistry, accounting, docs, roomFence, wsTraffic, isRoomBlocked, hasActiveRoomCapacity,
+  takeWsUpgradeToken, clientIpFromRequest, authenticatedDocFromRequest, roomKeyEpoch, e2eRelay, plainUpgrades, rejectUpgrade,
 });
+server.on('upgrade', handleUpgrade);
 
 // Graceful drain. Without this, `docker stop` kills the process while
 // storeUpdate calls are still in flight, so the last edits before a deploy
