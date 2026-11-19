@@ -35,7 +35,7 @@
       "checkEnv": {},
       "timeoutSec": 900,
       "baseline": "known-red",
-      "reason": "Round ZIP export then import: after import \"Average 4.5 / 5\" never appears within 15 s (identical in both attempts)",
+      "reason": "Stale since 68032f6 (mood result on demand): import drops resultShownAt on purpose and the step never presses \"Show mood result\" — unguarded until repaired (controller ruling T2-REPAIR)",
       "failingStep": "ZIP export then import keeps the round and its answers"
     },
     {
@@ -101,13 +101,13 @@
       "stack": "plain",
       "viteHost": "127.0.0.1",
       "ports": {},
-      "publicRelay": false,
+      "publicRelay": true,
       "maintainer": false,
       "relayEnv": {},
       "checkEnv": {},
       "timeoutSec": 900,
       "baseline": "known-red",
-      "reason": "Every step passes but the script counts 404/502 console resource errors from the isolated stack and exits 1 (identical in both attempts)",
+      "reason": "Every step passes, but the check demands zero console errors and the relay answers 404 on /api/account by design when sign-in is off (3 errors, no stack is clean); the Public relay is now running, so the earlier 502 is gone — unguarded until repaired (controller ruling T2-REPAIR)",
       "failingStep": null
     },
     {
@@ -145,7 +145,7 @@
       "checkEnv": {},
       "timeoutSec": 900,
       "baseline": "known-red",
-      "reason": "Times out waiting for the name dialog button \"name.skip\" (identical in both attempts); script prints no FAIL line",
+      "reason": "Stale since 0b8e164, which removed \"Continue as guest\" (name.skip) — unguarded until repaired (controller ruling T2-REPAIR)",
       "failingStep": null
     },
     {
@@ -166,7 +166,7 @@
       "checkEnv": {},
       "timeoutSec": 900,
       "baseline": "known-red",
-      "reason": "Times out waiting for .rb-mobile-editor__input after 4 passing steps (identical in both attempts); script prints no FAIL line",
+      "reason": "Stale since e1f7f51 (Text click-to-place) and a7505a9 (Done/Edit dropped) — unguarded until repaired (controller ruling T2-REPAIR)",
       "failingStep": null
     },
     {
@@ -187,7 +187,7 @@
       "checkEnv": {},
       "timeoutSec": 900,
       "baseline": "known-red",
-      "reason": "Times out waiting for .rb-public-wall at its first case (identical in both attempts); script prints no FAIL line",
+      "reason": "Stale since d40741b (Landing uses the hero variant): .rb-public-wall exists only in the card variant — unguarded until repaired (controller ruling T2-REPAIR)",
       "failingStep": null
     },
     {
@@ -210,7 +210,7 @@
       "checkEnv": {},
       "timeoutSec": 900,
       "baseline": "known-red",
-      "reason": "seedFixture throws \"Pan fixture rejected\": the check needs its own dedicated Public relay on 5188, not the runner stack (identical in both attempts)",
+      "reason": "Public creation limit from 2d698a1 (10 items and 1 image per 60 s) rejects the 24-item, 2-image fixture — unguarded until repaired (controller ruling T2-REPAIR)",
       "failingStep": null
     },
     {
@@ -232,7 +232,7 @@
       "checkEnv": {},
       "timeoutSec": 900,
       "baseline": "known-red",
-      "reason": "Times out waiting for the \"mobile.done\" button after 4 passing steps (identical in both attempts); script prints no FAIL line",
+      "reason": "Stale since a7505a9, which removed mobile.done — unguarded until repaired (controller ruling T2-REPAIR)",
       "failingStep": null
     },
     {
