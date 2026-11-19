@@ -1,3 +1,4 @@
+import { routeBoardKey } from './src/client/board/board-key-router.js';
 import { undoBlockReason } from './src/domain/undo-guard.js';
 import { createStickyItem, createTextItem, createZoneItem, createImageItem } from './src/domain/item-factory.js';
 import { filterLockedZoneMoves } from './src/domain/zone-move-lock.js';
@@ -52,7 +53,6 @@ import { useDrawingMode } from './src/client/board/useDrawingMode.js';
 import { useDrawingSession } from './src/client/board/useDrawingSession.js';
 import { LiveDrawingPreviews } from './src/client/board/LiveDrawingPreviews.jsx';
 import { DrawingTool } from './src/client/board/DrawingTool.jsx';
-import { resolveBoardShortcut } from './src/client/board/board-shortcuts.js';
 import { useSpacePan } from './src/client/board/use-space-pan.js';
 import { ToolDock, TOOL_ID } from './src/client/chrome/ToolDock.jsx';
 import { ZoomControls } from './src/client/chrome/ZoomControls.jsx';
@@ -2640,96 +2640,59 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
      ============================================================ */
   useEffect(() => {
     const onKey = (e) => {
-      if (focusedTextIdRef.current) return;
-      if (nameModalOpen) return;
-      if (commentsOpenReadable) {
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          setCommentsOpenFor(null);
-        }
-        return;
-      }
-      const el = e.target instanceof Element ? e.target : null;
-      if (el?.closest(
-        'input, textarea, select, [contenteditable="true"], '
-        + '[role="dialog"], [data-board-shortcuts="off"]',
-      )) return;
-      if (e.key === 'Escape' && followedUserIdRef.current) {
-        e.preventDefault();
-        stopFollowing();
-        return;
-      }
-      if (document.querySelector('[role="dialog"]')) return;
-      const action = resolveBoardShortcut(e);
-      if (shortcutToolHandlersRef.current[action]) {
-        if (!e.repeat) { e.preventDefault(); shortcutToolHandlersRef.current[action](); }
-        return;
-      }
-      if (action === 'fitContent') {
-        if (interactionRef.current === null) {
-          e.preventDefault();
-          fitToContent();
-        }
-        return;
-      }
-      if (action === 'fitSelection') {
-        if (interactionRef.current === null) {
-          e.preventDefault();
-          fitToSelection();
-        }
-        return;
-      }
-      const zoomInKey = action === 'zoomIn';
-      const zoomOutKey = action === 'zoomOut';
-      const resetZoomKey = action === 'zoomReset';
-      if (zoomInKey || zoomOutKey || resetZoomKey) {
-        e.preventDefault();
-        if (interactionRef.current !== null) return;
-        if (zoomInKey) zoomBy(ZOOM_STEP_FACTOR);
-        else if (zoomOutKey) zoomBy(1 / ZOOM_STEP_FACTOR);
-        else resetZoom();
-        return;
-      }
+      const { action, preventDefault } = routeBoardKey(e, {
+        focusedText: focusedTextIdRef.current, nameModal: nameModalOpen, commentsOpen: commentsOpenReadable,
+        get targetBlocked() {
+          const el = e.target instanceof Element ? e.target : null;
+          return !!el?.closest('input, textarea, select, [contenteditable="true"], [role="dialog"], [data-board-shortcuts="off"]');
+        },
+        following: followedUserIdRef.current,
+        get dialogOpen() { return !!document.querySelector('[role="dialog"]'); },
+        tools: Object.keys(shortcutToolHandlersRef.current), interacting: interactionRef.current !== null,
+        creating: creationModeRef.current, selected: selectedIds.size > 0, clipboard: clipboardRef.current?.length > 0,
+      });
+      if (preventDefault) e.preventDefault();
+      if (!action) return;
+      if (action === 'closeComments') { setCommentsOpenFor(null); return; }
+      if (action === 'stopFollowing') { stopFollowing(); return; }
+      if (shortcutToolHandlersRef.current[action]) { shortcutToolHandlersRef.current[action](); return; }
+      if (action === 'fitContent') { fitToContent(); return; }
+      if (action === 'fitSelection') { fitToSelection(); return; }
+      if (action === 'zoomIn') { zoomBy(ZOOM_STEP_FACTOR); return; }
+      if (action === 'zoomOut') { zoomBy(1 / ZOOM_STEP_FACTOR); return; }
+      if (action === 'zoomReset') { resetZoom(); return; }
       if (action === 'front' || action === 'back') {
-        e.preventDefault();
         if (action === 'front') bringToFront(selectedIds);
         else sendToBack(selectedIds);
         return;
       }
       if (action === 'forward' || action === 'backward') {
-        e.preventDefault();
         const id = selectedIds.size === 1 ? [...selectedIds][0] : null;
         if (action === 'forward') bringForward(id);
         else sendBackward(id);
         return;
       }
-      if (action === 'cancel') {
-        if (creationModeRef.current) { setCreationMode(null); setZonePreview(null); return; }
-        setSelectedIds(new Set());
-      }
+      if (action === 'cancelCreation') { setCreationMode(null); setZonePreview(null); return; }
+      if (action === 'clearSelection') setSelectedIds(new Set());
       if (action === 'delete' && selectedIds.size > 0) {
         deleteItemsIfAllowed(selectedIds);
       }
-      if (action === 'undo') { e.preventDefault(); doUndo(); return; }
-      if (action === 'redo') { e.preventDefault(); doRedo(); return; }
+      if (action === 'undo') { doUndo(); return; }
+      if (action === 'redo') { doRedo(); return; }
       if ((action === 'copy' || action === 'cut') && selectedIds.size > 0) {
-        e.preventDefault();
         const picked = boardRef.current.items.filter((it) => selectedIds.has(it.id));
         if (action === 'cut' && !deleteItemsIfAllowed(picked.map((it) => it.id))) return;
         clipboardRef.current = picked.map((it) => ({ ...it }));
         setToast({ msg: t('copy.done', { n: picked.length }), type: 'info' });
       }
       if (action === 'paste' && clipboardRef.current?.length) {
-        e.preventDefault();
         duplicateItems(clipboardRef.current);
       }
       if (action === 'duplicate' && selectedIds.size > 0) {
-        e.preventDefault();
         const picked = boardRef.current.items.filter((it) => selectedIds.has(it.id));
         duplicateItems(picked);
       }
       if (action === 'selectAll') {
-        e.preventDefault();
         setSelectedIds(new Set(boardRef.current.items.map((it) => it.id)));
       }
     };
