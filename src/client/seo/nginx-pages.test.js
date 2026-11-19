@@ -27,6 +27,12 @@ test('no location adds its own headers, so every response keeps the server secur
   for (const body of locations) assert.doesNotMatch(body, /add_header/);
 });
 
+test('the unhashed head script is cached for an hour with expires only, never its own headers', () => {
+  const body = locationBody('= /home-hint\\.js');
+  assert.match(body, /^\s*expires 1h;\s*$/m);
+  assert.doesNotMatch(body, /add_header/);
+});
+
 test('every HTML file, however it is reached, is served with revalidation', () => {
   assert.match(locationBody('~ \\\\\\.html\\$'), /expires -1;/);
 });
