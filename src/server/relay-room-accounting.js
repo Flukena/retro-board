@@ -7,6 +7,12 @@ export function createRoomAccounting({ databaseSizeBytes, MAX_DB_BYTES, MAX_PEND
   // throttled measurement refreshes it. This avoids synchronously encoding a
   // near-limit document on every tiny edit or every persistence compaction.
   const roomUsage = new WeakMap();
+  const usageFor = doc => roomUsage.get(doc) || {
+    upperBytes: 0,
+    exactBytes: 0,
+    lastMeasuredAt: Date.now(),
+  };
+
   const projectedActiveDocumentBytes = (ydoc, nextUpperBytes) => {
     const previous = roomUsage.get(ydoc);
     return Math.max(0, state.activeDocumentBytes - (previous?.upperBytes || 0) + nextUpperBytes);
@@ -32,7 +38,7 @@ export function createRoomAccounting({ databaseSizeBytes, MAX_DB_BYTES, MAX_PEND
     roomUsage.delete(ydoc);
   };
   return {
-    roomUsage, projectedActiveDocumentBytes, commitRoomUsage, tryCommitRoomUsage, releaseRoomUsage,
+    roomUsage, usageFor, projectedActiveDocumentBytes, commitRoomUsage, tryCommitRoomUsage, releaseRoomUsage,
     get dbUsageBytes() { return state.dbUsageBytes; },
     set dbUsageBytes(value) { state.dbUsageBytes = value; },
     get pendingStoreOps() { return state.pendingStoreOps; },

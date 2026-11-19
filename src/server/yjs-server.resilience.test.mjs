@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { relayEntrypoint } from './src/test-support/relay-entrypoint.js';
-import { RelayMaintenance } from './src/server/relay-maintenance.js';
-import { REGISTRY_STORAGE_FAILURE_EVENT } from './src/server/relay-room-registry.js';
-import { MAINTENANCE_INTERVAL_MS } from './src/server/relay-config.js';
-import { RoomSessions } from './src/server/relay-session.js';
-import { RelayWsTraffic } from './src/server/relay-ws-traffic.js';
-import { createRejectionCounters } from './src/server/relay-rejection-counters.js';
+import { relayEntrypoint } from '../test-support/relay-entrypoint.js';
+import { RelayMaintenance } from './relay-maintenance.js';
+import { REGISTRY_STORAGE_FAILURE_EVENT } from './relay-room-registry.js';
+import { MAINTENANCE_INTERVAL_MS } from './relay-config.js';
+import { RoomSessions } from './relay-session.js';
+import { RelayWsTraffic } from './relay-ws-traffic.js';
+import { createRejectionCounters } from './relay-rejection-counters.js';
 
 const require = createRequire(import.meta.url);
 const Y = require('yjs');

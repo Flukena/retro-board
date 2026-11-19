@@ -2,13 +2,9 @@ import { STORE_OPERATION_OVERHEAD_BYTES } from './relay-config.js';
 import { admitPublicAction } from './public-action-limit.js';
 import { PUBLIC_ACTION_LIMIT_REASON } from './public-wall-config.js';
 
-export function createWsAdmission({ config, accounting, roomUsage, persistenceChurnFor, scheduleRoomCompaction, markStorageFailure, inspectProtocolMessage, planAwarenessUpdate, rejectionCounters, PUBLIC_WALL, Y }) {
+export function createWsAdmission({ config, accounting, persistenceChurnFor, scheduleRoomCompaction, markStorageFailure, inspectProtocolMessage, planAwarenessUpdate, rejectionCounters, PUBLIC_WALL, Y }) {
   const { MAX_PENDING_STORE_OPS, MAX_PENDING_STORE_BYTES, MAX_DB_BYTES, MAX_DOCUMENT_BYTES, MAX_ACTIVE_DOCUMENT_BYTES, ROOM_MAX_UNCOMPACTED_UPDATES, ROOM_MAX_UNCOMPACTED_BYTES } = config;
-  const usageFor = doc => roomUsage.get(doc) || {
-    upperBytes: 0,
-    exactBytes: 0,
-    lastMeasuredAt: Date.now(),
-  };
+  const { usageFor } = accounting;
 
   const admitSyncUpdate = (doc, docName, inspection) => {
     const usage = usageFor(doc);

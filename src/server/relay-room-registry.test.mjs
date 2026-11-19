@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { ROOM_ACTIVITY_META } from './src/server/room-activity.js';
-import { ROOM_HANDLE_RE, STORE_OPERATION_OVERHEAD_BYTES } from './src/server/relay-config.js';
-import { RoomRegistry, REGISTRY_STORAGE_FAILURE_EVENT, databaseCapacityError } from './src/server/relay-room-registry.js';
-import { lockRecord } from './src/server/room-lock-fixtures.mjs';
-import { MAX_OWNED_ROOMS_PER_ACCOUNT, RETENTION_CLASS, ROOM_KIND, ROOM_OWNER_META, encodeOwnerRecord } from './src/domain/room-ownership.js';
+import { ROOM_ACTIVITY_META } from './room-activity.js';
+import { ROOM_HANDLE_RE, STORE_OPERATION_OVERHEAD_BYTES } from './relay-config.js';
+import { RoomRegistry, REGISTRY_STORAGE_FAILURE_EVENT, databaseCapacityError } from './relay-room-registry.js';
+import { lockRecord } from './room-lock-fixtures.mjs';
+import { MAX_OWNED_ROOMS_PER_ACCOUNT, RETENTION_CLASS, ROOM_KIND, ROOM_OWNER_META, encodeOwnerRecord } from '../domain/room-ownership.js';
 
 const require = createRequire(import.meta.url);
 const Y = require('yjs');

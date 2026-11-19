@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as Y from 'yjs';
-import { RelayMaintenance, MAINTENANCE_STORAGE_FAILURE_EVENT, sweepRetainedUploads, sweepInterruptedUploads } from './src/server/relay-maintenance.js';
-import { MILLISECONDS_PER_DAY } from './src/server/relay-config.js';
+import { RelayMaintenance, MAINTENANCE_STORAGE_FAILURE_EVENT, sweepRetainedUploads, sweepInterruptedUploads } from './relay-maintenance.js';
+import { MILLISECONDS_PER_DAY } from './relay-config.js';
 
 const AT_TIME_MS = MILLISECONDS_PER_DAY * 2;
 const EXPIRED_TIME_MS = 0;

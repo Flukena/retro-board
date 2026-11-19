@@ -15,6 +15,7 @@ const runRelay = (root, preload, overrides = {}) => new Promise((resolve, reject
   const child = spawn(process.execPath, [
     '--import', `data:text/javascript,${encodeURIComponent(preload)}`, process.env.RB_TEST_RELAY_ENTRY || 'yjs-server.mjs',
   ], {
+    cwd: new URL('../../', import.meta.url),
     env: {
       ...process.env, YJS_PORT: '0', YJS_HOST: '127.0.0.1',
       YJS_DB_DIR: join(root, 'db'), YJS_UPLOADS_DIR: join(root, 'images'),

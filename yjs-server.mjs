@@ -16,7 +16,6 @@ import { RoomSessions } from './src/server/relay-session.js';
 import { RelayProtocol } from './src/server/relay-protocol.js';
 // Yjs WebSocket relay with LevelDB persistence.
 // Single source of truth for collaborative state.
-
 import { envInt, envBool, readGuestSweepTiming, readRelayConfig, MAINTENANCE_INTERVAL_MS, MAX_REQUESTS_PER_SOCKET, RETRY_AFTER_LONG_SECONDS } from './src/server/relay-config.js';
 import { RelayWsTraffic } from './src/server/relay-ws-traffic.js';
 import { createE2ERelay } from './src/server/e2e-relay.js';
@@ -271,7 +270,7 @@ if (publicWall) {
 }
 const rejectionCounters = createRejectionCounters((message, counts) => console.log(message, counts));
 const { inspectMessage } = createWsAdmission({
-  config: relayConfig, accounting, roomUsage, persistenceChurnFor, scheduleRoomCompaction,
+  config: relayConfig, accounting, persistenceChurnFor, scheduleRoomCompaction,
   markStorageFailure, inspectProtocolMessage, planAwarenessUpdate, rejectionCounters, PUBLIC_WALL, Y,
 });
 const ACCOUNT_SIGNING_KEY = loadSigningKey(DB_DIR, ACCOUNT_SESSION_KEY);

@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import WebSocket from 'ws';
-import { restorePublicWall } from './src/server/public-wall-restore.js';
+import { restorePublicWall } from './public-wall-restore.js';
 
 const require = createRequire(import.meta.url);
 const Y = require('yjs');
@@ -23,7 +23,7 @@ const SYNC_UPDATE_TYPE = 2;
 const PNG_BYTES = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLttAAAAABJRU5ErkJggg==', 'base64');
 const TEST_MAX_UPLOAD_BYTES = 1024;
 const INCOMPLETE_PNG_HEADER_BYTES = 8;
-const readProfile = async name => Object.fromEntries((await readFile(new URL(`./config/${name}`, import.meta.url), 'utf8'))
+const readProfile = async name => Object.fromEntries((await readFile(new URL(`../../config/${name}`, import.meta.url), 'utf8'))
   .split('\n').filter(line => /^YJS_[A-Z_]+=\d+$/.test(line)).map(line => line.split('=')));
 const PROFILE = await readProfile('room-capacity.env');
 const PUBLIC_PROFILE = await readProfile('public-room-capacity.env');
@@ -32,6 +32,7 @@ async function relay(t, root, publicWall = true, environment = {}) {
   const directory = root || await mkdtemp(join(tmpdir(), 'public-relay-'));
   if (!root) t.after(() => rm(directory, { recursive: true, force: true }));
   const child = spawn(process.execPath, ['yjs-server.mjs'], {
+    cwd: new URL('../../', import.meta.url),
     env: { ...process.env, ...PROFILE, ...(publicWall ? PUBLIC_PROFILE : {}), YJS_PUBLIC_WALL: String(publicWall), YJS_PORT: '0', YJS_HOST: '127.0.0.1',
       YJS_DB_DIR: join(directory, 'db'), YJS_UPLOADS_DIR: join(directory, 'uploads'), YJS_ALLOWED_ORIGINS: ORIGIN,
       YJS_ALLOW_INSECURE_HTTP: 'false', YJS_ALLOW_LEGACY_URL_TOKENS: 'false', YJS_ALLOW_LEGACY_ROOMS: 'false',

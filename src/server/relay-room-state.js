@@ -39,7 +39,7 @@ export function createRoomPolicy({ MAX_ACTIVE_ROOMS }) {
 
 export function createRoomState({ Y, config, accounting, policy, votes, storage, queueStoreUpdate, roomPersistenceChurn, markStorageFailure, HYDRATION_ORIGIN }) {
   const { MAX_UPDATE_BYTES, MAX_DOCUMENT_BYTES } = config;
-  const { roomUsage, commitRoomUsage, tryCommitRoomUsage, releaseRoomUsage } = accounting;
+  const { usageFor, commitRoomUsage, tryCommitRoomUsage, releaseRoomUsage } = accounting;
   const { destroyedDocs, capacityRejectedDocs, blockRoom } = policy;
   const { finalizeExpiredVotes, armVoteExpiry, voteExpiryTimers } = votes;
   const { checkedGetYDoc, ldb } = storage;
@@ -67,11 +67,7 @@ export function createRoomState({ Y, config, accounting, policy, votes, storage,
       blockRoom(docName, ydoc, 'update too large');
       return;
     }
-    const usage = roomUsage.get(ydoc) || {
-      upperBytes: 0,
-      exactBytes: 0,
-      lastMeasuredAt: Date.now(),
-    };
+    const usage = usageFor(ydoc);
     const nextUsage = {
       ...usage,
       upperBytes: usage.upperBytes + u.byteLength,
