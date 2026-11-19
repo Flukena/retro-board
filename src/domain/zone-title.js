@@ -1,9 +1,9 @@
 // Screen geometry shared by theme, browser and relay vote finalization.
-export const ZONE_AUTO_TITLE_MIN_FONT_PX = 20;
+const ZONE_AUTO_TITLE_MIN_FONT_PX = 20;
 export const ZONE_AUTO_TITLE_MAX_FONT_PX = 32;
-export const ZONE_AUTO_TITLE_WIDTH_PER_FONT_PX = 24;
-export const ZONE_AUTO_TITLE_HEIGHT_PER_FONT_PX = 10;
-export const ZONE_AUTO_TITLE_FONT_STEP_PX = 2;
+const ZONE_AUTO_TITLE_WIDTH_PER_FONT_PX = 24;
+const ZONE_AUTO_TITLE_HEIGHT_PER_FONT_PX = 10;
+const ZONE_AUTO_TITLE_FONT_STEP_PX = 2;
 export const ZONE_COUNT_FONT_PX = 11;
 export const ZONE_TITLE_LINE_HEIGHT_RATIO = 1.35;
 export const ZONE_CHIP_PADDING_VERTICAL_PX = 6;

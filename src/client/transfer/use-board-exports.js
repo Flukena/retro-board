@@ -3,6 +3,7 @@ import { buildRetroSummary } from '../../domain/retro-summary.js';
 import { moodSummary } from '../../domain/mood-check.js';
 import { createBoardExport, createCsvBoardExport } from './board-transfer.js';
 import { exportFileName } from './board-backup.js';
+import { backupDoneNotice } from './export-notice.js';
 import { downloadArtifact } from './browser-download.js';
 import { copyTextToClipboard } from './clipboard.js';
 import { PNG_MIME_TYPE, renderBoardImage } from './board-image-export.js';
@@ -19,7 +20,7 @@ const liveVotes = () => window.storage?.snapshotVotes?.() || new Map();
 const closedMood = (moodCheck) => (moodCheck && !moodCheck.open
   ? moodSummary(window.storage?.snapshotMoods?.() || [], moodCheck.id) : null);
 
-export function summaryLabels() {
+function summaryLabels() {
   return {
     untitledBoard: t('summary.untitledBoard'), date: t('summary.date'), participants: t('summary.participants'),
     topVoted: t('summary.topVoted'), cards: t('summary.cards'), untitledZone: t('export.csv.untitledZone'),
@@ -31,7 +32,7 @@ export function summaryLabels() {
   };
 }
 
-export function boardImageLabels() {
+function boardImageLabels() {
   const lang = getLang();
   return {
     hidden: t('action.hiddenCard'), votes: n => t('summary.votes', { n }),
@@ -77,13 +78,7 @@ export function useBoardExports({ boardRef, boardCode, userId, setToast }) {
   const exportJson = useCallback(() => runBusy(async () => {
     const artifact = await createBoardExport(boardRef.current, { boardCode, userId });
     downloadArtifact(artifact);
-    const { positions, zoneDimensions } = artifact.geometryRepairs;
-    setToast({
-      msg: positions || zoneDimensions
-        ? t('export.repaired', { file: artifact.fileName, positions, zones: zoneDimensions })
-        : t('export.done', { file: artifact.fileName }),
-      type: 'info',
-    });
+    setToast(backupDoneNotice(artifact));
   }), [runBusy, boardRef, boardCode, userId, setToast]);
 
   // A zone's CSV holds only the stickies inside it; the board CSV groups every

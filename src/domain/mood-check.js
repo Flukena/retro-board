@@ -32,10 +32,14 @@ export const isMoodScore = (value) => Number.isInteger(value) && value >= 1 && v
 /** Public rooms have no single facilitator, so mood checks are private-only. */
 export const moodCheckAvailable = (mode) => mode !== BOARD_MODE.PUBLIC;
 
+// `resultShownAt` (epoch ms) is the admin's "show the result" press; absent or null means hidden.
+const isOptionalResultShownAt = (value) => value == null || (Number.isSafeInteger(value) && value >= 0);
+
 export const isMoodCheckState = (value) => value === null || (
   typeof value === 'object' && !Array.isArray(value)
   && isSafeId(value.id) && Number.isSafeInteger(value.startedAt) && value.startedAt >= 0
   && typeof value.open === 'boolean'
+  && isOptionalResultShownAt(value.resultShownAt)
 );
 
 /** Count, per-score histogram (index 0 = score 1) and average of one round's answers. */

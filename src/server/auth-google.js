@@ -11,9 +11,9 @@ import { accountCookiePath } from './auth-session.js';
 // a JWKS signature check (OIDC Core §3.1.3.7 item 6; owner-approved deviation).
 // This module never logs: failures throw AuthError carrying only a code.
 
-export const MAX_PENDING_FLOWS = 10_000;
+const MAX_PENDING_FLOWS = 10_000;
 export const FLOW_TTL_MS = 10 * MILLISECONDS_PER_MINUTE;
-export const TOKEN_EXCHANGE_TIMEOUT_MS = 10 * MILLISECONDS_PER_SECOND;
+const TOKEN_EXCHANGE_TIMEOUT_MS = 10 * MILLISECONDS_PER_SECOND;
 export const MAX_TOKEN_RESPONSE_BYTES = 16_384;
 export const CLOCK_SKEW_MS = MILLISECONDS_PER_MINUTE;
 export const MAX_SUB_CHARACTERS = 255;

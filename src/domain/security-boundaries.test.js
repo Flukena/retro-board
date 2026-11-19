@@ -5,7 +5,9 @@ import {
   IMAGE_SOURCE_MAX_DIMENSION,
   classifyImportedImageSource,
   imageInfoIsWithinLimits,
+  isDecodeSafeLegacyImage,
   inspectRasterImageBytes,
+  RETIRED_APP_ORIGINS,
   normalizeRuntimeImageSource,
   resolveRoomImageSource,
   isE2EImageSource,
@@ -107,6 +109,41 @@ test('runtime image URLs stay on the page or configured relay origin', () => {
   );
 });
 
+test('images stored under a retired app origin load from the current server, never the retired host', () => {
+  const options = {
+    pageOrigin: 'https://retroroom.party',
+    relayBaseUrl: 'https://retroroom.party/yjs',
+    roomHandle: ROOM_HANDLE,
+  };
+  const retired = 'https://retro.sagonzis.space';
+  assert.ok(Object.isFrozen(RETIRED_APP_ORIGINS));
+  assert.equal(
+    normalizeRuntimeImageSource(`${retired}/yjs/rooms/${ROOM_HANDLE}/images/${IMAGE_ID}.png`, options),
+    `https://retroroom.party/yjs/rooms/${ROOM_HANDLE}/images/${IMAGE_ID}.png`,
+  );
+  assert.equal(
+    normalizeRuntimeImageSource(`${retired}/yjs/images/${IMAGE_ID}.png`, options),
+    `https://retroroom.party/yjs/images/${IMAGE_ID}.png`,
+  );
+  const refused = [
+    `${retired}/yjs/rooms/${'z'.repeat(32)}/images/${IMAGE_ID}.png`,
+    `${retired}/yjs/rooms/${ROOM_HANDLE}/images/${IMAGE_ID}.png?x=1`,
+    `${retired}/yjs/rooms/${ROOM_HANDLE}/images/${IMAGE_ID}.png#x`,
+    `${retired}/yjs-public/rooms/${ROOM_HANDLE}/images/${IMAGE_ID}.png`,
+    `http://retro.sagonzis.space/yjs/images/${IMAGE_ID}.png`,
+    `https://www.retro.sagonzis.space/yjs/images/${IMAGE_ID}.png`,
+    `https://retro.sagonzis.space:8443/yjs/images/${IMAGE_ID}.png`,
+    `https://retroroom.party@retro.sagonzis.space/yjs/images/${IMAGE_ID}.png`,
+    `https://retro.sagonzis.space.evil.com/yjs/images/${IMAGE_ID}.png`,
+    `https://tracker.example/yjs/images/${IMAGE_ID}.png`,
+  ];
+  for (const source of refused) assert.equal(normalizeRuntimeImageSource(source, options), null, source);
+  assert.equal(
+    resolveRoomImageSource(`${retired}/yjs/rooms/${ROOM_HANDLE}/e2e-blobs/${IMAGE_ID}`, options),
+    null,
+  );
+});
+
 test('raster header inspection enforces dimensions and rejects animated WebP', () => {
   const png = new Uint8Array(24);
   png.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -202,4 +239,17 @@ test('the runtime normalizer never accepts an encrypted source, the room-aware r
   assert.equal(resolveRoomImageSource(E2E_PATH, RUNTIME, E2E_HANDLE), E2E_PATH);
   const plain = `/rooms/${E2E_HANDLE}/images/01234567-abcd.png`;
   assert.equal(resolveRoomImageSource(plain, RUNTIME, E2E_HANDLE), normalizeRuntimeImageSource(plain, RUNTIME));
+});
+
+test('isDecodeSafeLegacyImage accepts only parsed, decodable-size images that fail the import limits', () => {
+  const apng = { mime: 'image/png', width: 100, height: 100, animated: true };
+  assert.equal(isDecodeSafeLegacyImage(apng), true);
+  assert.equal(isDecodeSafeLegacyImage({ ...apng, animated: false }), false);
+  assert.equal(isDecodeSafeLegacyImage(null), false);
+  assert.equal(isDecodeSafeLegacyImage({ ...apng, width: IMAGE_SOURCE_MAX_DIMENSION }), true);
+  assert.equal(isDecodeSafeLegacyImage({ ...apng, width: IMAGE_SOURCE_MAX_DIMENSION + 1 }), false);
+  assert.equal(isDecodeSafeLegacyImage({ ...apng, width: 60000, height: 60000 }), false);
+  assert.equal(isDecodeSafeLegacyImage({ ...apng, width: 8000, height: 8000 }), false);
+  assert.equal(isDecodeSafeLegacyImage({ ...apng, width: 0 }), false);
+  assert.equal(isDecodeSafeLegacyImage({ ...apng, width: 1.5 }), false);
 });

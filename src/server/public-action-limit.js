@@ -9,7 +9,7 @@ const WEBSOCKET_OPEN = 1;
 const MAX_IP_BUCKETS = 10_000;
 const ITEM_TYPES = new Set(PUBLIC_ITEM_TYPES);
 
-export function publicSyncUpdate(data) {
+function publicSyncUpdate(data) {
   const bytes = data instanceof ArrayBuffer ? new Uint8Array(data)
     : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
   const decoder = decoding.createDecoder(bytes);

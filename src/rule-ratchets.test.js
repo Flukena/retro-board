@@ -5,11 +5,16 @@ import { filesUnder, productionSources } from '../scripts/project-files.mjs';
 
 const REPO_ROOT = new URL('../', import.meta.url);
 // AGENTS.md: frozen in size. These line ceilings may only be lowered, never raised.
-const RETRO_BOARD_MAX_LINES = 3993;
+const RETRO_BOARD_MAX_LINES = 3983;
 const YJS_SERVER_MAX_LINES = 1446;
+const STORAGE_BRIDGE_MAX_LINES = 1469;
+const I18N_MAX_LINES = 2510;
+const UNCEILINGED_MAX_LINES = 1250;
 const LINE_CEILINGS = new Map([
   ['RetroBoard.jsx', RETRO_BOARD_MAX_LINES],
   ['yjs-server.mjs', YJS_SERVER_MAX_LINES],
+  ['src/client/session/storage-bridge.js', STORAGE_BRIDGE_MAX_LINES],
+  ['src/client/ui/i18n.js', I18N_MAX_LINES],
 ]);
 const ALLOWED_COLOUR_REASONS = new Map([
   ['#2563eb', 'Functional selection outline'],
@@ -24,9 +29,17 @@ const ALLOWED_COLOUR_REASONS = new Map([
 const HEX_COLOUR_PATTERN = /#(?:[\da-f]{8}|[\da-f]{6}|[\da-f]{3})\b/gi;
 const COLOUR_FUNCTION_START_PATTERN = /\b(?:rgba?|hsla?)\s*\(/gi;
 
+function countLines(source) {
+  return source.split('\n').length - Number(source.endsWith('\n'));
+}
+
 export function assertLineCeiling(source, maxLines, label) {
-  const lines = source.split('\n').length - Number(source.endsWith('\n'));
+  const lines = countLines(source);
   assert.ok(lines <= maxLines, `${label}: ${lines} lines exceeds ceiling ${maxLines}`);
+}
+
+export function oversizeWithoutCeiling(lineCounts, ceilings, maxLines) {
+  return [...lineCounts].filter(([name, lines]) => lines > maxLines && !ceilings.has(name)).map(([name]) => name);
 }
 
 function readColourFunction(source, startIndex) {
@@ -98,4 +111,20 @@ test('encrypted-blob header names are spelled only in the shared contract module
   const spelled = productionSources().filter(name => name !== BLOB_HEADER_OWNER)
     .filter(name => BLOB_HEADER_LITERAL.test(readFileSync(new URL(name, REPO_ROOT), 'utf8')));
   assert.deepEqual(spelled, []);
+});
+
+test('every production source above the unceilinged limit has its own ceiling', () => {
+  const lineCounts = new Map(productionSources()
+    .map(name => [name, countLines(readFileSync(new URL(name, REPO_ROOT), 'utf8'))]));
+  assert.deepEqual(oversizeWithoutCeiling(lineCounts, LINE_CEILINGS, UNCEILINGED_MAX_LINES), []);
+});
+
+test('oversizeWithoutCeiling flags an unlisted file at 1251 lines and accepts one at 1250 or one with a ceiling', () => {
+  const lineCounts = new Map([
+    ['unlisted-over.js', UNCEILINGED_MAX_LINES + 1],
+    ['unlisted-at-limit.js', UNCEILINGED_MAX_LINES],
+    ['ceilinged-over.js', UNCEILINGED_MAX_LINES + 1],
+  ]);
+  const ceilings = new Map([['ceilinged-over.js', UNCEILINGED_MAX_LINES + 1]]);
+  assert.deepEqual(oversizeWithoutCeiling(lineCounts, ceilings, UNCEILINGED_MAX_LINES), ['unlisted-over.js']);
 });

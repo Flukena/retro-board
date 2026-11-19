@@ -5,7 +5,7 @@ import { t } from '../ui/i18n.js';
 import { ADMIN_PIN_RESULT, adminIsOnline, canUseCachedPin, adminPinSteps, adminClaimSteps, adminElectionSteps,
   finishAdminPin, finishAdminClaim, finishAdminElection } from './admin-role-model.js';
 
-export const HEARTBEAT_MS = 5000;
+const HEARTBEAT_MS = 5000;
 
 // Admin role: election, PIN gate, manual claim, and transfer. `board`/`boardRef`,
 // `onlineUsers`, `presence`, `patchMeta`, `setToast` and `storage` are passed

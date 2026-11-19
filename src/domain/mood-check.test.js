@@ -37,6 +37,16 @@ test('the summary counts only the asked round, with a histogram and a one-decima
   assert.deepEqual(moodSummary(answers, 'none'), { count: 0, histogram: [0, 0, 0, 0, 0], average: null });
 });
 
+test('resultShownAt is optional, but an explicit invalid value is rejected', () => {
+  const round = { id: 'r1', startedAt: 1, open: false };
+  for (const good of [undefined, null, 0, 1_700_000_000_000]) {
+    assert.equal(isMoodCheckState({ ...round, resultShownAt: good }), true, String(good));
+  }
+  for (const bad of [-1, 1.5, '5', Number.MAX_SAFE_INTEGER + 1, Number.NaN, Infinity, true, {}]) {
+    assert.equal(isMoodCheckState({ ...round, resultShownAt: bad }), false, String(bad));
+  }
+});
+
 test('mood checks are not offered on public boards', () => {
   assert.equal(moodCheckAvailable('public'), false);
   assert.equal(moodCheckAvailable('private'), true);

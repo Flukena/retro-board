@@ -37,7 +37,7 @@ export const centerOf = (it) => {
 export const insideZone = (p, z) =>
   p.x >= z.x && p.x <= z.x + z.w && p.y >= z.y && p.y <= z.y + z.h;
 
-export const effectiveArea = (it) => {
+const effectiveArea = (it) => {
   if (it.type === 'zone') return it.w * it.h;
   const w = it.w || (it.type === 'sticky' ? STICKY_W : it.type === 'text' ? TEXT_W : it.type === 'image' ? 200 : 0);
   const h = it.h || (it.type === 'sticky' ? STICKY_H : it.type === 'text' ? TEXT_H : it.type === 'image' ? 200 : 0);

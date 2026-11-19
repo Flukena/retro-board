@@ -127,7 +127,7 @@ export function RunningTimer({ view, store, isAdmin }) {
 }
 
 /** A polite live region, always mounted so a screen reader hears "Time's up" once and no tick before it. */
-export function EndAnnouncer({ view }) {
+function EndAnnouncer({ view }) {
   return (
     <span className="rb-writing-timer__announcer" role="status" aria-live="polite">
       {view.phase === WRITING_TIMER_PHASE.TIMES_UP ? t('writingTimer.timesUp') : ''}

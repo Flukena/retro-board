@@ -8,10 +8,10 @@ import { roomHandleOfImageFile } from './relay-uploads.js';
 
 /** Relay document holding the deletion journal. It lives outside every room, so clearing a room never clears it. */
 export const DELETION_JOURNAL_DOC = 'retro-relay-deletions';
-export const DELETION_KEY_PREFIX = 'deletion:';
+const DELETION_KEY_PREFIX = 'deletion:';
 /** How long a deletion waits for in-flight work (uploads, log ops, upgrades) before answering 503. */
-export const DELETE_DRAIN_TIMEOUT_MS = 10_000;
-export const DELETE_STATUS = Object.freeze({ NOT_FOUND: 404, UNAVAILABLE: 503 });
+const DELETE_DRAIN_TIMEOUT_MS = 10_000;
+const DELETE_STATUS = Object.freeze({ NOT_FOUND: 404, UNAVAILABLE: 503 });
 const JOURNAL_VERSION = 1;
 const JOURNAL_KEYS = ['v', 'handle', 'startedAt'];
 const PUT_OPERATION = 'put';
@@ -25,7 +25,7 @@ const DRAIN_TIMED_OUT = Object.freeze({ deleted: false, status: DELETE_STATUS.UN
 const journalKey = (docName) => `${DELETION_KEY_PREFIX}${docName}`;
 
 /** Exact-shape decode of a journal value; null for anything else. */
-export function decodeDeletionEntry(value) {
+function decodeDeletionEntry(value) {
   const exact = value !== null && typeof value === 'object' && !Array.isArray(value)
     && Object.keys(value).length === JOURNAL_KEYS.length && JOURNAL_KEYS.every((key) => Object.hasOwn(value, key));
   if (!exact || value.v !== JOURNAL_VERSION || !ROOM_HANDLE_RE.test(value.handle ?? '')) return null;

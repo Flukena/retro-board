@@ -1,79 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as Y from 'yjs';
-import { createServer } from 'vite';
 import { createZoneHeaderActions } from '../board/zone-header-actions.js';
 import { PLAYER_PRESENCE_STALE_MS } from './player-cursors.js';
 import { REACTION_CLEAR_MS } from '../reactions/reaction-channel.js';
-import { createRoomLock } from '../room-lock/e2e-crypto.js';
-import { fakeLockedRelay, LOCKED_TEST_CODE, LOCKED_TEST_HANDLE, LOCKED_TEST_TOKEN } from '../../test-support/fake-locked-relay.js';
-
-const SESSION_TTL_MS = 60_000;
-const ROOM_HANDLE = 'Abcdefghijklmnopqrstuvwxyz012345';
-const VALID_ITEM = { id: 'valid', type: 'sticky', x: 20, y: 30, text: 'Keep me', authorName: 'Alice' };
-class OfflineSocket {
-  close() { /* Transport fixture never opens a socket. */ }
-  send() { /* Offline transport deliberately cannot deliver updates. */ }
-}
-
-const LOCK_PASSWORD = 'correct horse battery staple';
-const LOCKED_EPOCH = 1;
-const ROOM_KEY_CHANGED_EVENT = 'retroroom:room-key-changed';
-
-async function unlockLockedRoom(server) {
-  const { lock, authKey } = await createRoomLock(LOCK_PASSWORD);
-  globalThis.fetch = fakeLockedRelay({ lock, authKey, keyEpoch: LOCKED_EPOCH }).fetch;
-  const lockSession = await server.ssrLoadModule('/src/client/room-lock/lock-session.js');
-  await lockSession.unlockRoom({
-    code: LOCKED_TEST_CODE, token: LOCKED_TEST_TOKEN, password: LOCK_PASSWORD, lockHint: { salt: lock.salt, kdf: lock.kdf },
-  });
-  return lockSession;
-}
-
-async function withStorage(check, { publicWall = false, locked = false } = {}) {
-  const saved = Object.getOwnPropertyDescriptors(globalThis);
-  const cache = new Map();
-  const browser = new EventTarget();
-  browser.location = new URL(publicWall ? 'http://localhost:5180/public' : 'http://localhost:5180/b/TEST#Abcdefgh12345678');
-  Object.assign(globalThis, { window: browser, WebSocket: OfflineSocket });
-  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
-    getItem: (key) => cache.get(key) ?? null,
-    setItem: (key, value) => cache.set(key, value),
-  } });
-  globalThis.fetch = async () => new Response(JSON.stringify({
-    roomHandle: ROOM_HANDLE, expiresAt: Date.now() + SESSION_TTL_MS,
-  }), { headers: { 'content-type': 'application/json' } });
-  const server = await createServer({ configFile: false,
-    server: { middlewareMode: true, watch: null, ws: false },
-    optimizeDeps: { noDiscovery: true, include: [] }, appType: 'custom' });
-  let refreshTimer;
-  const originalTimeout = globalThis.setTimeout;
-  try {
-    const session = await server.ssrLoadModule('/src/client/session/room-session.js');
-    globalThis.setTimeout = (...args) => { refreshTimer = originalTimeout(...args); return refreshTimer; };
-    if (publicWall) await session.establishPublicSession();
-    else if (locked) await unlockLockedRoom(server);
-    else await session.establishRoomSession('TEST', 'Abcdefgh12345678');
-    globalThis.setTimeout = originalTimeout;
-    await server.ssrLoadModule('/src/client/session/storage-bridge.js');
-    await check(browser, cache, server);
-  } finally {
-    globalThis.setTimeout = originalTimeout;
-    clearTimeout(refreshTimer);
-    browser.__rbProvider?.destroy();
-    browser.__rbYDoc?.destroy();
-    await server.close();
-    for (const key of ['window', 'WebSocket', 'localStorage', 'fetch']) {
-      if (saved[key]) Object.defineProperty(globalThis, key, saved[key]);
-      else delete globalThis[key];
-    }
-  }
-}
-
-function putItem(browser, item) {
-  const map = new Y.Map(Object.entries(item).filter(([key]) => key !== 'id'));
-  browser.__rbYItems.set(item.id, map);
-}
+import { LOCKED_TEST_HANDLE } from '../../test-support/fake-locked-relay.js';
+import { MOOD_SCALE, moodKey } from '../../domain/mood-check.js';
+import { TEMPLATE_PREFIX } from '../../domain/template-store.js';
+import {
+  LOCKED_EPOCH, ROOM_HANDLE, ROOM_KEY_CHANGED_EVENT, VALID_ITEM, putItem, withStorage,
+} from '../../test-support/bridge-harness.js';
 
 test('remote board changes identify only canonical root item deletions and local writes do not echo', async () => {
   await withStorage(async (browser) => {
@@ -773,4 +709,208 @@ test('the image rewrite is for locked rooms and only accepts canonical encrypted
     assert.throws(() => browser.storage.rewriteImageSources(new Map([[before, `/rooms/${'z'.repeat(32)}/e2e-blobs/4f2b8c1e-4d5a-4e6f-8a9b-0c1d2e3f4a5b`]])), RangeError);
     assert.equal(browser.storage.rewriteImageSources(new Map([[before, own('4f2b8c1e-4d5a-4e6f-8a9b-0c1d2e3f4a5b')]])), 1);
   }, { locked: true });
+});
+
+const BOARD_STATE_KEY = 'boardState';
+const VOTER_ID = 'voter1';
+
+function collectBoardStateEvents(storage) {
+  const events = [];
+  storage.on(({ detail }) => { if (detail.key === BOARD_STATE_KEY) events.push(detail); });
+  return events;
+}
+
+test('undo and redo each emit boardState with isUndoRedo true', async () => {
+  await withStorage(async (browser) => {
+    const { storage } = browser;
+    assert.equal(storage.addItem(VALID_ITEM), true);
+    storage.stopUndoCapture();
+    const events = collectBoardStateEvents(storage);
+
+    assert.equal(storage.undo(), true);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].isUndoRedo, true);
+    assert.equal(events[0].value.items.some((item) => item.id === VALID_ITEM.id), false);
+
+    assert.equal(storage.redo(), true);
+    assert.equal(events.length, 2);
+    assert.equal(events[1].isUndoRedo, true);
+    assert.equal(events[1].value.items.some((item) => item.id === VALID_ITEM.id), true);
+  });
+});
+
+test('a local write does not echo', async () => {
+  await withStorage(async (browser) => {
+    const { storage } = browser;
+    const events = collectBoardStateEvents(storage);
+    assert.equal(storage.addItem(VALID_ITEM), true);
+    assert.equal(storage.updateItem(VALID_ITEM.id, { x: 99 }), true);
+    assert.equal(events.length, 0);
+  });
+});
+
+test('a remote update and a system write are not undo or redo', async () => {
+  await withStorage(async (browser) => {
+    const { storage } = browser;
+    const peer = new Y.Doc();
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(browser.__rbYDoc));
+    const events = collectBoardStateEvents(storage);
+
+    peer.getMap('items').set('remote', new Y.Map(Object.entries({ ...VALID_ITEM, id: undefined })));
+    Y.applyUpdate(browser.__rbYDoc, Y.encodeStateAsUpdate(peer), peer);
+    assert.equal(events.length, 1);
+    assert.equal(Boolean(events[0].isUndoRedo), false);
+
+    browser.__rbYDoc.transact(() => browser.__rbYMeta.set('title', 'x'), 'system');
+    assert.equal(events.length, 2);
+    assert.equal(Boolean(events[1].isUndoRedo), false);
+  });
+});
+
+test('undo of a vote does not set the boardState flag', async () => {
+  await withStorage(async (browser) => {
+    const { storage } = browser;
+    assert.equal(storage.addItem(VALID_ITEM), true);
+    storage.stopUndoCapture();
+    storage.setVote(VALID_ITEM.id, VOTER_ID, true);
+    const events = collectBoardStateEvents(storage);
+    const voteKey = `s||vote:${VALID_ITEM.id}:${VOTER_ID}`;
+    assert.equal(browser.__rbYDoc.getMap('kv').has(voteKey), true);
+
+    assert.equal(storage.undo(), true);
+    assert.equal(browser.__rbYDoc.getMap('kv').has(voteKey), false);
+    assert.equal(events.some((event) => event.isUndoRedo), false);
+  });
+});
+
+// Spec (current-state map, "Change fan-out"): the five kv observers keep this registration order.
+const KV_OBSERVER_ORDER = Object.freeze(['change', 'votes', 'comments', 'templates', 'moods']);
+const KV_EMITTERS = Object.freeze({
+  change: ['on', 'off'],
+  votes: ['onVotesChange', 'offVotesChange'],
+  comments: ['onCommentsChange', 'offCommentsChange'],
+  templates: ['onTemplatesChange', 'offTemplatesChange'],
+  moods: ['onMoodsChange', 'offMoodsChange'],
+});
+// The bridge's own registrations on the board maps; the Public Wall adds its creation guard on yItems first.
+const BOARD_CHANGE_OBSERVERS = Object.freeze(['items.observeDeep', 'meta.observe']);
+const PUBLIC_CHANGE_OBSERVERS = Object.freeze(['items.observe', ...BOARD_CHANGE_OBSERVERS]);
+const OBSERVER_METHODS = Object.freeze(['observe', 'observeDeep']);
+// `new Error().stack` lines: 0 is the message, 1 the spy, 2 the code that registered the observer.
+const REGISTRAR_FRAME_INDEX = 2;
+const BRIDGE_FRAME = '/src/client/session/storage-bridge.js:';
+const PEER_ORIGIN = 'peer';
+const PROBE_PREFERENCE_KEY = 'observerProbe';
+const PROBE_COMMENT_ID = 'probe-comment';
+const PROBE_TEMPLATE_ID = 'probe-template';
+const PROBE_ROUND_ID = 'probe-round';
+const PROBE_CREATED_AT_MS = 1;
+const PROBE_TEMPLATE_ZONE = { title: 'Went well', color: 0, x: 0, y: 0, w: 400, h: 300 };
+
+/** One valid kv entry per observer kind; the `u|` key is this client's own, the only kind the change dispatch forwards. */
+const kvProbeEntries = (clientId) => [
+  [`u|${clientId}|${PROBE_PREFERENCE_KEY}`, PROBE_PREFERENCE_KEY],
+  [`s||vote:${VALID_ITEM.id}:${VOTER_ID}`, true],
+  [`s||comment:${VALID_ITEM.id}:${PROBE_COMMENT_ID}`,
+    { authorId: VOTER_ID, authorName: VALID_ITEM.authorName, text: VALID_ITEM.text, createdAt: PROBE_CREATED_AT_MS }],
+  [`${TEMPLATE_PREFIX}${PROBE_TEMPLATE_ID}`,
+    { id: PROBE_TEMPLATE_ID, name: PROBE_TEMPLATE_ID, zones: [PROBE_TEMPLATE_ZONE], createdAt: PROBE_CREATED_AT_MS }],
+  [moodKey(PROBE_ROUND_ID, VOTER_ID), MOOD_SCALE[0].score],
+];
+
+const remoteKeyEvent = (key) => ({ keysChanged: new Set([key]), transaction: { origin: PEER_ORIGIN, local: false } });
+const collapseRepeats = (list) => list.filter((entry, index) => entry !== list[index - 1]);
+
+/** Calls `record(kind)` whenever the storage emitter one kv observer feeds fires; returns the unsubscribe. */
+function listenToKvEmitters(storage, record) {
+  const stops = Object.entries(KV_EMITTERS).map(([kind, [subscribe, unsubscribe]]) => {
+    const listener = () => record(kind);
+    storage[subscribe](listener);
+    return () => storage[unsubscribe](listener);
+  });
+  return () => stops.forEach((stop) => stop());
+}
+
+/** The emitters one kv observer fires when handed a remote event for each probe key in turn. */
+function emittersFiredBy(storage, handler, keys) {
+  const fired = new Set();
+  const stop = listenToKvEmitters(storage, (kind) => fired.add(kind));
+  try {
+    keys.forEach((key) => handler(remoteKeyEvent(key)));
+  } finally {
+    stop();
+  }
+  return [...fired];
+}
+
+/**
+ * Loads the bridge while every Y.Map observer registration is recorded with the code that made it, then runs
+ * `check(browser, registrations)`. Both methods are inherited from AbstractType, so restoring deletes the spy.
+ */
+async function withObserverSpy(check, options) {
+  const registrations = [];
+  const inherited = OBSERVER_METHODS.map((method) => (
+    [method, Object.getOwnPropertyDescriptor(Y.Map.prototype, method), Y.Map.prototype[method]]
+  ));
+  for (const [method, , original] of inherited) {
+    Y.Map.prototype[method] = function recordRegistration(handler) {
+      const registrar = new Error().stack.split('\n')[REGISTRAR_FRAME_INDEX] ?? '';
+      registrations.push({ method, target: this, handler, registrar });
+      return original.call(this, handler);
+    };
+  }
+  try {
+    await withStorage((browser) => check(browser, registrations), options);
+  } finally {
+    for (const [method, descriptor] of inherited) {
+      if (descriptor) Object.defineProperty(Y.Map.prototype, method, descriptor);
+      else delete Y.Map.prototype[method];
+    }
+  }
+}
+
+test('the kv map has exactly five observers, registered in the order change dispatch, votes, comments, templates, moods', async () => {
+  await withObserverSpy(async (browser, registrations) => {
+    const kv = browser.__rbYDoc.getMap('kv');
+    const handlers = registrations
+      .filter(({ method, target }) => method === 'observe' && target === kv)
+      .map(({ handler }) => handler);
+    assert.equal(handlers.length, KV_OBSERVER_ORDER.length);
+    const entries = kvProbeEntries(browser.__rbClientId);
+    entries.forEach(([key, value]) => kv.set(key, value));
+    const keys = entries.map(([key]) => key);
+    assert.deepEqual(
+      handlers.map((handler) => emittersFiredBy(browser.storage, handler, keys)),
+      KV_OBSERVER_ORDER.map((kind) => [kind]),
+    );
+  });
+});
+
+test('one remote transaction touching all five key kinds notifies in that order', async () => {
+  await withStorage(async (browser) => {
+    const peer = new Y.Doc();
+    const arrivals = [];
+    const stop = listenToKvEmitters(browser.storage, (kind) => arrivals.push(kind));
+    try {
+      kvProbeEntries(browser.__rbClientId).forEach(([key, value]) => peer.getMap('kv').set(key, value));
+      Y.applyUpdate(browser.__rbYDoc, Y.encodeStateAsUpdate(peer), PEER_ORIGIN);
+    } finally {
+      stop();
+      peer.destroy();
+    }
+    assert.deepEqual(collapseRepeats(arrivals), KV_OBSERVER_ORDER);
+  });
+});
+
+test('the board-change observers are yItems.observeDeep then yMeta.observe', async () => {
+  for (const [publicWall, expected] of [[false, BOARD_CHANGE_OBSERVERS], [true, PUBLIC_CHANGE_OBSERVERS]]) {
+    await withObserverSpy(async (browser, registrations) => {
+      const mapNames = new Map([[browser.__rbYItems, 'items'], [browser.__rbYMeta, 'meta']]);
+      // drawing-previews.js and e2e-vote-expiry.js also observe yItems; only the bridge's own calls count here.
+      const bridgeRegistrations = registrations
+        .filter(({ target, registrar }) => mapNames.has(target) && registrar.includes(BRIDGE_FRAME))
+        .map(({ method, target }) => `${mapNames.get(target)}.${method}`);
+      assert.deepEqual(bridgeRegistrations, expected, `publicWall=${publicWall}`);
+    }, { publicWall });
+  }
 });

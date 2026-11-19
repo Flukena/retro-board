@@ -9,7 +9,7 @@ import { forgetWhenDeleted, pageRoomDeleted } from './room-deleted.js';
 const TITLE_KEYS = Object.freeze({ [ROOM_KIND.BOARD]: 'roomDeleted.title.board', [ROOM_KIND.POKER]: 'roomDeleted.title.poker' });
 
 /** Full page shown instead of a room its owner deleted. */
-export function RoomDeletedScreen({ kind }) {
+function RoomDeletedScreen({ kind }) {
   const titleId = useId();
   return (
     <SitePage labelledBy={titleId} homeLink={false}>

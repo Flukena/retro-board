@@ -44,7 +44,7 @@ export function gridStyleForViewport(viewport, textureZoom = viewport.zoom) {
 }
 
 // A texture cached while the dots were hidden has no dots to scale.
-export function liveTextureZoom(previousTextureZoom, zoom) {
+function liveTextureZoom(previousTextureZoom, zoom) {
   if (!previousTextureZoom || previousTextureZoom < GRID_DOTS_MIN_ZOOM) return zoom;
   const scale = zoom / previousTextureZoom;
   return scale >= 1 / GRID_LIVE_SCALE_LIMIT && scale <= GRID_LIVE_SCALE_LIMIT ? previousTextureZoom : zoom;

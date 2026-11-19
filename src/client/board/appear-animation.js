@@ -5,7 +5,7 @@
 // large board mounts many such items at once. Larger items appear without it.
 export const APPEAR_ANIMATION = 'rb-appear 0.28s ease-out';
 // 1,000,000 CSS px² is about 36 MB of layer at DPR 3.
-export const APPEAR_ANIMATION_MAX_AREA_CSS_PX2 = 1_000_000;
+const APPEAR_ANIMATION_MAX_AREA_CSS_PX2 = 1_000_000;
 
 /** The appear animation for an item of this size, or undefined when it is too large to animate. */
 export function appearAnimation({ w, h }) {

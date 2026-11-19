@@ -6,7 +6,7 @@ export const DEFAULT_PLAYER_NAME = 'Guest';
 export { PLAYER_PRESENCE_STALE_MS } from '../../domain/awareness-liveness.js';
 
 export const PLAYER_CURSOR_STALE_MS = 10_000;
-export const PLAYER_CURSOR_MAX_WORLD_COORD = 10_000_000;
+const PLAYER_CURSOR_MAX_WORLD_COORD = 10_000_000;
 
 export const normalizePlayerCursor = (cursor) => {
   if (!cursor || typeof cursor !== 'object') return null;

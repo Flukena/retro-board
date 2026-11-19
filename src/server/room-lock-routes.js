@@ -12,7 +12,7 @@ import { CORRUPT_LOCK } from './room-lock-record.js';
 import { UNFENCED } from './room-fence.js';
 
 export { KEY_ROTATED_CLOSE_CODE, KEY_ROTATED_REASON };
-export const MAX_PASSWORD_BODY_BYTES = 1024;
+const MAX_PASSWORD_BODY_BYTES = 1024;
 const OCTET_STREAM = 'application/octet-stream';
 const LOCK_LIMITED = 'LOCK_LIMITED';
 const STORAGE_FAILURE = 'STORAGE_FAILURE';

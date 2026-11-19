@@ -10,7 +10,7 @@ function collectionCounts(doc) {
 }
 
 // Never hydrate cold rooms or include capabilities, document keys, or user data.
-export function maintainerRooms({ registry, docs, connections, blockedRooms, roomUsage, now = Date.now() }) {
+function maintainerRooms({ registry, docs, connections, blockedRooms, roomUsage, now = Date.now() }) {
   return [...registry.registeredRoomsByHandle].map(([handle, docName]) => {
     // An encrypted room's content is ciphertext the relay cannot read: list it, never inspect it.
     const encrypted = registry.isLocked(docName);

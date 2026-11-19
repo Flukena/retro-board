@@ -101,7 +101,7 @@ export function validateRoomSessionResponse(value, now = Date.now()) {
 const hasBase64UrlBytes = (value, length) => typeof value === 'string' && decodeBase64Url(value)?.length === length;
 
 /** The salt and KDF a locked room's 409 asks the client to derive with. */
-export function validateLockedResponse(value) {
+function validateLockedResponse(value) {
   if (!isPlainObject(value) || value.locked !== true || !hasBase64UrlBytes(value.salt, LOCK_BYTES.salt) || !isLockKdf(value.kdf)) {
     fail(ROOM_SESSION_ERROR.UNAVAILABLE);
   }
@@ -109,7 +109,7 @@ export function validateLockedResponse(value) {
 }
 
 /** The wrapped room key a correct authKey earns, narrowed to the fields the client uses. */
-export function validateLockGrant(value) {
+function validateLockGrant(value) {
   if (!isPlainObject(value)
     || !hasBase64UrlBytes(value.wrappedDek, LOCK_BYTES.wrappedDek)
     || !hasBase64UrlBytes(value.wrapIv, LOCK_BYTES.wrapIv)

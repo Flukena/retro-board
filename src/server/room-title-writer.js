@@ -8,7 +8,7 @@ export const TITLE_WRITE_STATUS = Object.freeze({ OK: 200, NOT_FOUND: 404, UNAVA
 /** Storage reads of non-resident rooms in flight at once, across every list request. */
 export const MAX_CONCURRENT_TITLE_READS = 4;
 /** A renamed idle room waits for other fence holders without limit; this only re-arms the fence wait. */
-export const TITLE_UNLOAD_RECHECK_MS = 60_000;
+const TITLE_UNLOAD_RECHECK_MS = 60_000;
 const META_MAP = 'meta';
 const TITLE_KEY = 'title';
 

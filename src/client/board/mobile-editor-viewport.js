@@ -31,7 +31,7 @@ export function mobileEditorHeightLimitPx(viewport, insets, zoom) {
   return Math.max(MIN_EDITOR_HEIGHT_SCREEN_PX, availableHeightPx) / zoom;
 }
 
-export function mobileEditorWidthLimitPx(viewport, insets, zoom) {
+function mobileEditorWidthLimitPx(viewport, insets, zoom) {
   const availableWidthPx = viewport.width - insets.left - (insets.right ?? 0)
     - MOBILE_EDITOR_CLEARANCE_PX - MOBILE_EDITOR_CLEARANCE_PX;
   return Math.max(MIN_EDITOR_WIDTH_SCREEN_PX, availableWidthPx) / zoom;

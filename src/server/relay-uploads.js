@@ -27,7 +27,7 @@ const IMAGE_ID_RE = /^[a-f0-9-]+\.(png|jpe?g|webp|gif)$/;
 const LEGACY_IMAGE_FILENAME_RE = IMAGE_ID_RE;
 const ROOM_IMAGE_FILENAME_RE = /^[A-Za-z0-9_-]{32}\.[a-f0-9-]+\.(png|jpe?g|webp|gif)$/;
 // Encrypted room blobs: `<handle>.<lowercase uuid>.e2e`, opaque ciphertext with no magic bytes.
-export const E2E_BLOB_EXTENSION = 'e2e';
+const E2E_BLOB_EXTENSION = 'e2e';
 const E2E_BLOB_FILENAME_RE = /^([A-Za-z0-9_-]{32})\.([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.e2e$/;
 export const e2eBlobFilename = (roomHandle, blobId) => `${roomHandle}.${blobId}.${E2E_BLOB_EXTENSION}`;
 /** `{ handle, id }` for an encrypted blob file name, or null for any other file. */
@@ -47,7 +47,7 @@ const GIF_SIGNATURE_BYTES = 6;
 const WEBP_SIGNATURE_BYTES = 12;
 const RIFF_SIGNATURE_BYTES = 4;
 const WEBP_FORMAT_OFFSET_BYTES = 8;
-export const IMAGE_SNIFF_BYTES = WEBP_SIGNATURE_BYTES;
+const IMAGE_SNIFF_BYTES = WEBP_SIGNATURE_BYTES;
 const ROOM_HANDLE_CHARACTERS = 32;
 // The owning room's handle of a room image or encrypted blob file, or null for any other file.
 export const roomHandleOfImageFile = (name) => (

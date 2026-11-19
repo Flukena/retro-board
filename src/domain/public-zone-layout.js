@@ -3,7 +3,7 @@ import { geometryErrorForBoard, sizeForPlacement } from './board-geometry.js';
 import { ZONE_MIN_WIDTH_PX, ZONE_MIN_HEIGHT_PX, ZONE_MAX_SIDE_PX } from './item-size-limits.js';
 
 export { ZONE_MIN_WIDTH_PX, ZONE_MIN_HEIGHT_PX };
-export const PUBLIC_ZONE_LAYOUT_SCALE_FACTOR = 2;
+const PUBLIC_ZONE_LAYOUT_SCALE_FACTOR = 2;
 const CENTER_DIVISOR = 2;
 
 export function publicZoneCreationSize(mode, widthPx, heightPx) {
@@ -13,7 +13,7 @@ export function publicZoneCreationSize(mode, widthPx, heightPx) {
     h: Math.min(ZONE_MAX_SIDE_PX, Math.max(minimum.h, heightPx)) };
 }
 
-export function enlargedZoneGeometry(zone, origin = { x: 0, y: 0 }) {
+function enlargedZoneGeometry(zone, origin = { x: 0, y: 0 }) {
   return {
     x: origin.x + (zone.x - origin.x) * PUBLIC_ZONE_LAYOUT_SCALE_FACTOR,
     y: origin.y + (zone.y - origin.y) * PUBLIC_ZONE_LAYOUT_SCALE_FACTOR,
