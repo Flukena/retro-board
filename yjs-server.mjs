@@ -1,3 +1,4 @@
+import { createAdmissionLimits } from './src/server/relay-admission-limits.js';
 import { readAllowedOrigins } from './src/server/relay-origins.js';
 import { clientIpFromRequest as requestClientIp } from './src/server/relay-client-ip.js';
 import { coalesceAwarenessSends } from './src/server/relay-awareness-fanout.js';
@@ -6,8 +7,7 @@ import { RelayProtocol } from './src/server/relay-protocol.js';
 // Yjs WebSocket relay with LevelDB persistence.
 // Single source of truth for collaborative state.
 
-import { envInt, envBool, readGuestSweepTiming, readRelayConfig, MILLISECONDS_PER_MINUTE, MILLISECONDS_PER_HOUR, ROOM_BLOCK_TTL_MS, BLOCKED_ROOM_ENTRIES_PER_ACTIVE_ROOM, LARGE_UPDATE_LOG_THRESHOLD_BYTES, VOTE_EXPIRY_RETRY_INTERVAL_MS, MAINTENANCE_INTERVAL_MS, STORE_OPERATION_OVERHEAD_BYTES, MAX_HTTP_TARGET_CHARACTERS, MAX_REQUESTS_PER_SOCKET, RETRY_AFTER_SHORT_SECONDS, RETRY_AFTER_LONG_SECONDS } from './src/server/relay-config.js';
-import { evictOldestBucket, refillTokens, tokenWaitSeconds } from './src/server/relay-rate-bucket.js';
+import { envInt, envBool, readGuestSweepTiming, readRelayConfig, ROOM_BLOCK_TTL_MS, BLOCKED_ROOM_ENTRIES_PER_ACTIVE_ROOM, LARGE_UPDATE_LOG_THRESHOLD_BYTES, VOTE_EXPIRY_RETRY_INTERVAL_MS, MAINTENANCE_INTERVAL_MS, STORE_OPERATION_OVERHEAD_BYTES, MAX_HTTP_TARGET_CHARACTERS, MAX_REQUESTS_PER_SOCKET, RETRY_AFTER_SHORT_SECONDS, RETRY_AFTER_LONG_SECONDS } from './src/server/relay-config.js';
 import { roomTargetFromRequest, tokenDocNameFromRequest } from './src/server/relay-room-target.js';
 import { RelayWsTraffic, closeOnSessionExpiry } from './src/server/relay-ws-traffic.js';
 import { createE2ERelay } from './src/server/e2e-relay.js';
@@ -149,28 +149,6 @@ const {
   MAX_API_BODY_BYTES,
   MAX_COOKIE_HEADER_BYTES,
   MAX_HEADER_BYTES,
-  ROOM_CREATE_BURST,
-  ROOM_CREATES_PER_HOUR,
-  GLOBAL_ROOM_CREATE_BURST,
-  GLOBAL_ROOM_CREATES_PER_MINUTE,
-  SESSION_EXCHANGE_BURST,
-  SESSION_EXCHANGES_PER_MINUTE,
-  GLOBAL_SESSION_EXCHANGE_BURST,
-  GLOBAL_SESSION_EXCHANGES_PER_MINUTE,
-  SESSION_FAILURE_BURST,
-  SESSION_FAILURES_PER_HOUR,
-  WS_UPGRADE_IP_BURST,
-  WS_UPGRADES_PER_IP_PER_MINUTE,
-  WS_UPGRADE_ROOM_BURST,
-  WS_UPGRADES_PER_ROOM_PER_MINUTE,
-  GLOBAL_WS_UPGRADE_BURST,
-  GLOBAL_WS_UPGRADES_PER_MINUTE,
-  COLD_ROOM_OPEN_IP_BURST,
-  COLD_ROOM_OPENS_PER_IP_PER_MINUTE,
-  COLD_ROOM_OPEN_ROOM_BURST,
-  COLD_ROOM_OPENS_PER_ROOM_PER_MINUTE,
-  GLOBAL_COLD_ROOM_OPEN_BURST,
-  GLOBAL_COLD_ROOM_OPENS_PER_MINUTE,
   MAX_HTTP_REQUESTS,
   MAX_HTTP_REQUESTS_PER_IP,
   REQUEST_TIMEOUT_MS,
@@ -181,7 +159,6 @@ const {
   HTTP_SHUTDOWN_GRACE_MS,
   UPLOADS_DIR,
   MAX_UPLOAD_STORAGE_BYTES,
-  MAX_BUCKETS,
 } = relayConfig;
 fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 const uploadState = createUploadState(relayConfig);
@@ -750,107 +727,9 @@ const rateBuckets = {
   coldRoomOpenRoom: new Map(),
   coldRoomOpenGlobal: new Map(),
 };
-const getRateBucket = (map, key, burst, perHour) => {
-  const now = Date.now();
-  let bucket = map.get(key);
-  if (!bucket) {
-    evictOldestBucket(map, MAX_BUCKETS);
-    bucket = { tokens: burst, last: now, lastSeen: now };
-    map.set(key, bucket);
-  }
-  bucket.tokens = refillTokens(bucket.tokens, burst, now - bucket.last, perHour, MILLISECONDS_PER_HOUR);
-  bucket.last = now;
-  bucket.lastSeen = now;
-  return bucket;
-};
-const takeCreateToken = (ip) => {
-  const ipBucket = getRateBucket(rateBuckets.roomCreate, ip, ROOM_CREATE_BURST, ROOM_CREATES_PER_HOUR);
-  const globalRefillPerHour = GLOBAL_ROOM_CREATES_PER_MINUTE * MILLISECONDS_PER_HOUR / MILLISECONDS_PER_MINUTE;
-  const globalBucket = getRateBucket(
-    rateBuckets.roomCreateGlobal,
-    'global',
-    GLOBAL_ROOM_CREATE_BURST,
-    globalRefillPerHour,
-  );
-  const wait = Math.max(tokenWaitSeconds(ipBucket.tokens, ROOM_CREATES_PER_HOUR), tokenWaitSeconds(globalBucket.tokens, globalRefillPerHour));
-  if (wait) return wait;
-  ipBucket.tokens -= 1;
-  globalBucket.tokens -= 1;
-  return 0;
-};
-const takeSessionExchangeToken = (ip) => {
-  const ipBucket = getRateBucket(
-    rateBuckets.sessionExchange,
-    ip,
-    SESSION_EXCHANGE_BURST,
-    SESSION_EXCHANGES_PER_MINUTE * 60,
-  );
-  const globalBucket = getRateBucket(
-    rateBuckets.sessionExchangeGlobal,
-    'global',
-    GLOBAL_SESSION_EXCHANGE_BURST,
-    GLOBAL_SESSION_EXCHANGES_PER_MINUTE * 60,
-  );
-  if (ipBucket.tokens < 1 || globalBucket.tokens < 1) return false;
-  ipBucket.tokens -= 1;
-  globalBucket.tokens -= 1;
-  return true;
-};
-const failureAttemptAvailable = (ip) => (
-  getRateBucket(rateBuckets.sessionFailure, ip, SESSION_FAILURE_BURST, SESSION_FAILURES_PER_HOUR).tokens >= 1
-);
-const recordSessionFailure = (ip) => {
-  const bucket = getRateBucket(rateBuckets.sessionFailure, ip, SESSION_FAILURE_BURST, SESSION_FAILURES_PER_HOUR);
-  bucket.tokens = Math.max(0, bucket.tokens - 1);
-};
-
-const takeWsUpgradeToken = (ip, docName, coldRoom) => {
-  const reservations = [
-    getRateBucket(
-      rateBuckets.wsUpgradeIp,
-      ip,
-      WS_UPGRADE_IP_BURST,
-      WS_UPGRADES_PER_IP_PER_MINUTE * 60,
-    ),
-    getRateBucket(
-      rateBuckets.wsUpgradeRoom,
-      docName,
-      WS_UPGRADE_ROOM_BURST,
-      WS_UPGRADES_PER_ROOM_PER_MINUTE * 60,
-    ),
-    getRateBucket(
-      rateBuckets.wsUpgradeGlobal,
-      'global',
-      GLOBAL_WS_UPGRADE_BURST,
-      GLOBAL_WS_UPGRADES_PER_MINUTE * 60,
-    ),
-  ];
-  if (coldRoom) {
-    reservations.push(
-      getRateBucket(
-        rateBuckets.coldRoomOpenIp,
-        ip,
-        COLD_ROOM_OPEN_IP_BURST,
-        COLD_ROOM_OPENS_PER_IP_PER_MINUTE * 60,
-      ),
-      getRateBucket(
-        rateBuckets.coldRoomOpenRoom,
-        docName,
-        COLD_ROOM_OPEN_ROOM_BURST,
-        COLD_ROOM_OPENS_PER_ROOM_PER_MINUTE * 60,
-      ),
-      getRateBucket(
-        rateBuckets.coldRoomOpenGlobal,
-        'global',
-        GLOBAL_COLD_ROOM_OPEN_BURST,
-        GLOBAL_COLD_ROOM_OPENS_PER_MINUTE * 60,
-      ),
-    );
-  }
-  if (reservations.some((bucket) => bucket.tokens < 1)) return false;
-  for (const bucket of reservations) bucket.tokens -= 1;
-  return true;
-};
+const {
+  takeCreateToken, takeSessionExchangeToken, failureAttemptAvailable, recordSessionFailure, takeWsUpgradeToken,
+} = createAdmissionLimits(relayConfig, rateBuckets);
 
 
 const wsTraffic = new RelayWsTraffic(relayConfig);
