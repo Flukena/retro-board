@@ -41,6 +41,8 @@ const SERVER_IMAGE_PATH_RE = new RegExp(
 const E2E_IMAGE_PATH_RE = /^\/(?:yjs\/)?rooms\/([A-Za-z0-9_-]{32})\/e2e-blobs\/([0-9a-f-]{36})$/;
 const DATA_IMAGE_PREFIX_RE = /^data:(image\/(?:png|jpeg|webp|gif));base64,/i;
 const IMAGE_URL_MAX_LENGTH = 2048;
+// Former origins of this same app (2026-10-25 domain move, commit 14bbae7); stored image URLs still name them.
+export const RETIRED_APP_ORIGINS = Object.freeze(['https://retro.sagonzis.space']);
 const IMAGE_DATA_URL_MAX_LENGTH = Math.ceil(IMAGE_MAX_BYTES / 3) * 4 + 64;
 
 export const isSafeImageMime = (value) => SAFE_IMAGE_MIMES.has(value);
@@ -101,6 +103,10 @@ export const isSafeImportedImageSource = (value) => !!classifyImportedImageSourc
 // contacting an arbitrary origin would turn imported boards into tracking pixels.
 function resolveRuntimeImageUrl(source, page, relay) {
   try {
+    const stored = URL.canParse(source) ? new URL(source) : null;
+    if (stored && RETIRED_APP_ORIGINS.includes(stored.origin)) {
+      return new URL(`${stored.pathname}${stored.search}${stored.hash}`, page.origin);
+    }
     if (source.startsWith('/images/') || source.startsWith('/rooms/')) {
       const base = relay.href.endsWith('/') ? relay.href : `${relay.href}/`;
       return new URL(source.slice(1), base);
