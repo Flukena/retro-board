@@ -1,0 +1,62 @@
+diff --git a/AGENTS.md b/AGENTS.md
+index 68f5b77..d99fc4a 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -25,7 +25,7 @@ Release gate (full list, run from a clean checkout): `DEPLOYMENT.md` §Release g
+ Read `ARCHITECTURE.md`. Put browser features in `src/client/`, portable rules in
+ `src/domain/`, and relay behavior in `src/server/`; dependencies point toward domain.
+ 
+-- `RetroBoard.jsx` (4177 lines) and `yjs-server.mjs` (1836 lines) are frozen in size: do not add logic to them. They only wire. Put new behaviour in a focused module under `src/` (pure `.js` for logic, `.jsx` for components) with a paired colocated `<module>.test.js`; relay changes get a module plus `*.test.mjs`. Moving existing logic out of the two big files is welcome; growing them is not. `src/rule-ratchets.test.js` enforces the ceilings and colour-literal rule; ceilings may only be lowered.
++- `RetroBoard.jsx` and `yjs-server.mjs` are frozen in size, and `src/client/session/storage-bridge.js` and `src/client/ui/i18n.js` carry their own ceilings: do not add logic to them. They only wire (`storage-bridge.js` adapts storage, `i18n.js` holds translations). The current ceilings live in `src/rule-ratchets.test.js`; read them there. Put new behaviour in a focused module under `src/` (pure `.js` for logic, `.jsx` for components) with a paired colocated `<module>.test.js`; relay changes get a module plus `*.test.mjs`. Moving existing logic out of the two big files is welcome; growing them is not. `src/rule-ratchets.test.js` enforces the ceilings and colour-literal rule; ceilings may only be lowered.
+ - Pure logic stays out of components: geometry, voting, ownership, import/export, schema decoding are plain functions the component calls (see `board-geometry.js`, `vote-finalization.js`, `board-ownership.js`).
+ - UI follows the Warm Studio direction, token-first: colours, radii, fonts and shadows come from `src/client/ui/theme.js` CSS-variable tokens (extend them there) and shared UI primitives extracted into `src/` as they are needed, never new inline literals. No tape on stickies; keep functional signals (selection `#2563eb`, gold top-3 glow, zone colours). Reference tokens: `warmLook()` in https://claude.ai/artifact/Y62Xiyyi6a6zN2sYtY8aMF
+ - Every user-visible string goes through `t()` with keys added to **both** `th` and `en` in `src/client/ui/i18n.js`.
+diff --git a/ARCHITECTURE.md b/ARCHITECTURE.md
+index 392b933..7d5b6f7 100644
+--- a/ARCHITECTURE.md
++++ b/ARCHITECTURE.md
+@@ -8,22 +8,34 @@ RetroBoard.jsx                 React application coordinator
+ yjs-server.mjs                Relay startup and connection coordinator
+ src/
+   client/
++    account/                  Google sign-in session, account API and My boards list
+     app/                      Bootstrap, routing, landing, error recovery
+     board/                    Canvas, cards, gestures, selection, minimap
+     chrome/                   Navigation and tool docks
++    guide/                    Agile guide page and its content
+     legal/                    Privacy policy and terms pages
++    maintainer/               Maintainer console: monitoring, rooms, accounts
++    poker/                    Planning Poker rooms: session, table, cards, export
+     public-wall/              Public entry, snapshots and previews
++    reactions/                Board reactions over awareness: channel, overlay, fireworks
++    room-lock/                Locked rooms: password flow, E2E crypto, key rotation
++    seo/                      Indexable page list, head/prerender documents, structured data
+     session/                  Yjs adapter, local identity, presence, undo
+     templates/                Template picker and workflow
+     transfer/                 Import/export, downloads and image transport
+     ui/                       Shared UI, theme tokens and translations
+     voting/                   Timer, voting setup and result presentation
++    workspace/                Signed-in workspace: board cards, create menu, model
++    writing-timer/            Shared writing timer: store, UI and chime
+   domain/                     Portable board rules and validated contracts
+   server/                     HTTP, sessions, protocol, storage and maintenance
+   test-support/               Development-only render/style test helpers
+ scripts/
+   project-files.mjs           Shared recursive source/test discovery
+   test.mjs                    Node test runner; forwards CLI flags
++  live-check-all.mjs          Runs the browser live checks listed in the manifest
++  live-check-common.mjs       Shared helpers for the live checks
++  live-check-manifest.json    Live check ids, setup needs and baselines
+ ```
+ 
+ ## Dependency direction
+@@ -36,7 +48,8 @@ runtime imports test support.
+ 
+ `src/architecture.test.js` enforces these directions, portable domain code
+ and an acyclic import graph. `src/rule-ratchets.test.js` recursively checks all
+-JSX colors and limits the two root coordinators to 4,177 and 1,881 lines.
++JSX colors and holds the line ceilings of the two root coordinators and the large
++`storage-bridge.js` and `i18n.js`; the ceilings are defined only in that file.
+ 
+ ## Client flow
+ 
