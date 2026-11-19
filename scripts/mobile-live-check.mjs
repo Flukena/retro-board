@@ -59,12 +59,12 @@ const DRAWING_RED = '#dc2626';
 const DRAWING_MIN_INK_PIXELS = 20;
 const DRAWING_STROKE_WIDTH_PX = 8;
 const DRAWING_SHAPE_WIDTH_PX = 4;
-// Longer than tap-to-edit's 500 ms tap window (tap-to-edit.js) plus a React commit, so a late editor would be seen.
 const SAVED_INK_MARGIN_PX = 30;
 const SAVED_INK_RAIL_RIGHT_PX = 110;
 const SAVED_INK_BOTTOM_CLEAR_PX = 120;
 // The relay opens its own creation window a little after the client stamped the creation (same margin as pan).
 const CREATION_WINDOW_MARGIN_MS = 5_000;
+// Longer than tap-to-edit's 500 ms tap window (tap-to-edit.js) plus a React commit, so a late editor would be seen.
 const EDITOR_ABSENCE_WINDOW_MS = 1_000;
 const PINCH_RESTORE_ZOOM_TOLERANCE = 0.02;
 const DRAWING_MOBILE_OPTION_MIN_PX = 34; // --draw-mobile-option-size (theme.js:98), T2b-TOUCH
@@ -447,8 +447,7 @@ async function checkDrag(mobile, desktop, text) {
 async function checkResize(mobile, desktop, text) {
   const before = await geometry(mobile, text);
   const handle = mobile.page.locator('[data-mobile-resize="true"]').last();
-  // a7505a9: the edit no longer reserves room for Done, so the card can end the touch drag at the screen edge with its
-  // resize handle half off-screen; frame the handle with the existing helper before dragging it.
+  // Handle framed before the drag: the card can end the touch drag at the screen edge.
   await showLocator(mobile, handle);
   const box = await handle.boundingBox();
   assert.ok(box.width >= TOUCH_TARGET_MIN_PX && box.height >= TOUCH_TARGET_MIN_PX, 'Resize targets must be touch sized');
@@ -1483,8 +1482,10 @@ async function checkDrawingCancellation(user, peer, initialIds, mode) {
   const waiting = new Promise(resolveStarted => { started = resolveStarted; });
   await user.page.route('**/upload', route => { started(route); });
   await exitDrawing(user);
-  const route = await Promise.race([waiting, new Promise((_, reject) => setTimeout(
-    () => reject(new Error('The save upload never started (Public image window?)')), ACTION_TIMEOUT_MS))]);
+  let timer;
+  const route = await Promise.race([waiting, new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error('The save upload never started (Public image window?)')), ACTION_TIMEOUT_MS);
+  })]).finally(() => clearTimeout(timer));
   await activate(user, drawingToolbar(user).getByRole('button', { name: drawingWord(user, 'draw.close'), exact: true }));
   await route.abort(); await user.page.unroute('**/upload');
   await drawingToolbar(user).waitFor({ state: 'hidden' });
