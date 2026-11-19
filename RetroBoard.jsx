@@ -1,3 +1,4 @@
+import { useToast } from './src/client/ui/use-toast.js';
 // RetroBoard.jsx — application coordinator for the collaborative board
 // Yjs-backed realtime board with character-level collaborative text editing.
 
@@ -284,10 +285,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
   const [confirmClear, setConfirmClear] = useState(false);
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
   const [commentsOpenFor, setCommentsOpenFor] = useState(null);
-  const [toast, setToastRaw] = useState(null);
-  const setToast = useCallback((next) => {
-    setToastRaw(next ? { ...next, t: Date.now() } : null);
-  }, []);
+  const [toast, setToast] = useToast();
   const [voteFlashes, setVoteFlashes] = useState({}); // itemId -> timestamp of latest local vote
   const flashVote = useCallback((itemId) => {
     const t = Date.now();
@@ -1096,15 +1094,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     });
     return m;
   }, [votesByItem, anyZoneVotingActive, board.items, now]);
-
-  /* ============================================================
-     Auto-dismiss toast
-     ============================================================ */
-  useEffect(() => {
-    if (!toast || toast.sticky) return undefined;
-    const t = setTimeout(() => setToast(null), 3200);
-    return () => clearTimeout(t);
-  }, [toast]);
 
   /* Subscribe to Yjs undo-stack changes → toggles button enable/disable. */
   useEffect(() => {
