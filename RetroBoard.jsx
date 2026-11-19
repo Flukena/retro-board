@@ -1,3 +1,4 @@
+import { BoardDialogs } from './src/client/ui/BoardDialogs.jsx';
 import { useTopBarProps } from './src/client/chrome/use-topbar-props.js';
 import { ZonePreview, EmptyCanvasHint, MarqueeSelection } from './src/client/board/CanvasOverlays.jsx';
 import { RemoteCollaborationLabels } from './src/client/board/RemoteCollaborationLabels.jsx';
@@ -20,19 +21,12 @@ import { BOARD_MODE } from './src/domain/public-wall-contract.js';
 import React, {
   useState, useEffect, useRef, useCallback, useMemo, startTransition,
 } from 'react';
-import {
-  Unlock,
-  AlertCircle,
-  MousePointer2, RotateCcw,
-  Upload,
-} from 'lucide-react';
+import { MousePointer2 } from 'lucide-react';
 import { readBoardImport, prepareBoardImport, ImportBundleLimitError } from './src/client/transfer/board-transfer.js';
 import { useBoardExports } from './src/client/transfer/use-board-exports.js';
-import { ActionItemsDialog } from './src/client/board/ActionItemsDialog.jsx';
 import { useActionItems } from './src/client/board/use-action-items.js';
 import { useRetroPhase } from './src/client/board/use-retro-phase.js';
 import { useMoodCheck } from './src/client/board/use-mood-check.js';
-import { MoodCheckDialog } from './src/client/board/MoodCheck.jsx';
 import { useFollowMotion } from './src/client/board/use-follow-motion.js';
 import { usePresenterFollow } from './src/client/board/use-presenter-follow.js';
 import { actionTogglePatch } from './src/domain/action-item.js';
@@ -43,16 +37,10 @@ import {
   ZONE_TITLE_MAX_LENGTH,
   isSafeImageMime,
 } from './src/domain/security-boundaries.js';
-import {
-  ConfirmDialog, NameDialog, HelpDialog, CommentsDialog, AdminPinDialog, TemplateNameDialog, TEMPLATE_NAME_MODE,
-} from './src/client/ui/Modals.jsx';
-import { MODAL_SIZE, BUTTON_VARIANT } from './src/client/ui/ui-variants.js';
 import { CLEARED_VOTE_RESULTS, voteSessionScope, resetVoteSessionEntries } from './src/domain/vote-session-lifecycle.js';
-import { confirmThenPin } from './src/client/ui/confirm-then-pin.js';
 import { boardEditingAllowed, boardManagementPermissions, runSharedBoardAction } from './src/domain/public-board-permissions.js';
 import { publicZoneCreationSize } from './src/domain/public-zone-layout.js';
 import { itemSizeBounds, groupScaleRange } from './src/domain/item-size-limits.js';
-import { importWarningNotes } from './src/client/ui/modal-model.js';
 import { isEditableDrawingImage } from './src/domain/drawing-image-target.js';
 import { useDrawingMode } from './src/client/board/useDrawingMode.js';
 import { useDrawingSession } from './src/client/board/useDrawingSession.js';
@@ -163,18 +151,6 @@ const POLL_SAFETY = 15000; // safety net only — Realtime push is primary
 // cost when cards cluster. Cards stay separated by their borders.
 const DENSE_CARD_THRESHOLD = 60;
 const COMMENT_PREVIEW_TEXT_LIMIT = 120;
-const EMPTY_COMMENTS = [];
-
-// Help modal sections, in display order. `color` indexes PALETTE so each
-// section's accent dot matches a real sticky-note color from the palette.
-const HELP_SECTIONS = [
-  { key: 'collab', color: 0 },
-  { key: 'canvas', color: 2 },
-  { key: 'zones', color: 3 },
-  { key: 'reveal', color: 4 },
-  { key: 'voting', color: 1 },
-  { key: 'admin', color: 5 },
-];
 
 /* ============================================================
    Helpers
@@ -3498,93 +3474,52 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
       {/* Marquee selection box */}
       <MarqueeSelection marquee={marquee} />
 
-      {saveTemplateOpen && <TemplateNameDialog mode={TEMPLATE_NAME_MODE.SAVE}
-        onClose={closeSaveDialog} onSubmit={saveCurrentAsTemplate} zoneCount={templateDraft.length} />}
-      {renameTarget && <TemplateNameDialog key={renameTarget.id} mode={TEMPLATE_NAME_MODE.RENAME}
-        initialName={renameTarget.name} onSubmit={renameCustomTemplate} onClose={closeRenameDialog} />}
-      {nameModalOpen && (
-        <NameDialog draft={nameDraft} onDraftChange={setNameDraft} onSave={saveName} onClose={dismissName} hasName={Boolean(userName)} />
-      )}
-      {confirmUnlockAll && (
-        <ConfirmDialog
-          icon={<Unlock size={22} color="var(--accent)" />}
-          title={t('unlockAll.confirm.head')}
-          body={t('unlockAll.confirm.body')}
-          cancelLabel={t('common.cancel')}
-          confirmLabel={t('unlockAll.confirm.ok')}
-          onCancel={() => setConfirmUnlockAll(false)}
-          onConfirm={() => confirmThenPin(setConfirmUnlockAll, requireAdminPin, adminUnlockAll)}
-        />
-      )}
-      {confirmResetVotes && (
-        <ConfirmDialog
-          icon={<RotateCcw size={22} color="var(--accent)" />}
-          title={t('reset.confirm.head')}
-          body={<>{t('reset.confirm.body')}<br />{t('reset.confirm.body2')}</>}
-          cancelLabel={t('common.cancel')}
-          confirmLabel={t('reset.confirm.ok')}
-          onCancel={() => setConfirmResetVotes(false)}
-          onConfirm={() => confirmThenPin(setConfirmResetVotes, requireAdminPin, adminResetVotes)}
-        />
-      )}
-      {pendingImport && (
-        <ConfirmDialog
-          size={MODAL_SIZE.MD}
-          icon={<Upload size={22} color="var(--accent)" />}
-          title={t('import.confirm.head')}
-          body={importBusy ? t('import.processing') : t('import.confirm.body', {
-            n: pendingImport.items.length, file: pendingImport.name,
-          })}
-          notes={importWarningNotes(pendingImport).map(({ key, params }) => t(key, params))}
-          cancelLabel={t('common.cancel')}
-          confirmLabel={importBusy ? t('import.processing') : t('import.confirm.ok')}
-          busy={importBusy}
-          onCancel={() => setPendingImport(null)}
-          onConfirm={confirmImport}
-        />
-      )}
-      {mood.dialogOpen && <MoodCheckDialog onAnswer={mood.answer} onSkip={mood.skip} />}
-      {actionItems.open && (
-        <ActionItemsDialog rows={actionItems.rows} onClose={actionItems.hide}
-          canEdit={(id) => canModifyOwnedItem(board.items.find((it) => it.id === id))}
-          onPatch={updateItem} onLocate={(id) => { actionItems.hide(); setSelectedIds(new Set([id])); fitToItems([id]); }} />
-      )}
-      {commentsOpenReadable && (
-        <CommentsDialog
-          item={commentsOpenItem}
-          comments={commentsByItem.get(commentsOpenItem.id) ?? EMPTY_COMMENTS}
-          editingAllowed={editingAllowed}
-          onAdd={(text) => addCommentTo(commentsOpenItem, text)}
-          onDelete={(commentId) => deleteCommentFrom(commentsOpenItem.id, commentId)}
-          onClose={() => setCommentsOpenFor(null)}
-        />
-      )}
-      {helpOpen && (
-        <HelpDialog
-          sections={HELP_SECTIONS.map((section) => ({ ...section, color: PALETTE[section.color].border }))}
-          onClose={() => setHelpOpen(false)}
-        />
-      )}
-      {pinPromptCfg && (
-        <AdminPinDialog
-          isSetting={pinPromptCfg.isSetting}
-          error={pinPromptCfg.error}
-          onCancel={pinPromptCfg.onCancel}
-          onSubmit={pinPromptCfg.onSuccess}
-        />
-      )}
-      {confirmClear && (
-        <ConfirmDialog
-          icon={<AlertCircle size={22} color="var(--danger)" />}
-          title={t('clear.confirm.head')}
-          body={t('clear.confirm.body')}
-          cancelLabel={t('common.cancel')}
-          confirmLabel={t('clear.confirm.ok')}
-          confirmVariant={BUTTON_VARIANT.DANGER}
-          onCancel={() => setConfirmClear(false)}
-          onConfirm={() => confirmThenPin(setConfirmClear, requireAdminPin, adminClearBoard)}
-        />
-      )}
+      <BoardDialogs
+        saveTemplateOpen={saveTemplateOpen}
+        closeSaveDialog={closeSaveDialog}
+        saveCurrentAsTemplate={saveCurrentAsTemplate}
+        templateDraft={templateDraft}
+        renameTarget={renameTarget}
+        renameCustomTemplate={renameCustomTemplate}
+        closeRenameDialog={closeRenameDialog}
+        nameModalOpen={nameModalOpen}
+        nameDraft={nameDraft}
+        setNameDraft={setNameDraft}
+        saveName={saveName}
+        dismissName={dismissName}
+        userName={userName}
+        confirmUnlockAll={confirmUnlockAll}
+        setConfirmUnlockAll={setConfirmUnlockAll}
+        requireAdminPin={requireAdminPin}
+        adminUnlockAll={adminUnlockAll}
+        confirmResetVotes={confirmResetVotes}
+        setConfirmResetVotes={setConfirmResetVotes}
+        adminResetVotes={adminResetVotes}
+        pendingImport={pendingImport}
+        importBusy={importBusy}
+        setPendingImport={setPendingImport}
+        confirmImport={confirmImport}
+        mood={mood}
+        actionItems={actionItems}
+        canModifyOwnedItem={canModifyOwnedItem}
+        items={board.items}
+        updateItem={updateItem}
+        setSelectedIds={setSelectedIds}
+        fitToItems={fitToItems}
+        commentsOpenReadable={commentsOpenReadable}
+        commentsOpenItem={commentsOpenItem}
+        commentsByItem={commentsByItem}
+        editingAllowed={editingAllowed}
+        addCommentTo={addCommentTo}
+        deleteCommentFrom={deleteCommentFrom}
+        setCommentsOpenFor={setCommentsOpenFor}
+        helpOpen={helpOpen}
+        setHelpOpen={setHelpOpen}
+        pinPromptCfg={pinPromptCfg}
+        confirmClear={confirmClear}
+        setConfirmClear={setConfirmClear}
+        adminClearBoard={adminClearBoard}
+      />
 
       <Toast toast={toast} onClose={() => setToast(null)} />
     </div>

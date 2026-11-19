@@ -3,9 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { confirmThenPin } from './confirm-then-pin.js';
 
-// Source-scan owner: RetroBoard.jsx dialogs until R18; repoint to BoardDialogs.jsx
-// in that commit. Keep the real onConfirm wiring: a model-only test misses bypasses.
-const source = readFileSync(new URL('../../../RetroBoard.jsx', import.meta.url), 'utf8');
+// Source-scan owner: BoardDialogs.jsx. Keep the real onConfirm wiring and order.
+const source = readFileSync(new URL('./BoardDialogs.jsx', import.meta.url), 'utf8');
 const actions = ['UnlockAll', 'ResetVotes', 'ClearBoard'];
 for (const action of actions) {
   test(`${action}: confirm closes before PIN and stays closed after cancel`, async () => {

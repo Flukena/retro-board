@@ -81,6 +81,7 @@ test('top bar preserves undo, admin, claim and follow contracts', async (context
       );
     });
     // Source-scan owners: TopBar.jsx, TopBarPopovers.jsx, Avatar.jsx.
+    // BoardDialogs.jsx owns dialogs; use-topbar-props.js supplies these views.
     // use-topbar-props.js owns board-derived props; these three views stay presentational.
     for (const file of ['./TopBar.jsx', './TopBarPopovers.jsx', '../ui/Avatar.jsx']) {
       const source = readFileSync(new URL(file, import.meta.url), 'utf8');

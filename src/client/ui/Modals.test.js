@@ -129,7 +129,7 @@ test('selector contract distinguishes target compounds from ancestors and incomp
 // must update both paths together and retain the last-compound selector contract.
 test('every scoped component class has a compatible stylesheet selector targeting its last compound', () => {
   for (const [component, stylesheet] of [
-    ['./Modals.jsx', './modals.css'], ['../voting/TimerSetup.jsx', '../voting/timer-setup.css'],
+    ['./Modals.jsx', './modals.css'], ['./BoardDialogs.jsx', './modals.css'], ['../voting/TimerSetup.jsx', '../voting/timer-setup.css'],
     ['../board/SelectionToolbar.jsx', '../board/selection-toolbar.css'], ['../app/Landing.jsx', '../app/landing.css'],
     ['../board/MinimapPanel.jsx', '../../domain/minimap.css'], ['../chrome/ToolDock.jsx', '../chrome/tool-dock.css'],
     ['../board/ZoneCard.jsx', '../board/board-cards.css'], ['../board/ZoneToolStrip.jsx', '../board/board-cards.css'], ['../board/StickyCard.jsx', '../board/board-cards.css'], ['../templates/TemplateThumbnail.jsx', '../templates/template-thumbnail.css'],
