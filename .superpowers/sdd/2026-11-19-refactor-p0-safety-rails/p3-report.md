@@ -5,6 +5,19 @@ Task 8 is interpreted conservatively as the final composition/ratchet audit afte
 
 Browser checks are intentionally not run, as requested. Owed before release: `ui-live-check` undo/redo in two contexts (including bidirectional sync and th/en), `board-import-ui` export/import exact round trip, and `room-lock`. P3 alone does not satisfy the R-B release gate.
 
+Status: **COMPLETE_WITH_VERIFICATION_OWED**. P3 tasks 1–8 are implemented in eight task commits; final full gate **2871/2871**, build PASS. Final bridge and ceiling: **295 lines**, down from 1469. Browser/live and pinned-Node checks remain owed as listed below.
+
+| Task | Commit SHA | Full tests | Bridge ceiling before → after | Build |
+|---|---|---|---|---|
+| 1 | `9d37497ef697fe485ee781600b26a8cffd3dc3b6` | 2829/2829 | 1469 → 1452 | PASS |
+| 2 | `8d95af8a751b7dd4c959ceb1ad24775f6a376c76` | 2831/2831 | 1452 → 1348 | PASS |
+| 3 | `e3b3d5f12432b0aadf944e25256be94e4fae69bd` | 2836/2836 | 1348 → 1130 | PASS |
+| 4 | `a57dba438b1de89a72742a36c1c72aaafde5e486` | 2859/2859 | 1130 → 869 | PASS |
+| 5 | `8d57d1469645053a9a38a13505154c33a4d97076` | 2864/2864 | 869 → 846 | PASS |
+| 6 | `6a891b8dde5458cfe3b8243ca9228c8e4ce1af58` | 2864/2864 | 846 → 794 | PASS |
+| 7 | `44422665ba4d72797d2b5de1e5df5039aca404d2` | 2870/2870 | 794 → 368 | PASS |
+| 8 | `2535d46dd23255beabe928c572f3f67fc51172fe` | 2871/2871 | 368 → 295 | PASS |
+
 ## Task 1 — S1 public-permit
 
 - Files: `src/client/session/bridge/public-permit.{js,test.js}`, bridge, ratchet.
@@ -12,6 +25,7 @@ Browser checks are intentionally not run, as requested. Owed before release: `ui
 - RED proof: `public-permit.js:7`, changed `publicCreationFailure = true` to `false`; `public-permit.test.js:10` failed `false !== true` (`p3-red-1.log`). Restored before gate.
 - Ceiling: 1469 → 1452.
 - Full gate: see `p3-gate-1.log`; build passed (`p3-build-1.log`).
+
 ### RULE CONFORMANCE
 
 - Code shape: PASS.
@@ -30,6 +44,7 @@ Browser checks are intentionally not run, as requested. Owed before release: `ui
 - RED: `user-prefs.js:110` at mutation time (now :115 after named ID constants), replaced durable `ymap.set` with `ymap.delete`; `user-prefs.test.js:26` failed `undefined !== 'Bob'` (`p3-red-2.log`). Restored.
 - Ceiling: 1452 → 1348. ESLint complexity ≤15 and unused-variable checks PASS.
 - Full gate: `p3-gate-2.log`; build PASS (`p3-build-2.log`).
+
 ### RULE CONFORMANCE
 
 - Code shape: PASS.
@@ -67,6 +82,7 @@ Browser checks are intentionally not run, as requested. Owed before release: `ui
 - RED: `snapshot-doc.js:41`, make equal fields compare unequal; idempotence assertion failed on changed encoded Yjs state (`p3-red-4.log`). Restored.
 - Ceiling: 1130 → 869. New-module ESLint complexity ≤15 and unused-variable checks PASS. The old bridge importBundle complexity remains for its owning task 6.
 - Full gate: `p3-gate-4.log`; build PASS (`p3-build-4.log`).
+
 ### RULE CONFORMANCE
 
 - Code shape: PASS.
@@ -86,6 +102,7 @@ Browser checks are intentionally not run, as requested. Owed before release: `ui
 - RED: `undo-controller.js:3`, change `UNDO_CAPTURE_TIMEOUT_MS` from 500 to 0. The rapid-command test fails because undo leaves an item, and the configuration assertion fails `0 !== 500` (`p3-red-5.log`). Restored.
 - Ceiling: 869 → 846. New-module ESLint complexity ≤15 and unused-variable checks PASS.
 - Full gate: `p3-gate-5.log`; build PASS (`p3-build-5.log`).
+
 ### RULE CONFORMANCE
 
 - Code shape: PASS.
@@ -106,6 +123,7 @@ Browser checks are intentionally not run, as requested. Owed before release: `ui
 - RED: `import-plan.js:41`, remove duplicate-vote rejection; “duplicate vote” fails `true !== false` at `import-plan.test.js:36` (`p3-red-6.log`). Later unchanged-state assertions also catch that mutant's document writes. Restored.
 - Ceiling: 846 → 794. Planning is split into named item/vote/comment validators with the shared board-item validator; new-module ESLint complexity ≤15 and unused-variable checks PASS.
 - Full gate: `p3-gate-6.log`; build PASS (`p3-build-6.log`).
+
 ### RULE CONFORMANCE
 
 - Code shape: PASS.
@@ -129,6 +147,7 @@ Browser checks are intentionally not run, as requested. Owed before release: `ui
   - `room-methods.js:68`: invoke sync subscriber on false; assertion fails `1 !== 0` (`p3-red-7-room-methods.log`).
 - Ceiling: 794 → 368. New modules and remaining bridge functions satisfy ESLint complexity ≤15 / unused-variable checks. Only an inherited unused no-console suppression remains in the old diagnostics block, removed when that block moves in task 8.
 - Full gate: `p3-gate-7.log`; build PASS (`p3-build-7.log`).
+
 ### RULE CONFORMANCE
 
 - Code shape: PASS.
@@ -156,6 +175,8 @@ Browser checks are intentionally not run, as requested. Owed before release: `ui
 - Ownership re-review caught services writing to the assembled storage object. Before commit this was corrected: services return member maps, only the bridge assigns public members, and image repair consumes the lower-owned image-method port. No whole parent storage handle or parent callback is retained. Construction and public insertion order remain green. Targeted checks passed **98/98** for the ownership change (`p3-owner-review-8.log`); final snapshot/service/key/unchanged-bridge checks passed **52/52** (`p3-owner-restored-8.log`). Duplicate snapshot item seeding now calls the existing `seedItem`, and equivalent migration flag-only branches share one condition. The first final full gate had passed **2871/2871** before this ownership review; a fresh complete test/build gate was therefore required on the reviewed source.
 - Ceiling: 368 → **295**. It was lowered to the measured count in every task, never raised in a commit. One uncommitted extraction-range error in task 3 briefly produced an invalid generated source/measurement; both generated artifacts were discarded before successful characterization/gating, and the committed ceiling sequence remained strictly decreasing.
 
+- Task 8 commit: `2535d46dd23255beabe928c572f3f67fc51172fe`. Reviewed-source full gate **2871/2871**, build PASS (`p3-gate-8-final.log`, `p3-build-8-final.log`). Zero failures, cancellations, skips or todos. Final architecture/ratchet and all existing bridge/contract tests are included. All eight task ceilings are strictly decreasing as verified from their committed sources.
+
 ## Final review and open concerns
 
 The unchanged bridge tests and P0 surface/arity contract are preserved byte-for-byte from 576e3bd. RetroBoard.jsx and yjs-server.mjs are also unchanged. No dependency, workflow, deployment/security configuration, credential, environment file, production data, or other worktree was touched. No push, deploy or browser check was run.
@@ -173,11 +194,9 @@ Verification owed:
 ### RULE CONFORMANCE
 
 - Code shape: PASS — focused plain-JS owners, shared schemas/helpers, downward dependencies, complexity ≤15; no new suppressions or raised ceilings.
-- Tests: PASS — original-source characterizations, restored RED proofs, unchanged existing assertions; final full-gate result recorded below.
+- Tests: PASS — original-source characterizations, restored RED proofs, unchanged existing assertions; final full-gate result recorded above.
 - Logging and disk writes: PASS — original debug log format/frequency retained; no new sinks or durable-write changes.
 - Data location: PASS — explicitly authorized session TMPDIR for disposable evidence; small committed fixtures are test inputs, not logs/captures/bulk data.
 - Karpathy guidelines: PASS — P3-only scope, stated task-8 interpretation, measured ceiling and concrete checks; live/runtime limitations explicit.
 - repo style: PASS — colocated tests, architecture and ratchets green; no user-visible strings or UI changes added.
 - failure-path tests: PASS — blocked/corrupt cache, bounded timeout/listener cleanup, invalid geometry/imports, duplicate contributions, public rejection, destroy cleanup and native receiver coverage.
-
-Reviewed-source final gate: **2871/2871**, zero failures/cancellations/skips/todos; `npm run build` PASS (`p3-gate-8-final.log`, `p3-build-8-final.log`). Static complexity/unused checks and unchanged-file comparisons also PASS. Task-8 commit SHA is finalized in the report-only commit after the task commit, avoiding a self-referential SHA.
