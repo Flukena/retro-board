@@ -1,3 +1,4 @@
+import { RemoteCursorLayer } from './src/client/session/RemoteCursorLayer.jsx';
 import { usePresenceBroadcastState, usePresenceBroadcast } from './src/client/session/use-presence-broadcast.js';
 import { useEditingPresenceState, useEditingPresence, createLocalEditingPresence } from './src/client/session/use-editing-presence.js';
 import { BoardDialogs } from './src/client/ui/BoardDialogs.jsx';
@@ -22,7 +23,6 @@ import { BOARD_MODE } from './src/domain/public-wall-contract.js';
 import React, {
   useState, useEffect, useRef, useCallback, useMemo, startTransition,
 } from 'react';
-import { MousePointer2 } from 'lucide-react';
 import { readBoardImport, prepareBoardImport, ImportBundleLimitError } from './src/client/transfer/board-transfer.js';
 import { useBoardExports } from './src/client/transfer/use-board-exports.js';
 import { useActionItems } from './src/client/board/use-action-items.js';
@@ -60,7 +60,7 @@ import { useZoneHeaderActions } from './src/client/board/useZoneHeaderActions.js
 import { Toast } from './src/client/ui/Toast.jsx';
 import { TopBar } from './src/client/chrome/TopBar.jsx';
 import { shareLinkModel } from './src/client/chrome/topbar-model.js';
-import { hueFromId, playerAccentColor } from './src/client/board/player-colors.js';
+import { hueFromId } from './src/client/board/player-colors.js';
 import { t, useLang } from './src/client/ui/i18n.js';
 import { useTheme } from './src/client/ui/theme.js';
 import { PALETTE } from './src/client/ui/palette.js';
@@ -95,7 +95,6 @@ import {
   minimapPointToWorld,
 } from './src/domain/minimap.js';
 import {
-  cursorScreenPosition,
   visiblePlayerCursors,
 } from './src/client/session/player-cursors.js';
 import { summarizeRemoteEditors, summarizeRemoteSelectors } from './src/client/session/editing-presence.js';
@@ -3262,57 +3261,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
         <EmptyCanvasHint itemCount={board.items.length} creationMode={creationMode} />
       </div>
 
-      {/* Remote player cursors use world coordinates from Yjs Awareness, then
-          map through this client's viewport. The layer is screen-space so the
-          pointer and name stay readable at every board zoom level. */}
-      <div
-        ref={cursorLayerRef}
-        aria-hidden="true"
-        style={{
-          position: 'fixed', inset: 0, zIndex: Z.CURSOR_LAYER,
-          overflow: 'hidden', pointerEvents: 'none',
-        }}
-      >
-        {playerCursors.map((player) => {
-          const screen = cursorScreenPosition(player.cursor, viewportRef.current);
-          const color = playerAccentColor(hueFromId(player.userId));
-          return (
-            <div
-              key={player.userId}
-              className="rb-player-cursor"
-              data-cursor-x={player.cursor.x}
-              data-cursor-y={player.cursor.y}
-              style={{
-                position: 'absolute', left: 0, top: 0,
-                transform: `translate3d(${screen.x}px, ${screen.y}px, 0)`,
-                transition: 'transform 18ms linear',
-                willChange: 'transform',
-                display: 'flex', alignItems: 'flex-start',
-              }}
-            >
-              <MousePointer2
-                size={23}
-                color="var(--collaboration-foreground)"
-                fill={color}
-                strokeWidth={2.6}
-                style={{ filter: 'var(--cursor-filter)', flex: '0 0 auto' }}
-              />
-              <span
-                style={{
-                  marginLeft: -2, marginTop: 17,
-                  maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  padding: '4px 8px', borderRadius: 'var(--radius-cursor-label)',
-                  background: color, color: 'var(--collaboration-foreground)',
-                  fontSize: 13, lineHeight: 1.15, fontWeight: 700,
-                  boxShadow: 'var(--shadow-cursor-label)',
-                }}
-              >
-                {player.name}
-              </span>
-            </div>
-          );
-        })}
-      </div>
+      <RemoteCursorLayer cursorLayerRef={cursorLayerRef} viewportRef={viewportRef} playerCursors={playerCursors} />
 
       {/* Floating UI */}
       <input ref={fileInputRef} type="file" accept="application/zip,.zip,application/json,.json,text/csv,.csv"
