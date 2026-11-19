@@ -573,6 +573,7 @@ export default Object.freeze({
   "phase.wholeBoardHint": "Semua zona utama",
   "mood.start": "Mulai cek suasana hati",
   "mood.close": "Tutup cek suasana hati",
+  "mood.showResult": "Tampilkan hasil suasana hati",
   "mood.question": "Bagaimana perasaanmu sekarang?",
   "mood.anonymous": "Hasil ditampilkan anonim setelah ronde ditutup",
   "mood.skip": "Lewati dulu",

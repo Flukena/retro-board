@@ -79,6 +79,13 @@ export function MorePopover({
         onClick={closeThen(mood.open ? mood.close : mood.start)}
       />
       )}
+      {mood?.available && mood.canShowResult && (
+      <MenuItem
+        icon={<SmilePlus size={TOPBAR_ICON_SIZE_PX.MENU} />}
+        label={t('mood.showResult')}
+        onClick={closeThen(mood.showResult)}
+      />
+      )}
       <MenuItem
         icon={<ListTodo size={TOPBAR_ICON_SIZE_PX.MENU} />}
         label={exports.openActionCount ? t('action.menuCount', { n: exports.openActionCount }) : t('action.title')}
