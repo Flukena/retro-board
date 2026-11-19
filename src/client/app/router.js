@@ -64,34 +64,6 @@ function templateSlugForPath(path) {
   return starterFormat(slug) ? slug : null;
 }
 
-export function generateBoardCode() {
-  // 8-char alphanumeric (~62^8 = 218 trillion). URL-safe, easy to share.
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
-  let s = '';
-  for (let i = 0; i < 8; i += 1) {
-    s += alphabet[Math.floor(Math.random() * alphabet.length)];
-  }
-  return s;
-}
-
-// 16-char URL-safe secret — combined with the board code the full yjs doc
-// name has ~62^24 entropy, well beyond brute-force. Uses Web Crypto when
-// available so it's not predictable from Math.random's PRNG state.
-export function generateBoardToken() {
-  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  const len = 16;
-  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-    const buf = new Uint8Array(len);
-    crypto.getRandomValues(buf);
-    let s = '';
-    for (let i = 0; i < len; i += 1) s += alphabet[buf[i] % alphabet.length];
-    return s;
-  }
-  let s = '';
-  for (let i = 0; i < len; i += 1) s += alphabet[Math.floor(Math.random() * alphabet.length)];
-  return s;
-}
-
 // Build a full share URL. `token` is optional; without it the link is the
 // legacy /b/CODE form and resolves to the pre-token doc name.
 export function buildBoardUrl(code, token, kind = ROOM_KIND.BOARD) {
