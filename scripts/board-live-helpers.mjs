@@ -289,6 +289,29 @@ export async function step(report, name, action) {
   }
 }
 
+// The two participants every two-context check uses: A writes English, B Thai.
+export const NAME_A = 'Ada';
+export const NAME_B = 'บี';
+// Desktop and phone layouts every bottom-chrome check covers; `phone` ones use the phone layout's docked rows.
+export const LAYOUT_VIEWPORTS = Object.freeze([
+  { name: 'desktop-short', width: 1280, height: 600, phone: false },
+  { name: 'phone-390', width: 390, height: 844, phone: true },
+  { name: 'phone-360', width: 360, height: 740, phone: true },
+  { name: 'phone-320', width: 320, height: 568, phone: true },
+  { name: 'phone-landscape', width: 740, height: 360, phone: true },
+  { name: 'phone-landscape-short', width: 568, height: 320, phone: true },
+]);
+
+export const intersects = (one, other) => one.x < other.x + other.width && other.x < one.x + one.width
+  && one.y < other.y + other.height && other.y < one.y + one.height;
+
+/** The first match's box when it is shown, else null. */
+export async function visibleBox(page, selector) {
+  const locator = page.locator(selector).first();
+  if (!await locator.count() || !await locator.isVisible()) return null;
+  return locator.boundingBox();
+}
+
 /** A (English, board creator) and B (Thai) on one new board. */
 async function sharedBoard(browser, baseUrl, report) {
   const a = await participant(browser, 'en', report, 'A');
@@ -298,13 +321,54 @@ async function sharedBoard(browser, baseUrl, report) {
     await a.goto(baseUrl);
     await a.getByRole('button', { name: BASE_LABELS.en.create, exact: true }).click();
     await a.waitForURL(BOARD_URL_PATTERN);
-    await enter(a, 'en', 'Ada');
+    await enter(a, 'en', NAME_A);
     await b.goto(a.url());
-    await enter(b, 'th', 'บี');
+    await enter(b, 'th', NAME_B);
     return { boardUrl: a.url() };
   });
   return { a, b };
 }
+
+/** A (English) signs in with the fake Google and creates a board locked with `password`; B (Thai) unlocks it. */
+export async function lockedBoard(browser, baseUrl, report, password) {
+  const a = await participant(browser, 'en', report, 'A');
+  const b = await participant(browser, 'th', report, 'B');
+  report.pages.push(a, b);
+  await step(report, 'A signs in and creates a locked board; B unlocks it', async () => {
+    await openLanding(a, baseUrl);
+    await visitStub(a, baseUrl, FAKE_GOOGLE_DECISION.APPROVE);
+    const boardUrl = await createLockedBoard(a, baseUrl, password);
+    await unlockScreen(a, 'en', password, NAME_A);
+    await b.goto(boardUrl);
+    await unlockScreen(b, 'th', password, NAME_B);
+    return { locked: true };
+  });
+  return { a, b };
+}
+
+export const LIVE_MODE = Object.freeze({ PLAIN: 'plain', LOCKED: 'locked' });
+
+/** The check's mode from argv[4] (`plain` or `locked`). */
+export function liveMode(argv = process.argv) {
+  const mode = argv[4] ?? LIVE_MODE.PLAIN;
+  if (!Object.values(LIVE_MODE).includes(mode)) throw new Error(`mode must be ${Object.values(LIVE_MODE).join(' or ')}`);
+  return mode;
+}
+
+export const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
+
+/** The last step of a check: no page errors were recorded in `mode`. */
+export async function errorsStep({ report }, mode) {
+  await step(report, `${mode}: no page errors`, async () => {
+    if (report.pageErrors.length) throw new Error(JSON.stringify(report.pageErrors));
+    return { consoleErrors: report.consoleErrors.length };
+  });
+}
+
+/** The `runLiveCheck` options for `mode`: a locked board for `locked`, the default shared board otherwise. */
+export const liveSetupFor = (mode, password) => (mode === LIVE_MODE.LOCKED
+  ? { setup: (browser, baseUrl, report) => lockedBoard(browser, baseUrl, report, password) }
+  : {});
 
 /**
  * CLI entry: `<script> <base-url> <output-dir>`; `scenario({a, b, report, browser, baseUrl})` runs the steps.

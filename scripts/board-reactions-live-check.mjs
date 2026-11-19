@@ -13,17 +13,13 @@ import { BOARD_REACTIONS, REACTION_SEND_INTERVAL_MS } from '../src/domain/board-
 import { FIREWORKS_DURATION_MS, FLOAT_DURATION_MS } from '../src/client/reactions/reaction-timeline.js';
 import { FIRST_BURST_BY_MS } from '../src/client/reactions/fireworks-physics.js';
 import {
-  CANVAS_SELECTOR, FAKE_GOOGLE_DECISION, REDO_KEY, SYNC_TIMEOUT_MS, UNDO_KEY, VIEWPORT, addSharedSticky,
-  createLockedBoard, openLanding, participant, runLiveCheck, step, undoUntilHidden, unlockScreen, visitStub,
+  CANVAS_SELECTOR, LAYOUT_VIEWPORTS, NAME_A, NAME_B, REDO_KEY, SYNC_TIMEOUT_MS, UNDO_KEY, VIEWPORT, addSharedSticky,
+  errorsStep, intersects, liveMode, liveSetupFor, runLiveCheck, sleep, step, undoUntilHidden, visibleBox,
   waitForTextOn,
 } from './board-live-helpers.mjs';
 
-const MODE = Object.freeze({ PLAIN: 'plain', LOCKED: 'locked' });
-const mode = process.argv[4] ?? MODE.PLAIN;
-if (!Object.values(MODE).includes(mode)) throw new Error(`mode must be ${Object.values(MODE).join(' or ')}`);
+const mode = liveMode();
 
-const NAME_A = 'Ada';
-const NAME_B = 'บี';
 const LABELS = Object.freeze({
   en: { open: 'Send a reaction to everyone', picker: 'Reactions', fireworks: 'Fireworks for everyone', send: 'Send' },
   th: { open: 'ส่งรีแอคชันให้ทุกคน', picker: 'เลือกอีโมจิ', fireworks: 'จุดพลุให้ทุกคน', send: 'ส่ง' },
@@ -55,15 +51,6 @@ const EMPTY_CANVAS_PX = Object.freeze({ x: 760, y: 640 });
 const LAYOUT_EMPTY_PX = Object.freeze({ x: 200, y: 180 });
 const ALPHA_CHANNEL_OFFSET = 3;
 const RGBA_STRIDE = 4;
-// `phone` layouts dock the selection toolbar above the bottom row and give the open picker that row.
-const LAYOUT_VIEWPORTS = Object.freeze([
-  { name: 'desktop-short', width: 1280, height: 600, phone: false },
-  { name: 'phone-390', width: 390, height: 844, phone: true },
-  { name: 'phone-360', width: 360, height: 740, phone: true },
-  { name: 'phone-320', width: 320, height: 568, phone: true },
-  { name: 'phone-landscape', width: 740, height: 360, phone: true },
-  { name: 'phone-landscape-short', width: 568, height: 320, phone: true },
-]);
 const ZOOM_SELECTOR = '.rb-zoom-controls';
 const PICKER_SELECTOR = '.rb-reaction-picker';
 const SELECTION_TOOLBAR_SELECTOR = '.rb-selection-toolbar';
@@ -75,7 +62,6 @@ const stamp = Date.now();
 const STICKY_TEXT = `reaction-undo-${stamp}`;
 const password = `reactions-${randomBytes(9).toString('base64url')}`;
 
-const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 const waitForCooldown = () => sleep(REACTION_SEND_INTERVAL_MS + COOLDOWN_SLACK_MS);
 const reactionLabel = (lang, emoji) => (emoji === FIREWORKS ? LABELS[lang].fireworks : `${LABELS[lang].send} ${emoji}`);
 
@@ -130,14 +116,6 @@ async function waitForEffectEnd(page, selector, durationMs, shownAt) {
   return Date.now() - shownAt;
 }
 
-const intersects = (one, other) => one.x < other.x + other.width && other.x < one.x + one.width
-  && one.y < other.y + other.height && other.y < one.y + one.height;
-
-async function visibleBox(page, selector) {
-  const locator = page.locator(selector).first();
-  if (!await locator.count() || !await locator.isVisible()) return null;
-  return locator.boundingBox();
-}
 
 /**
  * The open picker's emoji buttons whose centre is inside its scroll area, as `{ emoji, x, y, onTop }`. On narrow
@@ -178,22 +156,6 @@ async function checkPlacement(page, viewport) {
   if (overlaps.length) throw new Error(`${viewport.name}: overlaps ${overlaps.join(', ')}`);
   if (picker && !await pickerOnTop(page)) throw new Error(`${viewport.name}: another element covers the open picker`);
   return { dock, picker };
-}
-
-async function lockedSetup(browser, baseUrl, report) {
-  const a = await participant(browser, 'en', report, 'A');
-  const b = await participant(browser, 'th', report, 'B');
-  report.pages.push(a, b);
-  await step(report, 'A signs in and creates a locked board; B unlocks it', async () => {
-    await openLanding(a, baseUrl);
-    await visitStub(a, baseUrl, FAKE_GOOGLE_DECISION.APPROVE);
-    const boardUrl = await createLockedBoard(a, baseUrl, password);
-    await unlockScreen(a, 'en', password, NAME_A);
-    await b.goto(boardUrl);
-    await unlockScreen(b, 'th', password, NAME_B);
-    return { locked: true };
-  });
-  return { a, b };
 }
 
 async function fireworksStep({ a, b, report }) {
@@ -413,13 +375,6 @@ async function drawingStep({ a, report }) {
   });
 }
 
-async function errorsStep({ report }) {
-  await step(report, `${mode}: no page errors`, async () => {
-    if (report.pageErrors.length) throw new Error(JSON.stringify(report.pageErrors));
-    return { consoleErrors: report.consoleErrors.length };
-  });
-}
-
 await runLiveCheck('board-reactions-live-check.mjs', async (context) => {
   await fireworksStep(context);
   await floatStep(context);
@@ -429,5 +384,5 @@ await runLiveCheck('board-reactions-live-check.mjs', async (context) => {
   await layoutStep(context);
   await touchScrollStep(context);
   await drawingStep(context);
-  await errorsStep(context);
-}, mode === MODE.LOCKED ? { setup: lockedSetup } : {});
+  await errorsStep(context, mode);
+}, liveSetupFor(mode, password));

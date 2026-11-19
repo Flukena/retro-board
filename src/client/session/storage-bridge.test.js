@@ -259,6 +259,75 @@ test('the Public Wall gets no reaction channel, so it neither shows nor plays re
   }, { publicWall: true });
 });
 
+test('retro boards, plain or locked, share a card-writing timer that never enters undo', async () => {
+  for (const locked of [false, true]) {
+    await withStorage(async (browser) => {
+      const { storage } = browser;
+      const timer = storage.writingTimer;
+      assert.equal(timer.start(3), true, `locked=${locked}`);
+      assert.equal(timer.view().label, '03:00');
+      assert.equal(storage.canUndo(), false, 'starting the timer leaves nothing to undo');
+      assert.equal(storage.addItem(VALID_ITEM), true);
+      storage.stopUndoCapture?.();
+      assert.equal(timer.extend(), true);
+      assert.equal(storage.undo(), true, 'undo takes back the sticky, not the +1');
+      assert.equal(browser.__rbYItems.has(VALID_ITEM.id), false);
+      assert.equal(timer.view().phase, 'running');
+      assert.equal(timer.view().label, '04:00');
+      assert.equal(storage.redo(), true);
+      assert.equal(browser.__rbYItems.has(VALID_ITEM.id), true);
+      assert.equal(timer.stop(), true);
+      assert.equal(storage.undo(), true, 'the sticky is still the only step');
+      assert.equal(timer.view().phase, 'idle', 'undo never brings a stopped timer back');
+    }, { locked });
+  }
+});
+
+test('a board exported while the card-writing timer runs imports cleanly, round-trips exactly and starts no timer', async () => {
+  const importedAt = Date.now();
+  const transferModule = (server) => server.ssrLoadModule('/src/client/transfer/board-transfer.js');
+  const boardOf = async (storage) => (await storage.get('boardState', true)).value;
+  // The decoded manifest's data; the archive reader also hands back an image-reading function, and `name` is the
+  // export's file name, which carries the second it was made in, so two exports can differ in it alone.
+  const manifestData = (manifest) => Object.fromEntries(
+    Object.entries(manifest).filter(([key, value]) => key !== 'name' && typeof value !== 'function'),
+  );
+  /** The export the UI downloads, read back through the import decoder, as the import dialog does. */
+  const exportAndRead = async (storage, transfer) => {
+    const artifact = await transfer.createBoardExport(await boardOf(storage), { boardCode: 'TEST', userId: 'alice' });
+    const file = new File([artifact.blob], artifact.fileName, { type: artifact.mimeType });
+    return { file, manifest: manifestData(await transfer.readBoardImport(file, importedAt)) };
+  };
+  let exported;
+  await withStorage(async (browser, _cache, server) => {
+    const { storage } = browser;
+    assert.equal(storage.addItem(VALID_ITEM), true);
+    const before = await boardOf(storage);
+    assert.equal(storage.writingTimer.start(3), true);
+    assert.deepEqual(await boardOf(storage), before, 'the running timer is not part of the board snapshot');
+    exported = await exportAndRead(storage, await transferModule(server));
+  });
+  await withStorage(async (browser, _cache, server) => {
+    const { storage } = browser;
+    const transfer = await transferModule(server);
+    const manifest = await transfer.readBoardImport(exported.file, importedAt);
+    const board = await transfer.prepareBoardImport(manifest, await boardOf(storage));
+    assert.equal(storage.importBundle(
+      board, manifest.voteEntries, manifest.commentEntries, manifest.customTemplates, manifest.moodEntries,
+    ), true);
+    assert.equal(exported.manifest.items.length, 1);
+    assert.deepEqual((await boardOf(storage)).items.map((item) => ({ ...item })), exported.manifest.items);
+    assert.equal(storage.writingTimer.view().phase, 'idle', 'a restored board starts no countdown');
+    assert.deepEqual((await exportAndRead(storage, transfer)).manifest, exported.manifest, 'export -> import -> export is exact');
+  });
+});
+
+test('the Public Wall gets no card-writing timer', async () => {
+  await withStorage(async (browser) => {
+    assert.equal(browser.storage.writingTimer, undefined);
+  }, { publicWall: true });
+});
+
 test('offline local changes expose status and guard unload until a socket sync', async () => {
   await withStorage(async (browser) => {
     const provider = browser.__rbProvider;

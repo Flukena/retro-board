@@ -11,6 +11,7 @@ import { t } from '../ui/i18n.js';
 import { TemplateThumbnail } from '../templates/TemplateThumbnail.jsx';
 import { BOARD_SHORTCUTS } from '../board/board-shortcuts.js';
 import { BoardReactions } from '../reactions/BoardReactions.jsx';
+import { WritingTimer } from '../writing-timer/WritingTimer.jsx';
 import './tool-dock.css';
 
 export const TOOL_ID = Object.freeze({ SELECT: 'select', TEXT: 'text', ZONE: 'zone', IMAGE: 'image', DRAW: 'draw' });
@@ -122,7 +123,7 @@ export function TemplatePopover({ selectedZoneCount = 0, rows, onApplyTemplate, 
 
 export function ToolDock({
   creationMode, templatesOpen, rows, selectedZoneCount = 0, onTool, onTemplatesOpenChange,
-  onApplyTemplate, onDeleteCustomTemplate, onRenameCustomTemplate, onSaveTemplate, onAddSticky,
+  onApplyTemplate, onDeleteCustomTemplate, onRenameCustomTemplate, onSaveTemplate, onAddSticky, isAdmin = false,
 }) {
   return (
     <div
@@ -167,6 +168,7 @@ export function ToolDock({
       </div>
       <PlacementHint creationMode={creationMode} />
       <BoardReactions />
+      <WritingTimer isAdmin={isAdmin} />
       {templatesOpen && (
         <TemplatePopover
           rows={rows}

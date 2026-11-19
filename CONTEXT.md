@@ -15,6 +15,14 @@ used by import without repair or information loss. The board's mood round
 (`board.moodCheck`) is restored closed; presenter and meeting phase are live
 session state and reset on import.
 
+## Card-writing timer
+
+The admin's shared countdown lives in its own Yjs root map, `writingTimer` (`{ id, writtenAt, endsAt }`), outside the
+board snapshot and undo. It is encrypted with the rest of the document in locked rooms. It is excluded from export:
+it is a wall-clock deadline that is over by the time a backup is restored, like the vote timer session, presenter and
+meeting phase. A page receiving it live counts the run from its own receipt; a late join counts to `endsAt`, capped
+at the run length from now (`src/domain/writing-timer.js`).
+
 ## Facilitation state
 
 Room meta fields written silently (never undone by Ctrl+Z), private boards only:

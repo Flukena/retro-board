@@ -118,6 +118,7 @@ import {
   normalizeViewport,
 } from './src/client/session/local-preferences.js';
 import { boardVoteIsOpen, timerDockModel, voteTimerPhaseSignature } from './src/domain/vote-timing.js';
+import { extendedDeadline } from './src/domain/countdown.js';
 import { storage, adminRoleStorage } from './src/client/session/room-storage.js';
 import { DEFAULT_BOARD } from './src/domain/board-state.js';
 import { reconcileBoardSnapshot } from './src/domain/board-reconciliation.js';
@@ -3042,9 +3043,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     if (!isAdmin) return;
     const zone = boardRef.current.items.find((i) => i.id === zoneId && i.type === 'zone');
     if (!zone?.voteTimer) return;
-    const cur = zone.voteTimer;
-    const base = cur.endsAt && cur.endsAt > Date.now() ? cur.endsAt : Date.now();
-    updateItem(zoneId, { voteTimer: { ...cur, endsAt: base + minutes * 60000 } });
+    updateItem(zoneId, { voteTimer: { ...zone.voteTimer, endsAt: extendedDeadline(zone.voteTimer.endsAt, Date.now(), minutes) } });
   }, [isAdmin, updateItem]);
 
   const adminStopTimer = useCallback((zoneId) => {
@@ -3860,6 +3859,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
         onApplyTemplate={applyTemplate}
         onDeleteCustomTemplate={deleteCustomTemplate} onRenameCustomTemplate={openRenameTemplate}
         onSaveTemplate={saveSelectedTemplate}
+        isAdmin={isAdmin}
       />
       <DrawingTool exitRef={drawingExitRef} active={creationMode === TOOL_ID.DRAW} lang={lang} editingAllowed={editingAllowed} requireEdit={requireEdit}
         viewportRef={viewportRef} boardRef={boardRef} boardCanvasRef={canvasRef} storage={storage} target={drawingSession.target} onUpdateItem={updateItem} onRemoveItem={id => storage.removeItem(id)}

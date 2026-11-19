@@ -4,10 +4,11 @@ import { Button, ChoiceChip, portalToBody } from '../ui/UiPrimitives.jsx';
 import { ModalShell } from '../ui/ModalShell.jsx';
 import { BUTTON_VARIANT, MODAL_SIZE } from '../ui/ui-variants.js';
 import { t } from '../ui/i18n.js';
+import { TIMER_MAX_MINUTES, TIMER_MIN_MINUTES, clampTimerMinutes } from '../../domain/countdown.js';
 import {
-  TIMER_PRESETS, VOTE_LIMIT_PRESETS, TIMER_MIN_MINUTES, TIMER_MAX_MINUTES,
+  TIMER_PRESETS, VOTE_LIMIT_PRESETS,
   VOTE_LIMIT_MIN_VOTES, VOTE_LIMIT_MAX_VOTES, TIMER_DEFAULT_MINUTES, VOTE_LIMIT_DEFAULT_VOTES,
-  clampTimerMinutes, clampVoteLimit, timerSetupArguments,
+  clampVoteLimit, timerSetupArguments,
 } from '../../domain/vote-timing.js';
 import './timer-setup.css';
 
