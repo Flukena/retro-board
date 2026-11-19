@@ -49,10 +49,9 @@ function word(user, key) { setLang(user.lang); return t(key); }
 async function activate(user, target) { if (user.mobile) await target.tap(); else await target.click(); }
 function near(value, expected) { return Math.abs(value - expected) <= TOLERANCE_PX; }
 function finding(ok, scene, message) { if (!ok) report.findings.push(`${scene}: ${message}`); }
-// The recents card keeps 20px today (--landing-recents-padding, theme.js:137): pending ruling T2b-RECENTS (an app fix on
-// branch fix/mobile-draw-toolbar-fit). Remove this exception when that fix merges.
+// a1be1a3: the recents card follows the same 16px mobile inset as the other landing cards.
 function expectedContentPadding(node, width) {
-  if (node.selector === '.rb-landing__card' && !node.isRecents && width <= LANDING_MOBILE_MAX_WIDTH_PX) return LANDING_MOBILE_CARD_PADDING_PX;
+  if (node.selector === '.rb-landing__card' && width <= LANDING_MOBILE_MAX_WIDTH_PX) return LANDING_MOBILE_CARD_PADDING_PX;
   return CONTENT_PADDING_PX;
 }
 function checkSpacing(scene, width, nodes) {
@@ -85,7 +84,6 @@ async function capture(user, name) {
     return [{ selector, padding: [css.paddingTop, css.paddingRight, css.paddingBottom, css.paddingLeft].map(parseFloat),
       gap: css.gap, marginBottom: css.marginBottom, overflowY: css.overflowY, overflowX: css.overflowX,
       scrollHeight: node.scrollHeight, clientHeight: node.clientHeight,
-      isRecents: node.matches('.rb-landing__card--recents'),
       isMenuFrame: node.matches('.rb-template-popover, .rb-topbar-popover'),
       width: node.getBoundingClientRect().width }];
   })), SELECTORS);
