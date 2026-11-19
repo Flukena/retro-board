@@ -1,3 +1,4 @@
+import { createLatestThrottle } from './src/client/session/latest-throttle.js';
 import { useEditingPresenceState, useEditingPresence, createLocalEditingPresence } from './src/client/session/use-editing-presence.js';
 import { BoardDialogs } from './src/client/ui/BoardDialogs.jsx';
 import { useTopBarProps } from './src/client/chrome/use-topbar-props.js';
@@ -302,9 +303,10 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
   const worldMeasureRef = useRef(null);
   const gridRef = useRef(null);
   const cursorLayerRef = useRef(null);
-  const cursorLastSentAtRef = useRef(0);
-  const cursorPendingRef = useRef(null);
-  const cursorBroadcastTimerRef = useRef(null);
+  const cursorBroadcastRef = useRef(null);
+  if (!cursorBroadcastRef.current) cursorBroadcastRef.current = createLatestThrottle({
+    intervalMs: CURSOR_BROADCAST_MS, publish: (point) => window.storage?.setLocalCursor?.(point),
+  });
   const viewLastSentAtRef = useRef(0);
   const viewPendingRef = useRef(null);
   const viewBroadcastTimerRef = useRef(null);
@@ -334,11 +336,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     activeViewportFinalizerRef.current?.();
     storage.setLocalBusyItems('geometry', []);
     localEditingPresence.dispose();
-    if (cursorBroadcastTimerRef.current != null) clearTimeout(cursorBroadcastTimerRef.current);
+    cursorBroadcastRef.current.cancel();
     if (viewBroadcastTimerRef.current != null) clearTimeout(viewBroadcastTimerRef.current);
     if (followViewportCommitRef.current != null) clearTimeout(followViewportCommitRef.current);
     if (followMotionFrameRef.current != null) cancelAnimationFrame(followMotionFrameRef.current);
-    window.storage?.setLocalCursor?.(null);
+    cursorBroadcastRef.current.dispose();
     window.storage?.setLocalView?.(null);
   }, []);
 
@@ -447,39 +449,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     minimapHideTimerRef.current = setTimeout(hideWhenIdle, MINIMAP_IDLE_MS);
   }, []);
 
-  const flushLocalCursor = useCallback(() => {
-    cursorBroadcastTimerRef.current = null;
-    const point = cursorPendingRef.current;
-    cursorPendingRef.current = null;
-    if (!point) return;
-    cursorLastSentAtRef.current = performance.now();
-    window.storage?.setLocalCursor?.(point);
-  }, []);
-
-  const publishLocalCursor = useCallback((point) => {
-    cursorPendingRef.current = point;
-    const elapsed = performance.now() - cursorLastSentAtRef.current;
-    if (elapsed >= CURSOR_BROADCAST_MS) {
-      if (cursorBroadcastTimerRef.current != null) {
-        clearTimeout(cursorBroadcastTimerRef.current);
-        cursorBroadcastTimerRef.current = null;
-      }
-      flushLocalCursor();
-      return;
-    }
-    if (cursorBroadcastTimerRef.current == null) {
-      cursorBroadcastTimerRef.current = setTimeout(flushLocalCursor, CURSOR_BROADCAST_MS - elapsed);
-    }
-  }, [flushLocalCursor]);
-
-  const clearLocalCursor = useCallback(() => {
-    cursorPendingRef.current = null;
-    if (cursorBroadcastTimerRef.current != null) {
-      clearTimeout(cursorBroadcastTimerRef.current);
-      cursorBroadcastTimerRef.current = null;
-    }
-    window.storage?.setLocalCursor?.(null);
-  }, []);
+  const publishLocalCursor = useCallback((point) => cursorBroadcastRef.current.push(point), []);
+  const clearLocalCursor = useCallback(() => cursorBroadcastRef.current.clear(), []);
 
   const flushLocalView = useCallback(() => {
     viewBroadcastTimerRef.current = null;
