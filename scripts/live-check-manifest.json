@@ -180,9 +180,7 @@
       "relayEnv": {},
       "checkEnv": {},
       "timeoutSec": 900,
-      "baseline": "known-red",
-      "reason": "NEEDS_CONTEXT (owner): after the repairs for d40741b (hero landing wait, header Start-vote button) and 0b8e164 (Thai Create label), the check's own rule 'landing card content inset is 20px' fails on 360/390px: c53c0fd set --landing-card-padding to var(--space-4) (16px) below the mobile breakpoint (landing.css:540). 768/1440px pass; unguarded until the owner decides whether the rule or the design wins",
-      "failingStep": "spacing is consistent across equivalent UI roles"
+      "baseline": "pass"
     },
     {
       "id": "pan",

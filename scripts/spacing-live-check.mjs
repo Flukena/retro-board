@@ -12,7 +12,10 @@ const TIMEOUT_MS = 15_000;
 const GRID_PX = 4;
 const FRAME_PADDING_PX = 8;
 const ROW_PADDING_PX = 12;
-const CONTENT_PADDING_PX = 20;
+const CONTENT_PADDING_PX = 20; // --modal-padding, and --landing-card-padding at 600px and up (theme.js:123)
+// c53c0fd, landing.css:532-540: below 600px the mobile landing density sets the card inset to --space-4.
+const LANDING_MOBILE_MAX_WIDTH_PX = 599;
+const LANDING_MOBILE_CARD_PADDING_PX = 16;
 const TOLERANCE_PX = 1;
 const TOUCH_TARGET_PX = 44;
 const CASES = [
@@ -46,7 +49,12 @@ function word(user, key) { setLang(user.lang); return t(key); }
 async function activate(user, target) { if (user.mobile) await target.tap(); else await target.click(); }
 function near(value, expected) { return Math.abs(value - expected) <= TOLERANCE_PX; }
 function finding(ok, scene, message) { if (!ok) report.findings.push(`${scene}: ${message}`); }
-function checkSpacing(scene, nodes) {
+// The recents card has its own token, --landing-recents-padding (20px, theme.js:137), which the 599px block leaves alone.
+function expectedContentPadding(node, width) {
+  if (node.selector === '.rb-landing__card' && !node.isRecents && width <= LANDING_MOBILE_MAX_WIDTH_PX) return LANDING_MOBILE_CARD_PADDING_PX;
+  return CONTENT_PADDING_PX;
+}
+function checkSpacing(scene, width, nodes) {
   for (const node of nodes) {
     const [top, right, bottom, left] = node.padding;
     const label = `${scene} ${node.selector}`;
@@ -57,7 +65,8 @@ function checkSpacing(scene, nodes) {
     }
     finding(near(left, right), label, `unequal horizontal padding ${left}/${right}px`);
     if (node.selector === '.rb-landing__card' || node.selector === '.rb-modal__content') {
-      finding(near(left, CONTENT_PADDING_PX), label, `content inset ${left}px; expected ${CONTENT_PADDING_PX}px`);
+      const expected = expectedContentPadding(node, width);
+      finding(near(left, expected), label, `content inset ${left}px; expected ${expected}px`);
     }
     if (['.rb-menu-item', '.rb-zone__tool-popup .rb-zone__icon'].includes(node.selector)) {
       finding(near(left, ROW_PADDING_PX), label, `menu row inset ${left}px; expected ${ROW_PADDING_PX}px`);
@@ -75,10 +84,11 @@ async function capture(user, name) {
     return [{ selector, padding: [css.paddingTop, css.paddingRight, css.paddingBottom, css.paddingLeft].map(parseFloat),
       gap: css.gap, marginBottom: css.marginBottom, overflowY: css.overflowY, overflowX: css.overflowX,
       scrollHeight: node.scrollHeight, clientHeight: node.clientHeight,
+      isRecents: node.matches('.rb-landing__card--recents'),
       isMenuFrame: node.matches('.rb-template-popover, .rb-topbar-popover'),
       width: node.getBoundingClientRect().width }];
   })), SELECTORS);
-  checkSpacing(scene, nodes);
+  checkSpacing(scene, user.width, nodes);
   report.scenes.push({ scene, nodes });
   await user.page.screenshot({ path: join(out, `${scene}.png`) });
 }
