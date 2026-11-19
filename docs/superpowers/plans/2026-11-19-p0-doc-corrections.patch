@@ -1,5 +1,5 @@
 diff --git a/AGENTS.md b/AGENTS.md
-index 68f5b77..d99fc4a 100644
+index 68f5b77..4c8467c 100644
 --- a/AGENTS.md
 +++ b/AGENTS.md
 @@ -25,7 +25,7 @@ Release gate (full list, run from a clean checkout): `DEPLOYMENT.md` §Release g
@@ -7,12 +7,12 @@ index 68f5b77..d99fc4a 100644
  `src/domain/`, and relay behavior in `src/server/`; dependencies point toward domain.
  
 -- `RetroBoard.jsx` (4177 lines) and `yjs-server.mjs` (1836 lines) are frozen in size: do not add logic to them. They only wire. Put new behaviour in a focused module under `src/` (pure `.js` for logic, `.jsx` for components) with a paired colocated `<module>.test.js`; relay changes get a module plus `*.test.mjs`. Moving existing logic out of the two big files is welcome; growing them is not. `src/rule-ratchets.test.js` enforces the ceilings and colour-literal rule; ceilings may only be lowered.
-+- `RetroBoard.jsx` and `yjs-server.mjs` are frozen in size, and `src/client/session/storage-bridge.js` and `src/client/ui/i18n.js` carry their own ceilings: do not add logic to them. They only wire (`storage-bridge.js` adapts storage, `i18n.js` holds translations). The current ceilings live in `src/rule-ratchets.test.js`; read them there. Put new behaviour in a focused module under `src/` (pure `.js` for logic, `.jsx` for components) with a paired colocated `<module>.test.js`; relay changes get a module plus `*.test.mjs`. Moving existing logic out of the two big files is welcome; growing them is not. `src/rule-ratchets.test.js` enforces the ceilings and colour-literal rule; ceilings may only be lowered.
++- `RetroBoard.jsx`, `yjs-server.mjs`, `src/client/session/storage-bridge.js` and `src/client/ui/i18n.js` are frozen in size: never grow them past their ceilings, and add no logic to them; `RetroBoard.jsx` and `yjs-server.mjs` only wire. Put new behaviour in a focused module under `src/` (pure `.js` for logic, `.jsx` for components) with a paired colocated `<module>.test.js`; relay changes get a module plus `*.test.mjs`. Moving existing logic out of these files is welcome; growing them is not. `src/rule-ratchets.test.js` holds the ceilings and the colour-literal rule; ceilings may only be lowered, and any production source over the shared limit needs its own ceiling there.
  - Pure logic stays out of components: geometry, voting, ownership, import/export, schema decoding are plain functions the component calls (see `board-geometry.js`, `vote-finalization.js`, `board-ownership.js`).
  - UI follows the Warm Studio direction, token-first: colours, radii, fonts and shadows come from `src/client/ui/theme.js` CSS-variable tokens (extend them there) and shared UI primitives extracted into `src/` as they are needed, never new inline literals. No tape on stickies; keep functional signals (selection `#2563eb`, gold top-3 glow, zone colours). Reference tokens: `warmLook()` in https://claude.ai/artifact/Y62Xiyyi6a6zN2sYtY8aMF
  - Every user-visible string goes through `t()` with keys added to **both** `th` and `en` in `src/client/ui/i18n.js`.
 diff --git a/ARCHITECTURE.md b/ARCHITECTURE.md
-index 392b933..7d5b6f7 100644
+index 392b933..889b58e 100644
 --- a/ARCHITECTURE.md
 +++ b/ARCHITECTURE.md
 @@ -8,22 +8,34 @@ RetroBoard.jsx                 React application coordinator
@@ -50,13 +50,14 @@ index 392b933..7d5b6f7 100644
  ```
  
  ## Dependency direction
-@@ -36,7 +48,8 @@ runtime imports test support.
+@@ -36,7 +48,9 @@ runtime imports test support.
  
  `src/architecture.test.js` enforces these directions, portable domain code
  and an acyclic import graph. `src/rule-ratchets.test.js` recursively checks all
 -JSX colors and limits the two root coordinators to 4,177 and 1,881 lines.
 +JSX colors and holds the line ceilings of the two root coordinators and the large
-+`storage-bridge.js` and `i18n.js`; the ceilings are defined only in that file.
++`storage-bridge.js` and `i18n.js`; the ceilings are defined only in that file, and any production source over the
++shared limit needs its own ceiling there.
  
  ## Client flow
  
