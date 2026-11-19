@@ -129,7 +129,7 @@ import { boardVoteIsOpen, timerDockModel, voteTimerPhaseSignature } from './src/
 import { extendedDeadline } from './src/domain/countdown.js';
 import { storage, adminRoleStorage } from './src/client/session/room-storage.js';
 import { DEFAULT_BOARD } from './src/domain/board-state.js';
-import { reconcileBoardSnapshot } from './src/domain/board-reconciliation.js';
+import { applyRemoteSnapshot, shouldDropSnapshotFocus } from './src/domain/apply-remote-snapshot.js';
 import { effectiveZIndex, compareZOrder, swapZOrderEntries } from './src/domain/z-order.js';
 import { IMAGE_MAX_MIB_LABEL, prepareImageBlob, canStartImageImport } from './src/client/transfer/image-upload.js';
 import { CollaborativeTextEditor } from './src/client/board/CollaborativeTextEditor.jsx';
@@ -144,7 +144,6 @@ import { attachSafariGestures } from './src/client/board/safari-gestures.js';
 import { attachMobileGestures, isMobileGestureEvent } from './src/client/board/mobile-gestures.js';
 import { APP_VIEWPORT_CONTENT } from './src/client/ui/mobile-layout.js';
 import { useMobileLayout } from './src/client/ui/use-mobile-layout.js';
-import { shouldPreserveRecentLocalItem } from './src/domain/pending-local-items.js';
 import { attachMobileEditorViewport } from './src/client/board/mobile-editor-viewport.js';
 import { worldMotionProps } from './src/client/board/world-motion.js';
 
@@ -871,19 +870,14 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     // but the on-screen sticky stays put until a refresh clears the ref.
     if (isUndoRedo) recentlyMovedRef.current.clear();
     const focusedItemId = focusedTextIdRef.current?.split(':')[0] || null;
-    if (focusedItemId && !remote.items?.some((it) => it.id === focusedItemId)) {
-      const localFocused = boardRef.current.items.find((it) => it.id === focusedItemId);
-      // Pending creates survive stale snapshots; explicit peer deletions and
-      // undo/redo remain authoritative even for an item just created locally.
-      const isRecentLocalCreate = shouldPreserveRecentLocalItem(localFocused, pendingContext);
-      if (!isRecentLocalCreate) updateFocusedText(null);
-    }
+    if (shouldDropSnapshotFocus(boardRef.current, remote, focusedItemId, pendingContext)) updateFocusedText(null);
+    const recentMoves = { forget: (ids) => ids.forEach((id) => recentlyMovedRef.current.delete(id)) };
     setBoard((previous) => {
-      const result = reconcileBoardSnapshot(previous, remote, {
+      const result = applyRemoteSnapshot(previous, remote, {
         ...pendingContext, draggedIds: dragItemsRef.current,
         recentMoves: recentlyMovedRef.current, moveNowMs: Date.now(),
       });
-      recentlyMovedRef.current = result.recentMoves;
+      recentMoves.forget(result.forgetMoveIds);
       return result.board;
     });
   }, [updateFocusedText]);

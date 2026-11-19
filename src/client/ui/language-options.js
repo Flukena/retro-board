@@ -12,4 +12,3 @@ export const LANGUAGE_OPTIONS = Object.freeze([
   { code: 'vi', name: 'Tiếng Việt' },
   { code: 'id', name: 'Bahasa Indonesia' },
 ].map(Object.freeze));
-

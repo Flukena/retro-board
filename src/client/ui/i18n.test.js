@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { withChromeModule } from '../../test-support/chrome-test-helper.js';
 import { getLang, initialLanguage, setLang, t } from './i18n.js';
 
 test('Thai vote stop and result copy uses Thai words and preserves count placeholders', () => {
@@ -72,7 +74,6 @@ test('the last language picked wins when loads overlap', async () => {
 });
 
 test('every translation output is byte-identical to the pre-extraction fixture', async () => {
-  const { readFileSync } = await import('node:fs');
   const frozen = readFileSync(new URL('./fixtures/i18n-outputs.json', import.meta.url), 'utf8');
   const outputs = {};
   const originalLang = getLang();
@@ -88,7 +89,6 @@ test('every translation output is byte-identical to the pre-extraction fixture',
 });
 
 test('loaded languages switch synchronously; missing entries fall back to English then the key; failed chunks keep language', async () => {
-  const { withChromeModule } = await import('../../test-support/chrome-test-helper.js');
   await withChromeModule('/src/client/ui/i18n.js', async (runtime) => {
     runtime.setLang('th');
     assert.equal(runtime.getLang(), 'th');
