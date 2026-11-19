@@ -1,3 +1,4 @@
+import { resizeGeometry } from './src/domain/resize-geometry.js';
 import { routeBoardKey } from './src/client/board/board-key-router.js';
 import { undoBlockReason } from './src/domain/undo-guard.js';
 import { createStickyItem, createTextItem, createZoneItem, createImageItem } from './src/domain/item-factory.js';
@@ -46,7 +47,7 @@ import { CLEARED_VOTE_RESULTS, voteSessionScope, resetVoteSessionEntries } from 
 import { confirmThenPin } from './src/client/ui/confirm-then-pin.js';
 import { boardEditingAllowed, boardManagementPermissions, runSharedBoardAction } from './src/domain/public-board-permissions.js';
 import { publicZoneCreationSize } from './src/domain/public-zone-layout.js';
-import { itemSizeBounds, clampCornerResize, clampAspectScale, groupScaleRange } from './src/domain/item-size-limits.js';
+import { itemSizeBounds, groupScaleRange } from './src/domain/item-size-limits.js';
 import { importWarningNotes } from './src/client/ui/modal-model.js';
 import { isEditableDrawingImage } from './src/domain/drawing-image-target.js';
 import { useDrawingMode } from './src/client/board/useDrawingMode.js';
@@ -2361,31 +2362,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     let lastEntries = null;
     const onMove = (ev) => {
       const z = viewportRef.current.zoom;
-      let dx = (ev.clientX - start.x) / z;
-      let dy = (ev.clientY - start.y) / z;
-      if (aspectLock) {
-        // Convert raw deltas into "growth" along each axis (positive = larger).
-        // signX/signY map a corner's outward direction onto +growth.
-        const signX = (corner === 'nw' || corner === 'sw') ? -1 : 1;
-        const signY = (corner === 'nw' || corner === 'ne') ? -1 : 1;
-        const sx = (initial.w + signX * dx) / initial.w;
-        const sy = (initial.h + signY * dy) / initial.h;
-        // Drive by whichever axis deviated more from 1.0 (proportional drag).
-        const scale = clampAspectScale(Math.abs(sx - 1) > Math.abs(sy - 1) ? sx : sy, initial, bounds);
-        dx = signX * initial.w * (scale - 1);
-        dy = signY * initial.h * (scale - 1);
-      }
-      let { x, y, w, h } = initial;
-      if (corner === 'nw') {
-        x = initial.x + dx; y = initial.y + dy; w = initial.w - dx; h = initial.h - dy;
-      } else if (corner === 'ne') {
-        y = initial.y + dy; w = initial.w + dx; h = initial.h - dy;
-      } else if (corner === 'sw') {
-        x = initial.x + dx; w = initial.w - dx; h = initial.h + dy;
-      } else if (corner === 'se') {
-        w = initial.w + dx; h = initial.h + dy;
-      }
-      lastEntries = [{ id: item.id, patch: clampCornerResize(initial, corner, { x, y, w, h }, bounds) }];
+      const dx = (ev.clientX - start.x) / z;
+      const dy = (ev.clientY - start.y) / z;
+      lastEntries = [{ id: item.id, patch: resizeGeometry(initial, corner, dx, dy, aspectLock, bounds) }];
       commitGeometry(lastEntries);
     };
     const removeListeners = () => {
