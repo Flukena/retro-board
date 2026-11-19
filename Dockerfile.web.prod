@@ -24,8 +24,23 @@ RUN npm run build
 # Plain nginx serving the built bundle. Smaller and faster than `vite preview`.
 FROM nginxinc/nginx-unprivileged:1.30.6-alpine@sha256:f5116ed4606f3eb015dd4a8e28cb9b351476dc0ad4bc6e9f93b19cec130cdf03 AS runtime
 
+# nginx 1.30.7 fixes CVE-2026-113425, -121810, -123007, -123633 and -123634
+# (nginx.org security advisories). Until the base image ships it, take the same
+# signed nginx.org packages the base installs (its signing key is already in
+# /etc/apk/keys). Drop this block when the base tag moves to 1.30.7 or later.
+ARG NGINX_PACKAGE_VERSION=1.30.7-r1
+ARG NJS_PACKAGE_VERSION=1.30.7.1.0.2-r1
+
 USER root
-RUN apk upgrade --no-cache
+RUN apk upgrade --no-cache \
+ && alpine_release="$(grep -oE '^[0-9]+[.][0-9]+' /etc/alpine-release)" \
+ && apk add --no-cache --repository "https://nginx.org/packages/alpine/v${alpine_release}/main" \
+      "nginx=${NGINX_PACKAGE_VERSION}" \
+      "nginx-module-geoip=${NGINX_PACKAGE_VERSION}" \
+      "nginx-module-image-filter=${NGINX_PACKAGE_VERSION}" \
+      "nginx-module-xslt=${NGINX_PACKAGE_VERSION}" \
+      "nginx-module-njs=${NJS_PACKAGE_VERSION}" \
+ && find /etc/nginx -name '*.apk-new' -delete
 USER 101
 
 COPY --chown=101:101 --from=build /app/dist /usr/share/nginx/html
