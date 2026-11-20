@@ -7,8 +7,13 @@ import { decodeRemoteBoard } from '../../board/remote-board-decoder.js';
 import { repairStoredBoardGeometry } from '../../board/stored-geometry-repair.js';
 import { migrateLegacyTemplates } from '../../../domain/template-store.js';
 
+// `boardState` now flows through yItems/yMeta. We delete the legacy ymap key
+// during migration; this guard ensures any rogue write to it (e.g. from a
+// stale client tab still running the old code) doesn't trample the granular
+// React state.
 export const LEGACY_BOARD_KEY = 's||boardState';
 export const META_INTERNAL_PREFIX = '__';
+// Not a tracked undo origin: a repair rewrites sources without becoming an undo step.
 export const IMAGE_REPAIR_ORIGIN = 'image-repair';
 export const originOf = (opts) => (opts && opts.silent ? 'system' : 'local');
 
@@ -150,8 +155,6 @@ export function createSnapshotDoc({ ydoc, yItems, yMeta, publicPermit }) {
   // writeBoardSnapshot did — 'local' = user action (undoable), 'system' = derived
   // / automatic change (skipped by the UndoManager).
   // ---------------------------------------------------------------------------
-  // Not a tracked undo origin: a repair rewrites sources without becoming an undo step.
-
   // Seed a brand-new item as its own Y.Map (mirrors writeBoardSnapshot's
   // create branch). Populated before attaching so peers see it complete.
   const seedItem = (id, fields) => {

@@ -1,3 +1,4 @@
+import { userKey } from './kv-keys.js';
 const CLIENT_ID_RADIX = 36;
 const CLIENT_ID_RANDOM_START = 2;
 const CLIENT_ID_RANDOM_END = 14;
@@ -72,7 +73,7 @@ export function createUserPreferences({ ydoc, ymap, provider, activeRoomSession,
   // Recover durable identity preferences; viewport bypasses this shared path.
   const readUserPreference = async (key) => {
     const lk = localStorageKeyFor(key);
-    const uKey = `u|${clientId}|${key}`;
+    const uKey = userKey(clientId, key);
     try {
       const raw = localStorage.getItem(lk);
       if (raw !== null) {
@@ -114,7 +115,7 @@ export function createUserPreferences({ ydoc, ymap, provider, activeRoomSession,
     // per-device prefs survive a cleared/broken localStorage. 'system' keeps
     // it off the undo stack; transact is synchronous, nothing to await.
     try {
-      ydoc.transact(() => { ymap.set(`u|${clientId}|${key}`, value); }, 'system');
+      ydoc.transact(() => { ymap.set(userKey(clientId, key), value); }, 'system');
     } catch { /* Yjs refused — cache above is the fallback */ }
   };
   return { clientId, localStorageKeyFor, readUserPreference, writeUserPreference };

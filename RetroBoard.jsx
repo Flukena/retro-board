@@ -120,7 +120,7 @@ import {
 import { boardVoteIsOpen, timerDockModel, voteTimerPhaseSignature } from './src/domain/vote-timing.js';
 import { storage, adminRoleStorage } from './src/client/session/room-storage.js';
 import { DEFAULT_BOARD } from './src/domain/board-state.js';
-import { applyRemoteSnapshot, shouldDropSnapshotFocus } from './src/domain/apply-remote-snapshot.js';
+import { createRemoteSnapshotController } from './src/client/session/remote-snapshot-controller.js';
 import { effectiveZIndex, compareZOrder, swapZOrderEntries } from './src/domain/z-order.js';
 import { CollaborativeTextEditor } from './src/client/board/CollaborativeTextEditor.jsx';
 import { TextCard } from './src/client/board/TextCard.jsx';
@@ -671,27 +671,11 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
      Realtime push: subscribe to storage change events.
      Polling kept as a long-interval safety net only.
      ============================================================ */
-  const applyRemoteBoard = useCallback((remote, isUndoRedo, deletedItemIds = []) => {
-    if (!remote) return;
-    const pendingContext = { isUndoRedo, deletedItemIds: new Set(deletedItemIds), userId: userIdRef.current, nowMs: Date.now() };
-    // Undo/redo is a deliberate, authoritative correction — never let the
-    // "protect a just-finished local drag from a stale peer echo" grace
-    // window (recentlyMovedRef, below) mask it back to the pre-undo
-    // position. Without this, undoing a drag reverts the Yjs doc correctly
-    // but the on-screen sticky stays put until a refresh clears the ref.
-    if (isUndoRedo) recentlyMovedRef.current.clear();
-    const focusedItemId = focusedTextIdRef.current?.split(':')[0] || null;
-    if (shouldDropSnapshotFocus(boardRef.current, remote, focusedItemId, pendingContext)) updateFocusedText(null);
-    const recentMoves = { forget: (ids) => ids.forEach((id) => recentlyMovedRef.current.delete(id)) };
-    setBoard((previous) => {
-      const result = applyRemoteSnapshot(previous, remote, {
-        ...pendingContext, draggedIds: dragItemsRef.current,
-        recentMoves: recentlyMovedRef.current, moveNowMs: Date.now(),
-      });
-      recentMoves.forget(result.forgetMoveIds);
-      return result.board;
-    });
-  }, [updateFocusedText]);
+  const recentMoves = { forget: ids => ids.forEach(id => recentlyMovedRef.current.delete(id)) };
+  const applyRemoteBoard = useCallback(createRemoteSnapshotController({
+    boardRef, userIdRef, focusedTextIdRef, dragItemsRef, recentlyMovedRef,
+    recentMoves, updateFocusedText, setBoard,
+  }), [updateFocusedText]);
 
   useEffect(() => {
     if (!loaded) return undefined;

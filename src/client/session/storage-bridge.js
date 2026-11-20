@@ -1,3 +1,4 @@
+import { parseKvKey } from './bridge/kv-keys.js';
 // window.storage polyfill backed by Yjs over WebSocket.
 //
 // Two storage layers live on the same Y.Doc:
@@ -151,10 +152,6 @@ const emitter = new EventTarget();
 let undoManager = null;
 const isUndoOrigin = origin => undoManager && origin === undoManager;
 
-// `boardState` now flows through yItems/yMeta. We delete the legacy ymap key
-// during migration; this guard ensures any rogue write to it (e.g. from a
-// stale client tab still running the old code) doesn't trample the granular
-// React state.
 const snapshot = createSnapshotDoc({ ydoc, yItems, yMeta, publicPermit });
 const { readRemoteBoardSnapshot, writeBoardSnapshot, newSnapshotItems } = snapshot;
 snapshot.attachMaintenance({ provider, ymap });
@@ -164,12 +161,9 @@ snapshot.attachMaintenance({ provider, ymap });
 // ---------------------------------------------------------------------------
 const dispatchKey = (mapKey) => {
   if (mapKey === LEGACY_BOARD_KEY) return; // owned by yItems/yMeta now
-  const sep1 = mapKey.indexOf('|');
-  const sep2 = mapKey.indexOf('|', sep1 + 1);
-  if (sep1 < 0 || sep2 < 0) return;
-  const scope = mapKey.slice(0, sep1);
-  const cid = mapKey.slice(sep1 + 1, sep2);
-  const key = mapKey.slice(sep2 + 1);
+  const parsed = parseKvKey(mapKey);
+  if (!parsed) return;
+  const { scope, clientId: cid, key } = parsed;
   if (scope === 'u' && cid !== clientId) return;
   const value = ymap.get(mapKey) ?? null;
   emitter.dispatchEvent(new CustomEvent('change', {

@@ -1,3 +1,4 @@
+import { userKeyPrefix } from './kv-keys.js';
 export function attachRoomDiagnostics({ provider, route }) {
   // Use the visible board code in diagnostics. The actual provider room handle
   // is non-secret, but omitting it keeps logs stable and easy to correlate.
@@ -25,7 +26,7 @@ export function installBridgeDebugHandles({ provider, ydoc, ymap, yItems, yMeta,
     yMetaAdminUserId: yMeta.get('adminUserId') || null,
     yMetaAdminName: yMeta.get('adminName') || null,
     yMetaAll: Array.from(yMeta.entries()).filter(([k]) => !k.startsWith('__')),
-    uScopeKeys: Array.from(ymap.entries()).filter(([k]) => k.startsWith(`u|${clientId}|`)),
+    uScopeKeys: Array.from(ymap.entries()).filter(([k]) => k.startsWith(userKeyPrefix(clientId))),
     awareness: Array.from((provider?.awareness?.getStates?.() || new Map()).entries()),
     yItemsCount: yItems.size,
   });

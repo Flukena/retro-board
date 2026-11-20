@@ -91,7 +91,7 @@ const BOARD_METHOD_ARITY = Object.freeze({
 function consumedStorageNames() {
   const clientSources = productionSources()
     .filter((file) => file === RETRO_BOARD_SOURCE || file.startsWith(CLIENT_SOURCE_PREFIX))
-    .filter((file) => file !== STORAGE_PRODUCER_SOURCE);
+    .filter(isStorageConsumer);
   const names = clientSources.flatMap((file) => [
     ...readFileSync(resolve(PROJECT_ROOT, file), 'utf8').matchAll(STORAGE_MEMBER_PATTERN),
   ].map(([, name]) => name));
@@ -160,4 +160,14 @@ test('method arity is frozen', async () => {
     const methods = BOARD_KEYS.filter((name) => typeof storage[name] === 'function');
     assert.deepEqual(Object.fromEntries(methods.map((name) => [name, storage[name].length])), BOARD_METHOD_ARITY);
   });
+});
+
+function isStorageConsumer(file) {
+  return file !== STORAGE_PRODUCER_SOURCE && !file.startsWith('src/client/session/bridge/');
+}
+
+test('storage producers cannot count as surface consumers', () => {
+  assert.equal(isStorageConsumer('src/client/session/storage-bridge.js'), false);
+  assert.equal(isStorageConsumer('src/client/session/bridge/awareness-presence.js'), false);
+  assert.equal(isStorageConsumer('src/client/board/use-vote-state.js'), true);
 });

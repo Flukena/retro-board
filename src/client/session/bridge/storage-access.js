@@ -1,7 +1,7 @@
+import { keyOf } from './kv-keys.js';
 import { LOCAL_ONLY_KEYS, readLocalPreference, writeLocalPreference } from '../local-preferences.js';
 
 const NEVER_UNDO_KEYS = new Set(['presence']);
-const keyOf = (scope, key, cid) => `${scope}|${cid}|${key}`;
 
 export function createStorageAccess({ ydoc, ymap, userPreferences, presence, snapshot, emitter }) {
   const { localStorageKeyFor, readUserPreference, writeUserPreference } = userPreferences;
