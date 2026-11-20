@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createBoardShortcuts } from './use-board-shortcuts.js';
-import { routeBoardKey } from './board-key-router.js';
 import { ZOOM_STEP_FACTOR } from '../../domain/viewport-zoom.js';
 
 class Target { constructor(blocked = false) { this.blocked = blocked; } closest() { return this.blocked; } }
@@ -17,8 +16,8 @@ function harness(initial = {}) {
   commands.deleteItemsIfAllowed = ids => { calls.push(['delete', [...ids]]); return canDelete; };
   const view = { addEventListener(name, handler) { assert.equal(this, view); listeners.set(name, handler); },
     removeEventListener(name, handler) { assert.equal(this, view); assert.equal(listeners.get(name), handler); listeners.delete(name); } };
-  const controller = createBoardShortcuts({ state, commands, view, document: { querySelector: () => dialog }, Element: Target,
-    routeBoardKey, t: (key, args) => ({ key, ...args }), ZOOM_STEP_FACTOR });
+  const controller = createBoardShortcuts({ state, commands, view, ownerDocument: { querySelector: () => dialog }, elementType: Target,
+    t: (key, args) => ({ key, ...args }) });
   const key = (key, modifiers = {}) => listeners.get('keydown')?.({ key, target: new Target(), ctrlKey: false, metaKey: false,
     shiftKey: false, altKey: false, repeat: false, preventDefault: () => calls.push(['prevent']), ...modifiers });
   return { calls, state, commands, controller, listeners, key, dialog: value => { dialog = value; }, allowDelete: value => { canDelete = value; } };

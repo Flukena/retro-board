@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
-import { MINIMAP_IDLE_MS as IDLE_MS } from './minimap-timing.js';
-import { minimapPointToWorld as pointToWorld, centerViewportOnWorld as centerOnWorld } from '../../domain/minimap.js';
+import { MINIMAP_IDLE_MS } from './minimap-timing.js';
+import { minimapPointToWorld, centerViewportOnWorld } from '../../domain/minimap.js';
 
 const KEY_STEP_FRACTION = 0.2;
 const MINIMAP_CLOCK = {
@@ -10,7 +10,14 @@ const MINIMAP_CLOCK = {
   cancelAnimationFrame: id => globalThis.cancelAnimationFrame(id),
 };
 
-export function createMinimapVisibility({ minimapPanelRef, minimapHideTimerRef, interactionRef, document = globalThis.document, clock = MINIMAP_CLOCK, MINIMAP_IDLE_MS = IDLE_MS }) {
+export function clearMinimapHideTimer(timerRef, clock = MINIMAP_CLOCK) {
+  if (timerRef.current != null) clock.clearTimeout(timerRef.current);
+}
+
+export function createMinimapVisibility({
+  minimapPanelRef, minimapHideTimerRef, interactionRef, ownerDocument = globalThis.document,
+  clock = MINIMAP_CLOCK,
+}) {
   const reveal = () => {
     const panel = minimapPanelRef.current;
     if (!panel) return;
@@ -20,7 +27,7 @@ export function createMinimapVisibility({ minimapPanelRef, minimapHideTimerRef, 
     const hideWhenIdle = () => {
       const currentPanel = minimapPanelRef.current;
       if (!currentPanel) return;
-      const hasFocus = currentPanel.contains(document.activeElement);
+      const hasFocus = currentPanel.contains(ownerDocument.activeElement);
       const isHovered = currentPanel.matches(':hover');
       if (hasFocus || isHovered || interactionRef.current?.kind === 'minimap') {
         minimapHideTimerRef.current = clock.setTimeout(hideWhenIdle, MINIMAP_IDLE_MS);
@@ -32,9 +39,12 @@ export function createMinimapVisibility({ minimapPanelRef, minimapHideTimerRef, 
     };
     minimapHideTimerRef.current = clock.setTimeout(hideWhenIdle, MINIMAP_IDLE_MS);
   };
-  return { reveal, dispose() { if (minimapHideTimerRef.current != null) clock.clearTimeout(minimapHideTimerRef.current); } };
+  return { reveal, dispose() { clearMinimapHideTimer(minimapHideTimerRef, clock); } };
 }
-export function createMinimapNavigation({ viewport, minimapModelRef, interactionRef, stopFollowing, settleWheelBeforeInteraction, activeViewportFinalizerRef, window = globalThis.window, clock = MINIMAP_CLOCK, minimapPointToWorld = pointToWorld, centerViewportOnWorld = centerOnWorld }) {
+export function createMinimapNavigation({
+  viewport, minimapModelRef, interactionRef, stopFollowing, settleWheelBeforeInteraction,
+  activeViewportFinalizerRef, view = globalThis.window, clock = MINIMAP_CLOCK,
+}) {
   const start = (e) => {
     if (e.button !== 0 || interactionRef.current !== null || !minimapModelRef.current) return;
     stopFollowing();
@@ -53,11 +63,11 @@ export function createMinimapNavigation({ viewport, minimapModelRef, interaction
       const model = minimapModelRef.current;
       if (!model) return;
       const worldPoint = minimapPointToWorld({ clientX, clientY }, surfaceRect, model);
-      viewport.commitViewport(centerViewportOnWorld(
+      viewport.previewViewport(centerViewportOnWorld(
         { ...viewport.getViewport(), zoom: startZoom },
         model.viewportSize,
         worldPoint,
-      ), { live: true });
+      ));
     };
     const flush = () => {
       frame = null;
@@ -75,10 +85,10 @@ export function createMinimapNavigation({ viewport, minimapModelRef, interaction
       queue(ev.clientX, ev.clientY);
     };
     const removeListeners = () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onCancel);
-      window.removeEventListener('blur', onBlur);
+      view.removeEventListener('pointermove', onMove);
+      view.removeEventListener('pointerup', onUp);
+      view.removeEventListener('pointercancel', onCancel);
+      view.removeEventListener('blur', onBlur);
     };
     const finalize = () => {
       if (finished) return;
@@ -93,7 +103,7 @@ export function createMinimapNavigation({ viewport, minimapModelRef, interaction
       surface.style.cursor = 'crosshair';
       removeListeners();
       if (activeViewportFinalizerRef.current === onBlur) activeViewportFinalizerRef.current = null;
-      viewport.commitViewport(viewport.getViewport(), { finish: true });
+      viewport.finishViewport(viewport.getViewport());
     };
     const onUp = (ev) => { if (ev.pointerId === pointerId) finalize(); };
     const onCancel = (ev) => { if (ev.pointerId === pointerId) finalize(); };
@@ -102,10 +112,10 @@ export function createMinimapNavigation({ viewport, minimapModelRef, interaction
     interactionRef.current = { kind: 'minimap' };
     surface.style.cursor = 'grabbing';
     navigate(e.clientX, e.clientY);
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onCancel);
-    window.addEventListener('blur', onBlur);
+    view.addEventListener('pointermove', onMove);
+    view.addEventListener('pointerup', onUp);
+    view.addEventListener('pointercancel', onCancel);
+    view.addEventListener('blur', onBlur);
     activeViewportFinalizerRef.current = onBlur;
   };
   const keyDown = (e) => {
@@ -124,9 +134,7 @@ export function createMinimapNavigation({ viewport, minimapModelRef, interaction
     e.stopPropagation();
     viewport.commitViewport(next);
   };
-  return { start, keyDown, dispose() {
-    if (interactionRef.current?.kind === 'minimap') activeViewportFinalizerRef.current?.();
-  } };
+  return { start, keyDown };
 }
 
 export function useMinimapReveal(options, dependencies) {

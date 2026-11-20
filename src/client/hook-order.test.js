@@ -4,9 +4,21 @@ import { readFileSync } from 'node:fs';
 
 const ROOT = new URL('../../', import.meta.url);
 const LOADING_RETURN = 'if (!loaded) return <BoardLoading />;';
+// Production presence owner replaced these refs/callbacks without moving effects.
+const BASE_PRESENCE_REF_COUNT = 7;
+const BASE_PRESENCE_CALLBACK_COUNT = 5;
+// Base 83a7892 cursor/view channels had seven refs and five callbacks.
+const LEGACY_PRESENCE_REF_COUNT = 7;
+const LEGACY_PRESENCE_CALLBACK_COUNT = 5;
 const HOOK_CALL = /\buse[A-Z]\w*\s*\(/;
-// Expand only new batch-B wrappers; the fixture records the unmoved hook sequence.
+// Compare against production 83a7892, expanding extracted owners at their original seams.
 const WRAPPERS = new Map([
+  ['useToast', ['ui/use-toast.js', ['useState', 'useCallback', 'useEffect']]],
+  ['useEditingPresenceState', ['session/use-editing-presence.js', ['useState', 'useState']]],
+  ['useEditingPresence', ['session/use-editing-presence.js', ['useEffect', 'useEffect', 'useEffect']]],
+  ['usePresenceBroadcastState', ['session/use-presence-broadcast.js', ['useRef']]],
+  ['usePresenceBroadcast', ['session/use-presence-broadcast.js', ['useCallback', 'useCallback', 'useCallback']]],
+  ['useBrowserZoomGuard', ['board/use-browser-zoom-guard.js', ['useEffect']]],
   ['useFinalizeVotingSession', ['board/use-admin-actions.js', ['useCallback']]],
   ['useBoardShortcuts', ['board/use-board-shortcuts.js', ['useEffect']]],
   ['useOnImportPick', ['transfer/use-board-import.js', ['useCallback']]],
@@ -39,9 +51,14 @@ function assertHooksBeforeLoadingReturn(source) {
 }
 
 function coordinatorHooks(source) {
-  return source.split('\n').filter(line => /^  (?:const |use[A-Z])/.test(line))
+  return source.split('\n').filter(line => /^(?:  \S|    [^{}]*} = use)/.test(line))
     .flatMap(line => [...line.matchAll(new RegExp(HOOK_CALL, 'g'))].flatMap(match => {
       const hook = match[0].replace(/\s*\($/, '');
+      // Toast's independent dismiss effect moved to its state owner in P2.
+      if (hook === 'useToast') return ['useState', 'useCallback'];
+      // Presence encapsulates seven former refs and two internal flush callbacks.
+      if (hook === 'usePresenceBroadcastState') return Array(BASE_PRESENCE_REF_COUNT).fill('useRef');
+      if (hook === 'usePresenceBroadcast') return Array(BASE_PRESENCE_CALLBACK_COUNT).fill('useCallback');
       return WRAPPERS.get(hook)?.[1] || [hook];
     }));
 }
@@ -65,12 +82,26 @@ test('hook-order guard rejects an added hook after the loading return', () => {
   assert.throws(() => assertHooksBeforeLoadingReturn(source), /hooks must precede/);
 });
 
-test('batch B preserves the captured coordinator hook sequence and wrapper hook order', () => {
+test('coordinator preserves production-base hook order with the accepted independent toast move', () => {
   const source = readFileSync(new URL('RetroBoard.jsx', ROOT), 'utf8');
   const baseline = JSON.parse(readFileSync(new URL('src/test-support/p5b-hook-order.json', ROOT), 'utf8'));
-  assert.deepEqual(coordinatorHooks(source), baseline);
-  for (const [name, [file, expected]] of WRAPPERS) {
+  assert.equal(baseline.capturedFrom, '83a7892:RetroBoard.jsx');
+  const expected = baseline.hooks.filter((_hook, index) => index !== baseline.acceptedToastDismissMove);
+  assert.deepEqual(coordinatorHooks(source), expected);
+  for (const [name, [file, wrapperExpected]] of WRAPPERS) {
     const module = readFileSync(new URL(`src/client/${file}`, ROOT), 'utf8');
-    assert.deepEqual(wrapperHooks(module, name), expected, `${name} primitive hook order`);
+    assert.deepEqual(wrapperHooks(module, name), wrapperExpected, `${name} primitive hook order`);
+  }
+});
+
+test('multiline identity/template/admin hooks are covered and reordering any one is rejected', () => {
+  const source = readFileSync(new URL('RetroBoard.jsx', ROOT), 'utf8');
+  const expected = coordinatorHooks(source);
+  for (const name of ['useUserIdentity', 'useBoardTemplates', 'useAdminRole']) {
+    assert.ok(expected.includes(name), `${name} must be tracked`);
+    const removed = source.replace(`${name}(`, 'readValue(');
+    assert.throws(() => assert.deepEqual(coordinatorHooks(removed), expected), assert.AssertionError);
+    const reordered = `${removed}\n  ${name}();`;
+    assert.throws(() => assert.deepEqual(coordinatorHooks(reordered), expected), assert.AssertionError);
   }
 });

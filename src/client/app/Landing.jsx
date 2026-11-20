@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import { useBrowserZoomGuard } from '../board/use-browser-zoom-guard.js';
+import React, { useState } from 'react';
 import {
   Sparkles, Plus, ArrowRight, Check, ChevronDown,
 } from 'lucide-react';
@@ -9,7 +10,6 @@ import { Button, Surface } from '../ui/UiPrimitives.jsx';
 import { BUTTON_VARIANT, SURFACE_KIND } from '../ui/ui-variants.js';
 import { parseJoinInput } from './join-input.js';
 import { DISPLAY_NAME_MAX_LENGTH } from '../../domain/security-boundaries.js';
-import { APP_VIEWPORT_CONTENT } from '../ui/mobile-layout.js';
 import { useCreateBoard } from './use-create-board.js';
 import CreateBoardError from './CreateBoardError.jsx';
 import GuestRoomNote from './GuestRoomNote.jsx';
@@ -35,55 +35,6 @@ const LANDING_LINKS = Object.freeze([
   { href: AGILE_GUIDE_PATH, labelKey: 'agileGuide.nav.guide' },
 ]);
 
-function useBlockBrowserZoom() {
-  // Block browser zoom on Landing only — board has its own zoom logic.
-  useEffect(() => {
-    const meta = document.querySelector('meta[name="viewport"]');
-    const prevContent = meta?.getAttribute('content') || '';
-    if (meta) {
-      meta.setAttribute(
-        'content',
-        APP_VIEWPORT_CONTENT,
-      );
-    }
-
-    const onWheel = (e) => {
-      if (e.ctrlKey || e.metaKey) e.preventDefault();
-    };
-    const onKeyDown = (e) => {
-      if (!(e.ctrlKey || e.metaKey)) return;
-      if (['+', '-', '=', '0'].includes(e.key)) e.preventDefault();
-    };
-    const onGesture = (e) => e.preventDefault();
-
-    window.addEventListener('wheel', onWheel, { passive: false });
-    window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('gesturestart', onGesture);
-    window.addEventListener('gesturechange', onGesture);
-    window.addEventListener('gestureend', onGesture);
-
-    const baseDPR = window.devicePixelRatio || 1;
-    const counterZoom = () => {
-      const ratio = (window.devicePixelRatio || 1) / baseDPR;
-      document.body.style.zoom = Math.abs(ratio - 1) > 0.01 ? String(1 / ratio) : '';
-    };
-    counterZoom();
-    window.addEventListener('resize', counterZoom);
-    window.visualViewport?.addEventListener('resize', counterZoom);
-
-    return () => {
-      if (meta) meta.setAttribute('content', prevContent);
-      window.removeEventListener('wheel', onWheel);
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('gesturestart', onGesture);
-      window.removeEventListener('gesturechange', onGesture);
-      window.removeEventListener('gestureend', onGesture);
-      window.removeEventListener('resize', counterZoom);
-      window.visualViewport?.removeEventListener('resize', counterZoom);
-      document.body.style.zoom = '';
-    };
-  }, []);
-}
 
 function scrollToControlledSection(event) {
   event.preventDefault();
@@ -99,7 +50,7 @@ export default function Landing() {
   const { creating, createError, createBoard: createRoomAndOpen } = useCreateBoard();
   // Poker rooms are listed on the Planning Poker page instead.
   const { recents, remove: removeRecent } = useRecentRooms(ROOM_KIND.BOARD);
-  useBlockBrowserZoom();
+  useBrowserZoomGuard({ blockGestures: true });
 
   const join = () => {
     const destination = parseJoinInput(joinCode);

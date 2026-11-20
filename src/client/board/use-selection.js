@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-export function createSelectionController({ selectedIdsRef, setSelectedIds, focusedTextIdRef, setFocusedTextId, storage }) {
+export function createSelectionController({
+  selectedIdsRef, setSelectedIds, focusedTextIdRef, setFocusedTextId, storage,
+}) {
   const mirror = (selectedIds) => { selectedIdsRef.current = selectedIds; };
   const selectOne = (id) => {
     setSelectedIds(id == null ? new Set() : new Set([id]));
@@ -10,7 +12,7 @@ export function createSelectionController({ selectedIdsRef, setSelectedIds, focu
     const itemId = typeof next === 'string' ? next.split(':')[0] : null;
     storage.setLocalBusyItems('text', itemId ? [itemId] : []);
   };
-  return { mirror, selectOne, focus, dispose() {} };
+  return { mirror, selectOne, focus };
 }
 
 // Keep these three seams at their original coordinator positions.

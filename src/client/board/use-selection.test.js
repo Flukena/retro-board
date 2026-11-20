@@ -23,7 +23,7 @@ test('selection mirrors the committed set by identity; single selection handles 
   h.controller.selectOne(null);
   assert.deepEqual(h.events, [['selected', new Set(['a'])], ['selected', new Set()]]);
   assert.equal(h.selectedIdsRef.current, next, 'selection mirroring remains in its original effect');
-  h.controller.dispose();
+
 });
 
 test('focus updates its ref before React state, then publishes item busy state and clears it', () => {

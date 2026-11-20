@@ -4,13 +4,13 @@ import { createMinimapVisibility } from './use-minimap.js';
 import { createMinimapNavigation } from './use-minimap.js';
 import { createFakeClock } from '../../test-support/fake-clock.js';
 import { MINIMAP_IDLE_MS } from './minimap-timing.js';
-import { minimapPointToWorld, centerViewportOnWorld, buildMinimapModel } from '../../domain/minimap.js';
+import { buildMinimapModel } from '../../domain/minimap.js';
 
 function timerHarness() {
   const clock = createFakeClock(); let hovered = false; let focused = false;
   const panel = { style: {}, contains: () => focused, matches: () => hovered };
   const options = { minimapPanelRef: { current: panel }, minimapHideTimerRef: { current: null }, interactionRef: { current: null },
-    document: { activeElement: {} }, clock, MINIMAP_IDLE_MS };
+    ownerDocument: { activeelementType: {} }, clock };
   return { clock, panel, options, controller: createMinimapVisibility(options), hover: value => { hovered = value; }, focus: value => { focused = value; } };
 }
 
@@ -36,11 +36,10 @@ function navigationHarness() {
     removeEventListener(name, callback) { assert.equal(this, view); assert.equal(listeners.get(name), callback); listeners.delete(name); } };
   const surface = { style: {}, getBoundingClientRect: () => ({ left: 0, top: 0, width: 200, height: 120 }) };
   const model = buildMinimapModel({ items: [], viewport: current, viewportSize: { w: 1000, h: 600 }, width: 200, height: 120 });
-  const options = { viewport: { getViewport: () => current, commitViewport: (next, flags) => { current = next; commits.push([next, flags]); } },
+  const options = { viewport: { getViewport: () => current, commitViewport: next => { current = next; commits.push([next, undefined]); }, previewViewport: next => { current = next; commits.push([next, { live: true }]); }, finishViewport: next => { current = next; commits.push([next, { finish: true }]); } },
     minimapModelRef: { current: model }, interactionRef: { current: null }, activeViewportFinalizerRef: { current: null },
-    stopFollowing: () => order.push('stop'), settleWheelBeforeInteraction: () => order.push('settle'), window: view,
-    clock: { ...clock, requestAnimationFrame: run => clock.setTimeout(run, 16), cancelAnimationFrame: clock.clearTimeout },
-    minimapPointToWorld, centerViewportOnWorld };
+    stopFollowing: () => order.push('stop'), settleWheelBeforeInteraction: () => order.push('settle'), view: view,
+    clock: { ...clock, requestAnimationFrame: run => clock.setTimeout(run, 16), cancelAnimationFrame: clock.clearTimeout } };
   const event = (overrides = {}) => ({ button: 0, pointerId: 7, currentTarget: surface, clientX: 100, clientY: 60,
     preventDefault: () => order.push('prevent'), stopPropagation: () => order.push('stopPropagation'), ...overrides });
   return { controller: createMinimapNavigation(options), options, clock, listeners, commits, order, surface, event, current: () => current };
@@ -62,10 +61,10 @@ test('pointer navigation coalesces latest point, keeps zoom and flushes on match
   assert.equal(h.options.activeViewportFinalizerRef.current, null); assert.equal(h.surface.style.cursor, 'crosshair');
 });
 
-test('cancel/blur/dispose finish navigation and remove pending frames/listeners', () => {
-  for (const exit of ['pointercancel', 'blur', 'dispose']) {
+test('cancel/blur/unmount finish navigation and remove pending frames/listeners', () => {
+  for (const exit of ['pointercancel', 'blur', 'unmount']) {
     const h = navigationHarness(); h.controller.start(h.event()); h.listeners.get('pointermove')(h.event({ clientX: 140 }));
-    if (exit === 'dispose') h.controller.dispose(); else h.listeners.get(exit)(h.event());
+    if (exit === 'unmount') h.options.activeViewportFinalizerRef.current(); else h.listeners.get(exit)(h.event());
     h.clock.advance(16); assert.equal(h.listeners.size, 0); assert.equal(h.clock.pendingCount(), 0); assert.equal(h.commits.length, 3);
   }
 });
@@ -91,7 +90,7 @@ test('default minimap timers and animation frames preserve native host receivers
     const h = timerHarness(); const visibility = createMinimapVisibility({ ...h.options, clock: undefined });
     visibility.reveal(); visibility.dispose();
     const nav = navigationHarness(); const navigation = createMinimapNavigation({ ...nav.options, clock: undefined });
-    navigation.start(nav.event()); nav.listeners.get('pointermove')(nav.event({ clientX: 140 })); navigation.dispose();
+    navigation.start(nav.event()); nav.listeners.get('pointermove')(nav.event({ clientX: 140 })); nav.options.activeViewportFinalizerRef.current();
     assert.deepEqual(calls, [['timer', MINIMAP_IDLE_MS], ['clear', 41], ['frame'], ['cancelFrame', 42]]);
   } finally {
     Object.assign(globalThis, saved);

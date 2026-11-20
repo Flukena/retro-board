@@ -1,11 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createController } from './use-vote-state.js';
-import { createVoteFlashController } from './use-vote-state.js';
-import { createVoteSnapshotController } from './use-vote-state.js';
+import { createVoteStateController, updateVoteFlashState, createVoteFlashController, createVoteSnapshotController } from './use-vote-state.js';
 import { createFakeClock } from '../../test-support/fake-clock.js';
-import { activeVoteZone } from '../../domain/vote-ownership.js';
-import { reuseSnapshotMap } from '../../domain/snapshot-references.js';
 
 const NOW_MS = 1000;
 function harness() {
@@ -23,8 +19,8 @@ function harness() {
   };
   let selected = new Set(['card', 'other']);
   const focusedTextIdRef = { current: 'card:body' };
-  const controller = createController({ boardRef, activeVoteZone, Date: { now: () => NOW_MS }, userId: 'me',
-    window: { storage }, storage, setToast: value => calls.push(['toast', value]), t: key => key,
+  const controller = createVoteStateController({ boardRef, clock: { now: () => NOW_MS }, userId: 'me',
+    view: { storage }, storage, setToast: value => calls.push(['toast', value]), t: key => key,
     flashVote: id => calls.push(['flash', id]), setBoard: update => { boardRef.current = update(boardRef.current); },
     setSelectedIds: update => { selected = update(selected); }, focusedTextIdRef, updateFocusedText: value => calls.push(['focus', value]),
   });
@@ -49,7 +45,7 @@ test('remove uses one combined item/vote/comment transaction, prunes local state
   const h = harness(); h.controller.removeItemUnchecked('card');
   assert.deepEqual(h.calls, [['deleteTogether', 'card'], ['focus', null]]);
   assert.deepEqual(h.boardRef.current.items.map(item => item.id), ['zone', 'other']);
-  assert.deepEqual(h.selected(), new Set(['other'])); h.controller.dispose();
+  assert.deepEqual(h.selected(), new Set(['other']));
 });
 
 test('older bridge fallback clears related state then removes item', () => {
@@ -75,7 +71,7 @@ test('vote/comment channels refresh, preserve equal snapshot identity and unsubs
     offVotesChange: handler => { assert.equal(listeners.get('votes'), handler); listeners.delete('votes'); },
     offCommentsChange: handler => { assert.equal(listeners.get('comments'), handler); listeners.delete('comments'); },
   };
-  const controller = createVoteSnapshotController({ window: { storage }, reuseSnapshotMap,
+  const controller = createVoteSnapshotController({ view: { storage },
     setVotesByItem: update => { votes = update(votes); }, setCommentsByItem: update => { comments = update(comments); },
   });
   controller.refreshVotes(); controller.refreshComments(); const previous = votes;
@@ -112,4 +108,17 @@ test('votes on expired sessions do not consume the new session quota', () => {
   const oldCard = { ...h.card, id: 'oldCard', zoneId: 'oldZone', x: 1020 };
   h.boardRef.current.items.push(oldZone, oldCard); h.votes.set('oldCard', new Set(['me']));
   h.controller.toggleVote(h.card); assert.deepEqual(h.calls, [['vote', 'card', true], ['flash', 'card']]);
+});
+
+test('superseded flash timers preserve the outer React state identity', () => {
+  const clock = createFakeClock(NOW_MS);
+  let state = { flashes: {}, controller: null };
+  const controller = createVoteFlashController({ clock, publish: update => { state = updateVoteFlashState(state, update); } });
+  controller.flash('card'); clock.advance(100); controller.flash('card');
+  const newer = state;
+  clock.advance(800);
+  assert.equal(state, newer);
+  clock.advance(100);
+  assert.notEqual(state, newer);
+  assert.deepEqual(state.flashes, {});
 });

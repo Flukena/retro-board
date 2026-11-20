@@ -2,7 +2,7 @@ import { t } from '../ui/i18n.js';
 import { nextThemePref } from '../ui/theme.js';
 import { adminPillModel, playerRows } from './topbar-model.js';
 
-export function useTopBarProps({ boardState, session, collaboration, appearance, workflow, actions }) {
+export function topBarProps({ boardState, session, collaboration, appearance, workflow, actions }) {
   const { board, undoState } = boardState;
   const { mode, boardCode, isAdmin, canClaim, userId, userName } = session;
   const { presence, onlineUsers, followedUserId, votesUsedByUser, activeZoneVoteLimit } = collaboration;

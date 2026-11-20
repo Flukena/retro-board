@@ -1,9 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createController } from './use-admin-actions.js';
+import { createAdminActions } from './use-admin-actions.js';
 import { DEFAULT_BOARD } from '../../domain/board-state.js';
-import { voteSessionScope, CLEARED_VOTE_RESULTS, resetVoteSessionEntries } from '../../domain/vote-session-lifecycle.js';
-import { extendedDeadline } from '../../domain/countdown.js';
+import { CLEARED_VOTE_RESULTS } from '../../domain/vote-session-lifecycle.js';
 
 const NOW_MS = 1000;
 const RESET_FIELDS = ['items', 'timer', 'lastResultsAt', 'allRevealed', 'votingLocked', 'editingLocked', 'phase', 'moodCheck'];
@@ -23,13 +22,13 @@ function harness(overrides = {}) {
     updateItems: entries => { calls.push(['update', entries]); return true; },
   };
   const options = { isAdmin: true, setToast: value => calls.push(['toast', value]), t: (key, args) => ({ key, ...args }),
-    boardRef, Date: { now: () => NOW_MS }, voteSessionScope, CLEARED_VOTE_RESULTS, window: { storage }, storage,
+    boardRef, clock: { now: () => NOW_MS }, view: { storage }, storage,
     patchMeta: patch => calls.push(['meta', patch]), reportWriteFailure: () => calls.push(['failure']),
     setBoard: update => { boardRef.current = update(boardRef.current); }, setTimerSetupZoneId: value => calls.push(['setup', value]),
-    updateItem: (...args) => calls.push(['item', ...args]), extendedDeadline, finalizeVotingSession: id => calls.push(['finalize', id]),
+    updateItem: (...args) => calls.push(['item', ...args]), finalizeVotingSession: id => calls.push(['finalize', id]),
     replaceBoardLocal: board => { calls.push(['replace', board]); return true; }, setConfirmClear: value => calls.push(['clearConfirm', value]),
-    resetVoteSessionEntries, setConfirmResetVotes: value => calls.push(['resetConfirm', value]), setConfirmUnlockAll: value => calls.push(['unlockConfirm', value]), ...overrides };
-  return { controller: createController(options), boardRef, zone, storage, calls };
+    setConfirmResetVotes: value => calls.push(['resetConfirm', value]), setConfirmUnlockAll: value => calls.push(['unlockConfirm', value]), ...overrides };
+  return { controller: createAdminActions(options), boardRef, zone, storage, calls };
 }
 
 test('clear makes named phase/mood decisions and explicitly classifies every default field (INV-14)', () => {
@@ -38,8 +37,10 @@ test('clear makes named phase/mood decisions and explicitly classifies every def
   const h = harness(); h.controller.adminClearBoard();
   assert.deepEqual(h.calls.map(call => call[0]), ['votes', 'comments', 'replace', 'clearConfirm']);
   const next = h.calls[2][1];
-  assert.deepEqual(next, { ...h.boardRef.current, items: [], timer: null, lastResultsAt: null, allRevealed: false, votingLocked: false,
-    editingLocked: false, phase: null, moodCheck: null });
+  for (const key of RESET_FIELDS) {
+    assert.notDeepEqual(h.boardRef.current[key], DEFAULT_BOARD[key], `${key} fixture must be dirty`);
+    assert.deepEqual(next[key], DEFAULT_BOARD[key], `${key} must clear`);
+  }
   for (const key of PRESERVED_FIELDS) assert.equal(next[key], h.boardRef.current[key]);
 });
 
@@ -92,5 +93,4 @@ test('unlock and reset commit zone patches and close confirmation only after suc
   h.calls.length = 0; h.zone.voteTimer = { startedAt: 1 }; h.boardRef.current.items[0].voteTimer = h.zone.voteTimer;
   h.controller.adminResetVotes(); assert.equal(h.boardRef.current.items[0].voteTimer, null);
   assert.deepEqual(h.calls.slice(-3), [['meta', { lastResultsAt: null }], ['resetConfirm', false], ['toast', { msg: { key: 'reset.done' }, type: 'info' }]]);
-  h.controller.dispose();
 });

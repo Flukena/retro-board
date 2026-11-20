@@ -1,5 +1,5 @@
 import { useBoardShortcuts } from './src/client/board/use-board-shortcuts.js';
-import { createMinimapVisibility, useMinimapReveal, useMinimapNavigation, useMinimapKeys } from './src/client/board/use-minimap.js';
+import { clearMinimapHideTimer, useMinimapReveal, useMinimapNavigation, useMinimapKeys } from './src/client/board/use-minimap.js';
 import { useFinalizeVotingSession, useAdminToggle, useAdminStartTimer, useAdminExtendTimer, useAdminStopTimer, useAdminClearBoard, useAdminResetVotes, useAdminUnlockAll } from './src/client/board/use-admin-actions.js';
 import { createVoteSnapshotController, useVoteSnapshotsState, useVoteFlashes, useToggleVote, useRemoveItem } from './src/client/board/use-vote-state.js';
 import { useSelection, useFocusedSelection, useSingleSelection } from './src/client/board/use-selection.js';
@@ -9,7 +9,7 @@ import { RemoteCursorLayer } from './src/client/session/RemoteCursorLayer.jsx';
 import { usePresenceBroadcastState, usePresenceBroadcast } from './src/client/session/use-presence-broadcast.js';
 import { useEditingPresenceState, useEditingPresence, createLocalEditingPresence } from './src/client/session/use-editing-presence.js';
 import { BoardDialogs } from './src/client/ui/BoardDialogs.jsx';
-import { useTopBarProps } from './src/client/chrome/use-topbar-props.js';
+import { topBarProps } from './src/client/chrome/use-topbar-props.js';
 import { ZonePreview, EmptyCanvasHint, MarqueeSelection } from './src/client/board/CanvasOverlays.jsx';
 import { RemoteCollaborationLabels } from './src/client/board/RemoteCollaborationLabels.jsx';
 import { useBrowserZoomGuard } from './src/client/board/use-browser-zoom-guard.js';
@@ -407,7 +407,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
   }, [clearLocalCursor]);
 
   useEffect(() => () => {
-    createMinimapVisibility({ minimapPanelRef, minimapHideTimerRef, interactionRef }).dispose();
+    clearMinimapHideTimer(minimapHideTimerRef);
   }, []);
 
   // Snapped viewport — quantize pan/zoom so small movements don't invalidate
@@ -750,7 +750,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
   // are computed once across the largest session zone by topVotedRanks above.
   // Shared by both ways a voting session can end: deadline or admin stop.
   const finalizeVotingSession = useFinalizeVotingSession({
-    boardRef, setBoard, recentMoves: { forget: id => recentlyMovedRef.current.delete(id) },
+    boardRef, setBoard, recentMoves,
   }, []);
 
   /* ============================================================
@@ -1544,11 +1544,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
 
   const minimapViewport = {
     getViewport: () => viewportRef.current,
-    commitViewport: (next, options = {}) => {
-      if (options.live) liveApplyViewport(next);
-      else if (options.finish) setViewport(next);
-      else commitViewportImmediately(next);
-    },
+    previewViewport: liveApplyViewport,
+    finishViewport: setViewport,
+    commitViewport: commitViewportImmediately,
   };
   const minimapNavigationOptions = { viewport: minimapViewport, minimapModelRef, interactionRef,
     stopFollowing, settleWheelBeforeInteraction, activeViewportFinalizerRef };
@@ -2620,7 +2618,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
       setToast({ msg: t('topbar.shareLink', { code: share.manualCode }), type: 'info', sticky: true });
     }
   };
-  const topbarProps = useTopBarProps({
+  const buildTopBarProps = () => topBarProps({
     boardState: { board, undoState },
     session: { mode, boardCode, isAdmin, canClaim, userId, userName },
     collaboration: { presence, onlineUsers, followedUserId, votesUsedByUser, activeZoneVoteLimit },
@@ -2779,7 +2777,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
       {/* Floating UI */}
       <input ref={fileInputRef} type="file" accept="application/zip,.zip,application/json,.json,text/csv,.csv"
         onChange={onImportFileChange} style={{ display: 'none' }} />
-      <TopBar {...topbarProps} />
+      <TopBar {...buildTopBarProps()} />
       <TopCenterStack
         board={board} userId={userId} roomHandle={window.storage.getRoomHandle?.()} now={now}
         follow={stackFollow} presenter={stackPresenter} phase={stackPhase} mood={stackMood}

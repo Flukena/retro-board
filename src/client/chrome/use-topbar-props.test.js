@@ -4,7 +4,7 @@ import { withSsrModule } from '../../test-support/ssr-load.js';
 
 const SUBJECT = '/src/client/chrome/use-topbar-props.js';
 test('topbar props preserve roles, quota, command identities and guarded admin ordering', async () => {
-  await withSsrModule(SUBJECT, ({ useTopBarProps }) => {
+  await withSsrModule(SUBJECT, ({ topBarProps }) => {
     const events = [];
     const actions = Object.fromEntries(['setToast', 'copyRoomLink', 'doUndo', 'doRedo', 'adminToggle', 'adminClaim',
       'setNameDraft', 'setNameModalOpen', 'onImportPick', 'setHelpOpen', 'setConfirmUnlockAll', 'setConfirmResetVotes',
@@ -18,7 +18,7 @@ test('topbar props preserve roles, quota, command identities and guarded admin o
       appearance: { themePref: 'auto', setThemePref: value => events.push(['theme', value]), scrollWheelZoomEnabled: true, toggleScrollWheelZoom() {} },
       workflow: { presenter: {}, retroPhase: {}, mood: {}, boardExports: { marker: 'export' }, actionItems: { show() {}, openCount: 2 } }, actions,
     };
-    const props = useTopBarProps(input);
+    const props = topBarProps(input);
     assert.equal(props.title, 'Retro');
     assert.equal(props.canUndo, true);
     assert.equal(props.canRedo, false);
@@ -37,7 +37,7 @@ test('topbar props preserve roles, quota, command identities and guarded admin o
     assert.equal(events[0][1].type, 'warn');
     events.length = 0;
     input.session.isAdmin = true;
-    const admin = useTopBarProps(input);
+    const admin = topBarProps(input);
     admin.onUnlockAll(); admin.onResetVotes(); admin.onClear(); admin.onTransferAdmin('peer'); admin.onEditName();
     assert.deepEqual(events, [['setConfirmUnlockAll', true], ['setConfirmResetVotes', true], ['setConfirmClear', true],
       ['PIN'], ['adminTransfer', 'peer'], ['setNameDraft', 'Me'], ['setNameModalOpen', true]]);

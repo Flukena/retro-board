@@ -1,8 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createVoteFinalizationController } from './vote-finalization-controller.js';
-import { zoneGroupIds } from '../../domain/zone-actions.js';
-import { effectiveOwnerZone } from '../../domain/board-ownership.js';
 
 const NOW_MS = 1000;
 function harness(plan = { entries: [{ id: 'card', patch: { x: 80 } }, { id: 'zone', patch: { voteTimer: null } }] }) {
@@ -11,14 +9,14 @@ function harness(plan = { entries: [{ id: 'card', patch: { x: 80 } }, { id: 'zon
   const outside = { ...card, id: 'outside', x: 1000 };
   const boardRef = { current: { items: [zone, card, outside] } };
   const moves = new Set(['zone', 'card', 'outside']); const calls = [];
-  const recentMoves = { forget: id => { calls.push(['forget', id]); moves.delete(id); } };
+  const recentMoves = { forget: ids => { calls.push(['forget', ids]); ids.forEach(id => moves.delete(id)); } };
   const participants = ['me'];
   const storage = {
     getVoteResultParticipants() { assert.equal(this, storage); calls.push(['participants']); return participants; },
     finalizeVoteSession(...args) { assert.equal(this, storage); calls.push(['finalize', ...args]); return plan; },
   };
-  const controller = createVoteFinalizationController({ boardRef, zoneGroupIds, effectiveOwnerZone, recentMoves,
-    recentlyMovedRef: { current: { delete: recentMoves.forget } }, window: { storage }, Date: { now: () => NOW_MS },
+  const controller = createVoteFinalizationController({ boardRef, recentMoves,
+    view: { storage }, clock: { now: () => NOW_MS },
     setBoard: update => { calls.push(['board']); boardRef.current = update(boardRef.current); },
   });
   return { controller, boardRef, moves, calls, outside, zone };
@@ -26,10 +24,10 @@ function harness(plan = { entries: [{ id: 'card', patch: { x: 80 } }, { id: 'zon
 
 test('vote finalization forgets only its scope before committing and applies one optimistic plan', () => {
   const h = harness(); h.controller.finalizeVotingSession('zone');
-  assert.deepEqual(h.calls, [['forget', 'zone'], ['forget', 'card'], ['participants'], ['finalize', 'zone', 10, ['me'], NOW_MS], ['board']]);
+  assert.deepEqual(h.calls, [['forget', ['zone', 'card']], ['participants'], ['finalize', 'zone', 10, ['me'], NOW_MS], ['board']]);
   assert.deepEqual(h.moves, new Set(['outside']));
   assert.equal(h.boardRef.current.items[0].voteTimer, null); assert.equal(h.boardRef.current.items[1].x, 80);
-  assert.equal(h.boardRef.current.items[2], h.outside); h.controller.dispose();
+  assert.equal(h.boardRef.current.items[2], h.outside);
 });
 
 test('missing or ended session is inert; rejected plan preserves the board after forgetting scope', () => {

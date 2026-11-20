@@ -9,11 +9,11 @@ function fixture() {
   view.visualViewport = new EventTarget();
   view.devicePixelRatio = 2;
   let content = 'previous viewport';
-  const document = {
+  const ownerDocument = {
     body: { style: { zoom: '' } },
     querySelector: () => ({ getAttribute: () => content, setAttribute: (_name, value) => { content = value; } }),
   };
-  return { view, document, content: () => content };
+  return { view, ownerDocument, content: () => content };
 }
 function input(view, type, props) {
   const event = new Event(type, { cancelable: true });
@@ -35,22 +35,30 @@ test('zoom guard blocks only modified zoom inputs, counters DPR, restores metada
   assert.equal(input(f.view, 'wheel', {}), false);
   f.view.devicePixelRatio = 4;
   f.view.visualViewport.dispatchEvent(new Event('resize'));
-  assert.equal(f.document.body.style.zoom, '0.5');
+  assert.equal(f.ownerDocument.body.style.zoom, '0.5');
   guard.dispose();
   clock.advance(1000);
   assert.equal(clock.pendingCount(), 0);
   assert.equal(f.content(), 'previous viewport');
-  assert.equal(f.document.body.style.zoom, '');
+  assert.equal(f.ownerDocument.body.style.zoom, '');
   assert.equal(input(f.view, 'wheel', { ctrlKey: true }), false);
   f.view.dispatchEvent(new Event('resize'));
-  assert.equal(f.document.body.style.zoom, '');
+  assert.equal(f.ownerDocument.body.style.zoom, '');
 });
 
 test('zoom guard tolerates absent viewport metadata and visualViewport', () => {
   const f = fixture();
   f.view.visualViewport = null;
-  f.document.querySelector = () => null;
+  f.ownerDocument.querySelector = () => null;
   const guard = attachBrowserZoomGuard(f);
   guard.dispose();
-  assert.equal(f.document.body.style.zoom, '');
+  assert.equal(f.ownerDocument.body.style.zoom, '');
+});
+
+test('Landing gesture mode blocks all gestures and removes every listener on dispose', () => {
+  const f = fixture();
+  const guard = attachBrowserZoomGuard({ ...f, blockGestures: true });
+  for (const type of ['gesturestart', 'gesturechange', 'gestureend']) assert.equal(input(f.view, type, {}), true);
+  guard.dispose();
+  for (const type of ['gesturestart', 'gesturechange', 'gestureend']) assert.equal(input(f.view, type, {}), false);
 });

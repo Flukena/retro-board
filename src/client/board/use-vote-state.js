@@ -1,53 +1,63 @@
 import { useState, useCallback } from 'react';
-import { reuseSnapshotMap as reuseMap } from '../../domain/snapshot-references.js';
-import { activeVoteZone as voteZone } from '../../domain/vote-ownership.js';
+import { reuseSnapshotMap } from '../../domain/snapshot-references.js';
+import { activeVoteZone } from '../../domain/vote-ownership.js';
 import { t as translate } from '../ui/i18n.js';
 
-export function createVoteSnapshotController({ window = globalThis.window, setVotesByItem, setCommentsByItem, reuseSnapshotMap = reuseMap }) {
-    const voteHandler = () => {
-      if (typeof window !== 'undefined' && window.storage?.snapshotVotes) {
-        const next = window.storage.snapshotVotes();
-        setVotesByItem(previous => reuseSnapshotMap(previous, next));
-      }
-    };
-    const commentHandler = () => {
-      if (typeof window !== 'undefined' && window.storage?.snapshotComments) {
-        const next = window.storage.snapshotComments();
-        setCommentsByItem(previous => reuseSnapshotMap(previous, next));
-      }
-    };
+export function createVoteSnapshotController({
+  view = globalThis.window, setVotesByItem, setCommentsByItem,
+}) {
+  const voteHandler = () => {
+    if (typeof view !== 'undefined' && view.storage?.snapshotVotes) {
+      const next = view.storage.snapshotVotes();
+      setVotesByItem(previous => reuseSnapshotMap(previous, next));
+    }
+  };
+  const commentHandler = () => {
+    if (typeof view !== 'undefined' && view.storage?.snapshotComments) {
+      const next = view.storage.snapshotComments();
+      setCommentsByItem(previous => reuseSnapshotMap(previous, next));
+    }
+  };
 
-  return { refreshVotes: voteHandler, refreshComments: commentHandler, subscribe() {
-    if (typeof window !== 'undefined' && window.storage?.onVotesChange) {
-      window.storage.onVotesChange(voteHandler);
-    }
-    if (typeof window !== 'undefined' && window.storage?.onCommentsChange) {
-      window.storage.onCommentsChange(commentHandler);
-    }
-}, dispose() {
-      if (typeof window !== 'undefined' && window.storage?.offVotesChange) {
-        window.storage.offVotesChange(voteHandler);
+  return {
+    refreshVotes: voteHandler,
+    refreshComments: commentHandler,
+    subscribe() {
+      if (typeof view !== 'undefined' && view.storage?.onVotesChange) {
+        view.storage.onVotesChange(voteHandler);
       }
-      if (typeof window !== 'undefined' && window.storage?.offCommentsChange) {
-        window.storage.offCommentsChange(commentHandler);
+      if (typeof view !== 'undefined' && view.storage?.onCommentsChange) {
+        view.storage.onCommentsChange(commentHandler);
       }
-} };
+    },
+    dispose() {
+      if (typeof view !== 'undefined' && view.storage?.offVotesChange) {
+        view.storage.offVotesChange(voteHandler);
+      }
+      if (typeof view !== 'undefined' && view.storage?.offCommentsChange) {
+        view.storage.offCommentsChange(commentHandler);
+      }
+    },
+  };
 }
 
-export function createController({boardRef, activeVoteZone = voteZone, Date = globalThis.Date, setToast, t = translate, window = globalThis.window, userId, flashVote, setBoard, storage, setSelectedIds, focusedTextIdRef, updateFocusedText}) {
+export function createVoteStateController({
+  boardRef, clock = globalThis.Date, setToast, t = translate, view = globalThis.window, userId,
+  flashVote, setBoard, storage, setSelectedIds, focusedTextIdRef, updateFocusedText,
+}) {
   const toggleVote = (it) => {
     const items = boardRef.current.items;
-    const voteZone = activeVoteZone(it, items, Date.now());
+    const voteZone = activeVoteZone(it, items, clock.now());
     const zTimer = voteZone?.voteTimer;
     const allowed = !!voteZone && !voteZone.votingLocked;
     if (!allowed) {
       setToast({ msg: t('vote.notStarted'), type: 'warn' });
       return;
     }
-    if (!window.storage?.setVote) return;
+    if (!view.storage?.setVote) return;
     // Read the live Yjs snapshot (not React state) so rapid clicks and
     // concurrent remote writes see the latest value.
-    const live = window.storage.snapshotVotes();
+    const live = view.storage.snapshotVotes();
     const has = !!live.get(it.id)?.has(userId);
     if (!has && zTimer.voteLimit != null) {
       let used = 0;
@@ -57,29 +67,29 @@ export function createController({boardRef, activeVoteZone = voteZone, Date = gl
       live.forEach((set, id) => {
         if (!set.has(userId)) return;
         const votedItem = items.find((i) => i.id === id);
-        if (votedItem && activeVoteZone(votedItem, items, Date.now())) used += 1;
+        if (votedItem && activeVoteZone(votedItem, items, clock.now())) used += 1;
       });
       if (used >= zTimer.voteLimit) {
         setToast({ msg: t('vote.outOfQuota'), type: 'warn' });
         return;
       }
     }
-    window.storage.setVote(it.id, userId, !has);
+    view.storage.setVote(it.id, userId, !has);
     if (!has) flashVote(it.id);
   };
   const removeItemUnchecked = (id) => {
     // One Yjs transaction so Cmd+Z restores the item and its related state together.
     // Falls back to the two-call path if the bridge is an older build that
     // doesn't expose the combined helper yet.
-    if (window.storage?.deleteItemWithVotesAndComments) {
-      window.storage.deleteItemWithVotesAndComments(id);
+    if (view.storage?.deleteItemWithVotesAndComments) {
+      view.storage.deleteItemWithVotesAndComments(id);
       // React state still needs to drop the item — the deepObserver fires a
       // synthetic boardState change, but only for non-local origins. Our own
       // delete is 'local', so do it explicitly here.
       setBoard((prev) => ({ ...prev, items: prev.items.filter((it) => it.id !== id) }));
     } else {
-      window.storage?.clearVotesFor?.(id);
-      window.storage?.clearCommentsForItems?.([id]);
+      view.storage?.clearVotesFor?.(id);
+      view.storage?.clearCommentsForItems?.([id]);
       setBoard((prev) => ({ ...prev, items: prev.items.filter((it) => it.id !== id) }));
       storage.removeItem(id);
     }
@@ -91,7 +101,7 @@ export function createController({boardRef, activeVoteZone = voteZone, Date = gl
     });
     if (focusedTextIdRef.current?.startsWith(`${id}:`)) updateFocusedText(null);
   };
-  return {toggleVote,removeItemUnchecked, dispose() {}};
+  return { toggleVote, removeItemUnchecked };
 }
 
 const VOTE_FLASH_MS = 900;
@@ -133,15 +143,20 @@ export function useVoteSnapshotsState() {
 export function useVoteFlashes() {
   const [state, setState] = useState(() => ({ flashes: {}, controller: createVoteFlashController() }));
   const flashVote = useCallback(itemId => state.controller.flash(itemId, update => {
-    setState(previous => ({ ...previous, flashes: update(previous.flashes) }));
+    setState(previous => updateVoteFlashState(previous, update));
   }), []);
   return { voteFlashes: state.flashes, flashVote, disposeVoteFlashes: state.controller.dispose };
 }
 
 export function useToggleVote(options, dependencies) {
-  return useCallback(createController(options).toggleVote, dependencies);
+  return useCallback(createVoteStateController(options).toggleVote, dependencies);
 }
 
 export function useRemoveItem(options, dependencies) {
-  return useCallback(createController(options).removeItemUnchecked, dependencies);
+  return useCallback(createVoteStateController(options).removeItemUnchecked, dependencies);
+}
+
+export function updateVoteFlashState(previous, update) {
+  const flashes = update(previous.flashes);
+  return flashes === previous.flashes ? previous : { ...previous, flashes };
 }

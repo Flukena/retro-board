@@ -1,12 +1,17 @@
 import { createVoteFinalizationController } from './vote-finalization-controller.js';
 import { useCallback } from 'react';
 import { t as translate } from '../ui/i18n.js';
-import { CLEARED_VOTE_RESULTS as clearedResults, voteSessionScope as sessionScope, resetVoteSessionEntries as resetEntries } from '../../domain/vote-session-lifecycle.js';
-import { extendedDeadline as extendDeadline } from '../../domain/countdown.js';
+import { CLEARED_VOTE_RESULTS, voteSessionScope, resetVoteSessionEntries } from '../../domain/vote-session-lifecycle.js';
+import { extendedDeadline } from '../../domain/countdown.js';
 
 const MINUTE_MS = 60000;
 
-export function createController({isAdmin, setToast, t = translate, patchMeta, boardRef, Date = globalThis.Date, voteSessionScope = sessionScope, CLEARED_VOTE_RESULTS = clearedResults, window = globalThis.window, reportWriteFailure, setBoard, setTimerSetupZoneId, updateItem, extendedDeadline = extendDeadline, finalizeVotingSession, replaceBoardLocal, setConfirmClear, resetVoteSessionEntries = resetEntries, storage, setConfirmResetVotes, setConfirmUnlockAll}) {
+export function createAdminActions({
+  isAdmin, setToast, t = translate, patchMeta, boardRef, clock = globalThis.Date,
+  view = globalThis.window, reportWriteFailure, setBoard, setTimerSetupZoneId, updateItem,
+  finalizeVotingSession, replaceBoardLocal, setConfirmClear, storage, setConfirmResetVotes,
+  setConfirmUnlockAll,
+}) {
   const adminToggle = (key) => {
     if (!isAdmin) { setToast({ msg: t('common.adminOnly'), type: 'warn' }); return; }
     // patchMeta writes the single flipped flag immediately — no debounce window
@@ -18,7 +23,7 @@ export function createController({isAdmin, setToast, t = translate, patchMeta, b
     const items = boardRef.current.items;
     const rootZone = items.find((i) => i.id === zoneId && i.type === 'zone');
     if (!rootZone) return;
-    const nowMs = Date.now();
+    const nowMs = clock.now();
     // Expired-but-unfinalized timers still block related starts.
     const { relatedActive, capturedIds, staleResultZoneIds } = voteSessionScope(rootZone, items);
     if (relatedActive) {
@@ -36,7 +41,7 @@ export function createController({isAdmin, setToast, t = translate, patchMeta, b
       votingLocked: false,
     };
     try {
-      if (window.storage.startVoteSession(zoneId, timerPatch, staleResultZoneIds, capturedIds) !== true) {
+      if (view.storage.startVoteSession(zoneId, timerPatch, staleResultZoneIds, capturedIds) !== true) {
         reportWriteFailure();
         return;
       }
@@ -65,7 +70,7 @@ export function createController({isAdmin, setToast, t = translate, patchMeta, b
     if (!isAdmin) return;
     const zone = boardRef.current.items.find((i) => i.id === zoneId && i.type === 'zone');
     if (!zone?.voteTimer) return;
-    updateItem(zoneId, { voteTimer: { ...zone.voteTimer, endsAt: extendedDeadline(zone.voteTimer.endsAt, Date.now(), minutes) } });
+    updateItem(zoneId, { voteTimer: { ...zone.voteTimer, endsAt: extendedDeadline(zone.voteTimer.endsAt, clock.now(), minutes) } });
   };
   const adminStopTimer = (zoneId) => {
     if (!isAdmin) return;
@@ -75,8 +80,8 @@ export function createController({isAdmin, setToast, t = translate, patchMeta, b
   };
   const adminClearBoard = () => {
     if (!isAdmin) return;
-    window.storage?.clearAllVotes?.();
-    window.storage?.clearAllComments?.();
+    view.storage?.clearAllVotes?.();
+    view.storage?.clearAllComments?.();
     // Full replace: drop every item, reset session meta, preserve admin identity.
     if (!replaceBoardLocal({
       ...boardRef.current,
@@ -93,7 +98,7 @@ export function createController({isAdmin, setToast, t = translate, patchMeta, b
   const adminResetVotes = () => {
     if (!isAdmin) return;
     // Votes live in CRDT keys; clearing them re-renders via the vote subscription.
-    window.storage?.clearAllVotes?.();
+    view.storage?.clearAllVotes?.();
     const zoneEntries = resetVoteSessionEntries(boardRef.current.items);
     if (zoneEntries.length) {
       if (!storage.updateItems(zoneEntries)) { reportWriteFailure(); return; }
@@ -128,35 +133,35 @@ export function createController({isAdmin, setToast, t = translate, patchMeta, b
     setConfirmUnlockAll(false);
     setToast({ msg: t('unlockAll.done'), type: 'info' });
   };
-  return {adminToggle,adminStartTimer,adminExtendTimer,adminStopTimer,adminClearBoard,adminResetVotes,adminUnlockAll, dispose() {}};
+  return { adminToggle, adminStartTimer, adminExtendTimer, adminStopTimer, adminClearBoard, adminResetVotes, adminUnlockAll };
 }
 
 export function useAdminToggle(options, dependencies) {
-  return useCallback(createController(options).adminToggle, dependencies);
+  return useCallback(createAdminActions(options).adminToggle, dependencies);
 }
 
 export function useAdminStartTimer(options, dependencies) {
-  return useCallback(createController(options).adminStartTimer, dependencies);
+  return useCallback(createAdminActions(options).adminStartTimer, dependencies);
 }
 
 export function useAdminExtendTimer(options, dependencies) {
-  return useCallback(createController(options).adminExtendTimer, dependencies);
+  return useCallback(createAdminActions(options).adminExtendTimer, dependencies);
 }
 
 export function useAdminStopTimer(options, dependencies) {
-  return useCallback(createController(options).adminStopTimer, dependencies);
+  return useCallback(createAdminActions(options).adminStopTimer, dependencies);
 }
 
 export function useAdminClearBoard(options, dependencies) {
-  return useCallback(createController(options).adminClearBoard, dependencies);
+  return useCallback(createAdminActions(options).adminClearBoard, dependencies);
 }
 
 export function useAdminResetVotes(options, dependencies) {
-  return useCallback(createController(options).adminResetVotes, dependencies);
+  return useCallback(createAdminActions(options).adminResetVotes, dependencies);
 }
 
 export function useAdminUnlockAll(options, dependencies) {
-  return useCallback(createController(options).adminUnlockAll, dependencies);
+  return useCallback(createAdminActions(options).adminUnlockAll, dependencies);
 }
 
 export function useFinalizeVotingSession(options, dependencies) {

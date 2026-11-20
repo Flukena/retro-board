@@ -1,19 +1,19 @@
+import { routeBoardKey } from './board-key-router.js';
+import { ZOOM_STEP_FACTOR } from '../../domain/viewport-zoom.js';
 import { useEffect } from 'react';
-import { routeBoardKey as routeKey } from './board-key-router.js';
-import { ZOOM_STEP_FACTOR as ZOOM_FACTOR } from '../../domain/viewport-zoom.js';
 import { t as translate } from '../ui/i18n.js';
 
 const BLOCKED_TARGETS = 'input, textarea, select, [contenteditable="true"], [role="dialog"], [data-board-shortcuts="off"]';
 
-function routingState(event, state, document, Element) {
+function routingState(event, state, ownerDocument, elementType) {
   return {
     focusedText: state.focusedTextIdRef.current, nameModal: state.nameModalOpen, commentsOpen: state.commentsOpenReadable,
     get targetBlocked() {
-      const element = event.target instanceof Element ? event.target : null;
+      const element = event.target instanceof elementType ? event.target : null;
       return !!element?.closest(BLOCKED_TARGETS);
     },
     following: state.followedUserIdRef.current,
-    get dialogOpen() { return !!document.querySelector('[role="dialog"]'); },
+    get dialogOpen() { return !!ownerDocument.querySelector('[role="dialog"]'); },
     tools: Object.keys(state.shortcutToolHandlersRef.current), interacting: state.interactionRef.current !== null,
     creating: state.creationModeRef.current, selected: state.selectedIds.size > 0, clipboard: state.clipboardRef.current?.length > 0,
   };
@@ -42,14 +42,14 @@ function selectionHandlers(state, commands, translate) {
   };
 }
 
-function actionHandlers(state, commands, translate, zoomFactor) {
+function actionHandlers(state, commands, translate) {
   const singleId = () => state.selectedIds.size === 1 ? [...state.selectedIds][0] : null;
   return {
     ...selectionHandlers(state, commands, translate),
     fitContent: () => commands.fitToContent(),
     fitSelection: () => commands.fitToSelection(),
-    zoomIn: () => commands.zoomBy(zoomFactor),
-    zoomOut: () => commands.zoomBy(1 / zoomFactor),
+    zoomIn: () => commands.zoomBy(ZOOM_STEP_FACTOR),
+    zoomOut: () => commands.zoomBy(1 / ZOOM_STEP_FACTOR),
     zoomReset: () => commands.resetZoom(),
     front: () => commands.bringToFront(state.selectedIds),
     back: () => commands.sendToBack(state.selectedIds),
@@ -61,11 +61,11 @@ function actionHandlers(state, commands, translate, zoomFactor) {
   };
 }
 
-export function createBoardShortcuts({ state, commands, view = globalThis.window, document = globalThis.document,
-  Element = globalThis.Element, routeBoardKey = routeKey, t = translate, ZOOM_STEP_FACTOR = ZOOM_FACTOR }) {
-  const handlers = actionHandlers(state, commands, t, ZOOM_STEP_FACTOR);
+export function createBoardShortcuts({ state, commands, view = globalThis.window, ownerDocument = globalThis.document,
+  elementType = globalThis.Element, t = translate }) {
+  const handlers = actionHandlers(state, commands, t);
   const onKey = event => {
-    const { action, preventDefault } = routeBoardKey(event, routingState(event, state, document, Element));
+    const { action, preventDefault } = routeBoardKey(event, routingState(event, state, ownerDocument, elementType));
     if (preventDefault) event.preventDefault();
     if (!action) return;
     if (action === 'closeComments') { commands.setCommentsOpenFor(null); return; }

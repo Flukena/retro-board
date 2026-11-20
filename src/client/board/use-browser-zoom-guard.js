@@ -2,54 +2,61 @@ import { useEffect } from 'react';
 import { APP_VIEWPORT_CONTENT } from '../ui/mobile-layout.js';
 
 const DPR_ZOOM_TOLERANCE = 0.01;
+const GESTURE_EVENTS = ['gesturestart', 'gesturechange', 'gestureend'];
 const ZOOM_KEYS = ['+', '-', '=', '0'];
 
-export function attachBrowserZoomGuard({ view = globalThis.window, document = globalThis.document } = {}) {
-    const meta = document.querySelector('meta[name="viewport"]');
-    const prevContent = meta?.getAttribute('content') || '';
-    if (meta) {
-      meta.setAttribute(
-        'content',
-        APP_VIEWPORT_CONTENT,
-      );
-    }
+export function attachBrowserZoomGuard({
+  view = globalThis.window, ownerDocument = globalThis.document, blockGestures = false,
+} = {}) {
+  const meta = ownerDocument.querySelector('meta[name="viewport"]');
+  const prevContent = meta?.getAttribute('content') || '';
+  if (meta) {
+    meta.setAttribute(
+      'content',
+      APP_VIEWPORT_CONTENT,
+    );
+  }
 
-    const onWheel = (e) => {
-      // Canvas already preventDefaults its own wheel; this stops zoom
-      // when pinch/ctrl-wheel happens over toolbars or modals.
-      if (e.ctrlKey || e.metaKey) e.preventDefault();
-    };
-    const onKeyDown = (e) => {
-      if (!(e.ctrlKey || e.metaKey)) return;
-      if (ZOOM_KEYS.includes(e.key)) e.preventDefault();
-    };
+  const onWheel = (e) => {
+    // Canvas already preventDefaults its own wheel; this stops zoom
+    // when pinch/ctrl-wheel happens over toolbars or modals.
+    if (e.ctrlKey || e.metaKey) e.preventDefault();
+  };
+  const onKeyDown = (e) => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    if (ZOOM_KEYS.includes(e.key)) e.preventDefault();
+  };
 
-    view.addEventListener('wheel', onWheel, { passive: false });
-    view.addEventListener('keydown', onKeyDown);
+  const onGesture = event => event.preventDefault();
+  if (blockGestures) GESTURE_EVENTS.forEach(type => view.addEventListener(type, onGesture));
 
-    const baseDPR = view.devicePixelRatio || 1;
-    const counterZoom = () => {
-      const ratio = (view.devicePixelRatio || 1) / baseDPR;
-      document.body.style.zoom = Math.abs(ratio - 1) > DPR_ZOOM_TOLERANCE ? String(1 / ratio) : '';
-    };
-    counterZoom();
-    view.addEventListener('resize', counterZoom);
-    view.visualViewport?.addEventListener('resize', counterZoom);
+  view.addEventListener('wheel', onWheel, { passive: false });
+  view.addEventListener('keydown', onKeyDown);
 
-    const dispose = () => {
-      if (meta) meta.setAttribute('content', prevContent);
-      view.removeEventListener('wheel', onWheel);
-      view.removeEventListener('keydown', onKeyDown);
-      view.removeEventListener('resize', counterZoom);
-      view.visualViewport?.removeEventListener('resize', counterZoom);
-      document.body.style.zoom = '';
-    };
-    return { dispose };
+  const baseDPR = view.devicePixelRatio || 1;
+  const counterZoom = () => {
+    const ratio = (view.devicePixelRatio || 1) / baseDPR;
+    ownerDocument.body.style.zoom = Math.abs(ratio - 1) > DPR_ZOOM_TOLERANCE ? String(1 / ratio) : '';
+  };
+  counterZoom();
+  view.addEventListener('resize', counterZoom);
+  view.visualViewport?.addEventListener('resize', counterZoom);
+
+  const dispose = () => {
+    if (meta) meta.setAttribute('content', prevContent);
+    if (blockGestures) GESTURE_EVENTS.forEach(type => view.removeEventListener(type, onGesture));
+    view.removeEventListener('wheel', onWheel);
+    view.removeEventListener('keydown', onKeyDown);
+    view.removeEventListener('resize', counterZoom);
+    view.visualViewport?.removeEventListener('resize', counterZoom);
+    ownerDocument.body.style.zoom = '';
+  };
+  return { dispose };
 }
 
-export function useBrowserZoomGuard() {
+export function useBrowserZoomGuard(options) {
   useEffect(() => {
-    const guard = attachBrowserZoomGuard();
+    const guard = attachBrowserZoomGuard(options);
     return () => guard.dispose();
   }, []);
 }

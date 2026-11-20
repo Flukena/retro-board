@@ -1,8 +1,12 @@
 import { useCallback } from 'react';
-import { readBoardImport as readImport, prepareBoardImport as prepareImport, ImportBundleLimitError as BundleLimitError } from './board-transfer.js';
+import { readBoardImport as readImport, prepareBoardImport as prepareImport, ImportBundleLimitError } from './board-transfer.js';
 import { t as translate } from '../ui/i18n.js';
 
-export function createController({isAdmin, fileInputRef, setToast, setPendingImport, pendingImport, importBusy, setImportBusy, boardRef, setBoard, readBoardImport = readImport, prepareBoardImport = prepareImport, ImportBundleLimitError = BundleLimitError, t = translate, window = globalThis.window}) {
+export function createBoardImport({
+  isAdmin, fileInputRef, setToast, setPendingImport, pendingImport, importBusy, setImportBusy,
+  boardRef, setBoard, readBoardImport = readImport, prepareBoardImport = prepareImport,
+  t = translate, view = globalThis.window,
+}) {
   const onImportPick = () => {
     if (!isAdmin) { setToast({ msg: t('common.adminOnly'), type: 'warn' }); return; }
     fileInputRef.current?.click();
@@ -34,7 +38,7 @@ export function createController({isAdmin, fileInputRef, setToast, setPendingImp
       });
       return;
     }
-    const imported = window.storage?.importBundle?.(
+    const imported = view.storage?.importBundle?.(
       nextBoard, voteEntries, commentEntries, importedTemplates, moodEntries,
     );
     if (!imported) {
@@ -51,17 +55,17 @@ export function createController({isAdmin, fileInputRef, setToast, setPendingImp
       type: 'info',
     });
   };
-  return {onImportPick,onImportFileChange,confirmImport, dispose() {}};
+  return { onImportPick, onImportFileChange, confirmImport };
 }
 
 export function useOnImportPick(options, dependencies) {
-  return useCallback(createController(options).onImportPick, dependencies);
+  return useCallback(createBoardImport(options).onImportPick, dependencies);
 }
 
 export function useOnImportFileChange(options, dependencies) {
-  return useCallback(createController(options).onImportFileChange, dependencies);
+  return useCallback(createBoardImport(options).onImportFileChange, dependencies);
 }
 
 export function useConfirmImport(options, dependencies) {
-  return useCallback(createController(options).confirmImport, dependencies);
+  return useCallback(createBoardImport(options).confirmImport, dependencies);
 }
