@@ -7,9 +7,6 @@ const LOADING_RETURN = 'if (!loaded) return <BoardLoading />;';
 // Production presence owner replaced these refs/callbacks without moving effects.
 const BASE_PRESENCE_REF_COUNT = 7;
 const BASE_PRESENCE_CALLBACK_COUNT = 5;
-// Base 83a7892 cursor/view channels had seven refs and five callbacks.
-const LEGACY_PRESENCE_REF_COUNT = 7;
-const LEGACY_PRESENCE_CALLBACK_COUNT = 5;
 const HOOK_CALL = /\buse[A-Z]\w*\s*\(/;
 // Compare against production 83a7892, expanding extracted owners at their original seams.
 const WRAPPERS = new Map([
