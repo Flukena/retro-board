@@ -1,6 +1,6 @@
 import { useBoardShortcuts } from './src/client/board/use-board-shortcuts.js';
 import { createMinimapVisibility, useMinimapReveal, useMinimapNavigation, useMinimapKeys } from './src/client/board/use-minimap.js';
-import { useAdminToggle, useAdminStartTimer, useAdminExtendTimer, useAdminStopTimer, useAdminClearBoard, useAdminResetVotes, useAdminUnlockAll } from './src/client/board/use-admin-actions.js';
+import { useFinalizeVotingSession, useAdminToggle, useAdminStartTimer, useAdminExtendTimer, useAdminStopTimer, useAdminClearBoard, useAdminResetVotes, useAdminUnlockAll } from './src/client/board/use-admin-actions.js';
 import { createVoteSnapshotController, useVoteSnapshotsState, useVoteFlashes, useToggleVote, useRemoveItem } from './src/client/board/use-vote-state.js';
 import { useSelection, useFocusedSelection, useSingleSelection } from './src/client/board/use-selection.js';
 import { useImageImport } from './src/client/transfer/use-image-import.js';
@@ -765,22 +765,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
   // category membership while ordering each layout by vote count. Medal ranks
   // are computed once across the largest session zone by topVotedRanks above.
   // Shared by both ways a voting session can end: deadline or admin stop.
-  const finalizeVotingSession = useCallback((zoneId) => {
-    const b = boardRef.current;
-    const rootZone = b.items.find((i) => i.id === zoneId && i.type === 'zone');
-    if (!rootZone?.voteTimer) return;
-    const group = zoneGroupIds(rootZone, b.items);
-    b.items.filter((item) => group.has(item.id) || group.has(effectiveOwnerZone(item, b.items)?.id))
-      .forEach((item) => recentlyMovedRef.current.delete(item.id));
-    const plan = window.storage.finalizeVoteSession(zoneId, rootZone.voteTimer.startedAt, window.storage.getVoteResultParticipants(), Date.now());
-    if (!plan) return;
-    const patchById = new Map(plan.entries.map((entry) => [entry.id, entry.patch]));
-    setBoard((prev) => ({
-      ...prev,
-      items: prev.items.map((item) => (
-        patchById.has(item.id) ? { ...item, ...patchById.get(item.id) } : item
-      )),
-    }));
+  const finalizeVotingSession = useFinalizeVotingSession({
+    boardRef, setBoard, recentMoves: { forget: id => recentlyMovedRef.current.delete(id) },
   }, []);
 
   /* ============================================================

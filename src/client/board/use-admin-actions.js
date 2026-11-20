@@ -1,3 +1,4 @@
+import { createVoteFinalizationController } from './vote-finalization-controller.js';
 import { useCallback } from 'react';
 import { t as translate } from '../ui/i18n.js';
 import { CLEARED_VOTE_RESULTS as clearedResults, voteSessionScope as sessionScope, resetVoteSessionEntries as resetEntries } from '../../domain/vote-session-lifecycle.js';
@@ -156,4 +157,8 @@ export function useAdminResetVotes(options, dependencies) {
 
 export function useAdminUnlockAll(options, dependencies) {
   return useCallback(createController(options).adminUnlockAll, dependencies);
+}
+
+export function useFinalizeVotingSession(options, dependencies) {
+  return useCallback(createVoteFinalizationController(options).finalizeVotingSession, dependencies);
 }
