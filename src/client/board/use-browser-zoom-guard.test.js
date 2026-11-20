@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { APP_VIEWPORT_CONTENT } from '../ui/mobile-layout.js';
 import { attachBrowserZoomGuard } from './use-browser-zoom-guard.js';
 import { createFakeClock } from '../../test-support/fake-clock.js';
 
@@ -26,7 +27,7 @@ test('zoom guard blocks only modified zoom inputs, counters DPR, restores metada
   const clock = createFakeClock();
   const f = fixture();
   const guard = attachBrowserZoomGuard(f);
-  assert.notEqual(f.content(), 'previous viewport');
+  assert.equal(f.content(), APP_VIEWPORT_CONTENT);
   for (const modifier of ['ctrlKey', 'metaKey']) {
     assert.equal(input(f.view, 'wheel', { [modifier]: true }), true);
     for (const key of ['+', '-', '=', '0']) assert.equal(input(f.view, 'keydown', { [modifier]: true, key }), true);
