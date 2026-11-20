@@ -26,29 +26,29 @@ export function createWsConnectionHandler({ config, accounting, docs, Y, PUBLIC_
   const createMessageHandler = ({ doc, docName, conn, context, meter, clientIp, req, parseYjsMessage }) => {
     let limited = false;
     return function onMessage(data) {
-    if (limited || roomFence.isFenced(docName)) return;
-    const size = data?.byteLength ?? data?.length ?? 0;
-    if (!meter.admitIngress(size)
-        || accounting.pendingStoreOps >= MAX_PENDING_STORE_OPS
-        || accounting.pendingStoreBytes >= MAX_PENDING_STORE_BYTES) {
-      limited = true;
-      rejectIngress(conn, req, docName, size);
-      return;
-    }
-    let inspection;
-    let awarenessPlan = null;
-    try {
-      ({ inspection, awarenessPlan } = inspectMessage(data, { doc, docName, conn, context, meter, clientIp }));
-      if (awarenessPlan?.dropFrame) return;
-    } catch (err) {
-      limited = true;
-      rejectProtocol(conn, docName, size, err);
-      return;
-    }
-    parseYjsMessage(data);
-    if (PUBLIC_WALL && inspection.kind === 'sync-update') notifyPublicQuota(doc, clientIp, conn);
-    if (awarenessPlan) commitAwarenessPlan(context, awarenessPlan);
-    wsTraffic.closeSlowConsumers(doc.conns.keys());
+      if (limited || roomFence.isFenced(docName)) return;
+      const size = data?.byteLength ?? data?.length ?? 0;
+      if (!meter.admitIngress(size)
+          || accounting.pendingStoreOps >= MAX_PENDING_STORE_OPS
+          || accounting.pendingStoreBytes >= MAX_PENDING_STORE_BYTES) {
+        limited = true;
+        rejectIngress(conn, req, docName, size);
+        return;
+      }
+      let inspection;
+      let awarenessPlan = null;
+      try {
+        ({ inspection, awarenessPlan } = inspectMessage(data, { doc, docName, conn, context, meter, clientIp }));
+        if (awarenessPlan?.dropFrame) return;
+      } catch (err) {
+        limited = true;
+        rejectProtocol(conn, docName, size, err);
+        return;
+      }
+      parseYjsMessage(data);
+      if (PUBLIC_WALL && inspection.kind === 'sync-update') notifyPublicQuota(doc, clientIp, conn);
+      if (awarenessPlan) commitAwarenessPlan(context, awarenessPlan);
+      wsTraffic.closeSlowConsumers(doc.conns.keys());
     };
   };
 
