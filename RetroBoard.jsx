@@ -1,3 +1,4 @@
+import { useBoardShortcuts } from './src/client/board/use-board-shortcuts.js';
 import { createMinimapVisibility, useMinimapReveal, useMinimapNavigation, useMinimapKeys } from './src/client/board/use-minimap.js';
 import { useAdminToggle, useAdminStartTimer, useAdminExtendTimer, useAdminStopTimer, useAdminClearBoard, useAdminResetVotes, useAdminUnlockAll } from './src/client/board/use-admin-actions.js';
 import { createVoteSnapshotController, useVoteSnapshotsState, useVoteFlashes, useToggleVote, useRemoveItem } from './src/client/board/use-vote-state.js';
@@ -13,7 +14,6 @@ import { ZonePreview, EmptyCanvasHint, MarqueeSelection } from './src/client/boa
 import { RemoteCollaborationLabels } from './src/client/board/RemoteCollaborationLabels.jsx';
 import { useBrowserZoomGuard } from './src/client/board/use-browser-zoom-guard.js';
 import { resizeGeometry } from './src/domain/resize-geometry.js';
-import { routeBoardKey } from './src/client/board/board-key-router.js';
 import { undoBlockReason } from './src/domain/undo-guard.js';
 import { createStickyItem, createTextItem, createZoneItem, createImageItem } from './src/domain/item-factory.js';
 import { filterLockedZoneMoves } from './src/domain/zone-move-lock.js';
@@ -2195,66 +2195,9 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
   /* ============================================================
      Keyboard
      ============================================================ */
-  useEffect(() => {
-    const onKey = (e) => {
-      const { action, preventDefault } = routeBoardKey(e, {
-        focusedText: focusedTextIdRef.current, nameModal: nameModalOpen, commentsOpen: commentsOpenReadable,
-        get targetBlocked() {
-          const el = e.target instanceof Element ? e.target : null;
-          return !!el?.closest('input, textarea, select, [contenteditable="true"], [role="dialog"], [data-board-shortcuts="off"]');
-        },
-        following: followedUserIdRef.current,
-        get dialogOpen() { return !!document.querySelector('[role="dialog"]'); },
-        tools: Object.keys(shortcutToolHandlersRef.current), interacting: interactionRef.current !== null,
-        creating: creationModeRef.current, selected: selectedIds.size > 0, clipboard: clipboardRef.current?.length > 0,
-      });
-      if (preventDefault) e.preventDefault();
-      if (!action) return;
-      if (action === 'closeComments') { setCommentsOpenFor(null); return; }
-      if (action === 'stopFollowing') { stopFollowing(); return; }
-      if (shortcutToolHandlersRef.current[action]) { shortcutToolHandlersRef.current[action](); return; }
-      if (action === 'fitContent') { fitToContent(); return; }
-      if (action === 'fitSelection') { fitToSelection(); return; }
-      if (action === 'zoomIn') { zoomBy(ZOOM_STEP_FACTOR); return; }
-      if (action === 'zoomOut') { zoomBy(1 / ZOOM_STEP_FACTOR); return; }
-      if (action === 'zoomReset') { resetZoom(); return; }
-      if (action === 'front' || action === 'back') {
-        if (action === 'front') bringToFront(selectedIds);
-        else sendToBack(selectedIds);
-        return;
-      }
-      if (action === 'forward' || action === 'backward') {
-        const id = selectedIds.size === 1 ? [...selectedIds][0] : null;
-        if (action === 'forward') bringForward(id);
-        else sendBackward(id);
-        return;
-      }
-      if (action === 'cancelCreation') { setCreationMode(null); setZonePreview(null); return; }
-      if (action === 'clearSelection') setSelectedIds(new Set());
-      if (action === 'delete' && selectedIds.size > 0) {
-        deleteItemsIfAllowed(selectedIds);
-      }
-      if (action === 'undo') { doUndo(); return; }
-      if (action === 'redo') { doRedo(); return; }
-      if ((action === 'copy' || action === 'cut') && selectedIds.size > 0) {
-        const picked = boardRef.current.items.filter((it) => selectedIds.has(it.id));
-        if (action === 'cut' && !deleteItemsIfAllowed(picked.map((it) => it.id))) return;
-        clipboardRef.current = picked.map((it) => ({ ...it }));
-        setToast({ msg: t('copy.done', { n: picked.length }), type: 'info' });
-      }
-      if (action === 'paste' && clipboardRef.current?.length) {
-        duplicateItems(clipboardRef.current);
-      }
-      if (action === 'duplicate' && selectedIds.size > 0) {
-        const picked = boardRef.current.items.filter((it) => selectedIds.has(it.id));
-        duplicateItems(picked);
-      }
-      if (action === 'selectAll') {
-        setSelectedIds(new Set(boardRef.current.items.map((it) => it.id)));
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+  useBoardShortcuts({
+    state: { focusedTextIdRef, nameModalOpen, commentsOpenReadable, followedUserIdRef, shortcutToolHandlersRef, interactionRef, creationModeRef, selectedIds, clipboardRef, boardRef },
+    commands: { setCommentsOpenFor, stopFollowing, fitToContent, fitToSelection, zoomBy, resetZoom, bringToFront, sendToBack, bringForward, sendBackward, setCreationMode, setZonePreview, setSelectedIds, deleteItemsIfAllowed, doUndo, doRedo, duplicateItems, setToast },
   }, [
     nameModalOpen, commentsOpenReadable, selectedIds, deleteItemsIfAllowed, duplicateItems, doUndo, doRedo,
     fitToContent, fitToSelection, zoomBy, resetZoom,

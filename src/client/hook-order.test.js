@@ -7,6 +7,7 @@ const LOADING_RETURN = 'if (!loaded) return <BoardLoading />;';
 const HOOK_CALL = /\buse[A-Z]\w*\s*\(/;
 // Expand only new batch-B wrappers; the fixture records the unmoved hook sequence.
 const WRAPPERS = new Map([
+  ['useBoardShortcuts', ['board/use-board-shortcuts.js', ['useEffect']]],
   ['useOnImportPick', ['transfer/use-board-import.js', ['useCallback']]],
   ['useOnImportFileChange', ['transfer/use-board-import.js', ['useCallback']]],
   ['useConfirmImport', ['transfer/use-board-import.js', ['useCallback']]],

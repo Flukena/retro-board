@@ -96,7 +96,7 @@ test('default flash timers preserve native host receivers for scheduling and dis
   const originalSetTimeout = globalThis.setTimeout; const originalClearTimeout = globalThis.clearTimeout;
   const calls = [];
   try {
-    globalThis.setTimeout = function (run, delayMs) { assert.equal(this, globalThis); calls.push(['schedule', delayMs]); return 42; };
+    globalThis.setTimeout = function (run, delayMs) { assert.equal(this, globalThis); assert.equal(typeof run, 'function'); calls.push(['schedule', delayMs]); return 42; };
     globalThis.clearTimeout = function (id) { assert.equal(this, globalThis); calls.push(['cancel', id]); };
     const controller = createVoteFlashController({ publish: () => {} });
     controller.flash('card'); controller.dispose();
