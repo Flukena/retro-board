@@ -463,3 +463,16 @@ test('live scripts never use async waitForFunction predicates', () => {
     assert.doesNotMatch(readFileSync(join(PROJECT_DIR, entry.script), 'utf8'), /waitForFunction\(async\b/, entry.script);
   }
 });
+
+test('an entry declaring stepLines: false is judged by exit code alone', () => {
+  const quiet = { requireStepLines: false };
+  assert.equal(summarizeRun('PASS: 19/19 steps\n', 0, quiet).passed, true);
+  assert.equal(summarizeRun('PASS: 19/19 steps\n', 1, quiet).passed, false);
+  assert.equal(summarizeRun('FAIL broken step\n', 0, quiet).passed, false);
+  assert.equal(summarizeRun('PASS: 19/19 steps\n', 0).passed, false);
+});
+
+test('stepLines must be a boolean', () => {
+  assert.throws(() => parseManifest(manifestOf(entryOf({ stepLines: 'no' }))), /stepLines is a boolean/);
+  assert.doesNotThrow(() => parseManifest(manifestOf(entryOf({ stepLines: false }))));
+});

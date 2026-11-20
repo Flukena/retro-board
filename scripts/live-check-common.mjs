@@ -102,6 +102,7 @@ function validateRecipe(entry, index) {
     [isPlainObject(entry.ports) && (entry.ports.vite === undefined || isPositiveInteger(entry.ports.vite)), 'ports.vite must be a port number'],
     [typeof entry.publicRelay === 'boolean' && typeof entry.maintainer === 'boolean', 'publicRelay and maintainer are booleans'],
     [entry.oidcInCheck === undefined || typeof entry.oidcInCheck === 'boolean', 'oidcInCheck is a boolean'],
+    [entry.stepLines === undefined || typeof entry.stepLines === 'boolean', 'stepLines is a boolean'],
     [isStringMap(entry.relayEnv) && isStringMap(entry.checkEnv), 'relayEnv and checkEnv map names to strings'],
     [isPositiveInteger(entry.timeoutSec), 'timeoutSec must be a positive integer'],
   ].find(([valid]) => !valid);
@@ -446,14 +447,16 @@ export function runWithHardTimeout(argv, {
 // ---------------------------------------------------------------- verdict
 
 /**
- * Reads the `PASS <step>` / `FAIL <step>` lines runLiveCheck prints. A run passes only when it exits 0, prints at least one PASS and no
- * FAIL line (fail-closed), so a timeout (no exit code) or a non-zero exit fails even when the script prints no FAIL.
+ * Reads the `PASS <step>` / `FAIL <step>` lines runLiveCheck prints. A run passes only when it exits 0, prints no
+ * FAIL line (fail-closed) and, unless the entry declares `stepLines: false`, at least one PASS line. A timeout (no
+ * exit code) or a non-zero exit fails even when the script prints no FAIL. `stepLines: false` is for the scripts
+ * that report in their own format (landing, ui, poker) and so are judged by exit code alone.
  */
-export function summarizeRun(stdout, exitCode) {
+export function summarizeRun(stdout, exitCode, { requireStepLines = true } = {}) {
   const steps = stdout.split('\n').map((line) => STEP_LINE.exec(line.trimEnd())).filter(Boolean);
   const failed = steps.filter(([, word]) => word === FAIL_WORD);
   return {
-    passed: exitCode === 0 && failed.length === 0 && steps.length > 0,
+    passed: exitCode === 0 && failed.length === 0 && (steps.length > 0 || !requireStepLines),
     passLines: steps.length - failed.length,
     failLines: failed.length,
     failedStep: failed[0]?.[2] ?? null,

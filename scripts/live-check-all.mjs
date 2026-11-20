@@ -96,7 +96,7 @@ async function runAttempt({ entry, ports, runDir, signal }) {
   await writeFile(join(outDir, 'check-stdout.log'), run.stdout);
   await writeFile(join(outDir, 'check-stderr.log'), run.stderr);
   const { exitCode, timedOut, durationMs } = run;
-  return { outDir, exitCode, timedOut, ...summarizeRun(run.stdout, exitCode), durationMs };
+  return { outDir, exitCode, timedOut, ...summarizeRun(run.stdout, exitCode, { requireStepLines: entry.stepLines !== false }), durationMs };
 }
 
 async function writeSummary(entry, attempts) {
