@@ -48,6 +48,7 @@ function navigationHarness() {
 test('pointer navigation coalesces latest point, keeps zoom and flushes on matching release', () => {
   const h = navigationHarness(); h.controller.start(h.event());
   assert.deepEqual(h.order, ['stop', 'prevent', 'stopPropagation', 'settle']);
+  assert.deepEqual(h.commits[0][1], { live: true }, 'pointer input uses the preview port');
   assert.equal(h.options.interactionRef.current.kind, 'minimap'); assert.equal(h.surface.style.cursor, 'grabbing');
   h.listeners.get('pointermove')(h.event({ clientX: 130 })); h.listeners.get('pointermove')(h.event({ clientX: 140 }));
   assert.equal(h.commits.length, 1); assert.equal(h.clock.pendingCount(), 1);
@@ -56,6 +57,7 @@ test('pointer navigation coalesces latest point, keeps zoom and flushes on match
   // Captured from the unmoved pointer callback before extraction.
   assert.deepEqual(h.commits[1][0], { x: -333.8461538461538, y: 30, zoom: 2 });
   assert.equal(h.commits.length, 3); assert.equal(h.commits[1][0].zoom, 2);
+  assert.deepEqual(h.commits[1][1], { live: true }, 'queued motion still uses the preview port');
   assert.deepEqual(h.commits[2], [h.current(), { finish: true }]);
   assert.equal(h.listeners.size, 0); assert.equal(h.clock.pendingCount(), 0); assert.equal(h.options.interactionRef.current, null);
   assert.equal(h.options.activeViewportFinalizerRef.current, null); assert.equal(h.surface.style.cursor, 'crosshair');
