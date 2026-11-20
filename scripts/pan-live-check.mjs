@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pollUntil } from './board-live-helpers.mjs';
 // Isolated Public pan regression. Never seeds a production board.
 import assert from 'node:assert/strict';
 import { mkdir, stat, writeFile } from 'node:fs/promises';
@@ -141,11 +142,11 @@ async function addChunk(page, chunk) {
   await page.evaluate(items => {
     if (!window.storage.addItems(items, { silent: true })) throw new Error('Pan fixture chunk rejected');
   }, chunk);
-  await page.waitForFunction(async ids => {
+  await pollUntil(() => page.evaluate(async ids => {
     const board = (await window.storage.get('boardState', true)).value;
     const present = new Set(board.items.map(item => item.id));
     return ids.every(id => present.has(id));
-  }, chunk.map(item => item.id));
+  }, chunk.map(item => item.id)), Boolean, 'fixture chunk is present');
 }
 
 async function step(name, action) {
@@ -450,8 +451,8 @@ async function checkRasterInteraction(page) {
   await input.fill(`${originalText} edited`);
   assert.equal(await page.locator('.rb-overview-atlas').count(), 0, 'Editing must use the native editor path');
   await input.press('Escape');
-  const expectText = text => page.waitForFunction(async ({ id, text }) =>
-    (await window.storage.get('boardState', true)).value.items.find(item => item.id === id).text === text, { id: target.id, text });
+  const expectText = text => pollUntil(() => page.evaluate(async ({ id, text }) =>
+    (await window.storage.get('boardState', true)).value.items.find(item => item.id === id).text === text, { id: target.id, text }), Boolean, `card text is ${text}`);
   await expectText(`${originalText} edited`);
   await page.getByTitle('Undo (Ctrl+Z)', { exact: true }).click();
   await expectText(originalText);

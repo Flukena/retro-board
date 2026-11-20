@@ -5,7 +5,7 @@ import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { t, setLang } from '../src/client/ui/i18n.js';
-import { waitForEditorCaretAtEnd } from './board-live-helpers.mjs';
+import { pollUntil, waitForEditorCaretAtEnd } from './board-live-helpers.mjs';
 import { ZONE_ICON_BUTTON_SIZE_PX, ZONE_ICON_GLYPH_SIZE_PX } from '../src/domain/zone-title.js';
 import { ZONE_HEADER_TOOLS_BASE_FONT_PX } from '../src/client/board/zone-header-layout.js';
 
@@ -443,7 +443,7 @@ async function checkPrivateEditingLock(owner, peer) {
   const sticky = peer.page.locator('.rb-sticky').first();
   const original = await sticky.innerText();
   await activate(owner, owner.page.getByRole('button', { name: word(owner, 'topbar.lockEdit'), exact: true }));
-  await peer.page.waitForFunction(async () => (await window.storage.get('boardState', true)).value.editingLocked === true);
+  await pollUntil(() => peer.page.evaluate(async () => (await window.storage.get('boardState', true)).value.editingLocked), value => value === true, 'editing lock is true');
   await sticky.dblclick();
   assert.equal(await sticky.locator('textarea').count(), 0, 'Private guests cannot edit a locked board');
   await peer.page.keyboard.press('Control+z');
@@ -455,7 +455,7 @@ async function checkPrivateEditingLock(owner, peer) {
   await owner.page.getByTitle(word(owner, 'sticky.privacyToggle.off'), { exact: true }).tap();
   await peer.page.getByText(text, { exact: true }).waitFor();
   await activate(owner, owner.page.getByRole('button', { name: word(owner, 'topbar.unlockEdit'), exact: true }));
-  await peer.page.waitForFunction(async () => (await window.storage.get('boardState', true)).value.editingLocked === false);
+  await pollUntil(() => peer.page.evaluate(async () => (await window.storage.get('boardState', true)).value.editingLocked), value => value === false, 'editing lock is false');
   const added = peer.page.locator('.rb-sticky').filter({ hasText: text });
   await added.dblclick();
   await replaceEditedText(added.locator('textarea'), text, `${text} guest`);

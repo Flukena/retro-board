@@ -446,14 +446,14 @@ export function runWithHardTimeout(argv, {
 // ---------------------------------------------------------------- verdict
 
 /**
- * Reads the `PASS <step>` / `FAIL <step>` lines runLiveCheck prints. A run passes only when it exits 0 and prints no
+ * Reads the `PASS <step>` / `FAIL <step>` lines runLiveCheck prints. A run passes only when it exits 0, prints at least one PASS and no
  * FAIL line (fail-closed), so a timeout (no exit code) or a non-zero exit fails even when the script prints no FAIL.
  */
 export function summarizeRun(stdout, exitCode) {
   const steps = stdout.split('\n').map((line) => STEP_LINE.exec(line.trimEnd())).filter(Boolean);
   const failed = steps.filter(([, word]) => word === FAIL_WORD);
   return {
-    passed: exitCode === 0 && failed.length === 0,
+    passed: exitCode === 0 && failed.length === 0 && steps.length > 0,
     passLines: steps.length - failed.length,
     failLines: failed.length,
     failedStep: failed[0]?.[2] ?? null,

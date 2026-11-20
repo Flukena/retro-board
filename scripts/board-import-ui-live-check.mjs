@@ -92,10 +92,11 @@ async function assertUnchanged(pages, expected, what) {
 
 /** Opens Import on A and picks `path` in the file chooser. */
 async function chooseImportFile(page, path) {
-  const chooser = page.waitForEvent(FILE_CHOOSER_EVENT, { timeout: CHOOSER_TIMEOUT_MS });
-  chooser.catch(() => {}); // A failed menu click is reported instead; avoid an unhandled rejection.
-  await openMenu(page, 'en', appLabel('en', 'topbar.import'));
-  await (await chooser).setFiles(path);
+  const [chooser] = await Promise.all([
+    page.waitForEvent(FILE_CHOOSER_EVENT, { timeout: CHOOSER_TIMEOUT_MS }),
+    openMenu(page, 'en', appLabel('en', 'topbar.import')),
+  ]);
+  await chooser.setFiles(path);
 }
 
 /** Picks `path`, confirms the overwrite dialog, and returns once the dialog has closed. */

@@ -449,3 +449,17 @@ test('judgeRun: env-skip is skipped', () => {
   const entry = entryOf({ baseline: BASELINE.ENV_SKIP, reason: 'cannot run on this Mac' });
   assert.equal(judgeRun(entry, []), 'skipped');
 });
+
+
+test('zero PASS lines fail even on exit zero', () => {
+  const run = summarizeRun('setup complete\n', 0);
+  assert.equal(run.passLines, 0);
+  assert.equal(run.passed, false);
+  assert.equal(judgeRun(entryOf({ baseline: BASELINE.PASS }), [run]), 'regression');
+});
+
+test('live scripts never use async waitForFunction predicates', () => {
+  for (const entry of committedManifestJson().entries) {
+    assert.doesNotMatch(readFileSync(join(PROJECT_DIR, entry.script), 'utf8'), /waitForFunction\(async\b/, entry.script);
+  }
+});
