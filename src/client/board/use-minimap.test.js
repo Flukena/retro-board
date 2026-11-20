@@ -10,7 +10,7 @@ function timerHarness() {
   const clock = createFakeClock(); let hovered = false; let focused = false;
   const panel = { style: {}, contains: () => focused, matches: () => hovered };
   const options = { minimapPanelRef: { current: panel }, minimapHideTimerRef: { current: null }, interactionRef: { current: null },
-    ownerDocument: { activeelementType: {} }, clock };
+    ownerDocument: { activeElement: {} }, clock };
   return { clock, panel, options, controller: createMinimapVisibility(options), hover: value => { hovered = value; }, focus: value => { focused = value; } };
 }
 

@@ -42,6 +42,7 @@ test('clear makes named phase/mood decisions and explicitly classifies every def
     assert.deepEqual(next[key], DEFAULT_BOARD[key], `${key} must clear`);
   }
   for (const key of PRESERVED_FIELDS) assert.equal(next[key], h.boardRef.current[key]);
+  assert.deepEqual(Object.keys(next).sort(), Object.keys(h.boardRef.current).sort(), "clear adds or drops no board field");
 });
 
 test('failed clear keeps its confirmation; non-admin actions cannot write', () => {
