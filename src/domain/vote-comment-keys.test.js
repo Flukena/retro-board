@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { voteKey, commentKey, moodKey, parseStoredVoteKey, parseStoredCommentKey, parseCanonicalVoteKey, parseMoodKey } from './vote-comment-keys.js';
-import { decodeRemoteBoard } from '../client/board/remote-board-decoder.js';
 import { buildRetroSummary } from './retro-summary.js';
 import { readCanonicalVotes } from './canonical-votes.js';
 import { moodKey as publicMoodKey, parseMoodKey as publicParseMoodKey } from './mood-check.js';
@@ -36,13 +35,6 @@ test('legacy bridge parsers and strict canonical parser retain distinct rejectio
   for (const key of [undefined, 42, 's||mood:r:__proto__', 's||mood:r:u:extra']) assert.equal(parseMoodKey(key), null);
 });
 
-test('remote board decoding keeps the mood round addressed by built and legacy keys', () => {
-  for (const key of [moodKey('round', 'alice'), 's||mood:round:alice']) {
-    const { roundId } = parseMoodKey(key);
-    const moodCheck = { id: roundId, startedAt: 0, open: false };
-    assert.deepEqual(decodeRemoteBoard([], { moodCheck }), { items: [], moodCheck });
-  }
-});
 test('retro summary consumes canonical votes addressed by built and legacy keys', () => {
   const labels = { date: 'Date', participants: 'Participants', topVoted: 'Top', cards: 'Cards',
     unassigned: 'Unassigned', actionItems: 'Actions', noActionItems: 'None', votes: n => `${n} votes` };

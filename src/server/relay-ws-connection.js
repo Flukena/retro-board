@@ -1,3 +1,4 @@
+import { WS_CLOSE } from './relay-status-codes.js';
 import { coalesceAwarenessSends } from './relay-awareness-fanout.js';
 import { closeOnSessionExpiry } from './relay-ws-traffic.js';
 import { registerPublicQuotaClient, notifyPublicQuota } from './public-action-limit.js';
@@ -9,29 +10,58 @@ export function createWsConnectionHandler({ config, accounting, docs, Y, PUBLIC_
   const rejectIngress = (conn, req, docName, size) => {
     rejectionCounters.observeBacklog(accounting.pendingStoreOps, accounting.pendingStoreBytes, MAX_PENDING_STORE_OPS, MAX_PENDING_STORE_BYTES);
     console.warn('[yjs] rate-limit close', { docName: roomLogId(docName), origin: req.headers.origin, size });
-    try { conn.close(1008, 'rate-limit'); } catch { /* already closing */ }
+    try { conn.close(WS_CLOSE.POLICY, 'rate-limit'); } catch { /* already closing */ }
   };
 
   const rejectProtocol = (conn, docName, size, err) => {
-    if (err.closeReason === PUBLIC_ACTION_LIMIT_REASON) rejectionCounters.increment(PUBLIC_ACTION_LIMIT_REASON, 1008);
+    if (err.closeReason === PUBLIC_ACTION_LIMIT_REASON) rejectionCounters.increment(PUBLIC_ACTION_LIMIT_REASON, WS_CLOSE.POLICY);
     else console.warn('[yjs] protocol-policy close', {
       docName: roomLogId(docName),
       reason: err.message,
       size,
     });
-    try { conn.close(err.closeCode || 1008, err.closeReason || 'protocol policy'); } catch { /* already closing */ }
+    try { conn.close(err.closeCode || WS_CLOSE.POLICY, err.closeReason || 'protocol policy'); } catch { /* already closing */ }
+  };
+
+  const createMessageHandler = ({ doc, docName, conn, context, meter, clientIp, req, parseYjsMessage }) => {
+    let limited = false;
+    return function onMessage(data) {
+    if (limited || roomFence.isFenced(docName)) return;
+    const size = data?.byteLength ?? data?.length ?? 0;
+    if (!meter.admitIngress(size)
+        || accounting.pendingStoreOps >= MAX_PENDING_STORE_OPS
+        || accounting.pendingStoreBytes >= MAX_PENDING_STORE_BYTES) {
+      limited = true;
+      rejectIngress(conn, req, docName, size);
+      return;
+    }
+    let inspection;
+    let awarenessPlan = null;
+    try {
+      ({ inspection, awarenessPlan } = inspectMessage(data, { doc, docName, conn, context, meter, clientIp }));
+      if (awarenessPlan?.dropFrame) return;
+    } catch (err) {
+      limited = true;
+      rejectProtocol(conn, docName, size, err);
+      return;
+    }
+    parseYjsMessage(data);
+    if (PUBLIC_WALL && inspection.kind === 'sync-update') notifyPublicQuota(doc, clientIp, conn);
+    if (awarenessPlan) commitAwarenessPlan(context, awarenessPlan);
+    wsTraffic.closeSlowConsumers(doc.conns.keys());
+    };
   };
 
   const handleConnection = (conn, req) => {
     const context = req.wsSecurityContext;
     if (!context?.docName) {
-      conn.close(1011, 'server setup error');
+      conn.close(WS_CLOSE.SETUP_ERROR, 'server setup error');
       return;
     }
     const { docName, clientIp, expiresAt } = context;
     const doc = docs.get(docName);
     if (!doc) {
-      conn.close(1011, 'server setup error');
+      conn.close(WS_CLOSE.SETUP_ERROR, 'server setup error');
       return;
     }
     context.awarenessClientIds = new Set();
@@ -43,7 +73,6 @@ export function createWsConnectionHandler({ config, accounting, docs, Y, PUBLIC_
     closeOnSessionExpiry(conn, expiresAt);
     // Ingress closes the WS when over budget; egress mediates conn.send, which y-websocket
     // funnels sync replies, awareness snapshots and broadcasts through.
-    let limited = false;
     const meter = wsTraffic.attach(conn, docName);
 
     if (PUBLIC_WALL) coalesceAwarenessSends(conn, doc, MAX_AWARENESS_MESSAGE_BYTES);
@@ -58,36 +87,12 @@ export function createWsConnectionHandler({ config, accounting, docs, Y, PUBLIC_
     const parsers = conn.listeners('message').filter((listener) => !before.has(listener));
     if (parsers.length !== 1) {
       console.error('[yjs] unexpected message-listener count', { docName: roomLogId(docName), count: parsers.length });
-      conn.close(1011, 'server setup error');
+      conn.close(WS_CLOSE.SETUP_ERROR, 'server setup error');
       return;
     }
     const [parseYjsMessage] = parsers;
     conn.off('message', parseYjsMessage);
-    conn.on('message', (data) => {
-      if (limited || roomFence.isFenced(docName)) return;
-      const size = data?.byteLength ?? data?.length ?? 0;
-      if (!meter.admitIngress(size)
-          || accounting.pendingStoreOps >= MAX_PENDING_STORE_OPS
-          || accounting.pendingStoreBytes >= MAX_PENDING_STORE_BYTES) {
-        limited = true;
-        rejectIngress(conn, req, docName, size);
-        return;
-      }
-      let inspection;
-      let awarenessPlan = null;
-      try {
-        ({ inspection, awarenessPlan } = inspectMessage(data, { doc, docName, conn, context, meter, clientIp }));
-        if (awarenessPlan?.dropFrame) return;
-      } catch (err) {
-        limited = true;
-        rejectProtocol(conn, docName, size, err);
-        return;
-      }
-      parseYjsMessage(data);
-      if (PUBLIC_WALL && inspection.kind === 'sync-update') notifyPublicQuota(doc, clientIp, conn);
-      if (awarenessPlan) commitAwarenessPlan(context, awarenessPlan);
-      wsTraffic.closeSlowConsumers(doc.conns.keys());
-    });
+    conn.on('message', createMessageHandler({ doc, docName, conn, context, meter, clientIp, req, parseYjsMessage }));
   };
 
   return { handleConnection };

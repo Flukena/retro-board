@@ -1,0 +1,15 @@
+export const HTTP_STATUS = Object.freeze({
+  OK: 200,
+  BAD_REQUEST: 400,
+  UNAUTHORIZED: 401,
+  FORBIDDEN: 403,
+  NOT_FOUND: 404,
+  TOO_MANY_REQUESTS: 429,
+  UNAVAILABLE: 503,
+});
+
+export const WS_CLOSE = Object.freeze({
+  POLICY: 1008,
+  TOO_LARGE: 1009,
+  SETUP_ERROR: 1011,
+});

@@ -1,3 +1,4 @@
+import { HTTP_STATUS } from './relay-status-codes.js';
 import { isExactAllowedOrigin } from './relay-http.js';
 import { roomTargetFromRequest, tokenDocNameFromRequest } from './relay-room-target.js';
 import { CORRUPT_LOCK } from './room-lock-record.js';
@@ -15,12 +16,12 @@ export function createUpgradeHandler({ settings, roomRegistry, accounting, docs,
     // Locked rooms are served only on /e2e and normal rooms never are; an unreadable lock is never served.
     const lock = roomRegistry.lockFor(docName);
     if (lock === CORRUPT_LOCK || Boolean(lock) !== Boolean(roomTarget?.e2e)) {
-      rejectUpgrade(socket, lock === CORRUPT_LOCK ? 503 : 404);
+      rejectUpgrade(socket, lock === CORRUPT_LOCK ? HTTP_STATUS.UNAVAILABLE : HTTP_STATUS.NOT_FOUND);
       return null;
     }
     const session = handle ? authenticatedDocFromRequest(req, handle) : null;
     if (handle && !session) {
-      rejectUpgrade(socket, 401);
+      rejectUpgrade(socket, HTTP_STATUS.UNAUTHORIZED);
       return null;
     }
     const expiresAt = session?.expiresAt || null;
@@ -31,23 +32,23 @@ export function createUpgradeHandler({ settings, roomRegistry, accounting, docs,
     // Reject known-doomed upgrades before getYDoc can allocate and hydrate a
     // room that will never receive a connection.
     if (accounting.shuttingDown || accounting.storageFailure || isRoomBlocked(docName)) {
-      rejectUpgrade(socket, 503);
+      rejectUpgrade(socket, HTTP_STATUS.UNAVAILABLE);
       return;
     }
     const e2e = Boolean(roomTarget?.e2e);
     const coldRoom = e2e ? e2eRelay.connectionsFor(docName) === 0 : !docs.has(docName);
     if (coldRoom && !hasActiveRoomCapacity()) {
-      rejectUpgrade(socket, 503);
+      rejectUpgrade(socket, HTTP_STATUS.UNAVAILABLE);
       return;
     }
     const clientIp = clientIpFromRequest(req);
     if (!takeWsUpgradeToken(clientIp, docName, coldRoom)) {
-      rejectUpgrade(socket, 429);
+      rejectUpgrade(socket, HTTP_STATUS.TOO_MANY_REQUESTS);
       return;
     }
     // Taken in the same tick as the room lookup and held until attach: a room being deleted answers like a missing one.
     const leave = roomFence.enter(docName);
-    const reservation = leave ? wsTraffic.reserve(clientIp, docName) : { status: 404 };
+    const reservation = leave ? wsTraffic.reserve(clientIp, docName) : { status: HTTP_STATUS.NOT_FOUND };
     if (reservation.status) {
       leave?.();
       rejectUpgrade(socket, reservation.status);
@@ -78,7 +79,7 @@ export function createUpgradeHandler({ settings, roomRegistry, accounting, docs,
     // from a malicious site running a ws() in the user's tab.
     const origin = req.headers.origin || '';
     if (!isExactAllowedOrigin(origin, ALLOWED_ORIGINS, ALLOW_INSECURE_HTTP)) {
-      rejectUpgrade(socket, 403);
+      rejectUpgrade(socket, HTTP_STATUS.FORBIDDEN);
       return;
     }
     const roomTarget = roomTargetFromRequest(req, { publicWall: PUBLIC_WALL });
@@ -86,7 +87,7 @@ export function createUpgradeHandler({ settings, roomRegistry, accounting, docs,
     // Resolve the canonical room first, on every route, so the lock check below covers legacy URLs too.
     const docName = resolveDocument(req, handle);
     if (!docName) {
-      rejectUpgrade(socket, 404);
+      rejectUpgrade(socket, HTTP_STATUS.NOT_FOUND);
       return;
     }
     const authorized = authorizeRoom(req, socket, docName, roomTarget, handle);

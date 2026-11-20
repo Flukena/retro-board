@@ -60,7 +60,7 @@ COPY --chown=node:node \
     src/server/relay-vote-expiry.js \
     src/server/relay-awareness-policy.js \
     src/server/relay-ws-admission.js \
-    src/server/relay-upgrade.js \
+    src/server/relay-status-codes.js src/server/relay-upgrade.js \
     src/server/relay-http-dispatch.js \
     src/server/relay-runtime.js \
     src/server/relay-persistence.js \

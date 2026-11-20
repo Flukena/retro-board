@@ -1,3 +1,4 @@
+import { WS_CLOSE } from './relay-status-codes.js';
 import { ROOM_BLOCK_TTL_MS, BLOCKED_ROOM_ENTRIES_PER_ACTIVE_ROOM } from './relay-config.js';
 import { roomLogId } from './relay-log-id.js';
 
@@ -18,7 +19,7 @@ export function createRoomPolicy({ MAX_ACTIVE_ROOMS }) {
     console.warn('[yjs] room policy close', { docName: roomLogId(docName), reason });
     if (ydoc) {
       for (const conn of ydoc.conns.keys()) {
-        try { conn.close(1009, 'room resource limit'); } catch { /* already closing */ }
+        try { conn.close(WS_CLOSE.TOO_LARGE, 'room resource limit'); } catch { /* already closing */ }
       }
     }
   };

@@ -1,3 +1,5 @@
+// Yjs WebSocket relay with LevelDB persistence.
+// Single source of truth for collaborative state.
 import { createRelayLateBindings, createStorageFailureHandler } from './src/server/relay-late-bindings.js';
 import { createWsConnectionHandler } from './src/server/relay-ws-connection.js';
 import { createRoomPolicy, createRoomState } from './src/server/relay-room-state.js';
@@ -14,8 +16,6 @@ import { readAllowedOrigins } from './src/server/relay-origins.js';
 import { clientIpFromRequest as requestClientIp } from './src/server/relay-client-ip.js';
 import { RoomSessions } from './src/server/relay-session.js';
 import { RelayProtocol } from './src/server/relay-protocol.js';
-// Yjs WebSocket relay with LevelDB persistence.
-// Single source of truth for collaborative state.
 import { envInt, envBool, readGuestSweepTiming, readRelayConfig, MAINTENANCE_INTERVAL_MS, MAX_REQUESTS_PER_SOCKET, RETRY_AFTER_LONG_SECONDS } from './src/server/relay-config.js';
 import { RelayWsTraffic } from './src/server/relay-ws-traffic.js';
 import { createE2ERelay } from './src/server/e2e-relay.js';

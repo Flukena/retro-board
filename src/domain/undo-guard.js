@@ -1,6 +1,5 @@
-export function undoBlockReason(midDrag, locked, hasUndo = true) {
+export function undoBlockReason(midDrag, locked) {
   if (midDrag) return 'topbar.finishDragFirst';
   if (locked) return 'common.warnLockEdit';
-  if (!hasUndo) return 'topbar.nothingToUndo';
   return null;
 }

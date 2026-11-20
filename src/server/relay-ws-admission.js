@@ -1,3 +1,4 @@
+import { WS_CLOSE } from './relay-status-codes.js';
 import { STORE_OPERATION_OVERHEAD_BYTES } from './relay-config.js';
 import { admitPublicAction } from './public-action-limit.js';
 import { PUBLIC_ACTION_LIMIT_REASON } from './public-wall-config.js';
@@ -21,11 +22,11 @@ export function createWsAdmission({ config, accounting, persistenceChurnFor, sch
     }
     if (usage.upperBytes + inspection.updateBytes > MAX_DOCUMENT_BYTES) {
       scheduleRoomCompaction(docName, { remeasure: true });
-      throw Object.assign(new Error('document conservative limit'), { closeCode: 1009 });
+      throw Object.assign(new Error('document conservative limit'), { closeCode: WS_CLOSE.TOO_LARGE });
     }
     if (accounting.activeDocumentBytes + inspection.updateBytes > MAX_ACTIVE_DOCUMENT_BYTES) {
       scheduleRoomCompaction(docName, { remeasure: true });
-      throw Object.assign(new Error('active document capacity reached'), { closeCode: 1009 });
+      throw Object.assign(new Error('active document capacity reached'), { closeCode: WS_CLOSE.TOO_LARGE });
     }
     if (churn.uncompactedUpdates + 1 > ROOM_MAX_UNCOMPACTED_UPDATES) {
       scheduleRoomCompaction(docName, { remeasure: true });

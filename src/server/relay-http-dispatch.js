@@ -1,3 +1,4 @@
+import { HTTP_STATUS } from './relay-status-codes.js';
 import { MAX_HTTP_TARGET_CHARACTERS, RETRY_AFTER_SHORT_SECONDS } from './relay-config.js';
 import { PUBLIC_RELAY_PREFIX } from './public-wall-config.js';
 import { isRelayReady } from './relay-lifecycle.js';
@@ -20,7 +21,7 @@ export function createHttpDispatch({ settings, accounting, traffic, sessions, ro
       ({ pathname } = parsed);
       hasQueryOrFragment = Boolean(parsed.search || parsed.hash);
     } catch {
-      res.writeHead(400);
+      res.writeHead(HTTP_STATUS.BAD_REQUEST);
       res.end();
       return null;
     }
@@ -44,10 +45,14 @@ export function createHttpDispatch({ settings, accounting, traffic, sessions, ro
     return false;
   };
 
+  // Readiness is separate from liveness: the process can be perfectly alive
+  // while LevelDB is unwritable, and the catch-all below answers 200 either
+  // way. An orchestrator polling this stops routing new traffic here instead
+  // of accepting work the relay can no longer persist.
   const handleReady = (req, res, routePath) => {
     if (req.method === 'GET' && routePath === '/readyz') {
       const ok = isRelayReady(accounting.storageFailure, accounting.shuttingDown);
-      res.writeHead(ok ? 200 : 503, { 'content-type': 'text/plain' });
+      res.writeHead(ok ? HTTP_STATUS.OK : HTTP_STATUS.UNAVAILABLE, { 'content-type': 'text/plain' });
       res.end(ok ? 'ready' : 'not ready');
       return true;
     }
@@ -84,11 +89,11 @@ export function createHttpDispatch({ settings, accounting, traffic, sessions, ro
     if (handleReady(req, res, routePath)) return;
     if (handlePrivate(req, res, clientIp, target)) return;
     if (req.method === 'GET' && routePath === '/') {
-      res.writeHead(200, { 'content-type': 'text/plain' });
+      res.writeHead(HTTP_STATUS.OK, { 'content-type': 'text/plain' });
       res.end('yjs-ws ok');
       return;
     }
-    res.writeHead(404, { 'content-type': 'text/plain' });
+    res.writeHead(HTTP_STATUS.NOT_FOUND, { 'content-type': 'text/plain' });
     res.end('not found');
   };
 

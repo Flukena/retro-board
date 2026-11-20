@@ -65,10 +65,22 @@ test('dropping focus does not invent deletions of unexpired move records for an 
   assert.deepEqual(result.forgetMoveIds, ['expired']);
 });
 
-test('undo/redo overrides recent-move protection even before its window expires', () => {
-  const result = applyRemoteSnapshot(board([note({ x: 500 })]), board([note()]), context({ isUndoRedo: true, recentMoves: new Map([['note', recentMove(NOW_MS + WINDOW_MS)]]) }));
+test('undo/redo accepts remote geometry after the call-site clear', () => {
+  const moves = new Map([['note', recentMove(NOW_MS + WINDOW_MS)]]);
+  moves.clear();
+  const result = applyRemoteSnapshot(board([note({ x: 500 })]), board([note()]), context({ isUndoRedo: true, recentMoves: moves }));
   assert.equal(result.board.items[0].x, 1);
-  assert.deepEqual(result.forgetMoveIds, ['note']);
+  assert.deepEqual(result.forgetMoveIds, []);
+});
+
+test('undo/redo preserves a move recorded after the clear but before the lazy updater', () => {
+  const moves = new Map([['old', recentMove(NOW_MS + WINDOW_MS)]]);
+  moves.clear();
+  moves.set('note', recentMove(NOW_MS + WINDOW_MS));
+  const result = applyRemoteSnapshot(board([note()]), board([note({ text: 'peer' })]), context({ isUndoRedo: true, recentMoves: moves }));
+  assert.equal(result.board.items[0].x, 90);
+  assert.equal(result.board.items[0].text, 'peer');
+  assert.deepEqual(result.forgetMoveIds, []);
 });
 
 test('snapshot capture time and updater move-expiry time stay separate', () => {
