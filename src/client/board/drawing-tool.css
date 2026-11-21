@@ -24,19 +24,26 @@
 .rb-drawing-status[role="alert"] { color: var(--danger); }
 
 @media (max-width: 767px), (max-width: 1024px) and (pointer: coarse) {
-  /* Two rows under the thumb: tools and history on top, sizes and colours below. */
-  .rb-drawing-toolbar { top: auto; bottom: var(--rb-mobile-bottom-px); left: var(--rb-mobile-left-px); right: var(--rb-mobile-right-px); max-width: none; display: grid; grid-template-columns: 1fr auto; grid-template-areas: "tools actions" "options options"; padding: var(--space-1) var(--space-2); gap: var(--space-1); }
+  /* Two rows under the thumb: every tool and Close on top, history then sizes and colours below. */
+  .rb-drawing-toolbar { top: auto; bottom: var(--rb-mobile-bottom-px); left: var(--rb-mobile-left-px); right: var(--rb-mobile-right-px); max-width: none; display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; grid-template-areas: "tools tools tools close" "undo redo options options"; align-items: center; padding: var(--space-1) var(--space-2); gap: var(--space-1); }
   .rb-drawing-tools { grid-area: tools; }
-  .rb-drawing-actions { grid-area: actions; }
+  /* The actions wrapper dissolves so Close joins the tools row and Undo/Redo stay pinned beside the scrolling options. */
+  .rb-drawing-actions { display: contents; }
+  .rb-drawing-actions [data-drawing-action="undo"] { grid-area: undo; }
+  .rb-drawing-actions [data-drawing-action="redo"] { grid-area: redo; }
+  .rb-drawing-actions [data-drawing-action="close"] { grid-area: close; }
   .rb-drawing-options { grid-area: options; overflow-x: auto; overscroll-behavior-x: contain; }
   .rb-drawing-options > * { flex-shrink: 0; }
+  /* The failed-load retry button gets its own row instead of auto-placing into the first track. */
+  .rb-drawing-toolbar > button { grid-column: 1 / -1; }
   .rb-drawing-tools button,
   .rb-drawing-actions button { min-width: var(--modal-touch-target); min-height: var(--modal-touch-target); }
   .rb-drawing-group:first-child { padding-left: 0; border-left: none; }
   .rb-drawing-toolbar .rb-drawing-swatch,
   .rb-drawing-toolbar .rb-drawing-size { width: var(--draw-mobile-option-size); min-width: var(--draw-mobile-option-size); height: var(--draw-mobile-option-size); min-height: var(--draw-mobile-option-size); }
   .rb-drawing-toolbar .rb-drawing-swatch { background-clip: content-box; padding: var(--space-1); border-color: transparent; }
-  .rb-drawing-status { position: fixed; left: var(--rb-mobile-canvas-left-px); right: var(--rb-mobile-right-px); bottom: calc(var(--rb-mobile-bottom-px) + var(--modal-touch-target) + var(--space-4)); padding: var(--space-1) var(--space-2); border-radius: var(--radius-md); background: var(--tool-section-bg); }
+  /* Anchored to the (fixed) toolbar so it stays just above it however many rows it has, and right of the tool rail. */
+  .rb-drawing-status { position: absolute; left: calc(var(--rb-mobile-canvas-left-px) - var(--rb-mobile-left-px)); right: 0; bottom: calc(100% + var(--space-2)); padding: var(--space-1) var(--space-2); border-radius: var(--radius-md); background: var(--tool-section-bg); }
   :root:has(.rb-drawing-toolbar) .rb-zoom-controls,
   :root:has(.rb-drawing-toolbar) .rb-minimap { display: none; }
 }

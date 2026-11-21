@@ -1,0 +1,1 @@
+export const FOLLOW_VIEWPORT_COMMIT_MS = 96;

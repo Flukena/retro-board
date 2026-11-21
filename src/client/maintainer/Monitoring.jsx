@@ -8,7 +8,7 @@ const CHART_HEIGHT_PX = 120;
 const percent = value => `${value}%`;
 const display = (field, value) => field === 'clients' ? String(value) : formatMib(value);
 
-export function ResourceAlerts({data}) {
+function ResourceAlerts({data}) {
   const alerts = resourceAlerts(data);
   return <section aria-label={t('maintainer.alerts')}>
     {!data.ready && <p role="alert" className="maintainer-critical">{t('maintainer.degraded')}</p>}

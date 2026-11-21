@@ -102,7 +102,10 @@ test('landing preserves safe-area viewport coverage and uses usable mobile contr
   assert.equal(viewport['maximum-scale'], '1.0');
   assert.equal(viewport['minimum-scale'], '1.0');
   assert.equal(viewport['user-scalable'], 'no');
-  assert.match(readSource('../app/Landing.jsx'), /meta.setAttribute\([\s\S]*?'content',\s*APP_VIEWPORT_CONTENT/);
+  const landing = readSource('../app/Landing.jsx');
+  assert.match(landing, /import \{ useBrowserZoomGuard \} from '..\/board\/use-browser-zoom-guard.js'/);
+  assert.match(landing, /useBrowserZoomGuard\(\{ blockGestures: true \}\)/);
+  assert.match(readSource('../board/use-browser-zoom-guard.js'), /meta.setAttribute\([\s\S]*?'content',\s*APP_VIEWPORT_CONTENT/);
   const css = readSource('../app/landing.css');
   assert.ok(css.includes(`@media ${MOBILE_LAYOUT_QUERY}`));
   assert.match(css, /--landing-control-font-size:\s*16px/);

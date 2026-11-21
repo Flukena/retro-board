@@ -649,8 +649,6 @@ if (typeof window !== 'undefined' && window.matchMedia) {
   });
 }
 
-export function getThemePref() { return currentPref; }
-
 export function setThemePref(next) {
   if (!['light', 'dark', 'auto'].includes(next)) return;
   currentPref = next;

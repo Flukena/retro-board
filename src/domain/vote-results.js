@@ -2,7 +2,7 @@ import { RESULT_TOP_SIZE, compareStableText, compareVoteRank } from './vote-rank
 import { isSafeId } from './comment-schema.js';
 import { DISPLAY_NAME_MAX_LENGTH } from './security-boundaries.js';
 
-export const VOTE_RESULTS_VERSION = 1;
+const VOTE_RESULTS_VERSION = 1;
 // Production room connection cap (DEPLOYMENT.md capacity profile).
 export const MAX_RESULT_PARTICIPANTS = 32;
 export { RESULT_TOP_SIZE } from './vote-ranking.js';

@@ -31,7 +31,7 @@ COPY --from=maintainer-ui --chown=node:node /build/dist-maintainer ./dist-mainta
 COPY --chown=node:node \
     src/domain/awareness-liveness.js src/domain/board-coordinates.js src/domain/board-geometry.js \
     src/domain/board-ownership.js src/domain/board-reconciliation.js src/domain/board-state.js \
-    src/domain/board-visibility.js src/domain/canonical-votes.js src/domain/comment-schema.js \
+    src/domain/board-visibility.js src/domain/canonical-votes.js src/domain/vote-comment-keys.js src/domain/comment-schema.js \
     src/domain/csv-import.js src/domain/import-schema.js src/domain/item-appearance.js \
     src/domain/minimap.js src/domain/move-concealment.js src/domain/move-reparenting.js \
     src/domain/pending-local-items.js src/domain/public-board-permissions.js src/domain/public-wall-contract.js \
@@ -46,7 +46,7 @@ COPY --chown=node:node \
     ./src/domain/
 
 COPY --chown=node:node \
-    src/server/account-store.js src/server/auth-google.js src/server/auth-routes.js src/server/auth-session.js src/server/e2e-blob-store.js src/server/e2e-blobs.js src/server/e2e-relay.js src/server/e2e-room-log.js src/server/legacy-image-migration.js src/server/maintainer-accounts.js src/server/maintainer-room-access.js src/server/maintainer-server.js src/server/maintainer-session.js src/server/maintainer-snapshot.js \
+    src/server/relay-client-ip.js src/server/relay-origins.js src/server/relay-admission-limits.js src/server/account-store.js src/server/auth-google.js src/server/auth-routes.js src/server/auth-session.js src/server/e2e-blob-store.js src/server/e2e-blobs.js src/server/e2e-relay.js src/server/e2e-room-log.js src/server/legacy-image-migration.js src/server/maintainer-accounts.js src/server/maintainer-room-access.js src/server/maintainer-server.js src/server/maintainer-session.js src/server/maintainer-snapshot.js \
     src/server/public-action-limit.js src/server/public-restore-images.js src/server/public-upload-backup.js src/server/public-wall-config.js \
     src/server/public-wall-history.js src/server/public-wall-prune.js src/server/public-wall-restore.js \
     src/server/public-wall-snapshot.js src/server/relay-awareness-fanout.js src/server/relay-config.js src/server/relay-http.js \
@@ -56,6 +56,17 @@ COPY --chown=node:node \
     src/server/relay-room-routes.js src/server/relay-room-target.js src/server/relay-storage.js src/server/relay-ws-traffic.js src/server/room-lock.js src/server/room-lock-routes.js src/server/room-lock-commit-body.js src/server/room-session-routes.js src/server/room-lock-record.js src/server/room-retirement.js src/server/guest-room-sweep.js \
     src/server/room-activity.js src/server/room-owner-index.js src/server/room-fence.js src/server/room-deletion.js src/server/plain-room-teardown.js src/server/plain-upgrade.js src/server/relay-http-slots.js src/server/account-room-routes.js src/server/room-title-writer.js src/server/room-links.js src/server/room-orphaning.js src/server/board-preview-reader.js \
     src/server/relay-session.js src/server/relay-uploads.js src/server/relay-vote-maintenance.js \
+    src/server/relay-room-accounting.js \
+    src/server/relay-vote-expiry.js \
+    src/server/relay-awareness-policy.js \
+    src/server/relay-ws-admission.js \
+    src/server/relay-status-codes.js src/server/relay-upgrade.js \
+    src/server/relay-http-dispatch.js \
+    src/server/relay-runtime.js \
+    src/server/relay-persistence.js \
+    src/server/relay-room-state.js \
+    src/server/relay-ws-connection.js \
+    src/server/relay-late-bindings.js \
     ./src/server/
 
 COPY --chown=node:node scripts/public-wall-restore.mjs scripts/public-wall-restore.sh ./scripts/

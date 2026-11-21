@@ -8,8 +8,8 @@ export { CORRUPT_LOCK, ROOM_LOCK_META, decodeLockRecord, encodeLockRecord } from
 const WINDOW_MINUTES = 15;
 export const WRONG_PASSWORD_WINDOW_MS = WINDOW_MINUTES * MILLISECONDS_PER_MINUTE;
 export const WRONG_PASSWORDS_PER_IP_ROOM = 5;
-export const WRONG_PASSWORDS_PER_ROOM = 50;
-export const DEFAULT_VERIFIER_MAX_KEYS = 10_000;
+const WRONG_PASSWORDS_PER_ROOM = 50;
+const DEFAULT_VERIFIER_MAX_KEYS = 10_000;
 const MIN_RETRY_SECONDS = 1;
 const KEY_SEPARATOR = '\0';
 const MISSING_RECORD_MESSAGE = 'RoomLockVerifier.check requires a lock record';

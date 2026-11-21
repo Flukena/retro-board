@@ -85,3 +85,13 @@ test('feature cards take the shared landing card padding: no later stylesheet ov
   const landingCss = readFileSync(new URL('./landing.css', import.meta.url), 'utf8');
   assert.match(landingCss, /\.rb-landing__feature,[^{]*\{\s*padding: var\(--landing-card-padding\);/);
 });
+
+test('below 600px every landing card padding token resolves to one shared mobile inset', () => {
+  const landingCss = readFileSync(new URL('./landing.css', import.meta.url), 'utf8');
+  const cardPaddingTokens = new Set([...landingCss.matchAll(/__card[^{}]*\{[^{}]*?\bpadding:\s*var\((--landing-[a-z-]*padding)\)/g)].map((match) => match[1]));
+  assert.ok(cardPaddingTokens.has('--landing-card-padding') && cardPaddingTokens.has('--landing-recents-padding'));
+  const mobileBlock = landingCss.slice(landingCss.indexOf('@media (max-width: 599px)'));
+  const mobileValues = [...cardPaddingTokens].map((token) => mobileBlock.match(new RegExp(`${token}:\\s*([^;]+);`))?.[1]);
+  assert.ok(mobileValues.every(Boolean), `a card padding token is not set below 600px: ${[...cardPaddingTokens].join(', ')} -> ${mobileValues.join(', ')}`);
+  assert.equal(new Set(mobileValues).size, 1, 'cards must share one inset on phones');
+});

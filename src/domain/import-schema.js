@@ -36,10 +36,10 @@ export const IMPORT_MAX_ARCHIVE_FILE_BYTES = 1024 * 1024 * 1024;
 // than its JSON snapshot, so leave headroom below the relay's 2 MB frame cap.
 export const IMPORT_MAX_BUNDLE_BYTES = 1 * 1024 * 1024;
 export const IMPORT_MAX_ITEMS = 10_000;
-export const IMPORT_MAX_COMMENTS = 5_000;
-export const IMPORT_MAX_COMMENTS_PER_ITEM = 500;
-export const IMPORT_MAX_VOTES = 20_000;
-export const IMPORT_MAX_RECORDS = 25_000;
+const IMPORT_MAX_COMMENTS = 5_000;
+const IMPORT_MAX_COMMENTS_PER_ITEM = 500;
+const IMPORT_MAX_VOTES = 20_000;
+const IMPORT_MAX_RECORDS = 25_000;
 
 const ITEM_ROTATION_MAX_DEGREES = 360;
 const ITEM_TYPES = new Set(['sticky', 'zone', 'text', 'image']);

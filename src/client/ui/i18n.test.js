@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { withChromeModule } from '../../test-support/chrome-test-helper.js';
 import { getLang, initialLanguage, setLang, t } from './i18n.js';
 
 test('Thai vote stop and result copy uses Thai words and preserves count placeholders', () => {
@@ -69,4 +71,39 @@ test('the last language picked wins when loads overlap', async () => {
   } finally {
     await setLang(originalLang);
   }
+});
+
+test('every translation output is byte-identical to the pre-extraction fixture', async () => {
+  const frozen = readFileSync(new URL('./fixtures/i18n-outputs.json', import.meta.url), 'utf8');
+  const outputs = {};
+  const originalLang = getLang();
+  try {
+    for (const [code, entries] of Object.entries(JSON.parse(frozen))) {
+      await setLang(code);
+      outputs[code] = Object.fromEntries(Object.keys(entries).map(key => [key, t(key)]));
+    }
+    assert.equal(JSON.stringify(outputs, null, 2) + '\n', frozen);
+  } finally {
+    await setLang(originalLang);
+  }
+});
+
+test('loaded languages switch synchronously; missing entries fall back to English then the key; failed chunks keep language', async () => {
+  await withChromeModule('/src/client/ui/i18n.js', async (runtime) => {
+    runtime.setLang('th');
+    assert.equal(runtime.getLang(), 'th');
+    await runtime.setLang('zh');
+    assert.equal(runtime.t('settings.lang'), 'fixture language');
+    assert.equal(runtime.t('app.title'), 'RetroRoom');
+    const absentKey = ['absent', 'translation'].join('.');
+    assert.equal(runtime.t(absentKey), absentKey);
+    await runtime.setLang('ja');
+    assert.equal(runtime.getLang(), 'zh');
+  }, { plugins: [{
+    name: 'locale-network-fixture',
+    transform(_source, id) {
+      if (id.endsWith('/locales/zh.js')) return 'export default { "settings.lang": "fixture language" };';
+      if (id.endsWith('/locales/ja.js')) return 'throw new Error("chunk unavailable"); export default {};';
+    },
+  }] });
 });

@@ -1,11 +1,12 @@
-const VOTE_KEY_PATTERN = /^s\|\|vote:([^:]+):([^:]+)$/;
+import { parseCanonicalVoteKey } from './vote-comment-keys.js';
+
 export function readCanonicalVotes(voteMap) {
   const votes = new Map();
   voteMap.forEach((value, key) => {
     if (!value) return;
-    const match = VOTE_KEY_PATTERN.exec(key);
-    if (!match) return;
-    const [, itemId, userId] = match;
+    const parsed = parseCanonicalVoteKey(key);
+    if (!parsed) return;
+    const { itemId, userId } = parsed;
     if (!votes.has(itemId)) votes.set(itemId, new Set());
     votes.get(itemId).add(userId);
   });

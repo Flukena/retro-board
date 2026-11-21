@@ -9,7 +9,7 @@ const BLOB_ROUTE = 'e2e-blobs';
 const BLOB_CONTENT_TYPE = 'application/octet-stream';
 const TYPE_LENGTH_BYTES = 1;
 /** Resolved blob epochs are remembered per source; the oldest entry goes first once the map is full. */
-export const E2E_EPOCH_CACHE_MAX_ENTRIES = 256;
+const E2E_EPOCH_CACHE_MAX_ENTRIES = 256;
 const BROKEN_IMAGE = 'broken-image';
 
 const textEncoder = new TextEncoder();
@@ -20,7 +20,7 @@ const brokenImage = () => new RoomKeyError(BROKEN_IMAGE);
 const HTTP_NOT_FOUND = 404;
 
 /** The relay holds no blob under this id (never uploaded, or swept after its grace). */
-export class BlobNotFoundError extends Error {
+class BlobNotFoundError extends Error {
   constructor() {
     super('encrypted image not found');
     this.name = 'BlobNotFoundError';
@@ -39,7 +39,7 @@ const requireKey = (key) => {
   return key;
 };
 
-export const e2eImagePath = (roomHandle, blobId) => `/rooms/${roomHandle}/${BLOB_ROUTE}/${blobId}`;
+const e2eImagePath = (roomHandle, blobId) => `/rooms/${roomHandle}/${BLOB_ROUTE}/${blobId}`;
 
 /** Plaintext layout: `[u8 typeLen][type ASCII][image bytes]`. */
 async function packImage(blob) {

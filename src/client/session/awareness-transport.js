@@ -15,7 +15,7 @@ export const sendOnlyLocalAwareness = (provider) => {
   return provider;
 };
 
-export const MOTION_BROADCAST_MS = 100;
+const MOTION_BROADCAST_MS = 100;
 
 // Cursor and viewport are one awareness state. Coalesce both streams while
 // preserving immediate identity/editing updates made during the interval.

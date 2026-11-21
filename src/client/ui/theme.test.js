@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { filesUnder } from '../../../scripts/project-files.mjs';
+import { filesUnder, productionSources } from '../../../scripts/project-files.mjs';
 import { stickyCardVars, zoneCardVars, medalLook, ZONE_EDGE_HIT_WIDTH_PX } from '../board/card-look.js';
 import { PALETTE } from './palette.js';
 import { defineTokens, TOKENS, ZONE_HEADER_SIZE_TOKENS } from './theme.js';
@@ -143,14 +143,57 @@ test('board card tokens exist in both modes with fixed selection and mode-specif
   for (const name of CARD_SHARED_TOKENS) assert.equal(TOKENS.light[name], TOKENS.dark[name]);
 });
 
+// Source-scan owners: these inline producers plus card-look.js and theme.js supplies.
+// R26/R27/R28 and every extraction adding an inline --rb-* producer must extend
+// this list in the same commit; discovery below rejects an unlisted producer.
+const INLINE_BOARD_VARIABLE_OWNERS = [
+  'RetroBoard.jsx',
+  'src/client/board/DrawingTool.jsx',
+  'src/client/board/ImageCard.jsx',
+  'src/client/board/MinimapPanel.jsx',
+  'src/client/board/MoodCheck.jsx',
+  'src/client/board/PhaseBar.jsx',
+  'src/client/board/SelectionToolbar.jsx',
+  'src/client/board/TextCard.jsx',
+  'src/client/board/ZoneCard.jsx',
+  'src/client/board/ZoneToolStrip.jsx',
+  'src/client/board/card-look.js',
+  'src/client/chrome/ToolDock.jsx',
+  'src/client/chrome/TopBar.jsx',
+  'src/client/chrome/TopCenterStack.jsx',
+  'src/client/chrome/ZoomControls.jsx',
+  'src/client/poker/PokerFeature.jsx',
+  'src/client/poker/RoundSummary.jsx',
+  'src/client/poker/SeatReactions.jsx',
+  'src/client/public-wall/PublicWallPreview.jsx',
+  'src/client/reactions/ReactionOverlay.jsx',
+  'src/client/room-lock/RoomLockDialogs.jsx',
+  'src/client/session/PublicCreationNotice.jsx',
+  'src/client/session/SyncBanner.jsx',
+  'src/client/ui/Avatar.jsx',
+  'src/client/ui/Modals.jsx',
+  'src/client/ui/theme.js',
+  'src/client/voting/TimerDock.jsx',
+  'src/client/voting/VoteResultsCard.jsx',
+];
+const INLINE_BOARD_VARIABLE_PATTERN = /['"](--rb-[\w-]+)['"]\s*:/g;
+
+test('every inline board variable producer is in the explicit owner list', () => {
+  const producers = productionSources()
+    .filter(file => [...readFileSync(new URL(`../../../${file}`, import.meta.url), 'utf8')
+      .matchAll(INLINE_BOARD_VARIABLE_PATTERN)].length > 0);
+  assert.deepEqual(producers.filter(file => !INLINE_BOARD_VARIABLE_OWNERS.includes(file)), [],
+    'Extend INLINE_BOARD_VARIABLE_OWNERS in the same commit as each new producer (R26/R27/R28)');
+});
+
 test('every component-local board CSS variable has an inline producer', () => {
   const css = readFileSync(new URL('../board/board-cards.css', import.meta.url), 'utf8');
   const supplied = {
     ...stickyCardVars(PALETTE[0]), ...zoneCardVars(PALETTE[0]), ...medalLook(1), ...ZONE_HEADER_SIZE_TOKENS,
   };
-  const componentSource = ['../../../RetroBoard.jsx', '../board/ZoneCard.jsx', '../board/TextCard.jsx', '../board/ImageCard.jsx']
-    .map((path) => readFileSync(new URL(path, import.meta.url), 'utf8')).join('\n');
-  const inlineNames = new Set([...componentSource.matchAll(/['"](--rb-[\w-]+)['"]\s*:/g)]
+  const componentSource = INLINE_BOARD_VARIABLE_OWNERS
+    .map((path) => readFileSync(new URL(`../../../${path}`, import.meta.url), 'utf8')).join('\n');
+  const inlineNames = new Set([...componentSource.matchAll(INLINE_BOARD_VARIABLE_PATTERN)]
     .map((match) => match[1]));
   for (const [, name] of css.matchAll(TOKEN_REFERENCE_PATTERN)) {
     if (name.startsWith(COMPONENT_LOCAL_TOKEN_PREFIX)) {

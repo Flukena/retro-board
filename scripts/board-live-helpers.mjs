@@ -86,7 +86,10 @@ function watchPage(page, report, name) {
 export async function participant(browser, lang, report, name) {
   const context = await browser.newContext({ viewport: VIEWPORT, acceptDownloads: true });
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-  await context.addInitScript((value) => { if (!localStorage.getItem('rb_lang')) localStorage.setItem('rb_lang', value); }, lang);
+  await context.addInitScript((value) => {
+    // A page the check sends to about:blank has an opaque origin, where localStorage throws.
+    if (window.origin !== 'null' && !localStorage.getItem('rb_lang')) localStorage.setItem('rb_lang', value);
+  }, lang);
   return watchPage(await context.newPage(), report, name);
 }
 
@@ -312,6 +315,48 @@ export async function visibleBox(page, selector) {
   return locator.boundingBox();
 }
 
+// Intermediate mouse events per drag, so the board's drag handlers see a gesture rather than a jump.
+export const DRAG_STEPS = 12;
+const STICKY_SELECTOR = '[data-sticky-id]';
+
+/** The board's canonical items, read through `window.storage` like the app's own sync; throws off a board. */
+export async function boardItems(page) {
+  return page.evaluate(async () => {
+    const record = await window.storage.get('boardState', true);
+    if (!record?.value) throw new Error('window.storage has no boardState; open a board first.');
+    return record.value.items;
+  });
+}
+
+export const itemById = (items, id) => items.find((item) => item.id === id);
+
+export const boxCenter = (box) => ({ x: box.x + box.width / 2, y: box.y + box.height / 2 });
+
+export const withinPx = (actual, expected, tolerancePx) => Math.abs(actual - expected) <= tolerancePx;
+
+/** The page box of the sticky whose element contains `text`; throws when no such sticky is shown. */
+export async function stickyBox(page, text) {
+  const box = await page.locator(STICKY_SELECTOR).filter({ hasText: text }).first().boundingBox();
+  if (!box) throw new Error(`no sticky containing "${text}" is shown`);
+  return box;
+}
+
+/**
+ * Presses at `from` and moves by `by` in `steps` mouse events. The button is released in `finally`, so a failed step
+ * never leaves a stuck drag; with `hold` it stays down after a completed move and the caller must `page.mouse.up()`.
+ */
+export async function dragBy(page, from, by, { steps = DRAG_STEPS, hold = false } = {}) {
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  let moved = false;
+  try {
+    await page.mouse.move(from.x + by.x, from.y + by.y, { steps });
+    moved = true;
+  } finally {
+    if (!hold || !moved) await page.mouse.up();
+  }
+}
+
 /** A (English, board creator) and B (Thai) on one new board. */
 async function sharedBoard(browser, baseUrl, report) {
   const a = await participant(browser, 'en', report, 'A');
@@ -356,6 +401,34 @@ export function liveMode(argv = process.argv) {
 }
 
 export const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
+
+const POLL_INTERVAL_MS = 100;
+
+/** Polls `read` until `accept` holds for its value; fails with `message` and the last value after `timeoutMs`. */
+export async function pollUntil(read, accept, message, timeoutMs = SYNC_TIMEOUT_MS) {
+  const deadline = Date.now() + timeoutMs;
+  let last = await read();
+  while (!accept(last)) {
+    if (Date.now() > deadline) throw new Error(`${message}; last read ${JSON.stringify(last)}`);
+    await sleep(POLL_INTERVAL_MS);
+    last = await read();
+  }
+  return last;
+}
+
+/**
+ * Waits until `editor` is focused with its caret after `current`. Opening an editor places the caret at the end of
+ * its text 10 ms later (RetroBoard.jsx `beginFocus`); a select-all `fill` that lands first is collapsed by that move
+ * and the new text is appended to the old instead of replacing it.
+ */
+export async function waitForEditorCaretAtEnd(editor, current) {
+  const node = await editor.elementHandle();
+  await editor.page().waitForFunction(
+    ([target, expected]) => document.activeElement === target && target.value === expected
+      && target.selectionStart === expected.length && target.selectionEnd === expected.length,
+    [node, current],
+  );
+}
 
 /** The last step of a check: no page errors were recorded in `mode`. */
 export async function errorsStep({ report }, mode) {

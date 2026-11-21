@@ -16,7 +16,7 @@ const RETENTION_LOG = '[yjs] upload retention sweep';
 const PRIVATE_UPLOAD_TEMP_PATTERN = /^\.upload-[a-f0-9-]+\.tmp$/;
 const TEMP_DEADLINE_MULTIPLIER = 2;
 
-export function pruneBuckets(buckets, now, ttlMs) {
+function pruneBuckets(buckets, now, ttlMs) {
   for (const [key, bucket] of buckets) {
     if (now - bucket.lastSeen > ttlMs) buckets.delete(key);
   }

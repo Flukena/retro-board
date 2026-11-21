@@ -3,7 +3,7 @@ import { finalizeExpiredVotes } from '../../domain/vote-expiry.js';
 import { E2E_SYNCED_FIELD } from './e2e-provider.js';
 
 /** Non-elected pages wait this long past the deadline before finalizing a timer that is still live. */
-export const E2E_VOTE_GRACE_MS = 10_000;
+const E2E_VOTE_GRACE_MS = 10_000;
 const ITEMS_MAP_KEY = 'items';
 const ITEM_TYPE_KEY = 'type';
 const ZONE_TYPE = 'zone';

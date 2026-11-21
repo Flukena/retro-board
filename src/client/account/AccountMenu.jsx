@@ -16,7 +16,7 @@ import './account.css';
 const PLAN_KEYS = Object.freeze({ free: 'account.plan.free', pro: 'account.plan.pro' });
 const DELETE_ICON_SIZE_PX = 20;
 
-export function SignedOutControl({ inApp, href, onCopyLink }) {
+function SignedOutControl({ inApp, href, onCopyLink }) {
   if (inApp) {
     return (
       <div className="rb-account__notice" role="note">

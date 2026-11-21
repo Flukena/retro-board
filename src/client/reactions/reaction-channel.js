@@ -12,7 +12,7 @@ import { ReactionReceiver } from './reaction-receiver.js';
 export const REACTION_CLEAR_MS = 3000;
 
 /** The sender's display name from its presence, trimmed and bounded; '' when it has none. */
-export function reactionSenderName(state) {
+function reactionSenderName(state) {
   const name = state?.user?.name;
   return typeof name === 'string' ? name.trim().slice(0, DISPLAY_NAME_MAX_LENGTH) : '';
 }

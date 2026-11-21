@@ -8,7 +8,7 @@ const SESSION_EXPIRED_REASON = 'session expired';
 
 // Top-level maps whose local edits must reach the relay before unload.
 // Board rooms use these; other room kinds pass their own list.
-export const BOARD_SHARED_MAP_NAMES = Object.freeze(['items', 'meta']);
+const BOARD_SHARED_MAP_NAMES = Object.freeze(['items', 'meta']);
 
 function hasSharedLocalChange(doc, transaction, sharedMapNames) {
   if (!transaction.local) return false;

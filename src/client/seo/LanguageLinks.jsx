@@ -1,5 +1,6 @@
 import React, { createContext, useContext } from 'react';
-import { LANGUAGE_OPTIONS, t, useLang } from '../ui/i18n.js';
+import { t, useLang } from '../ui/i18n.js';
+import { LANGUAGE_OPTIONS } from '../ui/language-options.js';
 import { localizedPath, seoPageForPath, splitLangPath } from './seo-pages.js';
 import '../ui/language-picker.css';
 

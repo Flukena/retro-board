@@ -20,7 +20,7 @@ const liveVotes = () => window.storage?.snapshotVotes?.() || new Map();
 const closedMood = (moodCheck) => (moodCheck && !moodCheck.open
   ? moodSummary(window.storage?.snapshotMoods?.() || [], moodCheck.id) : null);
 
-export function summaryLabels() {
+function summaryLabels() {
   return {
     untitledBoard: t('summary.untitledBoard'), date: t('summary.date'), participants: t('summary.participants'),
     topVoted: t('summary.topVoted'), cards: t('summary.cards'), untitledZone: t('export.csv.untitledZone'),
@@ -32,7 +32,7 @@ export function summaryLabels() {
   };
 }
 
-export function boardImageLabels() {
+function boardImageLabels() {
   const lang = getLang();
   return {
     hidden: t('action.hiddenCard'), votes: n => t('summary.votes', { n }),

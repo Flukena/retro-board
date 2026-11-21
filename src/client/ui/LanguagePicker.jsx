@@ -1,6 +1,7 @@
 import React from 'react';
 import { ChevronDown, Languages } from 'lucide-react';
-import { LANGUAGE_OPTIONS, t, useLang } from './i18n.js';
+import { t, useLang } from './i18n.js';
+import { LANGUAGE_OPTIONS } from './language-options.js';
 import './ui.css';
 import './language-picker.css';
 

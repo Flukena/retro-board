@@ -9,7 +9,7 @@ import { LOCK_ACTION_ERROR, RoomLockActionError, isRelayAnswer, lockActionErrorF
 /** How long the drain and the catch-up to the frozen head may take before the rotation gives up. */
 export const ROTATION_WAIT_TIMEOUT_MS = 60_000;
 /** Deadline of one image read or staged upload, body included. */
-export const ROTATION_IMAGE_TIMEOUT_MS = 30_000;
+const ROTATION_IMAGE_TIMEOUT_MS = 30_000;
 const ROTATION_POLL_INTERVAL_MS = 100;
 const ROTATION_ORIGIN = 'key-rotation';
 const ITEMS_MAP = 'items';

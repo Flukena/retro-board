@@ -1,15 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
-import { runInNewContext } from 'node:vm';
-import { LANGUAGE_OPTIONS } from './i18n.js';
+import { LOCALE_LOADERS } from './i18n.js';
+import th from './locales/th.js';
+import en from './locales/en.js';
 
 const SOURCE_ROOT = new URL('../../../', import.meta.url);
 const STATIC_TRANSLATION_CALL = /\bt\(\s*(['"])([^'"\n]+)\1/g;
-const dictionarySource = readFileSync(new URL('./i18n.js', import.meta.url), 'utf8');
-const dictionaryStart = dictionarySource.indexOf('const dict = ') + 'const dict = '.length;
-const dictionaryEnd = dictionarySource.indexOf('\n};', dictionaryStart) + '\n}'.length;
-const dictionaries = runInNewContext(`(${dictionarySource.slice(dictionaryStart, dictionaryEnd)})`);
+const dictionaries = { th, en };
 
 function sourcePaths(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -41,7 +39,7 @@ const PLACEHOLDER = /\{[a-zA-Z]+\}/g;
 const placeholdersOf = (value) => [...new Set(String(value).match(PLACEHOLDER) ?? [])].sort();
 
 test('every on-demand language has exactly the English keys and keeps their placeholders', async () => {
-  const lazyCodes = LANGUAGE_OPTIONS.map(({ code }) => code).filter((code) => !Object.hasOwn(dictionaries, code));
+  const lazyCodes = Object.keys(LOCALE_LOADERS);
   assert.ok(lazyCodes.length > 0);
   const englishKeys = Object.keys(dictionaries.en).sort();
   for (const code of lazyCodes) {
@@ -65,7 +63,7 @@ const PRIVACY_BROWSER_KEY = 'legal.privacy.browser.body';
 const PRIVACY_BROWSER_LINES = Object.freeze({ STORED: 0, SIGNED_IN_HINT: 1, REMOVAL: 2 });
 
 test('every language lists the signed-in hint in the browser-storage paragraph and keeps the removal line last', async () => {
-  const lazyCodes = LANGUAGE_OPTIONS.map(({ code }) => code).filter((code) => !Object.hasOwn(dictionaries, code));
+  const lazyCodes = Object.keys(LOCALE_LOADERS);
   const bodies = { th: dictionaries.th[PRIVACY_BROWSER_KEY], en: dictionaries.en[PRIVACY_BROWSER_KEY] };
   for (const code of lazyCodes) bodies[code] = (await import(`./locales/${code}.js`)).default[PRIVACY_BROWSER_KEY];
   const lineCount = Object.keys(PRIVACY_BROWSER_LINES).length;

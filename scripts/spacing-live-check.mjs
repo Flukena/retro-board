@@ -12,7 +12,10 @@ const TIMEOUT_MS = 15_000;
 const GRID_PX = 4;
 const FRAME_PADDING_PX = 8;
 const ROW_PADDING_PX = 12;
-const CONTENT_PADDING_PX = 20;
+const CONTENT_PADDING_PX = 20; // --modal-padding, and --landing-card-padding at 600px and up (theme.js:123)
+// c53c0fd, landing.css:532-540: below 600px the mobile landing density sets the card inset to --space-4.
+const LANDING_MOBILE_MAX_WIDTH_PX = 599;
+const LANDING_MOBILE_CARD_PADDING_PX = 16;
 const TOLERANCE_PX = 1;
 const TOUCH_TARGET_PX = 44;
 const CASES = [
@@ -46,7 +49,12 @@ function word(user, key) { setLang(user.lang); return t(key); }
 async function activate(user, target) { if (user.mobile) await target.tap(); else await target.click(); }
 function near(value, expected) { return Math.abs(value - expected) <= TOLERANCE_PX; }
 function finding(ok, scene, message) { if (!ok) report.findings.push(`${scene}: ${message}`); }
-function checkSpacing(scene, nodes) {
+// a1be1a3: the recents card follows the same 16px mobile inset as the other landing cards.
+function expectedContentPadding(node, width) {
+  if (node.selector === '.rb-landing__card' && width <= LANDING_MOBILE_MAX_WIDTH_PX) return LANDING_MOBILE_CARD_PADDING_PX;
+  return CONTENT_PADDING_PX;
+}
+function checkSpacing(scene, width, nodes) {
   for (const node of nodes) {
     const [top, right, bottom, left] = node.padding;
     const label = `${scene} ${node.selector}`;
@@ -57,7 +65,8 @@ function checkSpacing(scene, nodes) {
     }
     finding(near(left, right), label, `unequal horizontal padding ${left}/${right}px`);
     if (node.selector === '.rb-landing__card' || node.selector === '.rb-modal__content') {
-      finding(near(left, CONTENT_PADDING_PX), label, `content inset ${left}px; expected ${CONTENT_PADDING_PX}px`);
+      const expected = expectedContentPadding(node, width);
+      finding(near(left, expected), label, `content inset ${left}px; expected ${expected}px`);
     }
     if (['.rb-menu-item', '.rb-zone__tool-popup .rb-zone__icon'].includes(node.selector)) {
       finding(near(left, ROW_PADDING_PX), label, `menu row inset ${left}px; expected ${ROW_PADDING_PX}px`);
@@ -78,7 +87,7 @@ async function capture(user, name) {
       isMenuFrame: node.matches('.rb-template-popover, .rb-topbar-popover'),
       width: node.getBoundingClientRect().width }];
   })), SELECTORS);
-  checkSpacing(scene, nodes);
+  checkSpacing(scene, user.width, nodes);
   report.scenes.push({ scene, nodes });
   await user.page.screenshot({ path: join(out, `${scene}.png`) });
 }
@@ -121,6 +130,18 @@ async function zoneMenu(user) {
   await popup.waitFor();
   return popup;
 }
+// d40741b: while the zone header shows its own "Start voting" button the options popup hides that entry
+// (zone-menu-viewport.js), so the header button is the control; a narrow header leaves it to the popup.
+async function startZoneVote(user) {
+  const name = word(user, 'zone.startVote');
+  const header = user.page.locator('.rb-zone__admin-action').getByRole('button', { name, exact: true });
+  if (await header.isVisible()) {
+    await activate(user, header);
+    return;
+  }
+  const popup = await zoneMenu(user);
+  await activate(user, popup.getByRole('button', { name, exact: true }));
+}
 async function checkVoteExits(user) {
   for (const method of ['close', 'escape', 'backdrop']) {
     if (method === 'close') await dismiss(user);
@@ -131,14 +152,13 @@ async function checkVoteExits(user) {
       else await backdrop.click({ position: { x: 2, y: 2 } });
     }
     await user.page.locator('.rb-timer-setup').waitFor({ state: 'hidden' });
-    const popup = await zoneMenu(user);
-    await activate(user, popup.getByRole('button', { name: word(user, 'zone.startVote'), exact: true }));
+    await startZoneVote(user);
     await user.page.locator('.rb-timer-setup').waitFor();
   }
 }
 async function checkWidgets(user) {
   await boardFixtures(user);
-  let popup = await zoneMenu(user);
+  const popup = await zoneMenu(user);
   await capture(user, 'zone-menu');
   await activate(user, popup.getByRole('button', { name: word(user, 'selection.saveTemplate'), exact: true }));
   await capture(user, 'template-name');
@@ -148,8 +168,7 @@ async function checkWidgets(user) {
   await activate(user, sticky.locator('.rb-sticky__comment-chip'));
   await capture(user, 'comments');
   await dismiss(user);
-  popup = await zoneMenu(user);
-  await activate(user, popup.getByRole('button', { name: word(user, 'zone.startVote'), exact: true }));
+  await startZoneVote(user);
   await capture(user, 'timer-setup');
   for (const control of await user.page.locator('.rb-timer-setup .rb-choice-chip').all()) {
     const reachable = await control.evaluate(node => {
@@ -173,6 +192,14 @@ async function checkWidgets(user) {
   await capture(user, 'results');
 }
 async function checkCase(settings) {
+  try {
+    await runCase(settings);
+  } catch (error) {
+    console.log(`FAIL captured ${settings.width}px ${settings.lang}`);
+    throw error;
+  }
+}
+async function runCase(settings) {
   const context = await browser.newContext({ viewport: { width: settings.width, height: settings.height }, isMobile: settings.mobile,
     hasTouch: settings.mobile, reducedMotion: 'reduce' });
   try {
@@ -181,9 +208,10 @@ async function checkCase(settings) {
     user.page.setDefaultTimeout(TIMEOUT_MS);
     user.page.on('pageerror', error => report.errors.push(error.message));
     await user.page.goto(base.href);
-    await user.page.locator('.rb-public-wall').waitFor();
+    // d40741b: Landing renders the hero variant, whose Public dock is .rb-landing__public-bar (no .rb-public-wall card).
+    await user.page.locator('.rb-landing__public-bar').waitFor();
     await capture(user, 'landing');
-    const create = user.page.getByRole('button', { name: 'Create', exact: true });
+    const create = user.page.getByRole('button', { name: word(user, 'landing.create.btn'), exact: true });
     const join = user.page.locator('.rb-public-wall__join');
     const heights = await Promise.all([create, join].map(target => target.evaluate(node => node.getBoundingClientRect().height)));
     finding(near(heights[0], heights[1]), `${settings.width} landing`, `Create/Public actions have different heights ${heights.join('/')}px`);
@@ -225,6 +253,7 @@ async function checkCase(settings) {
 try {
   for (const settings of selectedCases) await checkCase(settings);
   assert.deepEqual(report.errors, []);
+  if (mode === 'check' && report.findings.length) console.log('FAIL spacing is consistent across equivalent UI roles');
   if (mode === 'check') assert.equal(report.findings.length, 0, `Spacing must be consistent across equivalent UI roles: ${report.findings.slice(0, 6).join('; ')}`);
 } finally {
   await writeFile(join(out, 'report.json'), JSON.stringify(report, null, 2));

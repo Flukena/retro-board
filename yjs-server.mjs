@@ -1,43 +1,48 @@
-import { coalesceAwarenessSends } from './src/server/relay-awareness-fanout.js';
-import { RoomSessions } from './src/server/relay-session.js';
-import { RelayProtocol } from './src/server/relay-protocol.js';
 // Yjs WebSocket relay with LevelDB persistence.
 // Single source of truth for collaborative state.
-
-import { envInt, envBool, readGuestSweepTiming, readRelayConfig, MILLISECONDS_PER_MINUTE, MILLISECONDS_PER_HOUR, ROOM_BLOCK_TTL_MS, BLOCKED_ROOM_ENTRIES_PER_ACTIVE_ROOM, LARGE_UPDATE_LOG_THRESHOLD_BYTES, VOTE_EXPIRY_RETRY_INTERVAL_MS, MAINTENANCE_INTERVAL_MS, STORE_OPERATION_OVERHEAD_BYTES, MAX_HTTP_TARGET_CHARACTERS, MAX_REQUESTS_PER_SOCKET, RETRY_AFTER_SHORT_SECONDS, RETRY_AFTER_LONG_SECONDS } from './src/server/relay-config.js';
-import { evictOldestBucket, refillTokens, tokenWaitSeconds } from './src/server/relay-rate-bucket.js';
-import { roomTargetFromRequest, tokenDocNameFromRequest } from './src/server/relay-room-target.js';
-import { RelayWsTraffic, closeOnSessionExpiry } from './src/server/relay-ws-traffic.js';
+import { createRelayLateBindings, createStorageFailureHandler } from './src/server/relay-late-bindings.js';
+import { createWsConnectionHandler } from './src/server/relay-ws-connection.js';
+import { createRoomPolicy, createRoomState } from './src/server/relay-room-state.js';
+import { createRelayPersistence } from './src/server/relay-persistence.js';
+import { createRelayRuntime, logRelayBanner } from './src/server/relay-runtime.js';
+import { createHttpDispatch } from './src/server/relay-http-dispatch.js';
+import { createUpgradeHandler } from './src/server/relay-upgrade.js';
+import { createWsAdmission } from './src/server/relay-ws-admission.js';
+import { createAwarenessPolicy } from './src/server/relay-awareness-policy.js';
+import { createVoteExpiry } from './src/server/relay-vote-expiry.js';
+import { createRoomAccounting } from './src/server/relay-room-accounting.js';
+import { createAdmissionLimits } from './src/server/relay-admission-limits.js';
+import { readAllowedOrigins } from './src/server/relay-origins.js';
+import { clientIpFromRequest as requestClientIp } from './src/server/relay-client-ip.js';
+import { RoomSessions } from './src/server/relay-session.js';
+import { RelayProtocol } from './src/server/relay-protocol.js';
+import { envInt, envBool, readGuestSweepTiming, readRelayConfig, MAINTENANCE_INTERVAL_MS, MAX_REQUESTS_PER_SOCKET, RETRY_AFTER_LONG_SECONDS } from './src/server/relay-config.js';
+import { RelayWsTraffic } from './src/server/relay-ws-traffic.js';
 import { createE2ERelay } from './src/server/e2e-relay.js';
 import { E2ERoomLog } from './src/server/e2e-room-log.js';
 import { migrateLegacyImages } from './src/server/legacy-image-migration.js';
 import { E2EBlobStore } from './src/server/e2e-blob-store.js';
 import { createE2EBlobs } from './src/server/e2e-blobs.js';
-import { isExactAllowedOrigin, sendUpgradeRejection } from './src/server/relay-http.js';
-import { handleRoomRoute } from './src/server/relay-room-routes.js';
+import { sendUpgradeRejection } from './src/server/relay-http.js';
 import { roomLogId } from './src/server/relay-log-id.js';
 import { createUploadState, scanUploadUsage, createRelayUploads, createImageReadBudgets, UPLOAD_STORAGE_FAILURE_EVENT, ROOM_UPLOAD_USAGE_META } from './src/server/relay-uploads.js';
 import http from 'http';
 import fs from 'fs';
-import { createRequire } from 'module';
 import { randomBytes } from 'crypto';
 import { isIP } from 'net';
 import { WebSocketServer } from 'ws';
-import { fileURLToPath } from 'url';
-import { dirname, resolve, join } from 'path';
 import {
-  createRelayLifecycle, drainRelay, isRelayReady, STORAGE_FAILURE_LOG, STORAGE_FAILURE_REASON,
+  createRelayLifecycle, drainRelay, isRelayReady,
   UNHANDLED_REJECTION_EVENT, UNCAUGHT_EXCEPTION_EVENT,
 } from './src/server/relay-lifecycle.js';
-import { finalizeRelayVotes } from './src/server/relay-vote-maintenance.js';
-import { RoomRegistry, REGISTRY_STORAGE_FAILURE_EVENT, databaseCapacityError } from './src/server/relay-room-registry.js';
+import { RoomRegistry, REGISTRY_STORAGE_FAILURE_EVENT } from './src/server/relay-room-registry.js';
 import { RelayMaintenance, MAINTENANCE_STORAGE_FAILURE_EVENT } from './src/server/relay-maintenance.js';
 import { directorySizeSync, loadSessionSigningKey, loadSigningKey, ACCOUNT_SESSION_KEY } from './src/server/relay-local-files.js';
 import { AccountStore, ACCOUNT_STORAGE_FAILURE_EVENT } from './src/server/account-store.js';
 import { AccountSessions } from './src/server/auth-session.js';
 import { FlowLedger } from './src/server/auth-google.js';
 import { createAuthRoutes, enabledOAuthConfig } from './src/server/auth-routes.js';
-import { publicRelayEnvironment, isPublicWallEnabled, PUBLIC_RELAY_PREFIX, PUBLIC_SNAPSHOT_DIRECTORY, PUBLIC_ACTION_LIMIT_REASON } from './src/server/public-wall-config.js';
+import { publicRelayEnvironment, isPublicWallEnabled, PUBLIC_SNAPSHOT_DIRECTORY } from './src/server/public-wall-config.js';
 import { claimPublicDirectory, PublicWallHistory } from './src/server/public-wall-history.js';
 import { provisionPublicWall, RelayPublicWall, retainPublicDocument } from './src/server/relay-public-wall.js';
 import { createRejectionCounters } from './src/server/relay-rejection-counters.js';
@@ -57,23 +62,9 @@ import { createHttpRequestSlots } from './src/server/relay-http-slots.js';
 import { createAccountRoomRoutes } from './src/server/account-room-routes.js';
 import { createRoomSummaryReader, createRoomTitleWriter } from './src/server/room-title-writer.js';
 import { orphanRoomsOfDeletedAccounts } from './src/server/room-orphaning.js';
-import { admitPublicAction, registerPublicQuotaClient, notifyPublicQuota } from './src/server/public-action-limit.js';
 
-// yjs, y-leveldb, and y-websocket must all resolve to the SAME yjs module
-// instance. y-websocket's bin/utils.js (below) is CJS and does
-// `require('yjs')`, which its package.json "exports" map sends to
-// dist/yjs.cjs. If we instead `import * as Y from 'yjs'` here, the "exports"
-// map sends that to dist/yjs.mjs — a separate module with separate Item/GC/
-// etc. classes. Structs created by one instance fail `instanceof` checks in
-// the other's merge/sync code, silently corrupting a doc's struct store; it
-// surfaces later as "Cannot read properties of undefined (reading 'splice')"
-// once enough concurrent edits force a merge over the tainted region.
-// Routing everything through this one `require` keeps it a single instance.
-const require = createRequire(import.meta.url);
-const Y = require('yjs');
-const { LeveldbPersistence } = require('y-leveldb');
-
-
+const bindings = createRelayLateBindings();
+const { Y, LeveldbPersistence, loadUtils } = createRelayRuntime();
 
 Object.assign(process.env, publicRelayEnvironment(process.env));
 const PUBLIC_WALL = isPublicWallEnabled(process.env);
@@ -90,138 +81,26 @@ const ALLOW_INSECURE_HTTP = envBool('YJS_ALLOW_INSECURE_HTTP');
 // reverse proxy. Otherwise a direct client can forge CF-Connecting-IP/XFF.
 const TRUST_PROXY = envBool('YJS_TRUST_PROXY');
 
-const normalizeIp = (value) => {
-  if (typeof value !== 'string') return null;
-  let candidate = value.trim();
-  if (candidate.startsWith('::ffff:') && isIP(candidate.slice(7)) === 4) candidate = candidate.slice(7);
-  return isIP(candidate) ? candidate : null;
-};
-
-const clientIpFromRequest = (req) => {
-  const socketIp = normalizeIp(req.socket?.remoteAddress) || 'unknown';
-  if (!TRUST_PROXY) return socketIp;
-  const cfIp = normalizeIp(Array.isArray(req.headers['cf-connecting-ip'])
-    ? req.headers['cf-connecting-ip'][0]
-    : req.headers['cf-connecting-ip']);
-  if (cfIp) return cfIp;
-  const forwarded = Array.isArray(req.headers['x-forwarded-for'])
-    ? req.headers['x-forwarded-for'][0]
-    : req.headers['x-forwarded-for'];
-  return normalizeIp(typeof forwarded === 'string' ? forwarded.split(',')[0] : '') || socketIp;
-};
+const clientIpFromRequest = req => requestClientIp(req, TRUST_PROXY);
 
 const SESSION_SIGNING_KEY = loadSessionSigningKey(DB_DIR);
 
-// y-websocket v1 ships server utils at bin/utils.js but doesn't expose them
-// in its package "exports" map, so we import the file directly.
-const here = dirname(fileURLToPath(import.meta.url));
-const utilsPath = resolve(here, 'node_modules/y-websocket/bin/utils.js');
-const { setupWSConnection, setPersistence, docs, getYDoc } = await import(utilsPath);
-
-// y-websocket calls syncProtocol.readSyncMessage without the optional
-// errorHandler, so corrupt-state errors fall through to a console.error that
-// doesn't include the doc name — we never know which room broke. y-websocket
-// uses CJS `require('y-protocols/sync')`, which resolves to dist/sync.cjs and
-// is cached, so mutating exports on the cached module reaches that call site.
-const syncProtocol = require('y-protocols/sync');
-const awarenessProtocol = require('y-protocols/awareness');
-const origReadSyncMessage = syncProtocol.readSyncMessage;
-syncProtocol.readSyncMessage = (decoder, encoder, doc, origin) =>
-  origReadSyncMessage(decoder, encoder, doc, origin, () => {
-    console.warn('[yjs] invalid sync message', { docName: roomLogId(doc.name) });
-    try { origin?.close?.(1008, 'invalid sync message'); } catch { /* already closing */ }
-  });
+const { setupWSConnection, setPersistence, docs, getYDoc, awarenessProtocol } = await loadUtils();
 
 // Comma-separated exact Origin allowlist. Empty is fail-closed unless the
 // explicit dev-only YJS_ALLOW_INSECURE_HTTP flag is enabled, in which case
 // only localhost/127.0.0.1 HTTP origins are accepted.
-const ALLOWED_ORIGINS = (process.env.YJS_ALLOWED_ORIGINS || '')
-  .split(',').map((s) => s.trim()).filter(Boolean);
-for (const origin of ALLOWED_ORIGINS) {
-  let parsed;
-  try { parsed = new URL(origin); }
-  catch { throw new Error('YJS_ALLOWED_ORIGINS must contain exact URL origins'); }
-  const localHttp = parsed.protocol === 'http:'
-    && ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname);
-  if (parsed.origin !== origin
-      || parsed.username || parsed.password
-      || parsed.pathname !== '/' || parsed.search || parsed.hash
-      || (parsed.protocol !== 'https:' && !(ALLOW_INSECURE_HTTP && localHttp))) {
-    throw new Error('YJS_ALLOWED_ORIGINS must contain exact HTTPS origins (or localhost HTTP in dev mode)');
-  }
-}
+const ALLOWED_ORIGINS = readAllowedOrigins(process.env.YJS_ALLOWED_ORIGINS, ALLOW_INSECURE_HTTP);
 
 const relayConfig = readRelayConfig();
-const {
-  RL_MAX_BYTES,
-  MAX_CONNECTIONS,
-  MAX_ACTIVE_ROOMS,
-  MAX_DOCUMENT_BYTES,
-  MAX_ACTIVE_DOCUMENT_BYTES,
-  MAX_UPDATE_BYTES,
-  MAX_PENDING_STORE_OPS,
-  MAX_PENDING_STORE_BYTES,
-  MAX_DB_BYTES,
-  ROOM_COMPACT_AFTER_BYTES,
-  ROOM_COMPACT_AFTER_UPDATES,
-  ROOM_MAX_UNCOMPACTED_UPDATES,
-  ROOM_COMPACTION_MIN_INTERVAL_MS,
-  DOCUMENT_REMEASURE_MIN_INTERVAL_MS,
-  ROOM_MAX_UNCOMPACTED_BYTES,
-  MAX_STATE_VECTOR_BYTES,
-  MAX_AWARENESS_MESSAGE_BYTES,
-  MAX_AWARENESS_STATE_BYTES,
-  MAX_AWARENESS_IDS_PER_CONNECTION,
-  MAX_AWARENESS_CLIENTS_PER_ROOM,
-  MAX_AWARENESS_ROOM_BYTES,
-  MAX_REGISTERED_ROOMS,
-  ROOM_SESSION_TTL_MS,
-  MAX_API_BODY_BYTES,
-  MAX_COOKIE_HEADER_BYTES,
-  MAX_HEADER_BYTES,
-  ROOM_CREATE_BURST,
-  ROOM_CREATES_PER_HOUR,
-  GLOBAL_ROOM_CREATE_BURST,
-  GLOBAL_ROOM_CREATES_PER_MINUTE,
-  SESSION_EXCHANGE_BURST,
-  SESSION_EXCHANGES_PER_MINUTE,
-  GLOBAL_SESSION_EXCHANGE_BURST,
-  GLOBAL_SESSION_EXCHANGES_PER_MINUTE,
-  SESSION_FAILURE_BURST,
-  SESSION_FAILURES_PER_HOUR,
-  WS_UPGRADE_IP_BURST,
-  WS_UPGRADES_PER_IP_PER_MINUTE,
-  WS_UPGRADE_ROOM_BURST,
-  WS_UPGRADES_PER_ROOM_PER_MINUTE,
-  GLOBAL_WS_UPGRADE_BURST,
-  GLOBAL_WS_UPGRADES_PER_MINUTE,
-  COLD_ROOM_OPEN_IP_BURST,
-  COLD_ROOM_OPENS_PER_IP_PER_MINUTE,
-  COLD_ROOM_OPEN_ROOM_BURST,
-  COLD_ROOM_OPENS_PER_ROOM_PER_MINUTE,
-  GLOBAL_COLD_ROOM_OPEN_BURST,
-  GLOBAL_COLD_ROOM_OPENS_PER_MINUTE,
-  MAX_HTTP_REQUESTS,
-  MAX_HTTP_REQUESTS_PER_IP,
-  REQUEST_TIMEOUT_MS,
-  HEADERS_TIMEOUT_MS,
-  KEEP_ALIVE_TIMEOUT_MS,
-  UPGRADE_TIMEOUT_MS,
-  SHUTDOWN_TIMEOUT_MS,
-  HTTP_SHUTDOWN_GRACE_MS,
-  UPLOADS_DIR,
-  MAX_UPLOAD_STORAGE_BYTES,
-  MAX_BUCKETS,
-} = relayConfig;
-fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+fs.mkdirSync(relayConfig.UPLOADS_DIR, { recursive: true });
 const uploadState = createUploadState(relayConfig);
 const initialUploadUsage = uploadState.initialUsage;
 const uploadBuckets = uploadState.buckets;
 
 const ldb = new LeveldbPersistence(DB_DIR);
-let dbUsageBytes = databaseSizeBytes();
-let pendingStoreOps = 0;
-let pendingStoreBytes = 0;
+const accounting = createRoomAccounting({ databaseSizeBytes, MAX_DB_BYTES: relayConfig.MAX_DB_BYTES, MAX_PENDING_STORE_OPS: relayConfig.MAX_PENDING_STORE_OPS, MAX_PENDING_STORE_BYTES: relayConfig.MAX_PENDING_STORE_BYTES, MAX_ACTIVE_DOCUMENT_BYTES: relayConfig.MAX_ACTIVE_DOCUMENT_BYTES });
+const { roomUsage } = accounting;
 
 // Marks the one update we apply from disk during hydration, so the listener
 // below can skip writing it straight back.
@@ -250,26 +129,13 @@ const registryPersistence = {
   flushDocument: checkedFlushDocument,
   clearDocument: checkedClearDocument,
   durableMetaBatch: (docName, ops) => durableMetaBatch(ldb, docName, ops),
-  hasCapacity: () => dbUsageBytes + pendingStoreBytes < MAX_DB_BYTES,
-  reserveStore(estimatedBytes) {
-    if (pendingStoreOps >= MAX_PENDING_STORE_OPS
-        || pendingStoreBytes + estimatedBytes > MAX_PENDING_STORE_BYTES
-        || dbUsageBytes + pendingStoreBytes + estimatedBytes > MAX_DB_BYTES) throw databaseCapacityError();
-    pendingStoreOps += 1;
-    pendingStoreBytes += estimatedBytes;
-    return () => {
-      pendingStoreOps = Math.max(0, pendingStoreOps - 1);
-      pendingStoreBytes = Math.max(0, pendingStoreBytes - estimatedBytes);
-    };
-  },
-  measureDatabase() {
-    dbUsageBytes = databaseSizeBytes();
-    return dbUsageBytes;
-  },
+  hasCapacity: accounting.hasCapacity,
+  reserveStore: accounting.reserveStore,
+  measureDatabase: accounting.measureDatabase,
 };
 const roomRegistry = new RoomRegistry({
-  persistence: registryPersistence, Y, maxRooms: MAX_REGISTERED_ROOMS,
-  maxDatabaseBytes: MAX_DB_BYTES, signingKey: SESSION_SIGNING_KEY,
+  persistence: registryPersistence, Y, maxRooms: relayConfig.MAX_REGISTERED_ROOMS,
+  maxDatabaseBytes: relayConfig.MAX_DB_BYTES, signingKey: SESSION_SIGNING_KEY,
 });
 // Rooms in the deletion journal are fenced and never registered; recovery below finishes them.
 const roomFence = new RoomFence();
@@ -278,22 +144,10 @@ const journaledDeletions = await deletionJournal.load();
 await roomRegistry.hydrate(initialUploadUsage, new Set(journaledDeletions.keys()));
 const publicWall = PUBLIC_WALL ? new RelayPublicWall(await provisionPublicWall(roomRegistry)) : null;
 const publicHistory = PUBLIC_WALL ? new PublicWallHistory(DB_DIR, Y) : null;
-const { registeredDocs, registeredRoomsByHandle, roomUploadUsage, existingDocNames } = roomRegistry;
+const { registeredRoomsByHandle, roomUploadUsage } = roomRegistry;
 const roomHandleForDoc = (docName) => roomRegistry.roomHandleForDoc(docName);
 
-// Flipped by the first storage failure. Existing clients are closed as well as
-// refusing new upgrades: otherwise they would continue seeing edits that can
-// no longer be persisted and lose them at the next restart.
-let storageFailure = null;
-// Set by the signal handlers at the bottom of this file; checked in the
-// upgrade path so a draining process stops taking on new rooms.
-let shuttingDown = false;
-const markStorageFailure = (err) => {
-  if (storageFailure) return;
-  storageFailure = err;
-  console.error(STORAGE_FAILURE_LOG, { errorId: roomLogId(String(err)) });
-  shutdown(STORAGE_FAILURE_REASON, true);
-};
+const markStorageFailure = createStorageFailureHandler({ accounting, bindings });
 
 roomRegistry.on(REGISTRY_STORAGE_FAILURE_EVENT, markStorageFailure);
 const accountStore = new AccountStore({ ldb, getMeta: checkedGetMeta, hasCapacity: registryPersistence.hasCapacity });
@@ -321,428 +175,24 @@ const reconcileUploadUsage = async () => {
   }
 };
 
-// `upperBytes` is a conservative in-memory document bound. It starts at the
-// exact hydrated size and grows by each accepted update until a separately
-// throttled measurement refreshes it. This avoids synchronously encoding a
-// near-limit document on every tiny edit or every persistence compaction.
-const roomUsage = new WeakMap();
-const destroyedDocs = new WeakSet();
-const capacityRejectedDocs = new WeakSet();
-let activeDocumentBytes = 0;
+const roomPolicy = createRoomPolicy(relayConfig);
+const { destroyedDocs, capacityRejectedDocs, blockedRooms, blockRoom, isRoomBlocked } = roomPolicy;
 
-const projectedActiveDocumentBytes = (ydoc, nextUpperBytes) => {
-  const previous = roomUsage.get(ydoc);
-  return Math.max(0, activeDocumentBytes - (previous?.upperBytes || 0) + nextUpperBytes);
-};
-
-const commitRoomUsage = (ydoc, nextUsage) => {
-  activeDocumentBytes = projectedActiveDocumentBytes(ydoc, nextUsage.upperBytes);
-  roomUsage.set(ydoc, nextUsage);
-};
-
-const tryCommitRoomUsage = (ydoc, nextUsage) => {
-  if (projectedActiveDocumentBytes(ydoc, nextUsage.upperBytes) > MAX_ACTIVE_DOCUMENT_BYTES) {
-    return false;
-  }
-  commitRoomUsage(ydoc, nextUsage);
-  return true;
-};
-
-const releaseRoomUsage = (ydoc) => {
-  const previous = roomUsage.get(ydoc);
-  if (!previous) return;
-  activeDocumentBytes = Math.max(0, activeDocumentBytes - previous.upperBytes);
-  roomUsage.delete(ydoc);
-};
-// A small current Y.Doc can still have a very large LevelDB update log (for
-// example repeated insert/delete cycles). Track that write amplification
-// independently and compact while peers remain connected instead of waiting
-// for the last socket to leave.
-const roomPersistenceChurn = new Map();
-const persistenceChurnFor = (docName) => {
-  let state = roomPersistenceChurn.get(docName);
-  if (!state) {
-    state = {
-      uncompactedBytes: 0,
-      uncompactedUpdates: 0,
-      compactionPromise: null,
-      compactionTimer: null,
-      compactionTimerDueAt: 0,
-      // Permit one prompt compaction after process start, then enforce the
-      // cooldown. Cold-open budgets bound how often an attacker can reset
-      // this state by cycling rooms, while legitimate first edits stay fluid.
-      lastCompactedAt: 0,
-      remeasureRequested: false,
-    };
-    roomPersistenceChurn.set(docName, state);
-  }
-  return state;
-};
-const blockedRooms = new Map();
-const MAX_BLOCKED_ROOM_ENTRIES = MAX_ACTIVE_ROOMS * BLOCKED_ROOM_ENTRIES_PER_ACTIVE_ROOM;
-
-const blockRoom = (docName, ydoc, reason) => {
-  const now = Date.now();
-  blockedRooms.delete(docName);
-  blockedRooms.set(docName, now + ROOM_BLOCK_TTL_MS);
-  while (blockedRooms.size > MAX_BLOCKED_ROOM_ENTRIES) {
-    blockedRooms.delete(blockedRooms.keys().next().value);
-  }
-  console.warn('[yjs] room policy close', { docName: roomLogId(docName), reason });
-  if (ydoc) {
-    for (const conn of ydoc.conns.keys()) {
-      try { conn.close(1009, 'room resource limit'); } catch { /* already closing */ }
-    }
-  }
-};
-
-const isRoomBlocked = (docName) => {
-  const expiresAt = blockedRooms.get(docName);
-  if (!expiresAt) return false;
-  if (expiresAt <= Date.now()) {
-    blockedRooms.delete(docName);
-    return false;
-  }
-  return true;
-};
-
-const armRoomCompactionTimer = (docName, churn, dueAt) => {
-  if (churn.compactionTimer && churn.compactionTimerDueAt <= dueAt) return;
-  if (churn.compactionTimer) clearTimeout(churn.compactionTimer);
-  churn.compactionTimerDueAt = dueAt;
-  churn.compactionTimer = setTimeout(() => {
-    churn.compactionTimer = null;
-    churn.compactionTimerDueAt = 0;
-    scheduleRoomCompaction(docName);
-  }, Math.max(1, dueAt - Date.now()));
-  churn.compactionTimer.unref();
-};
-
-const scheduleRoomCompaction = (docName, { remeasure = false } = {}) => {
-  const churn = persistenceChurnFor(docName);
-  if (remeasure) churn.remeasureRequested = true;
-  if (churn.compactionPromise || shuttingDown || storageFailure) return churn.compactionPromise;
-  let activeDoc = docs.get(docName);
-  if (!activeDoc) churn.remeasureRequested = false;
-
-  const hasPersistenceWork = churn.uncompactedBytes > 0 || churn.uncompactedUpdates > 0;
-  if (!hasPersistenceWork && !churn.remeasureRequested) return null;
-
-  const now = Date.now();
-  const compactionDueAt = churn.lastCompactedAt + ROOM_COMPACTION_MIN_INTERVAL_MS;
-  const canCompact = hasPersistenceWork && now >= compactionDueAt;
-  const usage = activeDoc ? roomUsage.get(activeDoc) : null;
-  const remeasureDueAt = (usage?.lastMeasuredAt || now) + DOCUMENT_REMEASURE_MIN_INTERVAL_MS;
-  const canRemeasure = Boolean(churn.remeasureRequested && activeDoc && now >= remeasureDueAt);
-
-  if (!canCompact && !canRemeasure) {
-    const nextDueAt = Math.min(
-      hasPersistenceWork ? compactionDueAt : Number.POSITIVE_INFINITY,
-      churn.remeasureRequested && activeDoc ? remeasureDueAt : Number.POSITIVE_INFINITY,
-    );
-    if (Number.isFinite(nextDueAt)) armRoomCompactionTimer(docName, churn, nextDueAt);
-    return null;
-  }
-
-  if (churn.compactionTimer) clearTimeout(churn.compactionTimer);
-  churn.compactionTimer = null;
-  churn.compactionTimerDueAt = 0;
-  const coveredBytes = canCompact ? churn.uncompactedBytes : 0;
-  const coveredUpdates = canCompact ? churn.uncompactedUpdates : 0;
-
-  // checkedFlushDocument enters y-leveldb's single serialized transaction
-  // queue at this exact point. Later storeUpdate calls are queued behind it,
-  // so subtracting only this captured generation cannot hide concurrent edits.
-  // Exact in-memory measurement is independent and can run without a flush;
-  // both expensive operations have their own per-room cooldown.
-  const compaction = (canCompact ? checkedFlushDocument(docName) : Promise.resolve())
-    .then(() => {
-      if (canCompact) {
-        churn.uncompactedBytes = Math.max(0, churn.uncompactedBytes - coveredBytes);
-        churn.uncompactedUpdates = Math.max(0, churn.uncompactedUpdates - coveredUpdates);
-        churn.lastCompactedAt = Date.now();
-        dbUsageBytes = databaseSizeBytes();
-      }
-      activeDoc = docs.get(docName);
-      const currentUsage = activeDoc ? roomUsage.get(activeDoc) : null;
-      const measurementNow = Date.now();
-      if (churn.remeasureRequested && activeDoc && currentUsage
-          && measurementNow - currentUsage.lastMeasuredAt >= DOCUMENT_REMEASURE_MIN_INTERVAL_MS) {
-        try {
-          const exactBytes = Y.encodeStateAsUpdate(activeDoc).byteLength;
-          commitRoomUsage(activeDoc, {
-            upperBytes: exactBytes,
-            exactBytes,
-            lastMeasuredAt: measurementNow,
-          });
-          churn.remeasureRequested = false;
-          if (exactBytes > MAX_DOCUMENT_BYTES) {
-            blockRoom(docName, activeDoc, 'document too large');
-          } else if (activeDocumentBytes > MAX_ACTIVE_DOCUMENT_BYTES) {
-            blockRoom(docName, activeDoc, 'active document capacity exceeded');
-          }
-          console.log('[yjs] document remeasured', {
-            docName: roomLogId(docName),
-            bytes: exactBytes,
-          });
-        } catch (err) {
-          churn.remeasureRequested = false;
-          blockRoom(docName, activeDoc, 'document size check failed');
-          console.error('[yjs] document size check failed', {
-            docName: roomLogId(docName),
-            err: err.message,
-          });
-        }
-      }
-      if (!activeDoc) churn.remeasureRequested = false;
-      if (canCompact) {
-        console.log('[yjs] room compacted', {
-          docName: roomLogId(docName),
-          bytes: coveredBytes,
-          updates: coveredUpdates,
-        });
-      }
-    })
-    .catch((err) => {
-      markStorageFailure(err);
-      console.error('[yjs] room compaction failed', { docName: roomLogId(docName), err: err.message });
-    })
-    .finally(() => {
-      churn.compactionPromise = null;
-      if (churn.uncompactedBytes >= ROOM_COMPACT_AFTER_BYTES
-          || churn.uncompactedUpdates >= ROOM_COMPACT_AFTER_UPDATES
-          || churn.remeasureRequested) {
-        scheduleRoomCompaction(docName);
-      }
-    });
-  churn.compactionPromise = compaction;
-  return compaction;
-};
-
-const storeWrites = new WeakMap(); // the last store write each doc queued (true once stored); a relay rename awaits its own
-const queueStoreUpdate = (docName, update, ydoc) => {
-  const estimatedBytes = update.byteLength + STORE_OPERATION_OVERHEAD_BYTES;
-  const churn = persistenceChurnFor(docName);
-  if (churn.uncompactedBytes + estimatedBytes > ROOM_MAX_UNCOMPACTED_BYTES
-      || churn.uncompactedUpdates + 1 > ROOM_MAX_UNCOMPACTED_UPDATES) {
-    scheduleRoomCompaction(docName, { remeasure: true });
-    blockRoom(docName, ydoc, 'room persistence backlog');
-    return;
-  }
-  if (pendingStoreOps >= MAX_PENDING_STORE_OPS
-      || pendingStoreBytes + estimatedBytes > MAX_PENDING_STORE_BYTES) {
-    blockRoom(docName, ydoc, 'persistence backlog');
-    return;
-  }
-  if (dbUsageBytes + pendingStoreBytes + estimatedBytes > MAX_DB_BYTES) {
-    markStorageFailure(new Error('configured database quota exceeded'));
-    return;
-  }
-  pendingStoreOps += 1;
-  pendingStoreBytes += estimatedBytes;
-  churn.uncompactedBytes += estimatedBytes;
-  churn.uncompactedUpdates += 1;
-  storeWrites.set(ydoc, checkedStoreUpdate(docName, update)
-    .then(() => {
-      dbUsageBytes += estimatedBytes;
-      if (update.byteLength > LARGE_UPDATE_LOG_THRESHOLD_BYTES) {
-        console.log('[yjs] storeUpdate ok', { docName: roomLogId(docName), bytes: update.byteLength });
-      }
-      return true;
-    })
-    .catch((err) => {
-      markStorageFailure(err);
-      console.error('[yjs] storeUpdate failed', { docName: roomLogId(docName), err: err.message });
-      return false;
-    })
-    .finally(() => {
-      pendingStoreOps = Math.max(0, pendingStoreOps - 1);
-      pendingStoreBytes = Math.max(0, pendingStoreBytes - estimatedBytes);
-    }));
-  if (churn.uncompactedBytes >= ROOM_COMPACT_AFTER_BYTES
-      || churn.uncompactedUpdates >= ROOM_COMPACT_AFTER_UPDATES) {
-    scheduleRoomCompaction(docName, { remeasure: true });
-  }
-};
-
-// The relay is the durable fallback for deadlines. Connected clients also
-// finalize promptly for immediate UI feedback; this pass covers a room whose
-// creator is gone and a room reopened after everyone was offline.
-const finalizeExpiredVotes = (docName, ydoc, atTime = Date.now()) => {
-  if (storageFailure || shuttingDown || isRoomBlocked(docName)) return;
-  finalizeRelayVotes(ydoc, Y, atTime, () => {
-    console.warn('[yjs] vote finalization skipped invalid geometry', { docName: roomLogId(docName) });
-  });
-};
-
-const voteExpiryTimers = new WeakMap();
-const armVoteExpiry = (docName, ydoc, deferExpired = false) => {
-  const existing = voteExpiryTimers.get(ydoc);
-  if (existing) clearTimeout(existing);
-  voteExpiryTimers.delete(ydoc);
-  if (destroyedDocs.has(ydoc) || storageFailure || shuttingDown) return;
-  let earliest = Infinity;
-  ydoc.getMap('items').forEach((yItem) => {
-    if (!(yItem instanceof Y.Map) || yItem.get('type') !== 'zone') return;
-    const deadline = yItem.get('voteTimer')?.endsAt;
-    if (Number.isFinite(deadline)) earliest = Math.min(earliest, deadline);
-  });
-  if (!Number.isFinite(earliest)) return;
-  // A malformed unfinalizable room must not create a zero-delay retry loop.
-  const waitMs = earliest <= Date.now()
-    ? (deferExpired ? VOTE_EXPIRY_RETRY_INTERVAL_MS : 1)
-    : Math.max(1, Math.min(earliest - Date.now(), 2_147_483_647));
-  const timer = setTimeout(() => {
-    voteExpiryTimers.delete(ydoc);
-    try { finalizeExpiredVotes(docName, ydoc); }
-    catch (err) {
-      console.error('[yjs] vote finalization failed', { docName: roomLogId(docName), err: err.message });
-    }
-    armVoteExpiry(docName, ydoc, true);
-  }, waitMs);
-  timer.unref();
-  voteExpiryTimers.set(ydoc, timer);
-};
-
-// Hydration promise per room. y-websocket calls bindState without awaiting it
-// and starts answering the sync protocol immediately, so a client connecting
-// to a cold room is told "synced" against an empty doc while the LevelDB read
-// is still in flight — it then sees a blank board and can write over real
-// state. The upgrade handler awaits this before letting the socket through.
-const roomReady = new WeakMap();
-
-setPersistence({
-  bindState: (docName, ydoc) => {
-    // Aggregate accounting follows the Y.Doc lifetime. This covers normal
-    // last-peer teardown as well as a failed first-upgrade cleanup exactly
-    // once, without depending on each caller to mirror the bookkeeping.
-    ydoc.on('destroy', () => {
-      const timer = voteExpiryTimers.get(ydoc);
-      if (timer) clearTimeout(timer);
-      voteExpiryTimers.delete(ydoc);
-      destroyedDocs.add(ydoc);
-      releaseRoomUsage(ydoc);
-    });
-    ydoc.getMap('items').observeDeep((events) => {
-      const itemMap = ydoc.getMap('items');
-      if (events.some((event) => event.keysChanged?.has('voteTimer')
-          || (event.target === itemMap && [...event.keysChanged].some((id) => (
-            itemMap.get(id) instanceof Y.Map && itemMap.get(id).get('voteTimer')
-          ))))) {
-        armVoteExpiry(docName, ydoc);
-      }
-    });
-    // The listener must be registered BEFORE the first await. y-websocket
-    // calls bindState without awaiting it, so the room already accepts and
-    // broadcasts client updates while the LevelDB read is in flight. Any
-    // update applied during that gap was never handed to storeUpdate — it
-    // reaches every peer, then vanishes on the next server restart.
-    ydoc.on('update', (u, origin) => {
-      if (origin === HYDRATION_ORIGIN) return;
-      if (u.byteLength > MAX_UPDATE_BYTES) {
-        blockRoom(docName, ydoc, 'update too large');
-        return;
-      }
-      const usage = roomUsage.get(ydoc) || {
-        upperBytes: 0,
-        exactBytes: 0,
-        lastMeasuredAt: Date.now(),
-      };
-      const nextUsage = {
-        ...usage,
-        upperBytes: usage.upperBytes + u.byteLength,
-      };
-      if (nextUsage.upperBytes > MAX_DOCUMENT_BYTES) {
-        // Network updates are conservatively admitted before y-websocket
-        // applies them. Reaching this branch means a non-network origin or an
-        // unexpected encoding expansion escaped that guard; never turn it
-        // into an attacker-controlled full-document encode loop.
-        commitRoomUsage(ydoc, nextUsage);
-        blockRoom(docName, ydoc, 'document conservative limit');
-        return;
-      }
-      if (!tryCommitRoomUsage(ydoc, nextUsage)) {
-        // A non-network update is already resident by this point. Account for
-        // the temporary excess, then evict; network updates are rejected by
-        // the protocol preflight before they can reach this branch.
-        commitRoomUsage(ydoc, nextUsage);
-        blockRoom(docName, ydoc, 'active document capacity exceeded');
-        return;
-      }
-      queueStoreUpdate(docName, u, ydoc);
-    });
-    // y-websocket calls bindState as a floating promise (bin/utils.js:149) with
-    // no .catch(), so anything thrown here becomes an unhandled rejection and
-    // kills the process. Contain it: latch the failure and drain for restart.
-    const ready = (async () => {
-      try {
-        const persisted = await checkedGetYDoc(docName);
-        let persistedUpdate;
-        try {
-          persistedUpdate = Y.encodeStateAsUpdate(persisted);
-        } finally {
-          persisted.destroy();
-        }
-        if (persistedUpdate.byteLength > MAX_DOCUMENT_BYTES) {
-          blockRoom(docName, ydoc, 'persisted document too large');
-          return;
-        }
-        if (destroyedDocs.has(ydoc)) return;
-        const hydratedUsage = {
-          upperBytes: persistedUpdate.byteLength,
-          exactBytes: persistedUpdate.byteLength,
-          lastMeasuredAt: Date.now(),
-        };
-        if (!tryCommitRoomUsage(ydoc, hydratedUsage)) {
-          // Aggregate pressure is transient. Reject this cold-room admission
-          // without poisoning the room for the blocked-room TTL or declaring
-          // the persistence layer globally unhealthy.
-          capacityRejectedDocs.add(ydoc);
-          console.warn('[yjs] active document capacity reached', {
-            docName: roomLogId(docName),
-          });
-          return;
-        }
-        Y.applyUpdate(ydoc, persistedUpdate, HYDRATION_ORIGIN);
-        try { finalizeExpiredVotes(docName, ydoc); }
-        catch (err) {
-          console.error('[yjs] vote finalization failed', { docName: roomLogId(docName), err: err.message });
-        }
-        armVoteExpiry(docName, ydoc);
-      } catch (err) {
-        markStorageFailure(err);
-        console.error('[yjs] hydrate failed', { docName: roomLogId(docName), err: err.message });
-      }
-    })();
-    // Runs before the IIFE's first await yields, so the entry is in place by
-    // the time y-websocket's getYDoc returns this doc to the upgrade handler.
-    roomReady.set(ydoc, ready);
-    return ready;
-  },
-  // y-websocket invokes writeState in closeConn when the last client of a
-  // room disconnects. Updates are already stored individually; consolidation
-  // is thresholded and rate-limited separately so disconnect cannot force a
-  // full-document merge.
-  // Rethrowing here would also be fatal: the caller does
-  // `writeState(...).then(() => doc.destroy())` with no .catch()
-  // (bin/utils.js:205), so the rejection would go unhandled.
-  writeState: async (docName) => {
-    try {
-      const churn = roomPersistenceChurn.get(docName);
-      // Every update is already durable through storeUpdate. Do not force a
-      // full-room merge merely because the last peer disconnected: repeated
-      // connect/disconnect would otherwise be an unbounded CPU amplifier.
-      // If a threshold-triggered merge is already running, wait before the
-      // library destroys its Y.Doc so our completion path cannot race it.
-      if (churn?.compactionPromise) await churn.compactionPromise;
-    }
-    catch (err) {
-      markStorageFailure(err);
-      console.error('[yjs] flushDocument failed', { docName: roomLogId(docName), err: err.message });
-    }
-  },
-  provider: ldb,
+const { roomPersistenceChurn, persistenceChurnFor, scheduleRoomCompaction, storeWrites, queueStoreUpdate } = createRelayPersistence({
+  config: relayConfig, accounting, docs, Y, blockRoom, markStorageFailure,
+  storage: { checkedFlushDocument, checkedStoreUpdate, databaseSizeBytes },
 });
+
+const { finalizeExpiredVotes, armVoteExpiry, voteExpiryTimers } = createVoteExpiry({
+  Y, accounting, destroyedDocs, isRoomBlocked,
+});
+
+const { roomReady, persistence: roomPersistence } = createRoomState({
+  Y, config: relayConfig, accounting, policy: roomPolicy,
+  votes: { finalizeExpiredVotes, armVoteExpiry, voteExpiryTimers },
+  storage: { checkedGetYDoc, ldb }, queueStoreUpdate, roomPersistenceChurn, markStorageFailure, HYDRATION_ORIGIN,
+});
+setPersistence(roomPersistence);
 
 await migrateLegacyImages((process.env.YJS_MIGRATE_DOCS || '').split(',').map((entry) => entry.trim()).filter(Boolean), {
   Y, registry: roomRegistry, roomUploadUsage, uploadState, config: relayConfig,
@@ -760,7 +210,7 @@ const roomKeyEpoch = (docName) => {
 };
 const roomSessions = new RoomSessions({
   signingKey: SESSION_SIGNING_KEY, rooms: registeredRoomsByHandle,
-  ttlMs: ROOM_SESSION_TTL_MS, maxCookieHeaderBytes: MAX_COOKIE_HEADER_BYTES,
+  ttlMs: relayConfig.ROOM_SESSION_TTL_MS, maxCookieHeaderBytes: relayConfig.MAX_COOKIE_HEADER_BYTES,
   allowInsecureHttp: ALLOW_INSECURE_HTTP, epochOf: roomKeyEpoch,
 });
 const createSessionCookie = roomSessions.createCookie.bind(roomSessions);
@@ -780,107 +230,9 @@ const rateBuckets = {
   coldRoomOpenRoom: new Map(),
   coldRoomOpenGlobal: new Map(),
 };
-const getRateBucket = (map, key, burst, perHour) => {
-  const now = Date.now();
-  let bucket = map.get(key);
-  if (!bucket) {
-    evictOldestBucket(map, MAX_BUCKETS);
-    bucket = { tokens: burst, last: now, lastSeen: now };
-    map.set(key, bucket);
-  }
-  bucket.tokens = refillTokens(bucket.tokens, burst, now - bucket.last, perHour, MILLISECONDS_PER_HOUR);
-  bucket.last = now;
-  bucket.lastSeen = now;
-  return bucket;
-};
-const takeCreateToken = (ip) => {
-  const ipBucket = getRateBucket(rateBuckets.roomCreate, ip, ROOM_CREATE_BURST, ROOM_CREATES_PER_HOUR);
-  const globalRefillPerHour = GLOBAL_ROOM_CREATES_PER_MINUTE * MILLISECONDS_PER_HOUR / MILLISECONDS_PER_MINUTE;
-  const globalBucket = getRateBucket(
-    rateBuckets.roomCreateGlobal,
-    'global',
-    GLOBAL_ROOM_CREATE_BURST,
-    globalRefillPerHour,
-  );
-  const wait = Math.max(tokenWaitSeconds(ipBucket.tokens, ROOM_CREATES_PER_HOUR), tokenWaitSeconds(globalBucket.tokens, globalRefillPerHour));
-  if (wait) return wait;
-  ipBucket.tokens -= 1;
-  globalBucket.tokens -= 1;
-  return 0;
-};
-const takeSessionExchangeToken = (ip) => {
-  const ipBucket = getRateBucket(
-    rateBuckets.sessionExchange,
-    ip,
-    SESSION_EXCHANGE_BURST,
-    SESSION_EXCHANGES_PER_MINUTE * 60,
-  );
-  const globalBucket = getRateBucket(
-    rateBuckets.sessionExchangeGlobal,
-    'global',
-    GLOBAL_SESSION_EXCHANGE_BURST,
-    GLOBAL_SESSION_EXCHANGES_PER_MINUTE * 60,
-  );
-  if (ipBucket.tokens < 1 || globalBucket.tokens < 1) return false;
-  ipBucket.tokens -= 1;
-  globalBucket.tokens -= 1;
-  return true;
-};
-const failureAttemptAvailable = (ip) => (
-  getRateBucket(rateBuckets.sessionFailure, ip, SESSION_FAILURE_BURST, SESSION_FAILURES_PER_HOUR).tokens >= 1
-);
-const recordSessionFailure = (ip) => {
-  const bucket = getRateBucket(rateBuckets.sessionFailure, ip, SESSION_FAILURE_BURST, SESSION_FAILURES_PER_HOUR);
-  bucket.tokens = Math.max(0, bucket.tokens - 1);
-};
-
-const takeWsUpgradeToken = (ip, docName, coldRoom) => {
-  const reservations = [
-    getRateBucket(
-      rateBuckets.wsUpgradeIp,
-      ip,
-      WS_UPGRADE_IP_BURST,
-      WS_UPGRADES_PER_IP_PER_MINUTE * 60,
-    ),
-    getRateBucket(
-      rateBuckets.wsUpgradeRoom,
-      docName,
-      WS_UPGRADE_ROOM_BURST,
-      WS_UPGRADES_PER_ROOM_PER_MINUTE * 60,
-    ),
-    getRateBucket(
-      rateBuckets.wsUpgradeGlobal,
-      'global',
-      GLOBAL_WS_UPGRADE_BURST,
-      GLOBAL_WS_UPGRADES_PER_MINUTE * 60,
-    ),
-  ];
-  if (coldRoom) {
-    reservations.push(
-      getRateBucket(
-        rateBuckets.coldRoomOpenIp,
-        ip,
-        COLD_ROOM_OPEN_IP_BURST,
-        COLD_ROOM_OPENS_PER_IP_PER_MINUTE * 60,
-      ),
-      getRateBucket(
-        rateBuckets.coldRoomOpenRoom,
-        docName,
-        COLD_ROOM_OPEN_ROOM_BURST,
-        COLD_ROOM_OPENS_PER_ROOM_PER_MINUTE * 60,
-      ),
-      getRateBucket(
-        rateBuckets.coldRoomOpenGlobal,
-        'global',
-        GLOBAL_COLD_ROOM_OPEN_BURST,
-        GLOBAL_COLD_ROOM_OPENS_PER_MINUTE * 60,
-      ),
-    );
-  }
-  if (reservations.some((bucket) => bucket.tokens < 1)) return false;
-  for (const bucket of reservations) bucket.tokens -= 1;
-  return true;
-};
+const {
+  takeCreateToken, takeSessionExchangeToken, failureAttemptAvailable, recordSessionFailure, takeWsUpgradeToken,
+} = createAdmissionLimits(relayConfig, rateBuckets);
 
 
 const wsTraffic = new RelayWsTraffic(relayConfig);
@@ -895,133 +247,21 @@ const uploads = createRelayUploads({
   allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, strictRasterValidation: PUBLIC_WALL, fence: roomFence,
 });
 uploadState.events.on(UPLOAD_STORAGE_FAILURE_EVENT, markStorageFailure);
-const e2eBlobStore = new E2EBlobStore({ uploadsDir: UPLOADS_DIR, admission: uploads.admission, roomUploadUsage });
+const e2eBlobStore = new E2EBlobStore({ uploadsDir: relayConfig.UPLOADS_DIR, admission: uploads.admission, roomUploadUsage });
 
 const relayProtocol = new RelayProtocol({
-  maxStateVectorBytes: MAX_STATE_VECTOR_BYTES, maxUpdateBytes: MAX_UPDATE_BYTES,
-  maxAwarenessMessageBytes: MAX_AWARENESS_MESSAGE_BYTES,
-  maxAwarenessClientsPerRoom: MAX_AWARENESS_CLIENTS_PER_ROOM,
-  maxAwarenessStateBytes: MAX_AWARENESS_STATE_BYTES,
+  maxStateVectorBytes: relayConfig.MAX_STATE_VECTOR_BYTES, maxUpdateBytes: relayConfig.MAX_UPDATE_BYTES,
+  maxAwarenessMessageBytes: relayConfig.MAX_AWARENESS_MESSAGE_BYTES,
+  maxAwarenessClientsPerRoom: relayConfig.MAX_AWARENESS_CLIENTS_PER_ROOM,
+  maxAwarenessStateBytes: relayConfig.MAX_AWARENESS_STATE_BYTES,
 });
 const inspectProtocolMessage = relayProtocol.inspect.bind(relayProtocol);
 
-const awarenessPolicies = new WeakMap();
-const awarenessPolicyFor = (doc) => {
-  let policy = awarenessPolicies.get(doc);
-  if (!policy) {
-    policy = {
-      owners: new Map(),
-      bytesById: new Map(),
-      totalBytes: 0,
-    };
-    awarenessPolicies.set(doc, policy);
-  }
-  return policy;
-};
+const { planAwarenessUpdate, commitAwarenessPlan, releaseAwarenessForConnection } = createAwarenessPolicy({
+  awarenessProtocol, MAX_AWARENESS_IDS_PER_CONNECTION: relayConfig.MAX_AWARENESS_IDS_PER_CONNECTION, MAX_AWARENESS_CLIENTS_PER_ROOM: relayConfig.MAX_AWARENESS_CLIENTS_PER_ROOM, MAX_AWARENESS_ROOM_BYTES: relayConfig.MAX_AWARENESS_ROOM_BYTES,
+});
 
-const planAwarenessUpdate = (doc, conn, context, entries) => {
-  const policy = awarenessPolicyFor(doc);
-  const proposedIds = new Set(context.awarenessClientIds);
-  const proposedOwners = new Map(policy.owners);
-  const proposedBytes = new Map(policy.bytesById);
-  let totalBytes = policy.totalBytes;
-  const mutations = [];
-
-  // Standard y-websocket clients echo server snapshots, BroadcastChannel
-  // relays, and removal announcements over their own socket. Never let such
-  // a relay overwrite another connection's first-claimed identity. An
-  // already-unowned null is likewise a harmless stale removal; feeding it to
-  // y-protocols would retain useless metadata. Drop the whole mixed frame so
-  // upstream parsing remains atomic and cannot take ownership as a side
-  // effect.
-  for (const entry of entries) {
-    if (entry.clientId === doc.awareness.clientID) throw new Error('reserved awareness id');
-    if (context.expectedAwarenessClientId !== null
-        && entry.clientId !== context.expectedAwarenessClientId) {
-      return { dropFrame: true };
-    }
-    const owner = proposedOwners.get(entry.clientId);
-    if ((owner && owner !== conn) || (!owner && entry.stateIsNull)) {
-      return { dropFrame: true };
-    }
-  }
-
-  for (const entry of entries) {
-    const owner = proposedOwners.get(entry.clientId);
-    const currentMeta = doc.awareness.meta.get(entry.clientId);
-    const currentClock = currentMeta === undefined ? 0 : currentMeta.clock;
-    const willApply = currentClock < entry.clock
-      || (currentClock === entry.clock
-        && entry.stateIsNull
-        && doc.awareness.states.has(entry.clientId));
-    if (!willApply) continue;
-
-    if (!owner) {
-      if (proposedIds.size >= MAX_AWARENESS_IDS_PER_CONNECTION
-          || proposedOwners.size >= MAX_AWARENESS_CLIENTS_PER_ROOM) {
-        throw new Error('awareness identity limit');
-      }
-      proposedIds.add(entry.clientId);
-      proposedOwners.set(entry.clientId, conn);
-    }
-
-    const previousBytes = proposedBytes.get(entry.clientId) || 0;
-    const nextBytes = entry.stateIsNull ? 0 : entry.stateBytes;
-    totalBytes += nextBytes - previousBytes;
-    if (totalBytes > MAX_AWARENESS_ROOM_BYTES) throw new Error('awareness room size limit');
-    if (nextBytes > 0) proposedBytes.set(entry.clientId, nextBytes);
-    else proposedBytes.delete(entry.clientId);
-    mutations.push({ ...entry, nextBytes });
-  }
-
-  return {
-    dropFrame: false,
-    policy,
-    proposedIds,
-    proposedOwners,
-    proposedBytes,
-    totalBytes,
-    mutations,
-  };
-};
-
-const commitAwarenessPlan = (context, plan) => {
-  if (plan.mutations.length === 0) return;
-  context.awarenessClientIds = plan.proposedIds;
-  plan.policy.owners = plan.proposedOwners;
-  plan.policy.bytesById = plan.proposedBytes;
-  plan.policy.totalBytes = plan.totalBytes;
-};
-
-const releaseAwarenessForConnection = (doc, conn, context) => {
-  const policy = awarenessPolicies.get(doc);
-  if (!policy) return;
-  const remainingStates = [];
-  for (const clientId of context.awarenessClientIds) {
-    if (policy.owners.get(clientId) === conn && doc.awareness.states.has(clientId)) {
-      remainingStates.push(clientId);
-    }
-  }
-  // y-websocket stops tracking an ID after a null update and classifies a
-  // later non-null update as `updated`, not `added`. Its own close hook can
-  // therefore miss a re-added state. Remove any authoritative leftovers while
-  // metadata still exists so the removal can be encoded and broadcast safely.
-  if (remainingStates.length > 0) {
-    awarenessProtocol.removeAwarenessStates(doc.awareness, remainingStates, null);
-  }
-  for (const clientId of context.awarenessClientIds) {
-    if (policy.owners.get(clientId) !== conn) continue;
-    policy.owners.delete(clientId);
-    policy.totalBytes = Math.max(0, policy.totalBytes - (policy.bytesById.get(clientId) || 0));
-    policy.bytesById.delete(clientId);
-    // y-protocols intentionally retains clocks in `meta`. Once the owning
-    // socket has been removed there is no identity continuity to preserve,
-    // and retaining every reconnect forever is an avoidable memory leak.
-    doc.awareness.meta.delete(clientId);
-  }
-};
-
-const reserveHttpRequest = createHttpRequestSlots({ maxRequests: MAX_HTTP_REQUESTS, maxRequestsPerIp: MAX_HTTP_REQUESTS_PER_IP });
+const reserveHttpRequest = createHttpRequestSlots({ maxRequests: relayConfig.MAX_HTTP_REQUESTS, maxRequestsPerIp: relayConfig.MAX_HTTP_REQUESTS_PER_IP });
 
 if (publicWall) {
   const publicDoc = getYDoc(publicWall.docName);
@@ -1029,29 +269,33 @@ if (publicWall) {
   retainPublicDocument(publicDoc);
 }
 const rejectionCounters = createRejectionCounters((message, counts) => console.log(message, counts));
+const { inspectMessage } = createWsAdmission({
+  config: relayConfig, accounting, persistenceChurnFor, scheduleRoomCompaction,
+  markStorageFailure, inspectProtocolMessage, planAwarenessUpdate, rejectionCounters, PUBLIC_WALL, Y,
+});
 const ACCOUNT_SIGNING_KEY = loadSigningKey(DB_DIR, ACCOUNT_SESSION_KEY);
-const accountSessions = new AccountSessions({ signingKey: ACCOUNT_SIGNING_KEY, allowInsecureHttp: ALLOW_INSECURE_HTTP, maxCookieHeaderBytes: MAX_COOKIE_HEADER_BYTES });
+const accountSessions = new AccountSessions({ signingKey: ACCOUNT_SIGNING_KEY, allowInsecureHttp: ALLOW_INSECURE_HTTP, maxCookieHeaderBytes: relayConfig.MAX_COOKIE_HEADER_BYTES });
 const roomLockVerifier = new RoomLockVerifier();
 const roomSessionRoutes = createRoomSessionRoutes({
   registry: roomRegistry, sessions: roomSessions, verifier: roomLockVerifier, accountSessions, accountStore,
   buckets: { takeCreateToken, takeSessionExchangeToken, failureAttemptAvailable, recordSessionFailure },
-  config: { allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, sessionTtlMs: ROOM_SESSION_TTL_MS, maxApiBodyBytes: MAX_API_BODY_BYTES },
-  unavailable: () => shuttingDown || Boolean(storageFailure), onStorageFailure: markStorageFailure, fence: roomFence,
+  config: { allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, sessionTtlMs: relayConfig.ROOM_SESSION_TTL_MS, maxApiBodyBytes: relayConfig.MAX_API_BODY_BYTES },
+  unavailable: () => accounting.shuttingDown || Boolean(accounting.storageFailure), onStorageFailure: markStorageFailure, fence: roomFence,
 });
-const plainRoomRefusal = (doc, docName) => (shuttingDown && new Error('shutting down')) || storageFailure
+const plainRoomRefusal = (doc, docName) => (accounting.shuttingDown && new Error('shutting down')) || accounting.storageFailure
   || (capacityRejectedDocs.has(doc) && new Error('active document capacity reached')) || (isRoomBlocked(docName) && new Error('room unavailable')) || null;
-const hasActiveRoomCapacity = () => docs.size + e2eRelay.activeRooms() < MAX_ACTIVE_ROOMS; // the one cold-room admission: upgrades and renames
+const hasActiveRoomCapacity = () => docs.size + bindings.activeRooms() < relayConfig.MAX_ACTIVE_ROOMS; // the one cold-room admission: upgrades and renames
 const titleWriter = createRoomTitleWriter({ docs, getYDoc, roomReady, fence: roomFence, refusal: plainRoomRefusal, admitsColdRoom: hasActiveRoomCapacity, storeWriteOf: (doc) => storeWrites.get(doc) });
 const accountRooms = createAccountRoomRoutes({
-  registry: roomRegistry, store: accountStore, maxBodyBytes: MAX_API_BODY_BYTES, onStorageFailure: markStorageFailure,
-  deleteRoom: (docName) => roomDeletion.deleteRoom(docName), readSummary: createRoomSummaryReader({ docs, roomReady, readStoredDoc: checkedGetYDoc }),
+  registry: roomRegistry, store: accountStore, maxBodyBytes: relayConfig.MAX_API_BODY_BYTES, onStorageFailure: markStorageFailure,
+  deleteRoom: (docName) => bindings.deleteRoom(docName), readSummary: createRoomSummaryReader({ docs, roomReady, readStoredDoc: checkedGetYDoc }),
   writeTitle: (docName, title) => titleWriter.write(docName, title),
 });
 const authRoutes = createAuthRoutes({
   oauth: enabledOAuthConfig(process.env, { allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, publicWall: PUBLIC_WALL, log: console }),
   sessions: accountSessions,
   accountKey: ACCOUNT_SIGNING_KEY, store: accountStore, ledger: new FlowLedger(), allowedOrigins: ALLOWED_ORIGINS,
-  allowInsecureHttp: ALLOW_INSECURE_HTTP, maxCookieHeaderBytes: MAX_COOKIE_HEADER_BYTES, rejectionCounters, accountRooms,
+  allowInsecureHttp: ALLOW_INSECURE_HTTP, maxCookieHeaderBytes: relayConfig.MAX_COOKIE_HEADER_BYTES, rejectionCounters, accountRooms,
 });
 const rejectUpgrade = (socket, status) => {
   rejectionCounters.upgrade(status);
@@ -1059,13 +303,13 @@ const rejectUpgrade = (socket, status) => {
 };
 
 const maintenance = new RelayMaintenance();
-const guestSweep = new GuestRoomSweep({ registry: roomRegistry, docs, connections: wsTraffic.connectionsByRoom, publicWall: PUBLIC_WALL, log: console, deleteRoom: (docName) => roomDeletion.deleteRoom(docName) }, readGuestSweepTiming(process.env, { allowInsecureHttp: ALLOW_INSECURE_HTTP }));
+const guestSweep = new GuestRoomSweep({ registry: roomRegistry, docs, connections: wsTraffic.connectionsByRoom, publicWall: PUBLIC_WALL, log: console, deleteRoom: (docName) => bindings.deleteRoom(docName) }, readGuestSweepTiming(process.env, { allowInsecureHttp: ALLOW_INSECURE_HTTP }));
 const maintainer = await startMaintainer(process.env, () => maintainerSnapshot({
   registry: roomRegistry, docs, connections: wsTraffic.connectionsByRoom, blockedRooms, roomUsage,
-  ready: isRelayReady(storageFailure, shuttingDown), publicWall: PUBLIC_WALL,
-  databaseBytes: dbUsageBytes, uploadBytes: uploadState.bytes,
-  pendingStoreOps, pendingStoreBytes, activeDocumentBytes,
-  limits: { databaseBytes: MAX_DB_BYTES, uploadBytes: MAX_UPLOAD_STORAGE_BYTES, activeDocumentBytes: MAX_ACTIVE_DOCUMENT_BYTES, pendingStoreBytes: MAX_PENDING_STORE_BYTES, pendingStoreOps: MAX_PENDING_STORE_OPS },
+  ready: isRelayReady(accounting.storageFailure, accounting.shuttingDown), publicWall: PUBLIC_WALL,
+  databaseBytes: accounting.dbUsageBytes, uploadBytes: uploadState.bytes,
+  pendingStoreOps: accounting.pendingStoreOps, pendingStoreBytes: accounting.pendingStoreBytes, activeDocumentBytes: accounting.activeDocumentBytes,
+  limits: { databaseBytes: relayConfig.MAX_DB_BYTES, uploadBytes: relayConfig.MAX_UPLOAD_STORAGE_BYTES, activeDocumentBytes: relayConfig.MAX_ACTIVE_DOCUMENT_BYTES, pendingStoreBytes: relayConfig.MAX_PENDING_STORE_BYTES, pendingStoreOps: relayConfig.MAX_PENDING_STORE_OPS },
 }), { registry: roomRegistry, boardOrigin: ALLOWED_ORIGINS[0], publicWall: PUBLIC_WALL }, () => guestSweep.retireIdle(), accountStore);
 maintenance.on(MAINTENANCE_STORAGE_FAILURE_EVENT, markStorageFailure);
 const runMaintenance = () => maintenance.run({
@@ -1075,79 +319,26 @@ const runMaintenance = () => maintenance.run({
   compaction: { schedule: scheduleRoomCompaction },
   votes: { finalize: finalizeExpiredVotes },
   storage: { measureDatabase: registryPersistence.measureDatabase, reconcileUploadUsage },
-  e2eBlobs,
+  e2eBlobs: bindings.e2eBlobs,
 });
-const maintenanceTimer = setInterval(() => { roomLockVerifier.sweep(); runMaintenance(); void roomDeletion.recover(); void guestSweep.tick(); }, MAINTENANCE_INTERVAL_MS);
+const maintenanceTimer = setInterval(() => { roomLockVerifier.sweep(); runMaintenance(); void bindings.recoverRooms(); void guestSweep.tick(); }, MAINTENANCE_INTERVAL_MS);
 maintenanceTimer.unref();
 
-const server = http.createServer({ maxHeaderSize: MAX_HEADER_BYTES }, (req, res) => {
-  rejectionCounters.observeResponse(res);
-  const clientIp = clientIpFromRequest(req);
-  const reservation = reserveHttpRequest(clientIp);
-  if (reservation.status) {
-    res.writeHead(reservation.status, { 'retry-after': RETRY_AFTER_SHORT_SECONDS });
-    res.end();
-    return;
-  }
-  res.once('finish', reservation.release);
-  res.once('close', reservation.release);
-  let pathname;
-  let hasQueryOrFragment = false;
-  try {
-    if (!req.url || req.url.length > MAX_HTTP_TARGET_CHARACTERS) throw new Error('invalid request target');
-    const parsed = new URL(req.url, 'http://localhost');
-    ({ pathname } = parsed);
-    hasQueryOrFragment = Boolean(parsed.search || parsed.hash);
-  } catch {
-    res.writeHead(400);
-    res.end();
-    return;
-  }
-  // Cloudflare Tunnel forwards the /yjs prefix through unstripped in prod;
-  // capability, session and room-upload routes answer in bare and prefixed
-  // forms so dev and production use the same server.
-  const prefix = PUBLIC_WALL ? PUBLIC_RELAY_PREFIX : '/yjs';
-  const prefixed = pathname === prefix || pathname.startsWith(`${prefix}/`);
-  const routePath = (prefixed ? pathname.slice(prefix.length) : pathname) || '/';
-  if (publicWall && publicWall.handleRequest(req, res, routePath, prefixed, {
-    allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, uploads, clientIp, hasQueryOrFragment,
-    unavailable: hasQueryOrFragment || shuttingDown || Boolean(storageFailure),
-    doc: docs.get(publicWall.docName), writerCount: wsTraffic.connectionsByRoom.get(publicWall.docName) || 0,
-    takeSessionExchangeToken: () => takeSessionExchangeToken(clientIp),
-    sessionTtlMs: ROOM_SESSION_TTL_MS, createSessionCookie, sessionAuthenticated: Boolean(authenticatedDocFromRequest(req, publicWall.roomHandle)),
-  })) return;
-  // Readiness is separate from liveness: the process can be perfectly alive
-  // while LevelDB is unwritable, and the catch-all below answers 200 either
-  // way. An orchestrator polling this stops routing new traffic here instead
-  // of accepting work the relay can no longer persist.
-  if (req.method === 'GET' && routePath === '/readyz') {
-    const ok = isRelayReady(storageFailure, shuttingDown);
-    res.writeHead(ok ? 200 : 503, { 'content-type': 'text/plain' });
-    res.end(ok ? 'ready' : 'not ready');
-    return;
-  }
-  if (roomSessionRoutes.handle(req, res, routePath, { clientIp, prefixed, hasQueryOrFragment })) return;
-  if (roomLockRoutes.handle(req, res, routePath, { clientIp, hasQueryOrFragment })) return;
-  if (authRoutes.handle(req, res, routePath, { prefixed, clientIp, unavailable: () => shuttingDown || Boolean(storageFailure) })) return;
-  if (handleRoomRoute(req, res, routePath, {
-    hasQueryOrFragment, allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP,
-    unavailable: shuttingDown || Boolean(storageFailure), rooms: registeredRoomsByHandle,
-    authenticate: authenticatedDocFromRequest, uploads, clientIp, lockFor: lockForDoc, e2eBlobs,
-  })) return;
-  if (req.method === 'GET' && routePath === '/') {
-    res.writeHead(200, { 'content-type': 'text/plain' });
-    res.end('yjs-ws ok');
-    return;
-  }
-  res.writeHead(404, { 'content-type': 'text/plain' });
-  res.end('not found');
+const { dispatch } = createHttpDispatch({
+  settings: { PUBLIC_WALL, ALLOWED_ORIGINS, ALLOW_INSECURE_HTTP, ROOM_SESSION_TTL_MS: relayConfig.ROOM_SESSION_TTL_MS }, accounting, rejectionCounters,
+  traffic: { clientIpFromRequest, reserveHttpRequest, wsTraffic },
+  sessions: { takeSessionExchangeToken, createSessionCookie, authenticatedDocFromRequest },
+  rooms: { publicWall, docs, registeredRoomsByHandle },
+  routes: { roomSessionRoutes, authRoutes },
+  assets: { uploads, lockForDoc }, lateBindings: bindings,
 });
+const server = http.createServer({ maxHeaderSize: relayConfig.MAX_HEADER_BYTES }, dispatch);
 
-server.requestTimeout = REQUEST_TIMEOUT_MS;
-server.headersTimeout = HEADERS_TIMEOUT_MS;
-server.keepAliveTimeout = KEEP_ALIVE_TIMEOUT_MS;
+server.requestTimeout = relayConfig.REQUEST_TIMEOUT_MS;
+server.headersTimeout = relayConfig.HEADERS_TIMEOUT_MS;
+server.keepAliveTimeout = relayConfig.KEEP_ALIVE_TIMEOUT_MS;
 server.maxRequestsPerSocket = MAX_REQUESTS_PER_SOCKET;
-server.maxConnections = MAX_CONNECTIONS + MAX_HTTP_REQUESTS;
+server.maxConnections = relayConfig.MAX_CONNECTIONS + relayConfig.MAX_HTTP_REQUESTS;
 server.on('clientError', (err, socket) => {
   const status = err.code === 'HPE_HEADER_OVERFLOW' ? 431 : 400;
   if (socket.writable) rejectUpgrade(socket, status);
@@ -1161,247 +352,64 @@ server.on('clientError', (err, socket) => {
 // listener, which parses and applies it. RL_MAX_BYTES is the right ceiling —
 // the bucket holds at most that many bytes, so a larger frame could never
 // have been admitted anyway.
-const wss = new WebSocketServer({ noServer: true, maxPayload: RL_MAX_BYTES });
+const wss = new WebSocketServer({ noServer: true, maxPayload: relayConfig.RL_MAX_BYTES });
 roomRegistry.activity.watch(wss, (error) => roomRegistry.reportStorageFailure(error));
 const e2eRoomLog = new E2ERoomLog({
-  ldb, maxRoomBytes: MAX_DOCUMENT_BYTES, reserveStore: registryPersistence.reserveStore, hasCapacity: registryPersistence.hasCapacity,
+  ldb, maxRoomBytes: relayConfig.MAX_DOCUMENT_BYTES, reserveStore: registryPersistence.reserveStore, hasCapacity: registryPersistence.hasCapacity,
   onError: markStorageFailure, deleteStagedBlobs: (_docName, rotationId) => e2eBlobStore.deleteStaged(rotationId),
   onBlobsRetired: (docName) => e2eBlobStore.trackRetired(docName), fence: roomFence,
 });
 const e2eRelay = createE2ERelay({
-  traffic: wsTraffic, maxRoomBytes: MAX_DOCUMENT_BYTES, maxAppendBytes: RL_MAX_BYTES, onStorageFailure: markStorageFailure, touch: (docName) => roomRegistry.activity.touch(docName),
+  traffic: wsTraffic, maxRoomBytes: relayConfig.MAX_DOCUMENT_BYTES, maxAppendBytes: relayConfig.RL_MAX_BYTES, onStorageFailure: markStorageFailure, touch: (docName) => roomRegistry.activity.touch(docName),
   roomLog: e2eRoomLog,
 });
+bindings.bind('activeRooms', () => e2eRelay.activeRooms());
 const e2eBlobs = createE2EBlobs({
   config: relayConfig, allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, uploads, store: e2eBlobStore,
   roomLog: e2eRoomLog, registry: roomRegistry, onStorageFailure: markStorageFailure, fence: roomFence,
 });
+bindings.bind('e2eBlobs', e2eBlobs);
 const roomLockRoutes = createRoomLockRoutes({
   registry: roomRegistry, roomLog: e2eRoomLog, blobStore: e2eBlobStore, closeRoom: e2eRelay.closeRoom, verifier: roomLockVerifier, accountSessions, accountStore,
-  config: { allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, maxApiBodyBytes: MAX_API_BODY_BYTES },
-  unavailable: () => shuttingDown || Boolean(storageFailure), onStorageFailure: markStorageFailure, fence: roomFence,
+  config: { allowedOrigins: ALLOWED_ORIGINS, allowInsecureHttp: ALLOW_INSECURE_HTTP, maxApiBodyBytes: relayConfig.MAX_API_BODY_BYTES },
+  unavailable: () => accounting.shuttingDown || Boolean(accounting.storageFailure), onStorageFailure: markStorageFailure, fence: roomFence,
 });
+bindings.bind('roomLockRoutes', roomLockRoutes);
 const roomDeletion = new RoomDeletion({
   fence: roomFence, journal: deletionJournal, registry: roomRegistry, pending: journaledDeletions, onStorageFailure: markStorageFailure,
   plainRooms: createPlainRoomTeardown({ docs, roomReady, roomPersistenceChurn, blockedRooms }), e2eRooms: e2eRelay,
-  files: createRoomFileRemover({ io: fs.promises, uploadsDir: UPLOADS_DIR, reconcileUploadUsage }),
+  files: createRoomFileRemover({ io: fs.promises, uploadsDir: relayConfig.UPLOADS_DIR, reconcileUploadUsage }),
 });
+bindings.bind('deleteRoom', docName => roomDeletion.deleteRoom(docName));
+bindings.bind('recoverRooms', () => roomDeletion.recover());
 const plainUpgrades = createPlainUpgrades({
-  docs, getYDoc, roomReady, wss, fence: roomFence, reject: rejectUpgrade, timeoutMs: UPGRADE_TIMEOUT_MS, refusal: plainRoomRefusal,
+  docs, getYDoc, roomReady, wss, fence: roomFence, reject: rejectUpgrade, timeoutMs: relayConfig.UPGRADE_TIMEOUT_MS, refusal: plainRoomRefusal,
 });
 roomRegistry.activity.watch(e2eRelay.wss, (error) => roomRegistry.reportStorageFailure(error));
-wss.on('connection', (conn, req) => {
-  const context = req.wsSecurityContext;
-  if (!context?.docName) {
-    conn.close(1011, 'server setup error');
-    return;
-  }
-  const { docName, clientIp, expiresAt } = context;
-  const doc = docs.get(docName);
-  if (!doc) {
-    conn.close(1011, 'server setup error');
-    return;
-  }
-  context.awarenessClientIds = new Set();
-  console.log('[yjs] conn open', { docName: roomLogId(docName), client: roomLogId(`ip:${clientIp}`), origin: req.headers.origin });
-  conn.on('error', (err) => {
-    console.warn('[yjs] conn error', { docName: roomLogId(docName), err: err.message, code: err.code });
-    try { conn.terminate(); } catch { /* already closed */ }
-  });
-  closeOnSessionExpiry(conn, expiresAt);
-  // Ingress closes the WS when over budget; egress mediates conn.send, which y-websocket
-  // funnels sync replies, awareness snapshots and broadcasts through.
-  let limited = false;
-  const meter = wsTraffic.attach(conn, docName);
-
-  if (PUBLIC_WALL) coalesceAwarenessSends(conn, doc, MAX_AWARENESS_MESSAGE_BYTES);
-  if (PUBLIC_WALL && context.supportsQuota) registerPublicQuotaClient(Y, doc, clientIp, conn);
-
-  const before = new Set(conn.listeners('message'));
-  setupWSConnection(conn, req, { docName, gc: true });
-  // setupWSConnection registers its close handler synchronously. Registering
-  // after it guarantees states/controlled IDs are removed before we delete
-  // y-protocols' otherwise-retained metadata and our byte accounting.
-  conn.once('close', () => releaseAwarenessForConnection(doc, conn, context));
-  const parsers = conn.listeners('message').filter((listener) => !before.has(listener));
-  if (parsers.length !== 1) {
-    console.error('[yjs] unexpected message-listener count', { docName: roomLogId(docName), count: parsers.length });
-    conn.close(1011, 'server setup error');
-    return;
-  }
-  const [parseYjsMessage] = parsers;
-  conn.off('message', parseYjsMessage);
-  conn.on('message', (data) => {
-    if (limited || roomFence.isFenced(docName)) return;
-    const size = data?.byteLength ?? data?.length ?? 0;
-    if (!meter.admitIngress(size)
-        || pendingStoreOps >= MAX_PENDING_STORE_OPS
-        || pendingStoreBytes >= MAX_PENDING_STORE_BYTES) {
-      limited = true;
-      rejectionCounters.observeBacklog(pendingStoreOps, pendingStoreBytes, MAX_PENDING_STORE_OPS, MAX_PENDING_STORE_BYTES);
-      console.warn('[yjs] rate-limit close', { docName: roomLogId(docName), origin: req.headers.origin, size });
-      try { conn.close(1008, 'rate-limit'); } catch { /* already closing */ }
-      return;
-    }
-    let inspection;
-    let awarenessPlan = null;
-    try {
-      inspection = inspectProtocolMessage(data);
-      if (inspection.kind === 'sync-update') {
-        const usage = roomUsage.get(doc) || {
-          upperBytes: 0,
-          exactBytes: 0,
-          lastMeasuredAt: Date.now(),
-        };
-        const churn = persistenceChurnFor(docName);
-        const estimatedStoreBytes = inspection.updateBytes + STORE_OPERATION_OVERHEAD_BYTES;
-        if (pendingStoreOps >= MAX_PENDING_STORE_OPS
-            || pendingStoreBytes + estimatedStoreBytes > MAX_PENDING_STORE_BYTES) {
-          rejectionCounters.storageBacklog();
-          throw new Error('persistence backlog');
-        }
-        if (dbUsageBytes + pendingStoreBytes + estimatedStoreBytes > MAX_DB_BYTES) {
-          markStorageFailure(new Error('configured database quota exceeded'));
-          throw new Error('database capacity reached');
-        }
-        if (usage.upperBytes + inspection.updateBytes > MAX_DOCUMENT_BYTES) {
-          scheduleRoomCompaction(docName, { remeasure: true });
-          throw Object.assign(new Error('document conservative limit'), { closeCode: 1009 });
-        }
-        if (activeDocumentBytes + inspection.updateBytes > MAX_ACTIVE_DOCUMENT_BYTES) {
-          scheduleRoomCompaction(docName, { remeasure: true });
-          throw Object.assign(new Error('active document capacity reached'), { closeCode: 1009 });
-        }
-        if (churn.uncompactedUpdates + 1 > ROOM_MAX_UNCOMPACTED_UPDATES) {
-          scheduleRoomCompaction(docName, { remeasure: true });
-          throw new Error('room persistence compacting');
-        }
-        if (churn.uncompactedBytes + inspection.updateBytes + STORE_OPERATION_OVERHEAD_BYTES > ROOM_MAX_UNCOMPACTED_BYTES) {
-          scheduleRoomCompaction(docName, { remeasure: true });
-          throw new Error('room persistence compacting');
-        }
-      } else if (inspection.kind === 'sync-step-1') {
-        const usage = roomUsage.get(doc) || {
-          upperBytes: 0,
-          exactBytes: 0,
-          lastMeasuredAt: Date.now(),
-        };
-        const estimatedBytes = Math.min(
-          MAX_DOCUMENT_BYTES,
-          Math.max(usage.upperBytes, usage.exactBytes),
-        );
-        if (!meter.takeSyncResponse(estimatedBytes)) {
-          throw new Error('sync response rate-limit');
-        }
-      } else if (inspection.kind === 'awareness') {
-        awarenessPlan = planAwarenessUpdate(doc, conn, context, inspection.entries);
-        if (awarenessPlan.dropFrame) return;
-      }
-      if (PUBLIC_WALL && inspection.kind === 'sync-update' && !admitPublicAction(Y, doc, clientIp, data)) throw Object.assign(new Error(PUBLIC_ACTION_LIMIT_REASON), { closeReason: PUBLIC_ACTION_LIMIT_REASON });
-    } catch (err) {
-      limited = true;
-      if (err.closeReason === PUBLIC_ACTION_LIMIT_REASON) rejectionCounters.increment(PUBLIC_ACTION_LIMIT_REASON, 1008);
-      else console.warn('[yjs] protocol-policy close', {
-        docName: roomLogId(docName),
-        reason: err.message,
-        size,
-      });
-      try { conn.close(err.closeCode || 1008, err.closeReason || 'protocol policy'); } catch { /* already closing */ }
-      return;
-    }
-    parseYjsMessage(data);
-    if (PUBLIC_WALL && inspection.kind === 'sync-update') notifyPublicQuota(doc, clientIp, conn);
-    if (awarenessPlan) commitAwarenessPlan(context, awarenessPlan);
-    wsTraffic.closeSlowConsumers(doc.conns.keys());
-  });
+const { handleConnection } = createWsConnectionHandler({
+  config: relayConfig, accounting, docs, Y, PUBLIC_WALL, roomFence, wsTraffic, rejectionCounters,
+  setupWSConnection, releaseAwarenessForConnection, inspectMessage, commitAwarenessPlan,
 });
+wss.on('connection', handleConnection);
 
-server.on('upgrade', (req, socket, head) => {
-  // Origin allowlist — set YJS_ALLOWED_ORIGINS in prod to lock the relay to
-  // the public site. Browsers always send Origin on WS handshakes; non-browser
-  // clients can spoof it but at least defeats opportunistic CSRF-style abuse
-  // from a malicious site running a ws() in the user's tab.
-  const origin = req.headers.origin || '';
-  if (!isExactAllowedOrigin(origin, ALLOWED_ORIGINS, ALLOW_INSECURE_HTTP)) {
-    rejectUpgrade(socket, 403);
-    return;
-  }
-  const roomTarget = roomTargetFromRequest(req, { publicWall: PUBLIC_WALL });
-  const handle = roomTarget?.handle || null;
-  // Resolve the canonical room first, on every route, so the lock check below covers legacy URLs too.
-  const legacyDoc = !handle && ALLOW_LEGACY_URL_TOKENS ? tokenDocNameFromRequest(req, { allowLegacyRooms: ALLOW_LEGACY_ROOMS }) : null;
-  const docName = handle ? registeredRoomsByHandle.get(handle)
-    : legacyDoc && (registeredDocs.has(legacyDoc) || (ALLOW_LEGACY_ROOMS && existingDocNames.has(legacyDoc))) && legacyDoc;
-  if (!docName) {
-    rejectUpgrade(socket, 404);
-    return;
-  }
-  // Locked rooms are served only on /e2e and normal rooms never are; an unreadable lock is never served.
-  const lock = roomRegistry.lockFor(docName);
-  if (lock === CORRUPT_LOCK || Boolean(lock) !== Boolean(roomTarget?.e2e)) {
-    rejectUpgrade(socket, lock === CORRUPT_LOCK ? 503 : 404);
-    return;
-  }
-  const session = handle ? authenticatedDocFromRequest(req, handle) : null;
-  if (handle && !session) {
-    rejectUpgrade(socket, 401);
-    return;
-  }
-  const expiresAt = session?.expiresAt || null;
-  // Reject known-doomed upgrades before getYDoc can allocate and hydrate a
-  // room that will never receive a connection.
-  if (shuttingDown || storageFailure || isRoomBlocked(docName)) {
-    rejectUpgrade(socket, 503);
-    return;
-  }
-  const e2e = Boolean(roomTarget?.e2e);
-  const coldRoom = e2e ? e2eRelay.connectionsFor(docName) === 0 : !docs.has(docName);
-  if (coldRoom && !hasActiveRoomCapacity()) {
-    rejectUpgrade(socket, 503);
-    return;
-  }
-  const clientIp = clientIpFromRequest(req);
-  if (!takeWsUpgradeToken(clientIp, docName, coldRoom)) {
-    rejectUpgrade(socket, 429);
-    return;
-  }
-  // Taken in the same tick as the room lookup and held until attach: a room being deleted answers like a missing one.
-  const leave = roomFence.enter(docName);
-  const reservation = leave ? wsTraffic.reserve(clientIp, docName) : { status: 404 };
-  if (reservation.status) {
-    leave?.();
-    rejectUpgrade(socket, reservation.status);
-    return;
-  }
-  socket.once('close', reservation.release);
-  req.wsSecurityContext = {
-    docName,
-    clientIp,
-    expiresAt,
-    expectedAwarenessClientId: roomTarget?.awarenessClientId ?? null,
-    supportsQuota: roomTarget?.supportsQuota ?? false,
-    e2e, keyEpoch: roomKeyEpoch(docName),
-  };
-  if (e2e) {
-    e2eRelay.handleUpgrade(req, socket, head);
-    leave();
-    return;
-  }
-  // Same canonical name as setupWSConnection, so hydration and the attachment cannot diverge between path forms.
-  plainUpgrades.attach(req, socket, head, docName, leave);
+const { handleUpgrade } = createUpgradeHandler({
+  settings: { PUBLIC_WALL, ALLOWED_ORIGINS, ALLOW_INSECURE_HTTP, ALLOW_LEGACY_URL_TOKENS, ALLOW_LEGACY_ROOMS },
+  roomRegistry, accounting, docs, roomFence, wsTraffic, isRoomBlocked, hasActiveRoomCapacity,
+  takeWsUpgradeToken, clientIpFromRequest, authenticatedDocFromRequest, roomKeyEpoch, e2eRelay, plainUpgrades, rejectUpgrade,
 });
+server.on('upgrade', handleUpgrade);
 
 // Graceful drain. Without this, `docker stop` kills the process while
 // storeUpdate calls are still in flight, so the last edits before a deploy
 // can be lost even though every client saw them.
 const lifecycle = createRelayLifecycle({
-  timeoutMs: SHUTDOWN_TIMEOUT_MS,
+  timeoutMs: relayConfig.SHUTDOWN_TIMEOUT_MS,
   log: console,
   errorId: (err) => roomLogId(String(err)),
   exit: (code) => process.exit(code),
   setExitCode: (code) => { process.exitCode = code; },
   onStart: (signal) => {
-    shuttingDown = true;
+    accounting.shuttingDown = true;
     clearInterval(maintenanceTimer);
     maintainer?.close(); maintainer?.closeAllConnections();
     console.log('[yjs] draining', { signal, rooms: docs.size });
@@ -1410,8 +418,8 @@ const lifecycle = createRelayLifecycle({
     const roomCount = docs.size;
     await e2eRelay.drain();
     await drainRelay({
-      server, clients: wss.clients, httpGraceMs: HTTP_SHUTDOWN_GRACE_MS,
-      isBusy: () => maintenance.running || roomRegistry.pendingRoomCreations > 0 || uploadState.active > 0 || pendingStoreOps > 0
+      server, clients: wss.clients, httpGraceMs: relayConfig.HTTP_SHUTDOWN_GRACE_MS,
+      isBusy: () => maintenance.running || roomRegistry.pendingRoomCreations > 0 || uploadState.active > 0 || accounting.pendingStoreOps > 0
         || accountStore.pendingOperations > 0 || authRoutes.pendingExchanges > 0,
       compactions: () => [...roomPersistenceChurn.values()].map((churn) => churn.compactionPromise).filter(Boolean),
       destroyStorage: async () => { await roomRegistry.activity.stop(); await accountStore.stop(); await ldb.destroy(); },
@@ -1419,6 +427,7 @@ const lifecycle = createRelayLifecycle({
     console.log('[yjs] drained', { rooms: roomCount });
   },
 });
+bindings.bind('shutdown', (...args) => lifecycle.shutdown(...args));
 const shutdown = lifecycle.shutdown;
 process.on('SIGTERM', () => { shutdown('SIGTERM'); });
 process.on('SIGINT', () => { shutdown('SIGINT'); });
@@ -1426,20 +435,7 @@ process.on(UNHANDLED_REJECTION_EVENT, (err) => { lifecycle.fatal(UNHANDLED_REJEC
 process.on(UNCAUGHT_EXCEPTION_EVENT, (err) => { lifecycle.fatal(UNCAUGHT_EXCEPTION_EVENT, err); });
 await roomDeletion.recover();
 if (await e2eBlobs.reconcileOrphans() > 0) await reconcileUploadUsage();
-server.listen(PORT, HOST, () => {
-  const address = server.address();
-  const boundPort = typeof address === 'object' && address ? address.port : PORT;
-  const displayHost = HOST.includes(':') ? `[${HOST}]` : HOST;
-  console.log(`[yjs] listening on ws://${displayHost}:${boundPort}  (db: ${DB_DIR})`);
-  if (ALLOWED_ORIGINS.length) {
-    console.log(`[yjs] origin allowlist: ${ALLOWED_ORIGINS.join(', ')}`);
-  } else if (ALLOW_INSECURE_HTTP) {
-    console.warn('[yjs] dev HTTP mode: accepting localhost origins only');
-  } else {
-    console.warn('[yjs] no allowed origins configured; APIs and WebSockets are fail-closed');
-  }
-  if (ALLOW_LEGACY_ROOMS) console.warn('[yjs] legacy tokenless rooms enabled');
-  if (ALLOW_LEGACY_URL_TOKENS) console.warn('[yjs] legacy URL-token WebSockets enabled');
-  if (TRUST_PROXY) console.warn('[yjs] trusted proxy headers enabled; block direct origin access');
-  if (dbUsageBytes > MAX_DB_BYTES) markStorageFailure(new Error('configured database quota exceeded'));
-});
+server.listen(PORT, HOST, () => logRelayBanner({
+  server, PORT, HOST, DB_DIR, ALLOWED_ORIGINS, ALLOW_INSECURE_HTTP,
+  ALLOW_LEGACY_ROOMS, ALLOW_LEGACY_URL_TOKENS, TRUST_PROXY, accounting, MAX_DB_BYTES: relayConfig.MAX_DB_BYTES, markStorageFailure,
+}));

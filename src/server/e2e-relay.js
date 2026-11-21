@@ -15,10 +15,10 @@ import { POLICY_CLOSE_CODE, closeOnSessionExpiry, safeClose } from './relay-ws-t
 
 export { E2E_SNAPSHOT_MIN_INTERVAL_MS } from '../domain/e2e-limits.js';
 /** Replay is sent in chunks of at most this many frames or bytes, whichever comes first. */
-export const REPLAY_CHUNK_FRAMES = 256;
-export const REPLAY_CHUNK_BYTES = 1024 * 1024;
+const REPLAY_CHUNK_FRAMES = 256;
+const REPLAY_CHUNK_BYTES = 1024 * 1024;
 /** A joiner whose buffer never drains below the slow-consumer limit within this time is closed. */
-export const REPLAY_DRAIN_TIMEOUT_MS = 30_000;
+const REPLAY_DRAIN_TIMEOUT_MS = 30_000;
 const REPLAY_DRAIN_POLL_MS = 10;
 const WS_OPEN_STATE = 1;
 const UNSUPPORTED_DATA_CLOSE_CODE = 1003;

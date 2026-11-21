@@ -162,7 +162,7 @@ export function FontColorSwatches({ fontColor, onFontColor, onClose }) {
   );
 }
 
-export function FontColorPicker({ fontColor, can, onFontColor }) {
+function FontColorPicker({ fontColor, can, onFontColor }) {
   const [fontColorOpen, setFontColorOpen] = useState(false);
   return (
     <div className="rb-selection-toolbar__popover-anchor">

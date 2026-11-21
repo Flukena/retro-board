@@ -16,7 +16,7 @@ const FEATURE_ICON_SIZE_PX = 18;
 // Indexes into PALETTE (src/client/ui/palette.js).
 const PALETTE_INDEX = Object.freeze({ YELLOW: 0, RED: 1, GREEN: 2, BLUE: 3, PURPLE: 4, ORANGE: 5 });
 const LINK_ICON_SIZE_PX = 14;
-export const GUIDE_FEATURES = Object.freeze([
+const GUIDE_FEATURES = Object.freeze([
   { key: 'notes', Icon: StickyNote, color: PALETTE_INDEX.YELLOW },
   { key: 'reveal', Icon: EyeOff, color: PALETTE_INDEX.PURPLE },
   { key: 'vote', Icon: ThumbsUp, color: PALETTE_INDEX.GREEN },
@@ -24,8 +24,8 @@ export const GUIDE_FEATURES = Object.freeze([
   { key: 'devices', Icon: Smartphone, color: PALETTE_INDEX.RED },
   { key: 'export', Icon: Download, color: PALETTE_INDEX.ORANGE },
 ]);
-export const GUIDE_STEP_KEYS = Object.freeze(['create', 'share', 'run']);
-export const GUIDE_FAQ_KEYS = Object.freeze(['free', 'signup', 'access', 'keep', 'phone', 'lang']);
+const GUIDE_STEP_KEYS = Object.freeze(['create', 'share', 'run']);
+const GUIDE_FAQ_KEYS = Object.freeze(['free', 'signup', 'access', 'keep', 'phone', 'lang']);
 
 function GuideSection({ id, titleKey, children }) {
   return (

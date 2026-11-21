@@ -25,6 +25,10 @@ const VOTE_B = '8';
 const EXPECTED_AVERAGE = '6.5';
 const EXPECTED_SUGGESTION = '8';
 const JSON_INDENT_SPACES = 2;
+// The relay answers /api/account with 404 when sign-in is off, by design (src/server/auth-routes.js:258-260);
+// the client maps that 404 to DISABLED (src/client/account/account-api.js:23). Chromium logs it as a console error.
+const DESIGNED_ACCOUNT_PROBE_PATH = '/api/account';
+const DESIGNED_ACCOUNT_PROBE_TEXT = /status of 404\b/;
 const REACTION_EMOJI = POKER_REACTIONS[1];
 
 const [baseArg, outputArg] = process.argv.slice(2);
@@ -47,6 +51,11 @@ function label(lang, key, params) {
   return t(key, params);
 }
 
+// Narrow on purpose: only the exact account path with a 404 status is exempt; any other console error still fails.
+function isDesignedAccountProbe(message) {
+  return DESIGNED_ACCOUNT_PROBE_TEXT.test(message.text()) && new URL(message.location().url, base).pathname === DESIGNED_ACCOUNT_PROBE_PATH;
+}
+
 async function participant(lang, theme) {
   const context = await browser.newContext({ viewport: VIEWPORT_DESKTOP });
   await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: base.origin });
@@ -57,7 +66,9 @@ async function participant(lang, theme) {
   const page = await context.newPage();
   page.setDefaultTimeout(TIMEOUT_MS);
   page.on('pageerror', (error) => report.errors.push({ lang, message: error.message }));
-  page.on('console', (message) => { if (message.type() === 'error') report.errors.push({ lang, console: message.text() }); });
+  page.on('console', (message) => {
+    if (message.type() === 'error' && !isDesignedAccountProbe(message)) report.errors.push({ lang, console: message.text() });
+  });
   return { page, lang };
 }
 
@@ -69,6 +80,7 @@ async function step(name, action) {
     entry.passed = true;
   } catch (error) {
     entry.error = error instanceof Error ? error.message : String(error);
+    console.log(`FAIL ${name}`);
     throw error;
   }
 }
@@ -226,5 +238,6 @@ try {
   await writeFile(join(output, 'report.json'), JSON.stringify(report, null, JSON_INDENT_SPACES));
   await browser.close();
 }
+if (report.errors.length > 0) console.log('FAIL no unexpected console or page errors');
 console.log(JSON.stringify({ passed: report.passed, steps: report.steps.map(({ name, passed }) => [name, passed]), errors: report.errors }, null, JSON_INDENT_SPACES));
 process.exitCode = report.passed ? 0 : 1;

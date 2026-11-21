@@ -6,7 +6,7 @@ import {
 } from './security-boundaries.js';
 
 export const TEMPLATE_PREFIX = 's||template:';
-export const LEGACY_TEMPLATE_KEY = 's||customTemplates';
+const LEGACY_TEMPLATE_KEY = 's||customTemplates';
 const TEMPLATE_FALLBACK_CREATED_AT_MS = 0;
 const LOCAL_ORIGIN = 'local';
 const MIGRATION_ORIGIN = 'system';
