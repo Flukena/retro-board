@@ -8,22 +8,34 @@ RetroBoard.jsx                 React application coordinator
 yjs-server.mjs                Relay startup and connection coordinator
 src/
   client/
+    account/                  Google sign-in session, account API and My boards list
     app/                      Bootstrap, routing, landing, error recovery
     board/                    Canvas, cards, gestures, selection, minimap
     chrome/                   Navigation and tool docks
+    guide/                    Agile guide page and its content
     legal/                    Privacy policy and terms pages
+    maintainer/               Maintainer console: monitoring, rooms, accounts
+    poker/                    Planning Poker rooms: session, table, cards, export
     public-wall/              Public entry, snapshots and previews
+    reactions/                Board reactions over awareness: channel, overlay, fireworks
+    room-lock/                Locked rooms: password flow, E2E crypto, key rotation
+    seo/                      Indexable page list, head/prerender documents, structured data
     session/                  Yjs adapter, local identity, presence, undo
     templates/                Template picker and workflow
     transfer/                 Import/export, downloads and image transport
     ui/                       Shared UI, theme tokens and translations
     voting/                   Timer, voting setup and result presentation
+    workspace/                Signed-in workspace: board cards, create menu, model
+    writing-timer/            Shared writing timer: store, UI and chime
   domain/                     Portable board rules and validated contracts
   server/                     HTTP, sessions, protocol, storage and maintenance
   test-support/               Development-only render/style test helpers
 scripts/
   project-files.mjs           Shared recursive source/test discovery
   test.mjs                    Node test runner; forwards CLI flags
+  live-check-all.mjs          Runs the browser live checks listed in the manifest
+  live-check-common.mjs       Shared helpers for the live checks
+  live-check-manifest.json    Live check ids, setup needs and baselines
 ```
 
 ## Dependency direction
@@ -36,7 +48,9 @@ runtime imports test support.
 
 `src/architecture.test.js` enforces these directions, portable domain code
 and an acyclic import graph. `src/rule-ratchets.test.js` recursively checks all
-JSX colors and limits the two root coordinators to 4,177 and 1,881 lines.
+JSX colors and holds the line ceilings of the two root coordinators and the large
+`storage-bridge.js` and `i18n.js`; the ceilings are defined only in that file, and any production source over the
+shared limit needs its own ceiling there.
 
 ## Client flow
 
