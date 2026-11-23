@@ -15,10 +15,23 @@ const SERVER_ROOT = new URL('../server/', import.meta.url).href;
 const ISOLATED_MODULES = new Set(['relay-late-bindings.js', 'relay-ws-connection.js', 'relay-room-state.js', 'relay-persistence.js', 'relay-runtime.js', 'relay-http-dispatch.js', 'relay-upgrade.js', 'relay-ws-admission.js', 'relay-awareness-policy.js', 'relay-vote-expiry.js', 'relay-room-accounting.js']);
 const require = createRequire(ENTRYPOINT);
 let nextSessionId = 0;
+let activeEntrypoint = false;
 
 // Import the complete, unmodified entrypoint through Node's module loader. Only
 // boundary dependencies are injected; no source reads, slices or copied handlers.
-export async function relayEntrypoint(t, { modules = {}, env = {} } = {}) {
+// y-websocket's CJS docs map and persistence handler belong to the process.
+export async function relayEntrypoint(t, options = {}) {
+  if (activeEntrypoint) throw new Error('relay entrypoint already active in this test process');
+  activeEntrypoint = true;
+  try {
+    return await loadEntrypoint(t, options);
+  } finally {
+    // Register after the fixture's cleanup so the next owner sees a clean process.
+    t.after(() => { activeEntrypoint = false; });
+  }
+}
+
+async function loadEntrypoint(t, { modules = {}, env = {} }) {
   const root = await mkdtemp(join(tmpdir(), 'relay-entrypoint-'));
   const syncProtocol = require('y-protocols/sync');
   const originalReadSyncMessage = syncProtocol.readSyncMessage;

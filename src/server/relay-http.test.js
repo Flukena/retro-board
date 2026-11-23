@@ -200,11 +200,13 @@ test('entrypoint preserves upload origin, unavailable, room and session guard pr
     [{}, UNKNOWN_HANDLE, ORIGIN, 404],
     [{}, ROOM_HANDLE, ORIGIN, 401],
   ]) {
-    const { dispatch } = await entrypointHttp(t, overrides);
-    const res = routeResponse();
-    dispatch(routeRequest('POST', `/yjs/rooms/${handle}/upload`, origin), res);
-    assert.equal(res.status, expected);
-    assert.equal(res.body, undefined);
+    await t.test(`responds with ${expected}`, async child => {
+      const { dispatch } = await entrypointHttp(child, overrides);
+      const res = routeResponse();
+      dispatch(routeRequest('POST', `/yjs/rooms/${handle}/upload`, origin), res);
+      assert.equal(res.status, expected);
+      assert.equal(res.body, undefined);
+    });
   }
 });
 
@@ -218,13 +220,16 @@ test('entrypoint image access retains unknown room before session and skips orig
   }
 });
 
-test('entrypoint retains creation and session JSON error and failure-budget precedence', { timeout: HTTP_DISPATCH_TIMEOUT_MS }, async t => {
+test('creation checks its budget before decoding the request', { timeout: HTTP_DISPATCH_TIMEOUT_MS }, async t => {
   const limited = await entrypointHttp(t, { takeCreateToken: () => 60 });
   const create = routeResponse();
   await limited.handleCreateRoom(request(['bad'], { origin: ORIGIN, 'content-type': 'text/plain' }), create, 'ip');
   assert.equal(create.status, 429);
   assert.equal(create.headers['retry-after'], '60');
   assert.equal(create.headers['cache-control'], 'no-store');
+});
+
+test('denied sessions leave the failure counter unchanged', { timeout: HTTP_DISPATCH_TIMEOUT_MS }, async t => {
   let failures = 0;
   const session = await entrypointHttp(t, { failureAttemptAvailable: () => false, recordSessionFailure() { failures += 1; } });
   const denied = routeResponse();
@@ -232,6 +237,9 @@ test('entrypoint retains creation and session JSON error and failure-budget prec
   assert.equal(denied.status, 429);
   assert.equal(denied.headers['retry-after'], '60');
   assert.equal(failures, 0);
+});
+
+test('an unknown session returns 404', { timeout: HTTP_DISPATCH_TIMEOUT_MS }, async t => {
   const invalid = routeResponse();
   await (await entrypointHttp(t)).handleRoomSession(request(['{}'], { origin: ORIGIN }), invalid, 'ip', true);
   assert.equal(invalid.status, 404);
