@@ -159,6 +159,10 @@ function maintainerEnv(entry, ports, { maintainerKey }) {
   return { YJS_MAINTAINER_KEY: maintainerKey, YJS_MAINTAINER_PORT: String(ports.maintainer) };
 }
 
+function relayIsolation(outDir, database, uploads) {
+  return { YJS_HOST: LOOPBACK_V4, YJS_DB_DIR: join(outDir, database), YJS_UPLOADS_DIR: join(outDir, uploads) };
+}
+
 function relayService(entry, ports, outDir, secrets) {
   return {
     name: 'relay', command: process.execPath, args: [RELAY_SCRIPT], port: ports.relay, host: LOOPBACK_V4,
@@ -166,8 +170,8 @@ function relayService(entry, ports, outDir, secrets) {
       YJS_ALLOW_INSECURE_HTTP: ENV_TRUE, YJS_PORT: String(ports.relay),
       YJS_ROOM_CREATE_BURST: ROOM_CREATE_BURST, YJS_ROOM_CREATES_PER_HOUR: ROOM_CREATES_PER_HOUR,
       YJS_ALLOWED_ORIGINS: allowedOrigins(ports),
-      YJS_DB_DIR: join(outDir, 'db'), YJS_UPLOADS_DIR: join(outDir, 'uploads'),
       ...oidcRelayEnv(entry, ports), ...maintainerEnv(entry, ports, secrets), ...entry.relayEnv,
+      ...relayIsolation(outDir, 'db', 'uploads'),
     },
   };
 }
@@ -176,8 +180,9 @@ function publicRelayService(ports, outDir) {
   return {
     name: 'public-relay', command: process.execPath, args: [RELAY_SCRIPT], port: ports.publicRelay, host: LOOPBACK_V4,
     env: {
-      YJS_PUBLIC_WALL: ENV_TRUE, YJS_PORT: String(ports.publicRelay), YJS_DB_DIR: join(outDir, 'public-db'),
+      YJS_PUBLIC_WALL: ENV_TRUE, YJS_PORT: String(ports.publicRelay),
       YJS_ALLOW_INSECURE_HTTP: ENV_TRUE, YJS_ALLOWED_ORIGINS: allowedOrigins(ports),
+      ...relayIsolation(outDir, 'public-db', 'public-db-uploads'),
     },
   };
 }

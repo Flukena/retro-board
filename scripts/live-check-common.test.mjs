@@ -112,6 +112,17 @@ test('serverPlan puts the public relay on 1235 and gives every other service its
   assert.equal(panPlan.find((candidate) => candidate.name === 'vite').port, PAN_VITE_PORT);
 });
 
+for (const [name, db, uploads] of [['relay', 'db', 'uploads'], ['public-relay', 'public-db', 'public-db-uploads']]) {
+  test(`${name} owns its bind address and storage even with conflicting shell and manifest settings`, () => {
+    const ambient = { YJS_HOST: '192.0.2.1', YJS_DB_DIR: '/external/db', YJS_UPLOADS_DIR: '/external/uploads' };
+    const entry = entryOf({ publicRelay: true, relayEnv: { ...ambient, YJS_ROOM_SESSION_TTL_SECONDS: '60' } });
+    const service = serverPlan(entry, portsFor(entry, 0), '/run').find(candidate => candidate.name === name);
+    const env = { ...ambient, ...service.env };
+    assert.deepEqual([env.YJS_HOST, env.YJS_DB_DIR, env.YJS_UPLOADS_DIR], ['127.0.0.1', join('/run', db), join('/run', uploads)]);
+    if (name === 'relay') assert.equal(env.YJS_ROOM_SESSION_TTL_SECONDS, '60');
+  });
+}
+
 test('serverPlan leaves the stub to a check that runs it (oidcInCheck) but still points the relay at its port', () => {
   const entry = entryOf({ id: 'room-management', stack: 'oidc', viteHost: 'localhost', oidcInCheck: true,
     checkEnv: { FAKE_OIDC_PORT: '{oidcPort}' } });
