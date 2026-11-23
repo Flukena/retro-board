@@ -5,6 +5,7 @@ import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { setLang, t } from '../src/client/ui/i18n.js';
+import { consoleStep } from './board-live-helpers.mjs';
 
 const SSD_ROOT = '/Volumes/ssd-fluke/BaseData';
 const PLAYWRIGHT_MODULE = '/opt/homebrew/lib/node_modules/playwright/index.mjs';
@@ -17,6 +18,7 @@ const CONTENT_PADDING_PX = 20; // --modal-padding, and --landing-card-padding at
 const LANDING_MOBILE_MAX_WIDTH_PX = 599;
 const LANDING_MOBILE_CARD_PADDING_PX = 16;
 const TOLERANCE_PX = 1;
+const MAX_FINDINGS_IN_ERROR = 6;
 const TOUCH_TARGET_PX = 44;
 const CASES = [
   { width: 360, height: 800, lang: 'th', mobile: true },
@@ -253,8 +255,11 @@ async function runCase(settings) {
 try {
   for (const settings of selectedCases) await checkCase(settings);
   assert.deepEqual(report.errors, []);
-  if (mode === 'check' && report.findings.length) console.log('FAIL spacing is consistent across equivalent UI roles');
-  if (mode === 'check') assert.equal(report.findings.length, 0, `Spacing must be consistent across equivalent UI roles: ${report.findings.slice(0, 6).join('; ')}`);
+  if (mode === 'check') {
+    await consoleStep('spacing is consistent across equivalent UI roles', () => {
+      assert.equal(report.findings.length, 0, report.findings.slice(0, MAX_FINDINGS_IN_ERROR).join('; '));
+    });
+  }
 } finally {
   await writeFile(join(out, 'report.json'), JSON.stringify(report, null, 2));
   await browser.close();

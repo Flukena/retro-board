@@ -5,7 +5,7 @@ import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { t, setLang } from '../src/client/ui/i18n.js';
-import { pollUntil, waitForEditorCaretAtEnd } from './board-live-helpers.mjs';
+import { consoleStep, pollUntil, waitForEditorCaretAtEnd } from './board-live-helpers.mjs';
 import { ZONE_ICON_BUTTON_SIZE_PX, ZONE_ICON_GLYPH_SIZE_PX } from '../src/domain/zone-title.js';
 import { ZONE_HEADER_TOOLS_BASE_FONT_PX } from '../src/client/board/zone-header-layout.js';
 
@@ -49,16 +49,7 @@ const browser = await playwright[engine].launch({ headless: true });
 const report = { engine, steps: [], errors: [], measurements: [] };
 const contexts = [];
 function word(user, key) { setLang(user.lang); return t(key); }
-async function step(name, action) {
-  try {
-    await action();
-  } catch (error) {
-    console.log(`FAIL ${name}`);
-    throw error;
-  }
-  report.steps.push(name);
-  console.log(`PASS ${name}`);
-}
+const step = (name, action) => consoleStep(name, action, report.steps);
 async function participant(mobile, lang) {
   const context = await browser.newContext({ viewport: mobile ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT, isMobile: mobile, hasTouch: mobile, reducedMotion: 'reduce' });
   contexts.push(context);
@@ -439,11 +430,17 @@ async function checkCommentsAndSync(mobile, desktop) {
   await desktop.page.getByTitle(word(desktop, 'topbar.redo'), { exact: true }).click();
   await mobile.page.getByText(`${text} peer`, { exact: true }).waitFor();
 }
+const waitForEditingLock = (page, locked) => pollUntil(
+  () => page.evaluate(async () => (await window.storage.get('boardState', true)).value.editingLocked),
+  value => value === locked,
+  `editing lock is ${locked}`,
+);
+
 async function checkPrivateEditingLock(owner, peer) {
   const sticky = peer.page.locator('.rb-sticky').first();
   const original = await sticky.innerText();
   await activate(owner, owner.page.getByRole('button', { name: word(owner, 'topbar.lockEdit'), exact: true }));
-  await pollUntil(() => peer.page.evaluate(async () => (await window.storage.get('boardState', true)).value.editingLocked), value => value === true, 'editing lock is true');
+  await waitForEditingLock(peer.page, true);
   await sticky.dblclick();
   assert.equal(await sticky.locator('textarea').count(), 0, 'Private guests cannot edit a locked board');
   await peer.page.keyboard.press('Control+z');
@@ -455,7 +452,7 @@ async function checkPrivateEditingLock(owner, peer) {
   await owner.page.getByTitle(word(owner, 'sticky.privacyToggle.off'), { exact: true }).tap();
   await peer.page.getByText(text, { exact: true }).waitFor();
   await activate(owner, owner.page.getByRole('button', { name: word(owner, 'topbar.unlockEdit'), exact: true }));
-  await pollUntil(() => peer.page.evaluate(async () => (await window.storage.get('boardState', true)).value.editingLocked), value => value === false, 'editing lock is false');
+  await waitForEditingLock(peer.page, false);
   const added = peer.page.locator('.rb-sticky').filter({ hasText: text });
   await added.dblclick();
   await replaceEditedText(added.locator('textarea'), text, `${text} guest`);

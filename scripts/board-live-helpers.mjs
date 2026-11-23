@@ -281,6 +281,20 @@ export async function shot(page, name, report) {
   report.screenshots.push(path);
 }
 
+// These checks emit each verdict immediately so a later timeout retains the last completed step.
+export async function consoleStep(name, action, passedNames) {
+  let result;
+  try {
+    result = await action();
+  } catch (error) {
+    console.log(`FAIL ${name}`);
+    throw error;
+  }
+  passedNames?.push(name);
+  console.log(`PASS ${name}`);
+  return result;
+}
+
 /** Runs one named step; on failure records it, screenshots every page, and rethrows. */
 export async function step(report, name, action) {
   try {
@@ -430,10 +444,32 @@ export async function waitForEditorCaretAtEnd(editor, current) {
   );
 }
 
-/** The last step of a check: no page errors were recorded in `mode`. */
+const RESOURCE_ERROR_PREFIX = 'Failed to load resource: the server responded with a status of ';
+const ACCOUNT_PATH = '/api/account';
+const ROOM_SESSION_PATH = '/api/room-session';
+
+export function isExpectedBoardConsoleError({ url, text }, baseUrl, mode, relayOrigin = process.env.LIVE_CHECK_RELAY_ORIGIN) {
+  const resource = URL.parse(url);
+  if (!resource) return false;
+  const app = new URL(baseUrl);
+  // Standalone checks receive only the app URL. Vite's relay shares its host and uses a separate port.
+  if (resource.protocol !== app.protocol || resource.hostname !== app.hostname) return false;
+  if (relayOrigin && resource.origin !== relayOrigin) return false;
+  if (resource.pathname === ACCOUNT_PATH) {
+    const status = mode === LIVE_MODE.LOCKED ? '401 (Unauthorized)' : '404 (Not Found)';
+    return text === RESOURCE_ERROR_PREFIX + status;
+  }
+  // Opening a locked room challenges the client before it supplies its unlock proof.
+  return mode === LIVE_MODE.LOCKED && resource.pathname === ROOM_SESSION_PATH
+    && text === RESOURCE_ERROR_PREFIX + '409 (Conflict)';
+}
+
+/** The final step records unexpected page and console errors on the isolated board. */
 export async function errorsStep({ report }, mode) {
   await step(report, `${mode}: no page errors`, async () => {
     if (report.pageErrors.length) throw new Error(JSON.stringify(report.pageErrors));
+    const unexpected = report.consoleErrors.filter(error => !isExpectedBoardConsoleError(error, report.baseUrl, mode));
+    if (unexpected.length) throw new Error(`${unexpected.length} unexpected console error(s), see report.json`);
     return { consoleErrors: report.consoleErrors.length };
   });
 }

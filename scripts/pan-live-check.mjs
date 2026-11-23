@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { pollUntil } from './board-live-helpers.mjs';
 // Isolated Public pan regression. Never seeds a production board.
 import assert from 'node:assert/strict';
 import { mkdir, stat, writeFile } from 'node:fs/promises';
@@ -8,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import {
   PUBLIC_CREATION_WINDOW_MS, PUBLIC_CREATIONS_PER_WINDOW, PUBLIC_IMAGES_PER_WINDOW, PUBLIC_PATH,
 } from '../src/domain/public-wall-contract.js';
+import { consoleStep as step, pollUntil } from './board-live-helpers.mjs';
 import { wheelDeltaForZoomFactor } from '../src/domain/viewport-zoom.js';
 
 const SSD_ROOT = '/Volumes/ssd-fluke/BaseData';
@@ -147,16 +147,6 @@ async function addChunk(page, chunk) {
     const present = new Set(board.items.map(item => item.id));
     return ids.every(id => present.has(id));
   }, chunk.map(item => item.id)), Boolean, 'fixture chunk is present');
-}
-
-async function step(name, action) {
-  try {
-    await action();
-  } catch (error) {
-    console.log(`FAIL ${name}`);
-    throw error;
-  }
-  console.log(`PASS ${name}`);
 }
 
 async function seedFixture(page) {

@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { BlobReader, TextWriter, ZipReader } from '@zip.js/zip.js/index-native.js';
 import { createJsonBackupArtifact } from '../src/client/transfer/board-backup.js';
 import { t, setLang } from '../src/client/ui/i18n.js';
-import { waitForEditorCaretAtEnd } from './board-live-helpers.mjs';
+import { consoleStep, waitForEditorCaretAtEnd } from './board-live-helpers.mjs';
 
 const SSD_ROOT = '/Volumes/ssd-fluke/BaseData';
 const PLAYWRIGHT_MODULE = '/opt/homebrew/lib/node_modules/playwright/index.mjs';
@@ -54,18 +54,11 @@ async function activate(user, target) {
   else await target.click();
 }
 async function noPin(user) { assert.equal(await user.page.getByPlaceholder('••••', { exact: true }).count(), 0, 'Public shared tools must never request a private admin PIN'); }
-async function step(name, action) {
-  try {
-    await action();
-    await noPin(mobile);
-    await noPin(desktop);
-  } catch (error) {
-    console.log(`FAIL ${name}`);
-    throw error;
-  }
-  report.steps.push(name);
-  console.log(`PASS ${name}`);
-}
+const step = (name, action) => consoleStep(name, async () => {
+  await action();
+  await noPin(mobile);
+  await noPin(desktop);
+}, report.steps);
 async function participant(isMobile, lang) {
   const context = await browser.newContext({ viewport: isMobile ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT, isMobile, hasTouch: isMobile, acceptDownloads: true });
   contexts.push(context);

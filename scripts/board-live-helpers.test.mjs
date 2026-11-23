@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { relative } from 'node:path';
 import {
-  DATA_VOLUME_ROOTS, boxCenter, dragBy, prepareDataVolumeOutput, withinPx, workspaceHeadingName,
+  DATA_VOLUME_ROOTS, boxCenter, consoleStep, dragBy, errorsStep, isExpectedBoardConsoleError, prepareDataVolumeOutput, withinPx, workspaceHeadingName,
 } from './board-live-helpers.mjs';
 
 /** A stand-in for Playwright's `page.mouse` that records calls; `failOnMove` makes that move call throw. */
@@ -68,4 +68,47 @@ test('dragBy with hold still releases the button when its move throws', async ()
   const { page, calls } = fakePage({ failOnMove: STEPPED_MOVE_CALL });
   await assert.rejects(dragBy(page, FROM, BY, { hold: true }), /move failed/);
   assert.equal(calls.up, 1);
+});
+
+test('a console step preserves its result, records only success and rethrows the original failure', async (t) => {
+  const log = t.mock.method(console, 'log', () => {});
+  const passed = [];
+  const error = new Error('peer disconnected');
+  assert.equal(await consoleStep('join', async () => 'joined', passed), 'joined');
+  await assert.rejects(consoleStep('edit', async () => { throw error; }, passed), (caught) => caught === error);
+  assert.deepEqual(passed, ['join']);
+  assert.deepEqual(log.mock.calls.map(({ arguments: args }) => args), [['PASS join'], ['FAIL edit']]);
+});
+
+const TEST_ORIGIN = 'http://127.0.0.1:5301';
+const resourceError = (path, status) => ({
+  url: new URL(path, TEST_ORIGIN).href, text: `Failed to load resource: the server responded with a status of ${status}`,
+});
+
+function checkBrowserErrors(mode, consoleErrors, pageErrors = []) {
+  const report = { baseUrl: TEST_ORIGIN, pages: [], steps: [], pageErrors, consoleErrors };
+  return errorsStep({ report }, mode);
+}
+
+test('the final browser step accepts only expected resource errors for this fixture', async () => {
+  const disabled = resourceError('/api/account', '404 (Not Found)');
+  const signedOut = resourceError('/api/account', '401 (Unauthorized)');
+  const locked = resourceError('/api/room-session', '409 (Conflict)');
+  await checkBrowserErrors('plain', [disabled]);
+  await checkBrowserErrors('locked', [signedOut, locked]);
+  for (const error of [
+    signedOut, locked, resourceError('/api/other', '404 (Not Found)'),
+    resourceError('https://other.example/api/account', '404 (Not Found)'),
+    resourceError('/yjs-public/api/snapshot', '502 (Bad Gateway)'), { text: 'render failed', url: '' },
+    { ...disabled, text: 'Application error 404' },
+  ]) await assert.rejects(checkBrowserErrors('plain', [error]), /unexpected console error/);
+  await assert.rejects(checkBrowserErrors('locked', [disabled]), /unexpected console error/);
+  await assert.rejects(checkBrowserErrors('plain', [], ['broken render']), /broken render/);
+});
+
+test('the manifest checks the private relay port independently of the Vite port', () => {
+  const relay = 'http://127.0.0.1:1301';
+  const disabledAccount = resourceError(new URL('/api/account', relay), '404 (Not Found)');
+  assert.equal(isExpectedBoardConsoleError(disabledAccount, TEST_ORIGIN, 'plain', relay), true);
+  assert.equal(isExpectedBoardConsoleError({ ...disabledAccount, url: TEST_ORIGIN + '/api/account' }, TEST_ORIGIN, 'plain', relay), false);
 });

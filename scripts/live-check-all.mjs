@@ -13,9 +13,10 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { prepareDataVolumeOutput } from './board-live-helpers.mjs';
 import {
-  BASELINE, FLAKY_ATTEMPTS, PortHeldError, VERDICT, assertPortsFree, checkCommand, checkEnv, entryPorts, judgeRun,
-  parseManifest, portsFor, runWithHardTimeout, serverPlan, startServers, summarizeRun,
+  BASELINE, FLAKY_ATTEMPTS, VERDICT, checkCommand, checkEnv, entryPorts, judgeRun,
+  parseManifest, portsFor, serverPlan, summarizeRun,
 } from './live-check-common.mjs';
+import { PortHeldError, assertPortsFree, runWithHardTimeout, startServers } from './live-check-process.mjs';
 import { PROJECT_ROOT } from './project-files.mjs';
 
 const MANIFEST_PATH = join(PROJECT_ROOT, 'scripts', 'live-check-manifest.json');
@@ -96,7 +97,8 @@ async function runAttempt({ entry, ports, runDir, signal }) {
   await writeFile(join(outDir, 'check-stdout.log'), run.stdout);
   await writeFile(join(outDir, 'check-stderr.log'), run.stderr);
   const { exitCode, timedOut, durationMs } = run;
-  return { outDir, exitCode, timedOut, ...summarizeRun(run.stdout, exitCode, { requireStepLines: entry.stepLines !== false }), durationMs };
+  const steps = summarizeRun(run.stdout, exitCode, { requireStepLines: entry.stepLines !== false, timedOut });
+  return { outDir, exitCode, timedOut, ...steps, durationMs };
 }
 
 async function writeSummary(entry, attempts) {

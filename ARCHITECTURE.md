@@ -34,7 +34,8 @@ scripts/
   project-files.mjs           Shared recursive source/test discovery
   test.mjs                    Node test runner; forwards CLI flags
   live-check-all.mjs          Runs the browser live checks listed in the manifest
-  live-check-common.mjs       Shared helpers for the live checks
+  live-check-common.mjs       Manifest validation, run recipes and verdicts
+  live-check-process.mjs      Isolated local server and process lifecycles
   live-check-manifest.json    Live check ids, setup needs and baselines
 ```
 

@@ -13,6 +13,7 @@ import { Z } from '../src/client/chrome/chrome-layout.js';
 import { parseColor } from '../src/client/ui/color-contrast.js';
 import { VIEWPORT_ZOOM_MAX } from '../src/domain/viewport-limits.js';
 import { PUBLIC_CREATION_WINDOW_MS, PUBLIC_RELAY_PREFIX, PUBLIC_SNAPSHOT_ROUTE } from '../src/domain/public-wall-contract.js';
+import { consoleStep } from './board-live-helpers.mjs';
 
 const SSD_ROOT = '/Volumes/ssd-fluke/BaseData';
 const PLAYWRIGHT_MODULE = '/opt/homebrew/lib/node_modules/playwright/index.mjs';
@@ -108,16 +109,7 @@ assert.ok(['all', 'private', 'public', 'preview', 'drawing', 'realtime'].include
 const browser = await playwright[engine].launch({ headless: true });
 const report = { engine, roomMode, pageErrors: [], steps: [], measurements: [], fixtureIds: [], pages: [] };
 
-async function step(name, action) {
-  try {
-    await action();
-  } catch (error) {
-    console.log(`FAIL ${name}`);
-    throw error;
-  }
-  report.steps.push(name);
-  console.log(`PASS ${name}`);
-}
+const step = (name, action) => consoleStep(name, action, report.steps);
 async function participant(mobile, lang) {
   const context = await browser.newContext({ viewport: mobile ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT,
     isMobile: mobile, hasTouch: mobile });
