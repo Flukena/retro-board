@@ -280,3 +280,7 @@ Plan written by workflow wf_38d021c3-4bd (writer, 2 critics, patch; 0 rejected).
 - N1/N2 fixed by controller (test-only); N1 red-proof: stray key in replaceBoardLocal -> 'clear adds or drops no board field'. Note: that src mutation lived ~2 s during the fix-full live run.
 - fix-full live: 19 OK, ui/landing/poker REGRESSION with exit 0 = false positives from the a4c1a83 zero-PASS guard (missed by re-review). Fixed by controller with a stepLines:false opt-out (commit above), red-proven, npm test 2981/2981.
 - Release e DEPLOYED 2026-11-20 (owner 'deploy'): yjs+web refactor-6e9a01f; rooms equal 242/5; prod drag-peer 7/7. Record release-20261120e/RECORD.txt.
+
+## 2026-11-23 final-review follow-up
+
+The owner selected the review backlog. The [follow-up report](../reviews/2026-11-23-refactor-followup.md) records the finding dispositions, red proofs, 3,002 passing unit tests and 22 passing live checks. React I2 and hook-order note N5 remain with P6.
