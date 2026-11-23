@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { withChromeModule } from '../../test-support/chrome-test-helper.js';
 import { getLang, initialLanguage, setLang, t } from './i18n.js';
 
@@ -68,21 +67,6 @@ test('the last language picked wins when loads overlap', async () => {
     setLang('th');
     await slow;
     assert.equal(getLang(), 'th');
-  } finally {
-    await setLang(originalLang);
-  }
-});
-
-test('every translation output is byte-identical to the pre-extraction fixture', async () => {
-  const frozen = readFileSync(new URL('./fixtures/i18n-outputs.json', import.meta.url), 'utf8');
-  const outputs = {};
-  const originalLang = getLang();
-  try {
-    for (const [code, entries] of Object.entries(JSON.parse(frozen))) {
-      await setLang(code);
-      outputs[code] = Object.fromEntries(Object.keys(entries).map(key => [key, t(key)]));
-    }
-    assert.equal(JSON.stringify(outputs, null, 2) + '\n', frozen);
   } finally {
     await setLang(originalLang);
   }

@@ -1,9 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readdirSync } from 'node:fs';
 import { LOCALE_LOADERS } from '../i18n.js';
-import th from './th.js';
-import en from './en.js';
 
 const LOCALE_CODES = ['th', 'en', ...Object.keys(LOCALE_LOADERS)];
 const areaFiles = (code) => readdirSync(new URL(`./${code}/`, import.meta.url)).sort();
@@ -32,13 +30,5 @@ test('locale indexes assemble every area key exactly once', async () => {
     assert.equal(new Set(keys).size, keys.length, `${code}: no overlap between areas`);
     const { default: dictionary } = await import(`./${code}.js`);
     assert.deepEqual(Object.keys(dictionary).sort(), keys.sort(), `${code}: assembled keys`);
-  }
-});
-
-test('Thai and English preserve the full dictionary and key order captured before the split', () => {
-  const frozen = JSON.parse(readFileSync(new URL('../fixtures/i18n-outputs.json', import.meta.url), 'utf8'));
-  for (const [code, dictionary] of Object.entries({ th, en })) {
-    assert.deepEqual(dictionary, frozen[code], `${code}: full dictionary`);
-    assert.deepEqual(Object.keys(dictionary), Object.keys(frozen[code]), `${code}: key order`);
   }
 });

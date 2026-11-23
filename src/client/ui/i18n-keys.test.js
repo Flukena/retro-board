@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
-import { LOCALE_LOADERS } from './i18n.js';
+import { LANGUAGE_OPTIONS, LOCALE_LOADERS } from './i18n.js';
 import th from './locales/th.js';
 import en from './locales/en.js';
 
@@ -16,6 +16,15 @@ function sourcePaths(directory) {
     return /\.jsx?$/.test(entry.name) ? [path] : [];
   });
 }
+
+test('every language in the picker has a dictionary and every on-demand loader resolves to its own locale', async () => {
+  const offered = LANGUAGE_OPTIONS.map(({ code }) => code).sort();
+  assert.deepEqual([...Object.keys(dictionaries), ...Object.keys(LOCALE_LOADERS)].sort(), offered);
+  for (const [code, load] of Object.entries(LOCALE_LOADERS)) {
+    const canonical = await import(`./locales/${code}.js`);
+    assert.equal((await load()).default, canonical.default, code);
+  }
+});
 
 test('Thai and English dictionaries have identical key sets', () => {
   assert.deepEqual(Object.keys(dictionaries.th).sort(), Object.keys(dictionaries.en).sort());
