@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Local-only shared Public management regression: no production URLs or confirmed Clear/Reset.
+import { formatLiveReport } from './live-check-diagnostics.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, stat, writeFile, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -279,7 +280,7 @@ try {
   throw error;
 } finally {
   await cleanup();
-  await writeFile(join(output, 'report.json'), JSON.stringify(report, null, 2));
+  await writeFile(join(output, 'report.json'), formatLiveReport(report));
   for (const context of contexts) await context.close();
   await browser.close();
 }

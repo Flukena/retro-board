@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Usage: node scripts/mobile-live-check.mjs <base-url> <BaseData output> [chromium|webkit] [all|private|public|preview]
 // Creates private-room fixtures and removes only its own public test cards.
+import { formatLiveReport } from './live-check-diagnostics.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, stat, writeFile, readFile } from 'node:fs/promises';
 import { BlobReader, TextWriter, ZipReader } from '@zip.js/zip.js/index-native.js';
@@ -1740,6 +1741,6 @@ try {
   await captureFailure(error);
   throw error;
 } finally {
-  await writeFile(join(output, 'report.json'), JSON.stringify(report, null, 2));
+  await writeFile(join(output, 'report.json'), formatLiveReport(report));
   await browser.close();
 }

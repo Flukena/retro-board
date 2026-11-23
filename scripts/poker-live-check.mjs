@@ -2,6 +2,7 @@
 // Two-participant Planning Poker live check against isolated local servers
 // (start them as in ui-live-check.mjs's header). Creates one poker room and one
 // board room. Run: node scripts/poker-live-check.mjs <base-url> <SSD output>
+import { formatLiveReport } from './live-check-diagnostics.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -25,7 +26,6 @@ const VOTE_B = '8';
 // One vote each for 5 and 8: the tie suggests the larger card.
 const EXPECTED_AVERAGE = '6.5';
 const EXPECTED_SUGGESTION = '8';
-const JSON_INDENT_SPACES = 2;
 const REACTION_EMOJI = POKER_REACTIONS[1];
 
 const [baseArg, outputArg] = process.argv.slice(2);
@@ -228,9 +228,9 @@ try {
   });
 } finally {
   report.passed = report.steps.every((entry) => entry.passed) && report.errors.length === 0;
-  await writeFile(join(output, 'report.json'), JSON.stringify(report, null, JSON_INDENT_SPACES));
+  await writeFile(join(output, 'report.json'), formatLiveReport(report));
   await browser.close();
 }
 if (report.errors.length > 0) console.log('FAIL no unexpected console or page errors');
-console.log(JSON.stringify({ passed: report.passed, steps: report.steps.map(({ name, passed }) => [name, passed]), errors: report.errors }, null, JSON_INDENT_SPACES));
+console.log(formatLiveReport({ passed: report.passed, steps: report.steps.map(({ name, passed }) => [name, passed]), errors: report.errors }));
 process.exitCode = report.passed ? 0 : 1;

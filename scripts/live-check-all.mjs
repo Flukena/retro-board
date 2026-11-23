@@ -5,6 +5,7 @@
 //   node scripts/live-check-all.mjs --list
 // A port held by a process this runner did not start makes that check ENV-SKIP; the holder is never signalled.
 // Exits non-zero on any regression, ENV-SKIP or interruption.
+import { redactRoomCapabilities } from './live-check-diagnostics.mjs';
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
@@ -94,10 +95,11 @@ async function runAttempt({ entry, ports, runDir, signal }) {
   const skip = await envSkipReason(entry, entryPorts(entry, ports));
   if (skip) return { envSkip: skip };
   const run = await runCheck(entry, ports, outDir, signal);
-  await writeFile(join(outDir, 'check-stdout.log'), run.stdout);
-  await writeFile(join(outDir, 'check-stderr.log'), run.stderr);
+  const stdout = redactRoomCapabilities(run.stdout);
+  await writeFile(join(outDir, 'check-stdout.log'), stdout);
+  await writeFile(join(outDir, 'check-stderr.log'), redactRoomCapabilities(run.stderr));
   const { exitCode, timedOut, durationMs } = run;
-  const steps = summarizeRun(run.stdout, exitCode, { requireStepLines: entry.stepLines !== false, timedOut });
+  const steps = summarizeRun(stdout, exitCode, { requireStepLines: entry.stepLines !== false, timedOut });
   return { outDir, exitCode, timedOut, ...steps, durationMs };
 }
 

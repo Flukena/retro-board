@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Measures real UI spacing on isolated local servers; never uses a production room.
+import { formatLiveReport } from './live-check-diagnostics.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
@@ -261,6 +262,6 @@ try {
     });
   }
 } finally {
-  await writeFile(join(out, 'report.json'), JSON.stringify(report, null, 2));
+  await writeFile(join(out, 'report.json'), formatLiveReport(report));
   await browser.close();
 }

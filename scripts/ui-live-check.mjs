@@ -8,8 +8,9 @@
  *   YJS_DB_DIR=<BaseData>/db YJS_UPLOADS_DIR=<BaseData>/uploads node yjs-server.mjs
  * node scripts/ui-live-check.mjs --base-url http://127.0.0.1:5180 --out <BaseData>/run
  * Optional: --strict-console; PLAYWRIGHT_MODULE=/absolute/path/to/playwright
- * Creates one disposable board; report.json contains its full capability URL.
+ * Creates one disposable board. Saved diagnostics omit room capabilities.
  */
+import { formatLiveReport, redactRoomCapabilities } from './live-check-diagnostics.mjs';
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -86,7 +87,6 @@ const INITIAL_APPEARANCE_B = { lang: 'th', theme: 'light' };
 const LANGUAGE_BUTTON_SEQUENCE = ['th', 'ja', 'en'];
 const EXIT_SUCCESS = 0;
 const EXIT_FAILURE = 1;
-const JSON_INDENT_SPACES = 2;
 
 function parseOptions(args) {
   const options = { baseUrl: DEFAULT_BASE_URL, strictConsole: false };
@@ -466,12 +466,12 @@ async function main() {
       && (!options.strictConsole || report.consoleErrors.length === 0),
   };
   const reportPath = join(options.out, REPORT_FILENAME);
-  await writeFile(reportPath, `${JSON.stringify(report, null, JSON_INDENT_SPACES)}\n`);
+  await writeFile(reportPath, `${formatLiveReport(report)}\n`);
   console.log(`${report.summary.passed ? 'PASS' : 'FAIL'}: ${report.summary.passedSteps}/${report.steps.length} steps; ${report.summary.screenshots} screenshots; ${report.summary.pageErrors} page errors; ${report.summary.consoleErrors} console errors; ${reportPath}`);
   process.exitCode = report.summary.passed ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
 main().catch((error) => {
-  console.error(`UI live check failed: ${errorMessage(error)}`);
+  console.error(redactRoomCapabilities(`UI live check failed: ${errorMessage(error)}`));
   process.exitCode = EXIT_FAILURE;
 });

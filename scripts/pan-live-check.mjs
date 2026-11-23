@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Isolated Public pan regression. Never seeds a production board.
+import { formatLiveReport } from './live-check-diagnostics.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -490,7 +491,7 @@ try {
     }, fixturePrefix);
     if (fixturePage) await fixturePage.waitForTimeout(SETTLE_MS);
   } finally {
-    try { await writeFile(join(output, 'report.json'), JSON.stringify(report, null, 2)); }
+    try { await writeFile(join(output, 'report.json'), formatLiveReport(report)); }
     finally { await browser.close(); }
   }
 }

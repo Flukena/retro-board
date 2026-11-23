@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Read-only landing regression. Recent entries exist only in isolated browser profiles.
+import { formatLiveReport } from './live-check-diagnostics.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
@@ -145,5 +146,5 @@ try {
   } finally { await user.context.close(); }
   assert.deepEqual(report.errors, []); assert.equal(report.writes, 0, 'Landing must not open a board session or mutate a room');
 } finally {
-  await writeFile(join(output, 'report.json'), JSON.stringify(report, null, 2)); await browser.close();
+  await writeFile(join(output, 'report.json'), formatLiveReport(report)); await browser.close();
 }

@@ -1,6 +1,7 @@
 // Shared Playwright helpers for two-participant board live checks
 // (retro-outcomes-live-check.mjs, facilitation-live-check.mjs, account-live-check.mjs, room-lock-live-check.mjs,
 // room-management-live-check.mjs).
+import { formatLiveReport, redactRoomCapabilities } from './live-check-diagnostics.mjs';
 import { execFileSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import { mkdir, stat, writeFile } from 'node:fs/promises';
@@ -16,7 +17,6 @@ export const BOARD_URL_PATTERN = /\/b\/[A-Za-z0-9_-]+#[A-Za-z0-9_-]+$/;
 export const POKER_URL_PATTERN = /\/p\/[A-Za-z0-9_-]+#[A-Za-z0-9_-]+$/;
 // PBKDF2 (600k iterations) runs on every unlock.
 export const UNLOCK_TIMEOUT_MS = 30_000;
-const JSON_INDENT_SPACES = 2;
 // AGENTS.md §Data location: live-check output lives on a mounted data volume, never a fallback.
 export const DATA_VOLUME_ROOTS = Object.freeze(['/Volumes/ssd-fluke/BaseData', '/Volumes/BaseDisk/Base']);
 const VOLUMES_DIR = '/Volumes';
@@ -493,12 +493,12 @@ export async function runLiveCheck(scriptName, scenario, { setup = sharedBoard }
   try {
     await scenario({ ...(await setup(browser, baseUrl, report)), report, browser, baseUrl });
   } catch (error) {
-    console.error(`FAIL: ${error.message}`);
+    console.error(redactRoomCapabilities(`FAIL: ${error.message}`));
     process.exitCode = 1;
   } finally {
     await browser.close();
     const { pages, ...saved } = report;
-    await writeFile(join(out, 'report.json'), JSON.stringify(saved, null, JSON_INDENT_SPACES));
-    console.log(report.steps.map(s => `${s.passed ? 'PASS' : 'FAIL'} ${s.name}`).join('\n'));
+    await writeFile(join(out, 'report.json'), formatLiveReport(saved));
+    console.log(redactRoomCapabilities(report.steps.map(s => `${s.passed ? 'PASS' : 'FAIL'} ${s.name}`).join('\n')));
   }
 }

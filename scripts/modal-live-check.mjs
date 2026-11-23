@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Local browser regression for modal exits and mobile navbar/zone touch controls.
+import { formatLiveReport } from './live-check-diagnostics.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -510,7 +511,7 @@ try {
   }
   throw error;
 } finally {
-  await writeFile(join(output, 'report.json'), JSON.stringify(report, null, 2));
+  await writeFile(join(output, 'report.json'), formatLiveReport(report));
   await Promise.all(contexts.map(context => context.close()));
   await browser.close();
 }
