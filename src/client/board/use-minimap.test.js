@@ -36,7 +36,17 @@ function navigationHarness() {
     removeEventListener(name, callback) { assert.equal(this, view); assert.equal(listeners.get(name), callback); listeners.delete(name); } };
   const surface = { style: {}, getBoundingClientRect: () => ({ left: 0, top: 0, width: 200, height: 120 }) };
   const model = buildMinimapModel({ items: [], viewport: current, viewportSize: { w: 1000, h: 600 }, width: 200, height: 120 });
-  const options = { viewport: { getViewport: () => current, commitViewport: next => { current = next; commits.push([next, undefined]); }, previewViewport: next => { current = next; commits.push([next, { live: true }]); }, finishViewport: next => { current = next; commits.push([next, { finish: true }]); } },
+  const recordViewport = (next, mode) => {
+    current = next;
+    commits.push([next, mode]);
+  };
+  const options = {
+    viewport: {
+      getViewport: () => current,
+      commitViewport: next => recordViewport(next),
+      previewViewport: next => recordViewport(next, { live: true }),
+      finishViewport: next => recordViewport(next, { finish: true }),
+    },
     minimapModelRef: { current: model }, interactionRef: { current: null }, activeViewportFinalizerRef: { current: null },
     stopFollowing: () => order.push('stop'), settleWheelBeforeInteraction: () => order.push('settle'), view: view,
     clock: { ...clock, requestAnimationFrame: run => clock.setTimeout(run, 16), cancelAnimationFrame: clock.clearTimeout } };

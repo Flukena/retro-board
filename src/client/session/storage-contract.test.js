@@ -11,19 +11,19 @@ import { PROJECT_ROOT, productionSources } from '../../../scripts/project-files.
 import { withStorage } from '../../test-support/bridge-harness.js';
 
 // `storage.x`, `storage?.x` and `window.storage.x`. Case-sensitive, so `localStorage`/`sessionStorage` never match.
-const STORAGE_MEMBER_PATTERN = /(?<![A-Za-z])(?:window\.)?storage\??\.([A-Za-z]+)/g;
+const STORAGE_MEMBER_PATTERN = /(?<![\w/-])(?:(window)\??\.)?storage\??\.([a-zA-Z_$][\w$]*)/g;
 const RETRO_BOARD_SOURCE = 'RetroBoard.jsx';
 const CLIENT_SOURCE_PREFIX = 'src/client/';
 // The producer: its own `window.storage.x = ...` assignments would make any new member look consumed.
+const BRIDGE_SOURCE_PREFIX = 'src/client/session/bridge/';
 const STORAGE_PRODUCER_SOURCE = 'src/client/session/storage-bridge.js';
 
-// Scan hits that are not window.storage members.
-const NOT_STORAGE_MEMBERS = Object.freeze({
-  getItem: 'Web Storage on an injected localStorage-like `storage` parameter '
-    + '(signed-in-hint, drawing-preferences, pending-starter, vote-results-dismissal)',
-  setItem: 'Web Storage on the same injected `storage` parameters as getItem',
-  js: 'the `./src/client/session/room-storage.js` import path in RetroBoard.jsx',
-});
+// These modules take an injected Web Storage parameter named storage.
+const WEB_STORAGE_CONSUMERS = new Set([
+  'src/client/account/signed-in-hint.js', 'src/client/board/drawing-preferences.js',
+  'src/client/templates/pending-starter.js', 'src/client/voting/vote-results-dismissal.js',
+]);
+const WEB_STORAGE_METHODS = new Set(['getItem', 'setItem']);
 
 // Members only a locked (end-to-end encrypted) room has.
 const LOCKED_ONLY_KEYS = Object.freeze(['rotationSource']);
@@ -88,15 +88,25 @@ const BOARD_METHOD_ARITY = Object.freeze({
   stopUndoCapture: 0, undo: 0, redo: 0, canUndo: 0, canRedo: 0, onUndoChange: 1, offUndoChange: 1,
 });
 
+function storageNamesInSource(file, source) {
+  return [...source.matchAll(STORAGE_MEMBER_PATTERN)]
+    .filter(([, receiver, name]) => receiver || !WEB_STORAGE_CONSUMERS.has(file) || !WEB_STORAGE_METHODS.has(name))
+    .map(([, , name]) => name);
+}
+
 function consumedStorageNames() {
   const clientSources = productionSources()
     .filter((file) => file === RETRO_BOARD_SOURCE || file.startsWith(CLIENT_SOURCE_PREFIX))
     .filter(isStorageConsumer);
-  const names = clientSources.flatMap((file) => [
-    ...readFileSync(resolve(PROJECT_ROOT, file), 'utf8').matchAll(STORAGE_MEMBER_PATTERN),
-  ].map(([, name]) => name));
-  return [...new Set(names)].filter((name) => !Object.hasOwn(NOT_STORAGE_MEMBERS, name));
+  const names = clientSources.flatMap(file => storageNamesInSource(file, readFileSync(resolve(PROJECT_ROOT, file), 'utf8')));
+  return [...new Set(names)];
 }
+
+test('explicit window.storage reads are checked even in modules that accept Web Storage', () => {
+  const file = 'src/client/account/signed-in-hint.js';
+  assert.deepEqual(storageNamesInSource(file, 'storage?.getItem(key); window.storage.getItem(key)'), ['getItem']);
+  assert.deepEqual(storageNamesInSource('RetroBoard.jsx', 'storage.getItem(key)'), ['getItem']);
+});
 
 const CONSUMED_NAMES = consumedStorageNames();
 const BOARD_KEYS = [...new Set([...CONSUMED_NAMES, ...Object.keys(UNCONSUMED_BUT_FROZEN)])]
@@ -154,16 +164,24 @@ test('every landing stub method is inert', async () => {
   }, { landing: true });
 });
 
-test('method arity is frozen', async () => {
-  await withStorage((browser) => {
-    const { storage } = browser;
-    const methods = BOARD_KEYS.filter((name) => typeof storage[name] === 'function');
-    assert.deepEqual(Object.fromEntries(methods.map((name) => [name, storage[name].length])), BOARD_METHOD_ARITY);
+// The landing no-op stub takes no arguments. The locked board adds a zero-argument snapshot getter.
+const LANDING_METHOD_ARITY = Object.fromEntries(LANDING_KEYS.map(name => [name, 0]));
+for (const [route, options, expected] of [
+  ['board', {}, BOARD_METHOD_ARITY],
+  ['public', { publicWall: true }, BOARD_METHOD_ARITY],
+  ['locked', { locked: true }, { ...BOARD_METHOD_ARITY, rotationSource: 0 }],
+  ['landing', { landing: true }, LANDING_METHOD_ARITY],
+]) {
+  test(`method arity is frozen on the ${route} route`, async () => {
+    await withStorage(({ storage }) => {
+      const methods = Object.entries(storage).filter(([, member]) => typeof member === 'function');
+      assert.deepEqual(Object.fromEntries(methods.map(([name, method]) => [name, method.length])), expected);
+    }, options);
   });
-});
+}
 
 function isStorageConsumer(file) {
-  return file !== STORAGE_PRODUCER_SOURCE && !file.startsWith('src/client/session/bridge/');
+  return file !== STORAGE_PRODUCER_SOURCE && !file.startsWith(BRIDGE_SOURCE_PREFIX);
 }
 
 test('storage producers cannot count as surface consumers', () => {

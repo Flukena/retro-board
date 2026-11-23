@@ -15,12 +15,12 @@ const LOCK_PASSWORD = 'correct horse battery staple';
 export const LOCKED_EPOCH = 1;
 export const ROOM_KEY_CHANGED_EVENT = 'retroroom:room-key-changed';
 
-const BOARD_URL = 'http://localhost:5180/b/TEST#Abcdefgh12345678';
+const BOARD_URL = `http://localhost:5180/b/${LOCKED_TEST_CODE}#${LOCKED_TEST_TOKEN}`;
 const PUBLIC_WALL_URL = 'http://localhost:5180/public';
 // The home page: the bridge installs its no-op stub there and never needs a room session.
 const LANDING_URL = 'http://localhost:5180/';
 
-export async function unlockLockedRoom(server) {
+async function unlockLockedRoom(server) {
   const { lock, authKey } = await createRoomLock(LOCK_PASSWORD);
   globalThis.fetch = fakeLockedRelay({ lock, authKey, keyEpoch: LOCKED_EPOCH }).fetch;
   const lockSession = await server.ssrLoadModule('/src/client/room-lock/lock-session.js');
@@ -38,7 +38,7 @@ function routeUrl({ publicWall, landing }) {
 async function establishSession(server, session, { publicWall, locked }) {
   if (publicWall) await session.establishPublicSession();
   else if (locked) await unlockLockedRoom(server);
-  else await session.establishRoomSession('TEST', 'Abcdefgh12345678');
+  else await session.establishRoomSession(LOCKED_TEST_CODE, LOCKED_TEST_TOKEN);
 }
 
 export async function withStorage(check, { publicWall = false, locked = false, landing = false } = {}) {

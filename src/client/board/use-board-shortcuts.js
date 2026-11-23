@@ -1,6 +1,6 @@
+import { useEffect } from 'react';
 import { routeBoardKey } from './board-key-router.js';
 import { ZOOM_STEP_FACTOR } from '../../domain/viewport-zoom.js';
-import { useEffect } from 'react';
 import { t as translate } from '../ui/i18n.js';
 
 const BLOCKED_TARGETS = 'input, textarea, select, [contenteditable="true"], [role="dialog"], [data-board-shortcuts="off"]';

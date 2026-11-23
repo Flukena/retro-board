@@ -1,4 +1,3 @@
-import { parseKvKey } from './bridge/kv-keys.js';
 // window.storage polyfill backed by Yjs over WebSocket.
 //
 // Two storage layers live on the same Y.Doc:
@@ -35,6 +34,7 @@ import { attachRoomEncryption, attachRoomCollaboration } from './bridge/room-ser
 import { attachRoomDiagnostics, installBridgeDebugHandles } from './bridge/bridge-diagnostics.js';
 import { createContributionStore } from './bridge/contribution-store.js';
 import { createBoardMethods } from './bridge/board-methods.js';
+import { parseKvKey } from './bridge/kv-keys.js';
 import { createStorageAccess } from './bridge/storage-access.js';
 import { createRoomMethods } from './bridge/room-methods.js';
 import { planImportBundle } from './bridge/import-plan.js';

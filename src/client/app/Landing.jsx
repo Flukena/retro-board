@@ -1,8 +1,8 @@
-import { useBrowserZoomGuard } from '../board/use-browser-zoom-guard.js';
 import React, { useState } from 'react';
 import {
   Sparkles, Plus, ArrowRight, Check, ChevronDown,
 } from 'lucide-react';
+import { useBrowserZoomGuard } from '../board/use-browser-zoom-guard.js';
 import { ROOM_KIND, gotoBoard } from './router.js';
 import RecentRooms, { useRecentRooms } from './RecentRooms.jsx';
 import { t } from '../ui/i18n.js';

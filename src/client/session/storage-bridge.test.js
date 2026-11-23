@@ -756,14 +756,15 @@ test('a remote update and a system write are not undo or redo', async () => {
     Y.applyUpdate(peer, Y.encodeStateAsUpdate(browser.__rbYDoc));
     const events = collectBoardStateEvents(storage);
 
-    peer.getMap('items').set('remote', new Y.Map(Object.entries({ ...VALID_ITEM, id: undefined })));
+    const fields = new Y.Map(Object.entries(VALID_ITEM).filter(([key]) => key !== 'id'));
+    peer.getMap('items').set('remote', fields);
     Y.applyUpdate(browser.__rbYDoc, Y.encodeStateAsUpdate(peer), peer);
     assert.equal(events.length, 1);
-    assert.equal(Boolean(events[0].isUndoRedo), false);
+    assert.equal(events[0].isUndoRedo, false);
 
     browser.__rbYDoc.transact(() => browser.__rbYMeta.set('title', 'x'), 'system');
     assert.equal(events.length, 2);
-    assert.equal(Boolean(events[1].isUndoRedo), false);
+    assert.equal(events[1].isUndoRedo, false);
   });
 });
 
@@ -807,7 +808,7 @@ const PROBE_ROUND_ID = 'probe-round';
 const PROBE_CREATED_AT_MS = 1;
 const PROBE_TEMPLATE_ZONE = { title: 'Went well', color: 0, x: 0, y: 0, w: 400, h: 300 };
 
-/** One valid kv entry per observer kind; the `u|` key is this client's own, the only kind the change dispatch forwards. */
+/** One valid kv entry per observer kind; shared keys and this client's user-scoped key reach the change dispatch. */
 const kvProbeEntries = (clientId) => [
   [`u|${clientId}|${PROBE_PREFERENCE_KEY}`, PROBE_PREFERENCE_KEY],
   [`s||vote:${VALID_ITEM.id}:${VOTER_ID}`, true],
