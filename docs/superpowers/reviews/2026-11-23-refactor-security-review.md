@@ -64,6 +64,16 @@ All checks ran with conflicting synthetic shell settings. The external directory
 
 The two-context UI check passed all 19 steps, including room creation and joining, sync in both directions, independent undo and redo, and Thai and English rendering. It recorded zero page errors. Its standalone fixture, which disables accounts and runs without a public relay, recorded 14 account HTTP 404s and seven public-snapshot HTTP 502s. The fixtures with a public relay passed their checks. Verification covered the local candidate and its images. Production rollout remains an owner action.
 
+## Production rollout on 24 November
+
+At 13:50 Bangkok time the operator began deploying `37d5ecd` to `retroroom.party`. The application and image inputs match the tested commit `74a514d`. Immediately before rollout the repository scanner passed again on the exact image IDs. The official backup and verification scripts confirmed that both databases and their uploads could be restored from the encrypted archive.
+
+The existing Compose project `miro` switched the public relay, private relay, web and both cloudflared connectors one service at a time to the `security-37d5ecd` image tags. Both relays passed their health checks, and each connector registered four tunnel connections. One edge request returned HTTP 530 during the final connector switch and its retry succeeded. The pre- and post-rollout room counts matched at 237 private and one public, measured before creating the smoke-test room. The Public Wall snapshot checksum matched. The observed storage mounts, network configuration and container restrictions matched their previous values.
+
+Through the public hostname, two fresh browser contexts created and joined a private guest room, synchronized edits both ways, observed undo and redo, and uploaded and decoded a PNG on the peer. An invalid invite to that room received HTTP 404 and opened zero board sockets. The public site served the JavaScript bytes from the expected web image. The browser reported zero page errors. Its console recorded signed-out HTTP 401 responses and third-party script loads blocked by the existing content security policy.
+
+The [deployment evidence](/Volumes/ssd-fluke/BaseData/retro-board/release-20261124-security-pjaxD4) includes the signed-off image IDs, service state, HTTP and browser results, verified backup log and the previous image mapping in `rollback.yml`. The one-shot volume initializer and the separate gateway containers retained their container IDs.
+
 ## RULE CONFORMANCE
 
 - Code shape — PASS. Both fixture recipes set their own storage and host. Report writers share one redaction function.
