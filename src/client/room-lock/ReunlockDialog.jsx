@@ -3,6 +3,7 @@ import { ModalShell } from '../ui/ModalShell.jsx';
 import { t } from '../ui/i18n.js';
 import PasswordPrompt from './PasswordPrompt.jsx';
 import { createReunlockController } from './reunlock-controller.js';
+import { showRememberFailure } from './room-lock-dialog-store.js';
 
 const TITLE_ID = 'room-reunlock-dialog-title';
 
@@ -21,5 +22,7 @@ export function ReunlockDialogView({ onUnlock }) {
 export default function ReunlockDialog() {
   const controller = useMemo(() => createReunlockController(globalThis.window), []);
   const open = useSyncExternalStore(controller.subscribe, controller.getSnapshot, () => false);
-  return open ? <ReunlockDialogView onUnlock={controller.unlock} /> : null;
+  if (!open) return null;
+  const unlock = async (password, remember) => showRememberFailure(await controller.unlock(password, remember), remember);
+  return <ReunlockDialogView onUnlock={unlock} />;
 }

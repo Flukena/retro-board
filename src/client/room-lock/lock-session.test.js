@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 
 import { fakeLockedRelay, LOCKED_TEST_CODE as CODE, LOCKED_TEST_TOKEN as TOKEN } from '../../test-support/fake-locked-relay.js';
 import { clearRoomSession, getRoomSessionHealth, ROOM_SESSION_ERROR } from '../session/room-session.js';
-import { createNextRoomKey, createRoomLock, rewrapRoomLock } from './e2e-crypto.js';
+import { rememberedRoomStore } from './remembered-room-store.js';
+import { createNextRoomKey, createRoomLock, deriveRoomMasterKey, rewrapRoomLock } from './e2e-crypto.js';
 import {
   ROOM_KEY_CHANGED_EVENT, clearRoomKey, dropPreviousKey, establishBoardSession, getRoomKey, isRoomUnlocked,
-  getPreviousKey, reunlock, unlockRoom, updateLockAfterPasswordChange,
+  forgetRememberedRoom, getPreviousKey, reunlock, unlockRoom, updateLockAfterPasswordChange,
 } from './lock-session.js';
 
 const PASSWORD = 'correct horse battery staple';
@@ -199,4 +200,158 @@ test('unlock and re-unlock write nothing secret to any browser storage', async (
   assert.equal(writes.length, 1, 'the spy would have seen a write');
   const written = JSON.stringify(writes);
   [PASSWORD, ROTATED_PASSWORD, first.authKey, rotated.authKey].forEach((secret) => assert.equal(written.includes(secret), false));
+});
+
+
+function simulateReopen() {
+  clearRoomSession();
+  clearRoomKey();
+}
+
+const rememberUnlock = () => unlockRoom({ code: CODE, token: TOKEN, password: PASSWORD, lockHint, remember: true });
+
+function device(context) {
+  const room = { record: null };
+  context.mock.method(rememberedRoomStore, 'save', async (_code, _token, record) => {
+    room.record = structuredClone(record);
+    return true;
+  });
+  context.mock.method(rememberedRoomStore, 'read', async () => room.record);
+  context.mock.method(rememberedRoomStore, 'remove', async (_code, _token, salt) => {
+    if (!salt || room.record?.salt === salt) room.record = null;
+    return true;
+  });
+  return room;
+}
+
+test('remembering restores through a fresh relay grant with the current owner role', async (context) => {
+  const { relay } = setup(context);
+  const browser = device(context);
+  assert.equal((await rememberUnlock()).remembered, true);
+  assert.deepEqual(Object.keys(browser.record).sort(), ['masterKey', 'salt']);
+  assert.equal(browser.record.masterKey.extractable, false);
+  simulateReopen();
+  relay.isOwner = false;
+  const calls = relay.calls.length;
+  await Promise.all([establishBoardSession(CODE, TOKEN), establishBoardSession(CODE, TOKEN)]);
+  assert.deepEqual(relay.calls.slice(calls), [{ code: CODE, token: TOKEN }, { code: CODE, token: TOKEN, authKey: first.authKey }]);
+  assert.equal(getRoomKey().isOwner, false);
+  assert.equal(getRoomKey().remembered, true);
+  assert.equal(getRoomKey().dek.extractable, false);
+});
+
+test('a rotated board asks for the new password without trying the remembered credential', async (context) => {
+  const { relay } = setup(context);
+  const browser = device(context);
+  await rememberUnlock();
+  simulateReopen();
+  const calls = relay.calls.length;
+  Object.assign(relay, { lock: rotated.lock, keyEpoch: ROTATED_EPOCH });
+  await assert.rejects(establishBoardSession(CODE, TOKEN), {
+    code: ROOM_SESSION_ERROR.LOCKED, lock: { salt: rotated.lock.salt, kdf: rotated.lock.kdf },
+  });
+  assert.equal(getRoomKey(), null);
+  assert.equal(browser.record, null);
+  assert.ok(relay.calls.slice(calls).every((body) => !Object.hasOwn(body, 'authKey')));
+});
+
+test('a rejected remembered credential is discarded and the password prompt is available', async (context) => {
+  const { relay } = setup(context);
+  const browser = device(context);
+  await rememberUnlock();
+  simulateReopen();
+  relay.lock = { ...rotated.lock, salt: first.lock.salt };
+  await assert.rejects(establishBoardSession(CODE, TOKEN), { code: ROOM_SESSION_ERROR.LOCKED });
+  assert.equal(browser.record, null);
+  assert.equal(getRoomKey(), null);
+});
+
+test('the relay can rate-limit a remembered browser and its next retry can unlock', async (context) => {
+  const { relay } = setup(context);
+  device(context);
+  await rememberUnlock();
+  simulateReopen();
+  const retryAfterSeconds = 23;
+  relay.limitedSeconds = retryAfterSeconds;
+  await assert.rejects(establishBoardSession(CODE, TOKEN), { code: ROOM_SESSION_ERROR.RATE_LIMITED, retryAfterSeconds });
+  assert.equal(getRoomKey(), null);
+  relay.limitedSeconds = null;
+  await establishBoardSession(CODE, TOKEN);
+  assert.equal(isRoomUnlocked(CODE, TOKEN), true);
+});
+
+test('storage failure leaves a manually unlocked board open for this visit', async (context) => {
+  setup(context);
+  context.mock.method(rememberedRoomStore, 'save', async () => false);
+  assert.equal((await rememberUnlock()).remembered, false);
+  assert.equal(isRoomUnlocked(CODE, TOKEN), true);
+});
+
+test('a failed password proof cannot save a credential', async (context) => {
+  setup(context);
+  const save = context.mock.method(rememberedRoomStore, 'save');
+  await assert.rejects(unlockRoom({ code: CODE, token: TOKEN, password: NEXT_PASSWORD, lockHint, remember: true }), {
+    code: ROOM_SESSION_ERROR.WRONG_PASSWORD,
+  });
+  assert.equal(save.mock.callCount(), 0);
+});
+
+
+test('forget removes saved access without closing the open board', async (context) => {
+  setup(context);
+  const browser = device(context);
+  const open = await rememberUnlock();
+  assert.equal(await forgetRememberedRoom(), true);
+  assert.equal(getRoomKey().dek, open.dek);
+  assert.equal(getRoomKey().remembered, false);
+  assert.equal(browser.record, null);
+  simulateReopen();
+  await assert.rejects(establishBoardSession(CODE, TOKEN), { code: ROOM_SESSION_ERROR.LOCKED });
+});
+
+test('a failed forget leaves the menu action available to retry', async (context) => {
+  setup(context);
+  device(context);
+  await rememberUnlock();
+  context.mock.method(rememberedRoomStore, 'remove', async () => false);
+  assert.equal(await forgetRememberedRoom(), false);
+  assert.equal(getRoomKey().remembered, true);
+});
+
+test('after another tab forgets, typing a replacement password alone does not remember it again', async (context) => {
+  const { relay } = setup(context);
+  const browser = device(context);
+  await rememberUnlock();
+  await rememberedRoomStore.remove(CODE, TOKEN);
+  relay.lock = rewrapped.lock;
+  await reunlock(NEXT_PASSWORD);
+  assert.equal(browser.record, null);
+  assert.equal(isRoomUnlocked(CODE, TOKEN), true);
+});
+
+test('a re-unlock without remembering leaves a newer device credential saved by another tab intact', async (context) => {
+  const { relay } = setup(context);
+  const browser = device(context);
+  await rememberUnlock();
+  relay.lock = rewrapped.lock;
+  const { salt, kdf } = rewrapped.lock;
+  const peerRecord = { salt, masterKey: await deriveRoomMasterKey(NEXT_PASSWORD, salt, kdf) };
+  browser.record = peerRecord;
+  await reunlock(NEXT_PASSWORD, false);
+  assert.equal(browser.record, peerRecord);
+  simulateReopen();
+  await establishBoardSession(CODE, TOKEN);
+  assert.equal(getRoomKey().remembered, true);
+});
+
+test('after an owner changes the password its saved unlock expires', async (context) => {
+  const { relay } = setup(context);
+  const browser = device(context);
+  await rememberUnlock();
+  relay.lock = rewrapped.lock;
+  await updateLockAfterPasswordChange({ lock: rewrapped.lock, authKey: rewrapped.authKey, lockRevision: CHANGED_REVISION });
+  assert.equal(browser.record, null);
+  assert.equal(getRoomKey().remembered, false);
+  simulateReopen();
+  await assert.rejects(establishBoardSession(CODE, TOKEN), { code: ROOM_SESSION_ERROR.LOCKED });
 });

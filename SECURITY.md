@@ -264,9 +264,18 @@ the Public Wall are unchanged.
 - **Keys.** The password is stretched in the page (PBKDF2-SHA-256, 600,000
   iterations, 16-byte salt) and split with HKDF into a key-encryption key and
   an `authKey`. A random 256-bit room key encrypts the board and is stored only
-  wrapped by the key-encryption key. The password, derived keys and room key
-  never reach storage, logs or URLs. `authKey` is sent over TLS in the body of
-  session requests only. Reload asks for the password again.
+  wrapped by the key-encryption key. The password stays in the page, and the
+  relay receives the authentication proof over TLS. By default, closing or
+  reloading the page clears its unlock.
+- **Remembering a board.** At the password prompt, a member can opt in to
+  remember that board in this browser profile. IndexedDB stores its salt and
+  a non-extractable HKDF key under a hash of the board code and link token.
+  Reopening the exact link requires a fresh relay grant before the browser can
+  unwrap the current room key. Changing the password or rotating the room key
+  invalidates the saved unlock. Anyone with the link and access to that
+  profile can open the board, and scripts running on this origin can use the
+  stored key. The board's More menu can forget this unlock. Clearing the
+  site's browser data removes all saved unlocks.
 - **What the relay stores and sees.** The lock record `retro-room-lock-v1`
   (salt, KDF parameters, verifier = SHA-256 of `authKey`, wrapped room key and
   IV, `keyEpoch`, `lockRevision`, owner account id, `createdAt`), an ordered

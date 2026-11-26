@@ -41,8 +41,9 @@ test('the owner sees rename, change-password and remove-everyone in both languag
       assert.doesNotMatch(html, /roomLock\./);
     }
     const chosen = [];
-    const items = menu.RoomLockMenuItems({ isOwner: true, onSelect: (dialog) => chosen.push(dialog) }).props.children;
-    items.filter((item) => item.props.onClick).forEach((item) => item.props.onClick());
+    const tree = menu.RoomLockMenuItems({ isOwner: true, onSelect: (dialog) => chosen.push(dialog) });
+    const [, ownerItems] = React.Children.toArray(tree.props.children);
+    ownerItems.props.children.forEach((item) => item.props.onClick());
     assert.deepEqual(chosen, [store.ROOM_LOCK_DIALOG.RENAME, store.ROOM_LOCK_DIALOG.PASSWORD, store.ROOM_LOCK_DIALOG.ROTATE]);
   });
 });
@@ -55,6 +56,30 @@ test('the More menu hosts the lock menu, which renders nothing on a board withou
     assert.ok(hosted, 'MorePopover renders RoomLockMenu');
     assert.equal(hosted.props.onClose, close);
     assert.equal(render(menu.default, { onClose: close }), '', 'no unlocked owner key: no entries');
+  });
+});
+
+test('only browsers that remember the board see the forget action, including guests', async () => {
+  await withModules(async ({ menu, i18n: { setLang, t } }) => {
+    for (const language of LANGUAGES) {
+      setLang(language);
+      const forgetLabel = t('roomLock.menu.forget');
+      for (const isOwner of [false, true]) {
+        const props = { isOwner, onSelect: noop, onForget: noop };
+        const remembered = render(menu.RoomLockMenuItems, { ...props, remembered: true });
+        assert.ok(remembered.includes(forgetLabel));
+        assert.doesNotMatch(remembered, /roomLock\./);
+        assert.ok(!render(menu.RoomLockMenuItems, props).includes(forgetLabel));
+        assert.equal(remembered.includes(t('roomLock.menu.rename')), isOwner);
+      }
+    }
+    let forgotten = false;
+    const menuItems = menu.RoomLockMenuItems({ isOwner: false, remembered: true, onForget: () => { forgotten = true; } });
+    const action = React.Children.toArray(menuItems.props.children).find((child) => child.props.onClick);
+    action.props.onClick();
+    assert.equal(forgotten, true);
+    const pending = render(menu.RoomLockMenuItems, { remembered: true, forgetting: true, onForget: noop });
+    assert.match(pending, /<button[^>]*disabled/);
   });
 });
 
@@ -99,10 +124,12 @@ test('an owner dialog is modal and cannot be dismissed while its action runs; no
     assert.match(dialog(true), /<button[^>]*disabled[^>]*rb-modal__close|rb-modal__close[^>]*disabled/);
     for (const language of LANGUAGES) {
       setLang(language);
-      for (const key of ['roomLock.notice.skipped', 'roomLock.notice.roomFull', 'roomLock.change.done']) {
-        const html = render(RoomLockNoticeView, { messageKey: key });
+      for (const key of ['roomLock.notice.skipped', 'roomLock.notice.roomFull', 'roomLock.change.done',
+        'roomLock.notice.rememberFailed', 'roomLock.notice.forgetFailed']) {
+        const html = render(RoomLockNoticeView, { messageKey: key }).replaceAll('&#x27;', "'");
         assert.match(html, /role="status"/);
         assert.ok(html.includes(t(key)));
+        assert.doesNotMatch(html, /roomLock\./);
       }
     }
   });

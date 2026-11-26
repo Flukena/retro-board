@@ -18,6 +18,8 @@ const WRAP_AAD = textEncoder.encode('retroroom/kek-wrap/v1');
 const AES_KEY_PARAMS = Object.freeze({ name: 'AES-GCM', length: AES_KEY_BITS });
 const HKDF_EMPTY_SALT = new Uint8Array(0);
 const SHA256_ALGORITHM = 'SHA-256';
+const MASTER_KEY_ALGORITHM = 'HKDF';
+const MASTER_KEY_USAGES = Object.freeze(['deriveBits', 'deriveKey']);
 
 export class RoomKeyError extends Error {
   constructor(code, message) {
@@ -48,17 +50,32 @@ async function pbkdf2Master(password, salt, kdf) {
   return new Uint8Array(await subtle.deriveBits(params, base, MASTER_BITS));
 }
 
-const hkdfParams = (info) => ({ name: 'HKDF', hash: SHA256_ALGORITHM, salt: HKDF_EMPTY_SALT, info });
+const hkdfParams = (info) => ({ name: MASTER_KEY_ALGORITHM, hash: SHA256_ALGORITHM, salt: HKDF_EMPTY_SALT, info });
 
-export async function deriveRoomSecrets(password, saltB64, kdf) {
+export const isRoomMasterKey = (key) => typeof globalThis.CryptoKey === 'function'
+  && key instanceof globalThis.CryptoKey
+  && key.type === 'secret' && !key.extractable && key.algorithm.name === MASTER_KEY_ALGORITHM
+  && key.usages.length === MASTER_KEY_USAGES.length && MASTER_KEY_USAGES.every((usage) => key.usages.includes(usage));
+
+export async function deriveRoomMasterKey(password, saltB64, kdf) {
   if (!isLockKdf(kdf)) throw new RangeError('unsupported kdf');
   const salt = decodeExact(saltB64, LOCK_BYTES.salt, 'salt');
   const master = await pbkdf2Master(password, salt, kdf);
-  const hkdfKey = await subtle.importKey('raw', master, 'HKDF', false, ['deriveBits', 'deriveKey']);
-  master.fill(0);
-  const kek = await subtle.deriveKey(hkdfParams(KEK_INFO), hkdfKey, AES_KEY_PARAMS, false, ['encrypt', 'decrypt']);
-  const authBytes = new Uint8Array(await subtle.deriveBits(hkdfParams(AUTH_INFO), hkdfKey, AUTH_BITS));
+  try {
+    return await subtle.importKey('raw', master, MASTER_KEY_ALGORITHM, false, MASTER_KEY_USAGES);
+  } finally {
+    master.fill(0);
+  }
+}
+
+export async function roomSecretsFromMaster(masterKey) {
+  const kek = await subtle.deriveKey(hkdfParams(KEK_INFO), masterKey, AES_KEY_PARAMS, false, ['encrypt', 'decrypt']);
+  const authBytes = new Uint8Array(await subtle.deriveBits(hkdfParams(AUTH_INFO), masterKey, AUTH_BITS));
   return { kek, authKey: encodeBase64Url(authBytes) };
+}
+
+export async function deriveRoomSecrets(password, saltB64, kdf) {
+  return roomSecretsFromMaster(await deriveRoomMasterKey(password, saltB64, kdf));
 }
 
 async function verifierOf(authKey) {

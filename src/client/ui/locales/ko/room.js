@@ -16,6 +16,7 @@ export const room2 = {
   "roomLock.prompt.body": "열려면 비밀번호를 입력하세요. 비밀번호를 잊으면 복구할 수 없으며, 서버 소유자도 복구할 수 없습니다.",
   "roomLock.password.label": "비밀번호",
   "roomLock.prompt.submit": "보드 잠금 해제",
+  "roomLock.prompt.remember": "이 브라우저에서 이 보드 기억하기",
   "roomLock.prompt.busy": "잠금 해제 중…",
   "roomLock.prompt.wrong": "비밀번호가 올바르지 않습니다. 다시 시도하세요.",
   "roomLock.prompt.lockedOut": "잘못된 시도가 너무 많습니다. {seconds}초 후에 다시 시도하세요.",
@@ -38,6 +39,7 @@ export const room2 = {
   "roomLock.menu.changePassword": "보드 비밀번호 변경",
   "roomLock.menu.removeEveryone": "모두 내보내기(새 키)",
   "roomLock.menu.rename": "보드 이름 변경",
+  "roomLock.menu.forget": "이 브라우저에서 이 보드 기억 해제",
   "roomDeleted.title.board": "이 보드는 삭제되었습니다",
   "roomDeleted.title.poker": "이 플래닝 포커 방은 삭제되었습니다",
   "roomDeleted.body": "소유자가 삭제했으므로 더 이상 열거나 복구할 수 없습니다.",
@@ -64,4 +66,6 @@ export const room2 = {
   "roomLock.manage.unavailable": "실패했습니다. 연결을 확인하고 다시 시도하세요.",
   "roomLock.notice.skipped": "일부 변경 사항을 복호화하지 못해 건너뛰었습니다. 보드를 새로 고쳐 다시 시도하세요.",
   "roomLock.notice.roomFull": "이 보드가 가득 찼습니다. 일부 내용을 삭제할 때까지 새 변경 사항이 저장되지 않을 수 있습니다.",
+  "roomLock.notice.rememberFailed": "브라우저에 보드 잠금 해제 정보를 저장하지 못했습니다. 다음에 열 때 비밀번호를 다시 입력해야 할 수 있습니다.",
+  "roomLock.notice.forgetFailed": "브라우저에 저장된 잠금 해제 정보를 삭제하지 못했습니다. 다시 시도하거나 브라우저에서 이 사이트의 데이터를 지워 주세요.",
 };

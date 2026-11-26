@@ -9,7 +9,8 @@ const LOCKOUT_SECONDS = 17;
 const SECRET = 'hunter2-hunter2';
 
 const prompt = (PasswordPromptView, props) => renderToStaticMarkup(React.createElement(PasswordPromptView, {
-  password: '', onPasswordChange: noop, onSubmit: noop, busy: false, error: null, lockedOutSeconds: 0, submitLabel: 'Go', ...props,
+  password: '', onPasswordChange: noop, onRememberChange: noop, onSubmit: noop,
+  busy: false, error: null, lockedOutSeconds: 0, submitLabel: 'Go', ...props,
 }));
 
 test('the password screen explains the protection in both languages with no raw keys', async () => {
@@ -21,6 +22,9 @@ test('the password screen explains the protection in both languages with no raw 
       assert.ok(html.includes(t('roomLock.prompt.body')));
       assert.ok(html.includes(t('roomLock.prompt.submit')));
       assert.ok(html.includes('type="password"'));
+      assert.match(html, /<label[^>]*><input[^>]*type="checkbox"[^>]*>/);
+      assert.doesNotMatch(html, /<input[^>]*type="checkbox"[^>]*checked/);
+      assert.ok(html.includes(t('roomLock.prompt.remember')));
       assert.doesNotMatch(html, /roomLock\./);
     }
     setLang('en');
@@ -40,6 +44,7 @@ test('the prompt shows busy, wrong-password and lock-out states, and blocks subm
       assert.ok(busy.includes(t('roomLock.prompt.busy')));
       assert.match(busy, /aria-busy="true"/);
       assert.match(busy, /<button[^>]*disabled/);
+      assert.match(busy, /<input[^>]*type="checkbox"[^>]*disabled/);
 
       const wrong = prompt(PasswordPromptView, { password: SECRET, error: { kind: 'wrong', seconds: 0 } });
       assert.match(wrong, /role="alert"[^>]*>[^<]*</);
@@ -61,16 +66,19 @@ test('an empty password cannot be submitted', async () => {
   });
 });
 
-test('the re-unlock dialog renders over the board in both languages and cannot be dismissed', async () => {
+test('the re-unlock dialog requires a fresh choice in both languages and cannot be dismissed', async () => {
   await withChromeModule('/src/client/room-lock/ReunlockDialog.jsx', ({ ReunlockDialogView }, { setLang, t }) => {
     for (const language of ['th', 'en']) {
       setLang(language);
-      const html = renderToStaticMarkup(React.createElement(ReunlockDialogView, { onUnlock: noop }));
+      const html = renderToStaticMarkup(React.createElement(ReunlockDialogView, { onUnlock: noop, remembered: true }));
       assert.match(html, /role="dialog"/);
       assert.match(html, /aria-modal="true"/);
       assert.ok(html.includes(t('roomLock.reunlock.title')));
       assert.ok(html.includes(t('roomLock.reunlock.body')));
       assert.ok(html.includes(t('roomLock.reunlock.submit')));
+      assert.ok(html.includes(t('roomLock.prompt.remember')));
+      assert.match(html, /<input[^>]*type="checkbox"/);
+      assert.doesNotMatch(html, /<input[^>]*type="checkbox"[^>]*checked/);
       assert.doesNotMatch(html, /roomLock\./);
       assert.doesNotMatch(html, /rb-modal__close/);
     }

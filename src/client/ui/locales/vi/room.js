@@ -16,6 +16,7 @@ export const room2 = {
   "roomLock.prompt.body": "Nhập mật khẩu để mở. Nếu quên mật khẩu thì không thể khôi phục, kể cả chủ máy chủ.",
   "roomLock.password.label": "Mật khẩu",
   "roomLock.prompt.submit": "Mở khóa bảng",
+  "roomLock.prompt.remember": "Ghi nhớ bảng này trên trình duyệt này",
   "roomLock.prompt.busy": "Đang mở khóa…",
   "roomLock.prompt.wrong": "Mật khẩu không đúng. Hãy thử lại.",
   "roomLock.prompt.lockedOut": "Sai quá nhiều lần. Hãy thử lại sau {seconds} giây.",
@@ -38,6 +39,7 @@ export const room2 = {
   "roomLock.menu.changePassword": "Đổi mật khẩu bảng",
   "roomLock.menu.removeEveryone": "Loại mọi người (khóa mới)",
   "roomLock.menu.rename": "Đổi tên bảng",
+  "roomLock.menu.forget": "Bỏ ghi nhớ bảng này trên trình duyệt này",
   "roomDeleted.title.board": "Bảng này đã bị xóa",
   "roomDeleted.title.poker": "Phòng Planning Poker này đã bị xóa",
   "roomDeleted.body": "Chủ sở hữu đã xóa nên không thể mở hay khôi phục được nữa.",
@@ -64,4 +66,6 @@ export const room2 = {
   "roomLock.manage.unavailable": "Không thành công. Kiểm tra kết nối rồi thử lại.",
   "roomLock.notice.skipped": "Một số thay đổi không giải mã được và đã bị bỏ qua. Tải lại bảng để thử lại.",
   "roomLock.notice.roomFull": "Bảng này đã đầy. Thay đổi mới có thể không được lưu cho đến khi xóa bớt nội dung.",
+  "roomLock.notice.rememberFailed": "Trình duyệt không thể ghi nhớ bảng. Bạn có thể phải nhập lại mật khẩu vào lần mở tiếp theo.",
+  "roomLock.notice.forgetFailed": "Trình duyệt không thể bỏ ghi nhớ bảng. Hãy thử lại hoặc xóa dữ liệu của trang web này trong trình duyệt.",
 };

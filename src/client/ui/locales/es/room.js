@@ -16,6 +16,7 @@ export const room2 = {
   "roomLock.prompt.body": "Introduce la contraseña para abrirlo. Si se olvida, no se puede recuperar, ni siquiera el propietario del servidor.",
   "roomLock.password.label": "Contraseña",
   "roomLock.prompt.submit": "Desbloquear tablero",
+  "roomLock.prompt.remember": "Recordar este tablero en este navegador",
   "roomLock.prompt.busy": "Desbloqueando…",
   "roomLock.prompt.wrong": "La contraseña no es correcta. Inténtalo de nuevo.",
   "roomLock.prompt.lockedOut": "Demasiados intentos fallidos. Inténtalo de nuevo en {seconds} s.",
@@ -38,6 +39,7 @@ export const room2 = {
   "roomLock.menu.changePassword": "Cambiar la contraseña del tablero",
   "roomLock.menu.removeEveryone": "Expulsar a todos (nueva clave)",
   "roomLock.menu.rename": "Cambiar nombre del tablero",
+  "roomLock.menu.forget": "Olvidar este tablero en este navegador",
   "roomDeleted.title.board": "Este tablero fue eliminado",
   "roomDeleted.title.poker": "Esta sala de Planning Poker fue eliminada",
   "roomDeleted.body": "Su propietario la eliminó, así que ya no se puede abrir ni recuperar.",
@@ -64,4 +66,6 @@ export const room2 = {
   "roomLock.manage.unavailable": "No funcionó. Revisa tu conexión e inténtalo de nuevo.",
   "roomLock.notice.skipped": "Algunos cambios no se pudieron descifrar y se omitieron. Recarga el tablero para intentarlo de nuevo.",
   "roomLock.notice.roomFull": "Este tablero está lleno. Es posible que los cambios nuevos no se guarden hasta que se elimine contenido.",
+  "roomLock.notice.rememberFailed": "El navegador no ha podido recordar el tablero. Es posible que tengas que volver a introducir la contraseña la próxima vez.",
+  "roomLock.notice.forgetFailed": "El navegador no ha podido olvidar el tablero. Vuelve a intentarlo o borra los datos de este sitio en el navegador.",
 };

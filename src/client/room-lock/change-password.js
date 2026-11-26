@@ -10,5 +10,5 @@ import { updateLockAfterPasswordChange } from './lock-session.js';
 export async function changeRoomPassword({ currentPassword, newPassword, key, api, signal }) {
   const { lock, authKey, oldAuthKey } = await rewrapRoomLock({ currentPassword, lock: key.lock, newPassword });
   const { lockRevision } = await api.changePassword({ oldAuthKey, expectedRevision: key.lockRevision, lock }, { signal });
-  updateLockAfterPasswordChange({ lock, authKey, lockRevision });
+  await updateLockAfterPasswordChange({ lock, authKey, lockRevision });
 }

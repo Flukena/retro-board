@@ -17,6 +17,7 @@ export const room = {
     'roomLock.prompt.wrong': 'รหัสผ่านไม่ถูกต้อง ลองอีกครั้ง',
     'roomLock.prompt.lockedOut': 'ใส่รหัสผ่านผิดหลายครั้งเกินไป ลองใหม่ในอีก {seconds} วินาที',
     'roomLock.prompt.unavailable': 'ปลดล็อกบอร์ดไม่สำเร็จ ตรวจสอบการเชื่อมต่อแล้วลองอีกครั้ง',
+    'roomLock.prompt.remember': 'จำการปลดล็อกบอร์ดนี้ในเบราว์เซอร์นี้',
     'roomLock.reunlock.title': 'ใส่รหัสผ่านอีกครั้ง',
     'roomLock.reunlock.body': 'รหัสผ่านหรือกุญแจของบอร์ดนี้เปลี่ยนไป ใส่รหัสผ่านปัจจุบันเพื่อทำต่อ การแก้ไขที่ยังไม่ได้ส่งจะไม่หาย',
     'roomLock.reunlock.submit': 'ดำเนินการต่อ',
@@ -35,6 +36,7 @@ export const room = {
     'roomLock.menu.changePassword': 'เปลี่ยนรหัสผ่านบอร์ด',
     'roomLock.menu.removeEveryone': 'นำทุกคนออก (กุญแจใหม่)',
     'roomLock.menu.rename': 'เปลี่ยนชื่อบอร์ด',
+    'roomLock.menu.forget': 'ล้างการจดจำบอร์ดนี้ในเบราว์เซอร์นี้',
     'roomDeleted.title.board': 'บอร์ดนี้ถูกลบแล้ว',
     'roomDeleted.title.poker': 'ห้อง Planning Poker นี้ถูกลบแล้ว',
     'roomDeleted.body': 'เจ้าของลบห้องนี้แล้ว จึงเปิดหรือกู้คืนไม่ได้อีก',
@@ -61,4 +63,6 @@ export const room = {
     'roomLock.manage.unavailable': 'ทำรายการไม่สำเร็จ ตรวจสอบการเชื่อมต่อแล้วลองอีกครั้ง',
     'roomLock.notice.skipped': 'มีการเปลี่ยนแปลงบางส่วนที่ถอดรหัสไม่ได้และถูกข้ามไป โหลดบอร์ดใหม่เพื่อลองอีกครั้ง',
     'roomLock.notice.roomFull': 'บอร์ดนี้เต็มแล้ว การเปลี่ยนแปลงใหม่อาจไม่ถูกบันทึกจนกว่าจะลบเนื้อหาบางส่วน',
+    'roomLock.notice.rememberFailed': 'เบราว์เซอร์นี้จำการปลดล็อกบอร์ดไม่ได้ ครั้งหน้าอาจต้องใส่รหัสผ่านอีกครั้ง',
+    'roomLock.notice.forgetFailed': 'ล้างการจดจำบอร์ดไม่ได้ ลองอีกครั้งหรือล้างข้อมูลของเว็บไซต์นี้ในเบราว์เซอร์',
 };

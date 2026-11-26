@@ -16,6 +16,7 @@ export const room2 = {
   "roomLock.prompt.body": "Masukkan kata sandi untuk membukanya. Jika kata sandi lupa, tidak dapat dipulihkan, bahkan oleh pemilik server.",
   "roomLock.password.label": "Kata sandi",
   "roomLock.prompt.submit": "Buka kunci papan",
+  "roomLock.prompt.remember": "Ingat papan ini di browser ini",
   "roomLock.prompt.busy": "Membuka kunci…",
   "roomLock.prompt.wrong": "Kata sandi salah. Coba lagi.",
   "roomLock.prompt.lockedOut": "Terlalu banyak percobaan salah. Coba lagi dalam {seconds} dtk.",
@@ -38,6 +39,7 @@ export const room2 = {
   "roomLock.menu.changePassword": "Ubah kata sandi papan",
   "roomLock.menu.removeEveryone": "Keluarkan semua orang (kunci baru)",
   "roomLock.menu.rename": "Ganti nama papan",
+  "roomLock.menu.forget": "Lupakan papan ini di browser ini",
   "roomDeleted.title.board": "Papan ini telah dihapus",
   "roomDeleted.title.poker": "Ruang Planning Poker ini telah dihapus",
   "roomDeleted.body": "Pemiliknya telah menghapusnya, jadi tidak bisa dibuka atau dipulihkan lagi.",
@@ -64,4 +66,6 @@ export const room2 = {
   "roomLock.manage.unavailable": "Itu tidak berhasil. Periksa koneksi lalu coba lagi.",
   "roomLock.notice.skipped": "Beberapa perubahan tidak dapat didekripsi dan dilewati. Muat ulang papan untuk mencoba lagi.",
   "roomLock.notice.roomFull": "Papan ini penuh. Perubahan baru mungkin tidak tersimpan sampai sebagian konten dihapus.",
+  "roomLock.notice.rememberFailed": "Browser ini tidak dapat mengingat papan. Anda mungkin harus memasukkan kata sandi lagi saat membukanya nanti.",
+  "roomLock.notice.forgetFailed": "Browser ini tidak dapat melupakan papan. Coba lagi atau hapus data situs ini di browser Anda.",
 };

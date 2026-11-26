@@ -31,6 +31,7 @@ import RoomPasswordScreen from '../room-lock/RoomPasswordScreen.jsx';
 import ReunlockDialog from '../room-lock/ReunlockDialog.jsx';
 import RoomLockDialogs from '../room-lock/RoomLockDialogs.jsx';
 import { establishBoardSession, getRoomKey, unlockRoom } from '../room-lock/lock-session.js';
+import { showRememberFailure } from '../room-lock/room-lock-dialog-store.js';
 
 const route = parseRoute();
 // A language-prefixed page (/th/...) is shown in that language from the first paint.
@@ -65,8 +66,9 @@ function BoardBootstrap({ code, token, mode = BOARD_MODE.PRIVATE }) {
   }
   if (state.status === ROOM_SESSION_ERROR.LOCKED) {
     // The board boots only after the password opens it; retry then runs the rest of the bootstrap.
-    const unlock = async (password) => {
-      await unlockRoom({ code, token, password, lockHint: state.lock });
+    const unlock = async (password, remember) => {
+      const result = await unlockRoom({ code, token, password, lockHint: state.lock, remember });
+      showRememberFailure(result, remember);
       state.retry();
     };
     return <RoomPasswordScreen onUnlock={unlock} />;

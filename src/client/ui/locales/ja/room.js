@@ -16,6 +16,7 @@ export const room2 = {
   "roomLock.prompt.body": "開くにはパスワードを入力してください。パスワードを忘れると復元できません。サーバーの管理者でも復元できません。",
   "roomLock.password.label": "パスワード",
   "roomLock.prompt.submit": "ボードのロックを解除",
+  "roomLock.prompt.remember": "このブラウザーにボードのロック解除を記憶する",
   "roomLock.prompt.busy": "ロック解除中…",
   "roomLock.prompt.wrong": "パスワードが正しくありません。もう一度お試しください。",
   "roomLock.prompt.lockedOut": "間違いが多すぎます。{seconds} 秒後にもう一度お試しください。",
@@ -38,6 +39,7 @@ export const room2 = {
   "roomLock.menu.changePassword": "ボードのパスワードを変更",
   "roomLock.menu.removeEveryone": "全員を退出させる（新しい鍵）",
   "roomLock.menu.rename": "ボード名を変更",
+  "roomLock.menu.forget": "このブラウザーに保存したロック解除情報を削除",
   "roomDeleted.title.board": "このボードは削除されました",
   "roomDeleted.title.poker": "このプランニングポーカーのルームは削除されました",
   "roomDeleted.body": "所有者が削除したため、開くことも復元することもできません。",
@@ -64,4 +66,6 @@ export const room2 = {
   "roomLock.manage.unavailable": "うまくいきませんでした。接続を確認してもう一度お試しください。",
   "roomLock.notice.skipped": "一部の変更を復号できず、スキップしました。ボードを再読み込みしてもう一度お試しください。",
   "roomLock.notice.roomFull": "このボードは容量がいっぱいです。内容を削除するまで新しい変更が保存されない場合があります。",
+  "roomLock.notice.rememberFailed": "このブラウザーにロック解除を記憶できませんでした。次に開くときにパスワードの入力が必要になる場合があります。",
+  "roomLock.notice.forgetFailed": "このブラウザーに保存したロック解除情報を削除できませんでした。もう一度試すか、ブラウザーでこのサイトのデータを削除してください。",
 };

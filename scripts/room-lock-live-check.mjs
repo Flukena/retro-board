@@ -25,7 +25,7 @@ import { join } from 'node:path';
 import { crc32, deflateSync } from 'node:zlib';
 import {
   BASE_LABELS, CANVAS_SELECTOR, FAKE_GOOGLE_DECISION, LOCK_LABELS, REDO_KEY, SYNC_TIMEOUT_MS, UNLOCK_TIMEOUT_MS,
-  addSharedSticky, createBlankBoardFromMenu, createLockedBoard, download, enter, openLanding, openMenu, openWorkspace, participant,
+  addSharedSticky, appLabel, createBlankBoardFromMenu, createLockedBoard, download, enter, openLanding, openMenu, openWorkspace, participant,
   passwordScreen, runLiveCheck, shot, step, submitPassword, undoUntilHidden, unlockScreen, visitStub, waitForTextOn,
 } from './board-live-helpers.mjs';
 
@@ -142,9 +142,13 @@ function noisePng(size = NOISE_IMAGE_PX) {
 // ---------- locked-board flows ----------
 
 const reunlockDialog = (page, lang) => page.getByRole('dialog').filter({ has: page.getByText(LABELS[lang].reunlockTitle, { exact: true }) });
+const rememberCheckbox = (scope, lang) => scope.getByRole('checkbox', { name: appLabel(lang, 'roomLock.prompt.remember'), exact: true });
 
-async function reunlock(page, lang, password) {
+async function reunlock(page, lang, password, remember = false) {
   const dialog = reunlockDialog(page, lang);
+  const checkbox = rememberCheckbox(dialog, lang);
+  assert.equal(await checkbox.isChecked(), false, 'a new password requires a fresh choice to remember the board');
+  if (remember) await checkbox.check();
   await submitPassword(dialog, lang, password, LABELS[lang].reunlockSubmit);
   await dialog.waitFor({ state: 'hidden', timeout: UNLOCK_TIMEOUT_MS });
 }
@@ -381,17 +385,35 @@ async function imageSteps({ a, b, report, baseUrl, state }) {
 }
 
 async function credentialSteps({ a, b, report, state }) {
-  await step(report, '6. B reloads, is asked again; browser storage holds no password or authKey', async () => {
+  await step(report, '6. B opts into remembering, reloads without a password, and forgets the board', async () => {
     await b.reload();
+    await passwordScreen(b, 'th').waitFor({ timeout: UNLOCK_TIMEOUT_MS });
+    const remember = rememberCheckbox(b, 'th');
+    assert.equal(await remember.isChecked(), false, 'a fresh password prompt defaults to remembering nothing');
+    await remember.check();
     await unlockScreen(b, 'th', PASSWORDS.board1, NAME_B);
+    await b.reload();
+    await enter(b, 'th', NAME_B);
     await waitForTextOn([b], TEXT.b);
+    await waitForRenderedImages(b, 2);
     const authKey = await deriveAuthKey(b, state.board1, PASSWORDS.board1);
     const secrets = [...Object.values(PASSWORDS), authKey];
     const [dumpA, dumpB] = await Promise.all([dumpBrowserStorage(a), dumpBrowserStorage(b)]);
     const hits = [...secretHits(dumpA, secrets), ...secretHits(dumpB, secrets)];
-    assert.deepEqual(hits, [], 'no password, authKey or secret-like key in browser storage');
-    const summary = (dump) => ({ localKeys: dump.local.map((entry) => entry.key), sessionKeys: dump.session.map((entry) => entry.key),
-      indexed: dump.indexed.map(({ database, store, values }) => ({ database, store, values: values.length })) });
+    assert.equal(hits.length, 0, 'no password, authKey or secret-like key in browser storage');
+    const forgetLabel = appLabel('th', 'roomLock.menu.forget');
+    await openMenu(b, 'th', forgetLabel);
+    await b.getByRole('button', { name: forgetLabel, exact: true }).waitFor({ state: 'hidden' });
+    await b.reload();
+    await passwordScreen(b, 'th').waitFor({ timeout: UNLOCK_TIMEOUT_MS });
+    assert.equal(await remember.isChecked(), false, 'forgetting restores the unchecked password prompt');
+    await remember.check();
+    await unlockScreen(b, 'th', PASSWORDS.board1, NAME_B);
+    const summary = (dump) => ({
+      localEntries: dump.local.length,
+      sessionEntries: dump.session.length,
+      indexedEntries: dump.indexed.reduce((count, { values }) => count + values.length, 0),
+    });
     return { a: summary(dumpA), b: summary(dumpB) };
   });
   await step(report, '7. A changes the password; B re-unlocks at its next renewal and its pending edit survives', async () => {
@@ -410,7 +432,7 @@ async function credentialSteps({ a, b, report, state }) {
     // A password change keeps the board key, so B's edit may already have reached A before renewal.
     const seenByABeforeReunlock = Boolean(await findItem(a, (item) => itemText(item) === TEXT.pending));
     await shot(b, 'reunlock-th.png', report);
-    await reunlock(b, 'th', PASSWORDS.changed);
+    await reunlock(b, 'th', PASSWORDS.changed, true);
     await waitForTextOn([a, b], TEXT.pending);
     return { reunlockAfterMs: waitedMs, seenByABeforeReunlock };
   });

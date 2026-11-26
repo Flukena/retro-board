@@ -16,6 +16,7 @@ export const room2 = {
   "roomLock.prompt.body": "Gib das Passwort ein, um es zu öffnen. Ein vergessenes Passwort lässt sich nicht wiederherstellen, auch nicht durch den Serverbetreiber.",
   "roomLock.password.label": "Passwort",
   "roomLock.prompt.submit": "Board entsperren",
+  "roomLock.prompt.remember": "Dieses Board in diesem Browser merken",
   "roomLock.prompt.busy": "Wird entsperrt…",
   "roomLock.prompt.wrong": "Das Passwort ist falsch. Versuche es erneut.",
   "roomLock.prompt.lockedOut": "Zu viele falsche Versuche. Versuche es in {seconds} s erneut.",
@@ -38,6 +39,7 @@ export const room2 = {
   "roomLock.menu.changePassword": "Board-Passwort ändern",
   "roomLock.menu.removeEveryone": "Alle entfernen (neuer Schlüssel)",
   "roomLock.menu.rename": "Board umbenennen",
+  "roomLock.menu.forget": "Dieses Board in diesem Browser vergessen",
   "roomDeleted.title.board": "Dieses Board wurde gelöscht",
   "roomDeleted.title.poker": "Dieser Planning-Poker-Raum wurde gelöscht",
   "roomDeleted.body": "Der Eigentümer hat ihn gelöscht. Er kann nicht mehr geöffnet oder wiederhergestellt werden.",
@@ -64,4 +66,6 @@ export const room2 = {
   "roomLock.manage.unavailable": "Das hat nicht geklappt. Prüfe die Verbindung und versuche es erneut.",
   "roomLock.notice.skipped": "Einige Änderungen konnten nicht entschlüsselt werden und wurden übersprungen. Lade das Board neu, um es erneut zu versuchen.",
   "roomLock.notice.roomFull": "Dieses Board ist voll. Neue Änderungen werden eventuell nicht gespeichert, bis Inhalte entfernt werden.",
+  "roomLock.notice.rememberFailed": "Der Browser konnte sich das Board nicht merken. Möglicherweise musst du beim nächsten Besuch das Passwort erneut eingeben.",
+  "roomLock.notice.forgetFailed": "Der Browser konnte das Board nicht vergessen. Versuche es erneut oder lösche die Daten dieser Website im Browser.",
 };

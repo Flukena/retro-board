@@ -16,6 +16,7 @@ export const room2 = {
   "roomLock.prompt.body": "Saisis le mot de passe pour l'ouvrir. Un mot de passe oublié ne peut pas être récupéré, même par le propriétaire du serveur.",
   "roomLock.password.label": "Mot de passe",
   "roomLock.prompt.submit": "Déverrouiller le tableau",
+  "roomLock.prompt.remember": "Mémoriser ce tableau dans ce navigateur",
   "roomLock.prompt.busy": "Déverrouillage…",
   "roomLock.prompt.wrong": "Ce mot de passe n'est pas correct. Réessaie.",
   "roomLock.prompt.lockedOut": "Trop de tentatives échouées. Réessaie dans {seconds} s.",
@@ -38,6 +39,7 @@ export const room2 = {
   "roomLock.menu.changePassword": "Changer le mot de passe du tableau",
   "roomLock.menu.removeEveryone": "Retirer tout le monde (nouvelle clé)",
   "roomLock.menu.rename": "Renommer le tableau",
+  "roomLock.menu.forget": "Oublier ce tableau dans ce navigateur",
   "roomDeleted.title.board": "Ce tableau a été supprimé",
   "roomDeleted.title.poker": "Cette salle de Planning Poker a été supprimée",
   "roomDeleted.body": "Son propriétaire l’a supprimé : il ne peut plus être ouvert ni récupéré.",
@@ -64,4 +66,6 @@ export const room2 = {
   "roomLock.manage.unavailable": "Cela n’a pas fonctionné. Vérifiez votre connexion et réessayez.",
   "roomLock.notice.skipped": "Certaines modifications n’ont pas pu être déchiffrées et ont été ignorées. Rechargez le tableau pour réessayer.",
   "roomLock.notice.roomFull": "Ce tableau est plein. Les nouvelles modifications risquent de ne pas être enregistrées tant que du contenu n’est pas supprimé.",
+  "roomLock.notice.rememberFailed": "Le navigateur n’a pas pu mémoriser le tableau. Tu devras peut-être saisir de nouveau le mot de passe la prochaine fois.",
+  "roomLock.notice.forgetFailed": "Le navigateur n’a pas pu oublier le tableau. Réessaie ou efface les données de ce site dans ton navigateur.",
 };

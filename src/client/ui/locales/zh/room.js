@@ -16,6 +16,7 @@ export const room2 = {
   "roomLock.prompt.body": "输入密码即可打开。忘记密码将无法找回，服务器所有者也无法找回。",
   "roomLock.password.label": "密码",
   "roomLock.prompt.submit": "解锁看板",
+  "roomLock.prompt.remember": "在此浏览器中记住看板的解锁状态",
   "roomLock.prompt.busy": "正在解锁…",
   "roomLock.prompt.wrong": "密码不正确，请重试。",
   "roomLock.prompt.lockedOut": "错误次数过多，请在 {seconds} 秒后重试。",
@@ -38,6 +39,7 @@ export const room2 = {
   "roomLock.menu.changePassword": "更改看板密码",
   "roomLock.menu.removeEveryone": "移除所有人（新密钥）",
   "roomLock.menu.rename": "重命名看板",
+  "roomLock.menu.forget": "清除此浏览器中保存的看板解锁信息",
   "roomDeleted.title.board": "此看板已被删除",
   "roomDeleted.title.poker": "此 Planning Poker 房间已被删除",
   "roomDeleted.body": "所有者已将其删除，无法再打开或恢复。",
@@ -64,4 +66,6 @@ export const room2 = {
   "roomLock.manage.unavailable": "操作未成功。请检查连接后重试。",
   "roomLock.notice.skipped": "部分更改无法解密，已跳过。请重新加载看板后重试。",
   "roomLock.notice.roomFull": "此看板已满。在删除部分内容之前，新的更改可能无法保存。",
+  "roomLock.notice.rememberFailed": "此浏览器无法保存看板解锁信息。下次打开时可能需要重新输入密码。",
+  "roomLock.notice.forgetFailed": "此浏览器无法清除已保存的看板解锁信息。请重试，或在浏览器中清除此网站的数据。",
 };

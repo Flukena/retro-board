@@ -5,6 +5,8 @@ export const ROOM_LOCK_NOTICE = Object.freeze({
   PASSWORD_CHANGED: 'roomLock.change.done',
   SKIPPED: 'roomLock.notice.skipped',
   ROOM_FULL: 'roomLock.notice.roomFull',
+  REMEMBER_FAILED: 'roomLock.notice.rememberFailed',
+  FORGET_FAILED: 'roomLock.notice.forgetFailed',
 });
 
 function createStore(initial) {
@@ -31,6 +33,11 @@ export const roomLockDialog = createStore(null);
 
 /** The notice (an i18n key) the board shows for a while, or null. */
 export const roomLockNotice = createStore(null);
+
+export function showRememberFailure(result, remember) {
+  if (remember && !result.remembered) roomLockNotice.set(ROOM_LOCK_NOTICE.REMEMBER_FAILED);
+  if (result.forgetFailed) roomLockNotice.set(ROOM_LOCK_NOTICE.FORGET_FAILED);
+}
 
 const NOTICE_BY_EVENT = new Map([[E2E_SKIPPED_EVENT, ROOM_LOCK_NOTICE.SKIPPED], [E2E_ROOM_FULL_EVENT, ROOM_LOCK_NOTICE.ROOM_FULL]]);
 

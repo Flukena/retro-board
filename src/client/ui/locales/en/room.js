@@ -17,6 +17,7 @@ export const room = {
     'roomLock.prompt.wrong': 'That password is not correct. Try again.',
     'roomLock.prompt.lockedOut': 'Too many wrong attempts. Try again in {seconds} s.',
     'roomLock.prompt.unavailable': 'The board could not be unlocked. Check your connection and try again.',
+    'roomLock.prompt.remember': 'Remember this board on this browser',
     'roomLock.reunlock.title': 'Enter the password again',
     'roomLock.reunlock.body': 'The password or key of this board changed. Enter the current password to continue. Your unsent edits are kept.',
     'roomLock.reunlock.submit': 'Continue',
@@ -35,6 +36,7 @@ export const room = {
     'roomLock.menu.changePassword': 'Change board password',
     'roomLock.menu.removeEveryone': 'Remove everyone (new key)',
     'roomLock.menu.rename': 'Rename board',
+    'roomLock.menu.forget': 'Forget this board on this browser',
     'roomDeleted.title.board': 'This board was deleted',
     'roomDeleted.title.poker': 'This Planning Poker room was deleted',
     'roomDeleted.body': 'Its owner deleted it, so it can no longer be opened or recovered.',
@@ -61,4 +63,6 @@ export const room = {
     'roomLock.manage.unavailable': 'That did not work. Check your connection and try again.',
     'roomLock.notice.skipped': 'Some changes could not be decrypted and were skipped. Reload the board to try again.',
     'roomLock.notice.roomFull': 'This board is full. New changes may not be saved until some content is removed.',
+    'roomLock.notice.rememberFailed': 'This browser could not remember the board. You may need to enter the password again next time.',
+    'roomLock.notice.forgetFailed': "This browser could not forget the board. Try again or clear this site's data in your browser.",
 };

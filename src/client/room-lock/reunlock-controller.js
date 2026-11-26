@@ -26,10 +26,11 @@ export function createReunlockController(eventTarget) {
       };
     },
     /** Re-unlocks with the password; on success the dialog closes even if no health change follows. */
-    async unlock(password) {
-      await reunlock(password);
+    async unlock(password, remember) {
+      const result = await reunlock(password, remember);
       rotated = false;
       notify();
+      return result;
     },
   };
 }

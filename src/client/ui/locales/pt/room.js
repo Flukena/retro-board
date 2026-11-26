@@ -16,6 +16,7 @@ export const room2 = {
   "roomLock.prompt.body": "Digite a senha para abri-lo. Se a senha for esquecida, não pode ser recuperada, nem mesmo pelo dono do servidor.",
   "roomLock.password.label": "Senha",
   "roomLock.prompt.submit": "Desbloquear quadro",
+  "roomLock.prompt.remember": "Lembrar este quadro neste navegador",
   "roomLock.prompt.busy": "Desbloqueando…",
   "roomLock.prompt.wrong": "A senha não está correta. Tente novamente.",
   "roomLock.prompt.lockedOut": "Muitas tentativas erradas. Tente novamente em {seconds} s.",
@@ -38,6 +39,7 @@ export const room2 = {
   "roomLock.menu.changePassword": "Alterar a senha do quadro",
   "roomLock.menu.removeEveryone": "Remover todos (nova chave)",
   "roomLock.menu.rename": "Renomear quadro",
+  "roomLock.menu.forget": "Esquecer este quadro neste navegador",
   "roomDeleted.title.board": "Este quadro foi excluído",
   "roomDeleted.title.poker": "Esta sala de Planning Poker foi excluída",
   "roomDeleted.body": "O proprietário a excluiu, então ela não pode mais ser aberta nem recuperada.",
@@ -64,4 +66,6 @@ export const room2 = {
   "roomLock.manage.unavailable": "Não funcionou. Verifique a conexão e tente novamente.",
   "roomLock.notice.skipped": "Algumas alterações não puderam ser descriptografadas e foram ignoradas. Recarregue o quadro para tentar novamente.",
   "roomLock.notice.roomFull": "Este quadro está cheio. Novas alterações podem não ser salvas até que algum conteúdo seja removido.",
+  "roomLock.notice.rememberFailed": "O navegador não conseguiu lembrar o quadro. Talvez você precise digitar a senha novamente na próxima vez.",
+  "roomLock.notice.forgetFailed": "O navegador não conseguiu esquecer o quadro. Tente novamente ou limpe os dados deste site no navegador.",
 };
