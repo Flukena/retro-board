@@ -376,7 +376,9 @@ export function redactBoardExportForViewer(items, comments, isHiddenSticky) {
   const safeItems = (Array.isArray(items) ? items : []).map((item) => {
     if (!item || item.type !== 'sticky' || !isHiddenSticky(item)) return item;
     hiddenIds.add(item.id);
-    return { ...item, text: '' };
+    const redacted = { ...item, text: '' };
+    delete redacted.lastEditor;
+    return redacted;
   });
   const safeComments = Object.fromEntries(
     Object.entries(comments && typeof comments === 'object' ? comments : {})

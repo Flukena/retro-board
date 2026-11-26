@@ -222,6 +222,8 @@ export const board11 = {
     'sticky.placeholder': 'Double-click to edit',
     'sticky.hidden': 'Hidden',
     'sticky.hiddenBy': 'by {name}',
+    'sticky.createdBy': '{name} · Creator',
+    'sticky.lastEditedBy': '{name} · Last editor',
     'sticky.hideContent': 'Unlock first to vote',
     'sticky.privacyToggle.on': 'On: show content in the normal UI',
     'sticky.privacyToggle.off': 'Off: hide in the normal UI (not encrypted)',

@@ -219,6 +219,8 @@ export const board11 = {
   "sticky.placeholder": "Double-cliquez pour modifier",
   "sticky.hidden": "Masquée",
   "sticky.hiddenBy": "par {name}",
+  "sticky.createdBy": "{name} · Création",
+  "sticky.lastEditedBy": "{name} · Dernière modification",
   "sticky.hideContent": "Déverrouillez d’abord pour voter",
   "sticky.privacyToggle.on": "Activé : afficher le contenu dans l’interface normale",
   "sticky.privacyToggle.off": "Désactivé : masquer dans l’interface normale (non chiffré)",

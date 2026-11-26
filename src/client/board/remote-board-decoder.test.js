@@ -24,6 +24,16 @@ test('valid action-item fields reach React unchanged', () => {
   assert.deepEqual(decodeRemoteBoard([action, ZONE], {}).items, [action, ZONE]);
 });
 
+test('remote sticky editor attribution is retained only for a bounded foreign identity', () => {
+  const card = { ...STICKY, authorId: 'alice' };
+  const editor = { userId: 'bo', name: 'โบ' };
+  const edited = { ...card, lastEditor: editor };
+  assert.deepEqual(decodeRemoteBoard([edited], {}).items, [edited]);
+  for (const invalid of [null, { ...editor, name: {} }, { ...editor, userId: card.authorId }]) {
+    assert.deepEqual(decodeRemoteBoard([{ ...card, lastEditor: invalid }], {}).items, [card]);
+  }
+});
+
 test('malformed fields cannot become React children, styles or voting controls', () => {
   const badPatches = [
     { text: {} }, { authorName: {} }, { x: NaN }, { color: {} }, { fontSize: {} },

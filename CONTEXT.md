@@ -7,6 +7,11 @@ finite, bounded `x` and `y` coordinates. Zones additionally have positive,
 bounded `w` and `h` dimensions. Geometry in the Yjs room is canonical state,
 not a rendering fallback.
 
+Sticky notes keep the original `authorId` and `authorName`. A text edit by a
+different participant records `lastEditor: { userId, name }` with the text
+transaction. An edit by the original author clears that attribution.
+Backups omit the editor whenever they redact a hidden sticky's text.
+
 ## Backup manifest
 
 The versioned JSON representation of a board, votes, comments, mood answers

@@ -65,6 +65,29 @@ test('private notes keep the lock layout, author badge and reveal behavior at bo
   });
 });
 
+test('a readable sticky credits its creator and most recent other editor in both board views', async () => {
+  await withChromeModule('/src/client/board/StickyCard.jsx', ({ StickyCard }, { getLang, setLang }) => {
+    const previous = getLang();
+    const item = { ...ITEM, authorId: 'creator', lastEditor: { userId: 'second', name: 'Mali' } };
+    try {
+      for (const [locale, creatorCredit, editorCredit] of [
+        ['th', 'Ada · ผู้สร้าง', 'Mali · ผู้แก้ล่าสุด'], ['en', 'Ada · Creator', 'Mali · Last editor'],
+      ]) {
+        setLang(locale);
+        for (const compact of [false, true]) {
+          const view = (props) => renderCard(StickyCard, { item, compact, ...props }).html;
+          const visible = view();
+          assert.ok(visible.includes(creatorCredit), creatorCredit);
+          assert.ok(visible.includes(editorCredit), editorCredit);
+          assert.ok(!view({ item: { ...item, private: true } }).includes('Mali'));
+          assert.ok(!view({ item: { ...item, lastEditor: { userId: 'creator', name: 'Mali' } } }).includes('Mali'));
+        }
+        assert.ok(renderCard(StickyCard).html.includes('Ada'));
+      }
+    } finally { setLang(previous); }
+  });
+});
+
 test('voting permits removal of an existing vote after voting closes, in full and overview modes', async () => {
   await withChromeModule('/src/client/board/StickyCard.jsx', ({ StickyCard }) => {
     for (const compact of [false, true]) {

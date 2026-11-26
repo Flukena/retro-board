@@ -36,10 +36,7 @@ import { useFollowMotion } from './src/client/board/use-follow-motion.js';
 import { usePresenterFollow } from './src/client/board/use-presenter-follow.js';
 import { actionTogglePatch } from './src/domain/action-item.js';
 import { geometryErrorForItem, geometryErrorForPatch, sizeForPlacement, sizeForResize, sizeForGroupBounds, sizeForStickySignature } from './src/domain/board-geometry.js';
-import {
-  BOARD_TEXT_MAX_LENGTH,
-  ZONE_TITLE_MAX_LENGTH,
-} from './src/domain/security-boundaries.js';
+import { applyOptimisticItemPatch, boundBoardTextPatch } from './src/client/board/board-text-edits.js';
 import { boardEditingAllowed, boardManagementPermissions, runSharedBoardAction } from './src/domain/public-board-permissions.js';
 import { publicZoneCreationSize } from './src/domain/public-zone-layout.js';
 import { itemSizeBounds, groupScaleRange } from './src/domain/item-size-limits.js';
@@ -561,7 +558,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     if (!storage.updateItem(id, patch, opts)) { reportWriteFailure(); return false; }
     setBoard((prev) => ({
       ...prev,
-      items: prev.items.map((it) => (it.id === id ? { ...it, ...patch } : it)),
+      items: prev.items.map((it) => (it.id === id ? applyOptimisticItemPatch(it, patch, opts?.editor) : it)),
     }));
     return true;
   }, [reportWriteFailure]);
@@ -2148,6 +2145,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
         clone.votingLocked = false;
       }
       delete clone.zIndex;
+      delete clone.lastEditor;
       clone.parentZoneId = idMap.has(it.parentZoneId)
         ? idMap.get(it.parentZoneId)
         : (resolveOwnerZone(clone, b.items)?.id ?? null);
@@ -2264,15 +2262,8 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
   }, [canEditItem, setSelectedId, updateFocusedText]);
 
   const onTextChange = useCallback((id, patch, opts) => {
-    const boundedPatch = { ...patch };
-    if (typeof boundedPatch.text === 'string') {
-      boundedPatch.text = boundedPatch.text.slice(0, BOARD_TEXT_MAX_LENGTH);
-    }
-    if (typeof boundedPatch.title === 'string') {
-      boundedPatch.title = boundedPatch.title.slice(0, ZONE_TITLE_MAX_LENGTH);
-    }
-    updateItem(id, boundedPatch, opts);
-  }, [updateItem]);
+    updateItem(id, boundBoardTextPatch(patch), { ...opts, editor: { userId, name: userName } });
+  }, [updateItem, userId, userName]);
 
   const onTextBlur = useCallback((id) => {
     if (focusedTextIdRef.current?.startsWith(`${id}:`)) updateFocusedText(null);

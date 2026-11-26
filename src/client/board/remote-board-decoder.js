@@ -5,6 +5,7 @@ import { DISPLAY_NAME_MAX_LENGTH } from '../../domain/security-boundaries.js';
 import { isBoardTitle } from '../../domain/board-title.js';
 import { isPhaseState } from '../../domain/retro-phase.js';
 import { isMoodCheckState } from '../../domain/mood-check.js';
+import { isStickyLastEditor } from '../../domain/sticky-editor.js';
 
 // hashAdminPin uses SHA-256, represented as two hexadecimal characters per byte.
 const ADMIN_PIN_HASH_HEX_LENGTH = 64;
@@ -42,16 +43,22 @@ const META_FIELDS = {
   moodCheck: nullable((value) => isRecord(value) && isMoodCheckState(value)),
 };
 
+function omitInvalidOptionalFields(item) {
+  const dropEditor = Object.hasOwn(item, 'lastEditor') && !isStickyLastEditor(item, item.lastEditor);
+  const dropResults = item.voteResults != null && (item.type !== 'zone' || !isVoteResults(item.voteResults, item.id));
+  if (!dropEditor && !dropResults) return item;
+  const safe = { ...item };
+  if (dropEditor) delete safe.lastEditor;
+  if (dropResults) delete safe.voteResults;
+  return safe;
+}
+
 export function decodeRemoteItem(item) {
   if (!isRecord(item) || !fieldsMatch(item, ITEM_RUNTIME_FIELDS)) return null;
   try {
-    validateBoardItem(item);
-    if (item.voteResults != null && (item.type !== 'zone' || !isVoteResults(item.voteResults, item.id))) {
-      const safe = { ...item };
-      delete safe.voteResults;
-      return safe;
-    }
-    return item;
+    const safe = omitInvalidOptionalFields(item);
+    validateBoardItem(safe);
+    return safe;
   } catch (error) {
     // Schema rejection is isolated to this item; never repair the shared doc.
     if (error instanceof Error) return null;

@@ -226,6 +226,8 @@ export const board11 = {
     'sticky.placeholder': 'ดับเบิลคลิกเพื่อแก้ไข',
     'sticky.hidden': 'ซ่อนอยู่',
     'sticky.hiddenBy': 'โดย {name}',
+    'sticky.createdBy': '{name} · ผู้สร้าง',
+    'sticky.lastEditedBy': '{name} · ผู้แก้ล่าสุด',
     'sticky.hideContent': 'ปลดล็อกก่อนถึงโหวตได้',
     'sticky.privacyToggle.on': 'เปิด: แสดงเนื้อหาในหน้าจอปกติ',
     'sticky.privacyToggle.off': 'ปิด: ซ่อนในหน้าจอปกติ (ไม่ได้เข้ารหัส)',

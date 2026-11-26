@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   BOARD_TEXT_MAX_LENGTH,
   BOARD_TITLE_MAX_LENGTH,
+  DISPLAY_NAME_MAX_LENGTH,
   IMPORT_COORDINATE_MAX_ABS,
   IMPORT_DIMENSION_MAX,
   IMPORT_MAX_TEMPLATE_ZONES,
@@ -78,6 +79,21 @@ test('normalizes a manifest into bounded whitelisted records', () => {
   assert.deepEqual(normalized.customTemplates[0].zones[0], {
     title: 'Start', color: 2, x: 0, y: 0, w: 300, h: 200,
   });
+});
+
+test('accepts exact sticky editor attribution and rejects malformed or inapplicable attribution', () => {
+  const editor = { userId: 'visitor', name: 'ผู้แก้' };
+  const manifest = validManifest();
+  manifest.board.items[1].lastEditor = editor;
+  assert.deepEqual(normalizeImportManifest(manifest, importedAt).items[1].lastEditor, editor);
+  for (const invalid of [null, 'name', { userId: 'visitor' }, { ...editor, userId: 'user-1' },
+    { ...editor, name: 'a'.repeat(DISPLAY_NAME_MAX_LENGTH + 1) }, { ...editor, url: 'unexpected' }]) {
+    manifest.board.items[1].lastEditor = invalid;
+    assert.throws(() => normalizeImportManifest(manifest, importedAt), /lastEditor/);
+  }
+  manifest.board.items[1].lastEditor = editor;
+  manifest.board.items[0].lastEditor = editor;
+  assert.throws(() => normalizeImportManifest(manifest, importedAt), /lastEditor/);
 });
 
 test('recovers omitted legacy item geometry into a deterministic area', () => {

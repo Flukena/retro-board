@@ -219,6 +219,8 @@ export const board11 = {
   "sticky.placeholder": "Klik dua kali untuk mengedit",
   "sticky.hidden": "Tersembunyi",
   "sticky.hiddenBy": "oleh {name}",
+  "sticky.createdBy": "{name} · Pembuat",
+  "sticky.lastEditedBy": "{name} · Penyunting terakhir",
   "sticky.hideContent": "Buka kunci dulu untuk voting",
   "sticky.privacyToggle.on": "Aktif: tampilkan isi di UI normal",
   "sticky.privacyToggle.off": "Nonaktif: sembunyikan di UI normal (tidak dienkripsi)",

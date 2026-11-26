@@ -219,6 +219,8 @@ export const board11 = {
   "sticky.placeholder": "더블클릭하여 편집",
   "sticky.hidden": "숨김",
   "sticky.hiddenBy": "{name}",
+  "sticky.createdBy": "{name} · 작성자",
+  "sticky.lastEditedBy": "{name} · 마지막 편집자",
   "sticky.hideContent": "투표하려면 먼저 잠금을 해제하세요",
   "sticky.privacyToggle.on": "켜짐: 일반 화면에 내용 표시",
   "sticky.privacyToggle.off": "꺼짐: 일반 화면에서 숨김 (암호화되지 않음)",

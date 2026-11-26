@@ -219,6 +219,8 @@ export const board11 = {
   "sticky.placeholder": "Nhấp đúp để sửa",
   "sticky.hidden": "Đã ẩn",
   "sticky.hiddenBy": "bởi {name}",
+  "sticky.createdBy": "{name} · Người tạo",
+  "sticky.lastEditedBy": "{name} · Người sửa gần nhất",
   "sticky.hideContent": "Hãy mở khóa trước để bình chọn",
   "sticky.privacyToggle.on": "Bật: hiện nội dung trong giao diện thông thường",
   "sticky.privacyToggle.off": "Tắt: ẩn trong giao diện thông thường (không mã hóa)",

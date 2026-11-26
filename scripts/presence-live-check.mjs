@@ -13,6 +13,7 @@
  */
 import assert from 'node:assert/strict';
 import { PLAYER_PRESENCE_STALE_MS } from '../src/domain/awareness-liveness.js';
+import { ITEM_MIN_SIZE_PX } from '../src/domain/item-size-limits.js';
 import { wheelDeltaForZoomFactor } from '../src/domain/viewport-zoom.js';
 import {
   CANVAS_SELECTOR, LIVE_MODE, NAME_A, NAME_B, SYNC_TIMEOUT_MS, addSharedSticky, appLabel, boardItems, boxCenter, dragBy, errorsStep,
@@ -193,7 +194,50 @@ async function selectionAppearsAndClears({ a, b }, run) {
   return { label: appLabel('en', 'selection.by', { name: NAME_B }), zoom };
 }
 
-async function editingAppearsAndClears({ a, b }) {
+async function attributionAtMinimumWidth(card, lang) {
+  const creditRows = [
+    { name: NAME_A, label: appLabel(lang, 'sticky.createdBy', { name: NAME_A }) },
+    { name: NAME_B, label: appLabel(lang, 'sticky.lastEditedBy', { name: NAME_B }) },
+  ];
+  const result = await card.evaluate((note, { creditRows, widthPx }) => {
+    const original = note.style.width;
+    try {
+      note.style.width = `${widthPx}px`;
+      const credits = [...note.querySelectorAll('.rb-sticky__credits .rb-sticky__author')];
+      const vote = note.querySelector('.rb-sticky__vote-pill')?.getBoundingClientRect();
+      const textMetrics = document.createElement('canvas').getContext('2d');
+      const names = creditRows.map(({ name, label }) => {
+        const row = credits.find(credit => credit.textContent === label);
+        const node = row?.firstChild;
+        const index = node?.textContent.indexOf(name) ?? -1;
+        if (!node || index < 0) return null;
+        const range = document.createRange();
+        range.setStart(node, index);
+        range.setEnd(node, index + name.length);
+        const text = range.getBoundingClientRect();
+        const bounds = row.getBoundingClientRect();
+        textMetrics.font = getComputedStyle(row).font;
+        const ellipsisPx = row.scrollWidth > row.clientWidth ? textMetrics.measureText('…').width : 0;
+        return {
+          name, left: text.left - bounds.left, right: text.right - bounds.left,
+          visibleRight: Math.min(bounds.right - ellipsisPx, vote?.left ?? bounds.right) - bounds.left,
+        };
+      });
+      return { width: note.offsetWidth, voteWidth: vote?.width, names };
+    } finally {
+      note.style.width = original;
+    }
+  }, { creditRows, widthPx: ITEM_MIN_SIZE_PX.sticky.w });
+  assert.equal(result.width, ITEM_MIN_SIZE_PX.sticky.w, `${lang} note reaches minimum width`);
+  assert.ok(result.voteWidth > 0, `${lang} vote pill occupies footer space`);
+  for (const row of result.names) {
+    assert.ok(row && row.left >= 0 && row.right > row.left && row.right <= row.visibleRight + LABEL_SIZE_TOLERANCE_PX,
+      `${lang} attribution clips a name at minimum width: ${JSON.stringify(row)}`);
+  }
+  return result;
+}
+
+async function editingAppearsAndClears({ a, b }, run) {
   const label = editingLabel(a, NAME_B);
   assert.equal(await label.count(), 0, 'an editing label shows before B edits');
   const centre = await stickyCentre(b);
@@ -211,7 +255,14 @@ async function editingAppearsAndClears({ a, b }) {
   }
   await hiddenWithin(label, 'the editing label');
   await b.mouse.click(EMPTY_CANVAS_PX.x, EMPTY_CANVAS_PX.y);
-  return { label: appLabel('en', 'editing.by', { name: NAME_B }) };
+  const attribution = {};
+  for (const [page, lang] of [[a, 'en'], [b, 'th']]) {
+    const card = page.locator(`[data-sticky-id="${run.id}"]`);
+    await visibleWithin(card.getByText(appLabel(lang, 'sticky.createdBy', { name: NAME_A }), { exact: true }));
+    await visibleWithin(card.getByText(appLabel(lang, 'sticky.lastEditedBy', { name: NAME_B }), { exact: true }));
+    attribution[lang] = await attributionAtMinimumWidth(card, lang);
+  }
+  return { label: appLabel('en', 'editing.by', { name: NAME_B }), attribution };
 }
 
 // ---------------------------------------------------------------- steps 5-6
@@ -278,7 +329,7 @@ await runLiveCheck('presence-live-check.mjs', async (context) => {
   await step(report, STEP_NAMES.cursorA, () => cursorFollows(b, a, NAME_B));
   await step(report, STEP_NAMES.cursorB, () => cursorFollows(a, b, NAME_A));
   await step(report, STEP_NAMES.selection, () => selectionAppearsAndClears(context, run));
-  await step(report, STEP_NAMES.editing, () => editingAppearsAndClears(context));
+  await step(report, STEP_NAMES.editing, () => editingAppearsAndClears(context, run));
   await step(report, STEP_NAMES.busy, () => busyBlocksThenClears(context, run));
   await step(report, STEP_NAMES.gone, () => departedPeerIsGone(context, run));
   await errorsStep(context, LIVE_MODE.PLAIN);

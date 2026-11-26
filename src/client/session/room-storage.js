@@ -1,4 +1,5 @@
 import { DEFAULT_BOARD } from '../../domain/board-state.js';
+import { stickyTextEditPatch } from '../../domain/sticky-editor.js';
 
 const SHARED_MEMORY_PREFIX = 's';
 const USER_MEMORY_PREFIX = 'u';
@@ -119,7 +120,9 @@ export const storage = {
     }
     const b = memBoard();
     if (!b.items.some((it) => it.id === id)) return false;
-    memSetBoard({ ...b, items: b.items.map((it) => (it.id === id ? memMerge(it, patch) : it)) });
+    memSetBoard({ ...b, items: b.items.map((it) => (
+      it.id === id ? memMerge(it, stickyTextEditPatch(it, patch, opts?.editor)) : it
+    )) });
     return true;
   },
   updateItems(entries, opts) {

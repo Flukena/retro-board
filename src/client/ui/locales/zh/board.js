@@ -219,6 +219,8 @@ export const board11 = {
   "sticky.placeholder": "双击编辑",
   "sticky.hidden": "已隐藏",
   "sticky.hiddenBy": "来自 {name}",
+  "sticky.createdBy": "{name} · 创建者",
+  "sticky.lastEditedBy": "{name} · 最后编辑者",
   "sticky.hideContent": "请先解锁再投票",
   "sticky.privacyToggle.on": "开：在常规界面中显示内容",
   "sticky.privacyToggle.off": "关：在常规界面中隐藏（未加密）",

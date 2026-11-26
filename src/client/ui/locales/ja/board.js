@@ -219,6 +219,8 @@ export const board11 = {
   "sticky.placeholder": "ダブルクリックで編集",
   "sticky.hidden": "非表示",
   "sticky.hiddenBy": "{name}さん",
+  "sticky.createdBy": "{name} · 作成者",
+  "sticky.lastEditedBy": "{name} · 最終編集者",
   "sticky.hideContent": "投票するには先にロックを解除",
   "sticky.privacyToggle.on": "オン: 通常のUIで内容を表示",
   "sticky.privacyToggle.off": "オフ: 通常のUIで非表示(暗号化はされません)",

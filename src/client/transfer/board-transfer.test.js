@@ -85,3 +85,19 @@ test('a shown mood round exports and re-imports closed with its result hidden', 
   assert.equal(board.moodCheck.id, 'round1');
   assert.equal('resultShownAt' in board.moodCheck, false);
 });
+
+test('a backup preserves a readable sticky editor and redacts the editor of a hidden sticky', async (context) => {
+  const previousWindow = globalThis.window;
+  globalThis.window = { storage: {}, location: { pathname: '/ROOM1', origin: 'http://localhost' } };
+  context.after(() => { globalThis.window = previousWindow; });
+  const sticky = { id: 'idea', type: 'sticky', x: 40, y: 50, text: 'Original content',
+    authorId: 'owner', authorName: 'Ada', private: true, lastEditor: { userId: 'peer', name: 'Bo' } };
+  for (const userId of ['owner', 'viewer']) {
+    const artifact = await createBoardExport({ items: [sticky] }, { boardCode: 'ROOM1', userId });
+    const manifest = await readBoardImport(new File([artifact.blob], artifact.fileName, { type: artifact.mimeType }), IMPORTED_AT_MS);
+    const [restored] = (await prepareBoardImport(manifest, {})).items;
+    assert.equal(restored.authorName, sticky.authorName);
+    assert.equal(restored.text, userId === 'owner' ? sticky.text : '');
+    assert.deepEqual(restored.lastEditor, userId === 'owner' ? sticky.lastEditor : undefined);
+  }
+});

@@ -19,6 +19,19 @@ import { isActionItem } from '../../domain/action-item.js';
 const STICKY_AUTO_GROW_MAX_H = 900;
 const OWNER_LOCK_SIZE_PX = 14;
 
+function StickyAttribution({ authorName, editor }) {
+  const author = authorName || t('comments.anonymous');
+  if (!editor) return <span className="rb-sticky__author" title={author}>{author}</span>;
+  const createdBy = t('sticky.createdBy', { name: author });
+  const editedBy = t('sticky.lastEditedBy', { name: editor.name || t('comments.anonymous') });
+  return (
+    <span className="rb-sticky__credits">
+      <span className="rb-sticky__author" title={createdBy}>{createdBy}</span>
+      <span className="rb-sticky__author" title={editedBy}>{editedBy}</span>
+    </span>
+  );
+}
+
 const autoGrownStickyHeight = (height, overflow) => {
   if (!Number.isFinite(overflow) || overflow <= 1) return height;
   return Math.min(STICKY_AUTO_GROW_MAX_H, Math.ceil(height + overflow));
@@ -62,6 +75,7 @@ export const StickyCard = React.memo(function StickyCard({
   const c = PALETTE[it.color] || PALETTE[0];
   const showLock = stickyShowsLock(it, allRevealed);
   const hideContent = showLock && !isOwner;
+  const editor = !hideContent && it.lastEditor?.userId !== it.authorId ? it.lastEditor : null;
   const ownerLock = showLock && isOwner && <Lock size={OWNER_LOCK_SIZE_PX} className="rb-sticky__lock" />;
   const visibleText = stickyTextForDom(it, hideContent);
   const w = it.w || STICKY_W;
@@ -99,6 +113,7 @@ export const StickyCard = React.memo(function StickyCard({
   }, [commentPreviews, hideContent, overview]);
   if (overview) {
     const preview = visibleText.slice(0, CARD_OVERVIEW_TEXT_MAX_LENGTH);
+    const showVote = showVoteCount && (voteCount > 0 || votingAllowedNow);
     return (
       <div
         className="rb-card-overview rb-card-overview--shadow-flat"
@@ -126,15 +141,20 @@ export const StickyCard = React.memo(function StickyCard({
         >
           {preview}
         </div>
-        {showVoteCount && (voteCount > 0 || votingAllowedNow) && (
-          <button
-            type="button"
-            onMouseDown={e => e.stopPropagation()}
-            onClick={e => { e.stopPropagation(); onToggleVote(it); }}
-            disabled={!votingAllowedNow && !voted}
-            aria-label={voted ? t('vote.tooltip.unvote') : t('vote.tooltip.vote')}
-            className={stickyVoteClassName('rb-card-overview__vote', voted, votingAllowedNow)}
-          >{voteCount}</button>
+        {(editor || showVote) && (
+          <div className="rb-card-overview__footer">
+            {editor && <StickyAttribution authorName={it.authorName} editor={editor} />}
+            {showVote && (
+              <button
+                type="button"
+                onMouseDown={e => e.stopPropagation()}
+                onClick={e => { e.stopPropagation(); onToggleVote(it); }}
+                disabled={!votingAllowedNow && !voted}
+                aria-label={voted ? t('vote.tooltip.unvote') : t('vote.tooltip.vote')}
+                className={stickyVoteClassName('rb-card-overview__vote', voted, votingAllowedNow)}
+              >{voteCount}</button>
+            )}
+          </div>
         )}
       </div>
     );
@@ -286,9 +306,7 @@ export const StickyCard = React.memo(function StickyCard({
       )}
 
       <div className="rb-sticky__footer">
-        <span className="rb-sticky__author">
-          {it.authorName || 'Anon'}
-        </span>
+        <StickyAttribution authorName={it.authorName} editor={editor} />
         <div className="rb-sticky__vote-wrap">
           <button
             type="button"

@@ -26,6 +26,7 @@ import { isValidFontColor, isValidFontSize, isValidZIndex } from './item-appeara
 import { isBoardTitle } from './board-title.js';
 import { normalizeActionFields } from './action-item.js';
 import { MOOD_MAX_ANSWERS, isMoodCheckState, isMoodScore } from './mood-check.js';
+import { isStickyLastEditor } from './sticky-editor.js';
 
 // Portable JSON backups include raster bytes expanded by base64. This file
 // budget is separate from the small Yjs transaction after image uploads.
@@ -242,6 +243,10 @@ const normalizeBoardItem = (item, index, importedAt, zLimit) => {
     if (item[field] != null) normalized[field] = item[field];
   });
   if (hasOwn(item, 'parentZoneId')) normalized.parentZoneId = item.parentZoneId;
+  if (hasOwn(item, 'lastEditor')) {
+    if (!isStickyLastEditor(normalized, item.lastEditor)) fail(`item ${item.id} has an invalid lastEditor`);
+    normalized.lastEditor = { userId: item.lastEditor.userId, name: item.lastEditor.name };
+  }
 
   Object.assign(normalized, normalizeItemAppearance(item, zLimit));
   if (item.type === 'sticky' || item.type === 'text') {

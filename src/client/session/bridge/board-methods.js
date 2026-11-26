@@ -1,5 +1,6 @@
 import { boardItemWriteError, boardItemsWriteError, META_INTERNAL_PREFIX, originOf } from './snapshot-doc.js';
 import { geometryErrorForItem, geometryErrorForPatch } from '../../../domain/board-geometry.js';
+import { stickyTextEditPatch } from '../../../domain/sticky-editor.js';
 
 export function createBoardMethods({ ydoc, yItems, yMeta, snapshot, publicPermit }) {
   const { permitPublicCreations, consumePublicCreationFailure } = publicPermit;
@@ -32,7 +33,8 @@ export function createBoardMethods({ ydoc, yItems, yMeta, snapshot, publicPermit
       if (!current
         || ('type' in patch && patch.type !== current.type)
         || geometryErrorForPatch(current, patch)) return false;
-      ydoc.transact(() => { patchProtectedItems([{ id, patch }]); }, originOf(opts));
+      const editPatch = stickyTextEditPatch(current, patch, opts?.editor);
+      ydoc.transact(() => { patchProtectedItems([{ id, patch: editPatch }]); }, originOf(opts));
       return true;
     },
     updateItems(entries, opts) {

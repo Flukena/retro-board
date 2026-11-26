@@ -219,6 +219,8 @@ export const board11 = {
   "sticky.placeholder": "Clique duas vezes para editar",
   "sticky.hidden": "Oculto",
   "sticky.hiddenBy": "por {name}",
+  "sticky.createdBy": "{name} · Criação",
+  "sticky.lastEditedBy": "{name} · Última edição",
   "sticky.hideContent": "Desbloqueie primeiro para votar",
   "sticky.privacyToggle.on": "Ligado: mostrar o conteúdo na interface normal",
   "sticky.privacyToggle.off": "Desligado: ocultar na interface normal (não criptografado)",
