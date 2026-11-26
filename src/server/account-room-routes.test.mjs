@@ -417,3 +417,49 @@ test('deleting the account orphans every room it owned; they stay kept and leave
   }
   assert.equal(roomCodeOf(board.docName), board.code);
 });
+
+const SAVED = '/api/account/saved-boards';
+const inviteOf = ({ code, token }) => ({ code, token });
+const savedRooms = async (ctx, cookie) => (await (await get(ctx, SAVED, { cookie })).json()).rooms;
+const bookmark = (ctx, action, room, cookie, options) => post(ctx, SAVED + '/' + action, inviteOf(room), { cookie, ...options });
+
+test('bookmarks belong to the signed-in account across sessions, never to its owned rooms', async t => {
+  const ctx = await startRoutes(t);
+  const owner = await ctx.signIn(OWNER_PROFILE);
+  const member = await ctx.signIn(OTHER_PROFILE);
+  const room = await ctx.createRoom(ownedBoard(owner.account));
+  ctx.ports.titles.set(room.docName, TITLE);
+  assert.equal((await get(ctx, SAVED)).status, STATUS.UNAUTHORIZED);
+  assert.equal((await bookmark(ctx, 'save', room, member.cookie, { origin: OTHER_ORIGIN })).status, STATUS.FORBIDDEN);
+  assert.equal((await bookmark(ctx, 'save', { ...room, token: 'wrongtoken' }, member.cookie)).status, STATUS.NOT_FOUND);
+  assert.deepEqual(await savedRooms(ctx, member.cookie), []);
+  assert.deepEqual(await (await bookmark(ctx, 'status', room, member.cookie)).json(), { saved: false });
+  for (const action of ['save', 'save', 'status']) {
+    assert.deepEqual(await (await bookmark(ctx, action, room, member.cookie)).json(), { saved: true });
+  }
+  const second = await ctx.signIn(OTHER_PROFILE);
+  const listed = await savedRooms(ctx, second.cookie);
+  assert.deepEqual(listed.map(({ title, link }) => ({ title, link })), [{ title: TITLE, link: '/b/' + room.code + '#' + room.token }]);
+  assert.deepEqual(await savedRooms(ctx, owner.cookie), []);
+  assert.deepEqual((await (await get(ctx, ROOMS, { cookie: member.cookie })).json()).rooms, []);
+  assert.equal((await remove(ctx, room.code, member.cookie)).status, STATUS.NOT_FOUND);
+  assert.deepEqual(await (await bookmark(ctx, 'remove', room, second.cookie)).json(), { saved: false });
+  assert.deepEqual(await savedRooms(ctx, member.cookie), []);
+});
+
+test('a saved locked room returns only its ordinary invite and no content, and disappears after deletion', async t => {
+  const ctx = await startRoutes(t);
+  const owner = await ctx.signIn(OWNER_PROFILE), member = await ctx.signIn(OTHER_PROFILE);
+  const room = await ctx.createRoom({ lock: lockRecord({ ownerAccountId: owner.account.id }) });
+  assert.equal((await bookmark(ctx, 'save', room, member.cookie)).status, STATUS.OK);
+  const [entry] = await savedRooms(ctx, member.cookie);
+  assert.equal(entry.link, '/b/' + room.code + '#' + room.token);
+  assert.equal(entry.locked, true);
+  assert.equal(entry.title, null);
+  assert.equal(entry.preview, null);
+  assert.deepEqual(ctx.ports.reads, []);
+  const account = await ctx.store.get(member.account.id);
+  assert.deepEqual(account.savedBoardHandles, [ctx.registry.roomHandleForDoc(room.docName)]);
+  ctx.registry.unpublish(room.docName);
+  assert.deepEqual(await savedRooms(ctx, member.cookie), []);
+});

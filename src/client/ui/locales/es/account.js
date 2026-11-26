@@ -41,6 +41,12 @@ export const account = {
 
 export const account2 = {
   "workspace.title": "Mis tableros",
+  "savedBoards.title": "Tableros guardados",
+  "savedBoards.empty": "Marca un tablero compartido con una estrella para abrirlo aquí desde cualquier dispositivo.",
+  "savedBoards.save": "Guardar tablero",
+  "savedBoards.remove": "Quitar de los tableros guardados",
+  "savedBoards.removeNamed": "Quitar {name} de los tableros guardados",
+  "savedBoards.limit": "Tu lista está llena. Quita un tablero para guardar otro.",
   "workspace.intro": "Tableros que creaste con la sesión iniciada. Ábrelos, cámbiales el nombre o elimínalos aquí.",
   "workspace.search": "Buscar por nombre o código",
   "workspace.sort": "Ordenar",

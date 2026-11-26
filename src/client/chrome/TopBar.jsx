@@ -11,6 +11,7 @@ import { BUTTON_VARIANT, DIVIDER_ORIENTATION, topBarButtonVariant } from '../ui/
 import { TOPBAR_BOTTOM_PX, TOPBAR_H_PX, TOPBAR_INSET_PX, TOPBAR_ICON_SIZE_PX, Z } from './chrome-layout.js';
 import { t } from '../ui/i18n.js';
 import { LanguagePicker } from '../ui/LanguagePicker.jsx';
+import { SaveBoardButton } from '../account/SaveBoardButton.jsx';
 import { boardManagementPermissions } from '../../domain/public-board-permissions.js';
 import { PhaseZoneDialog } from '../board/PhaseZoneDialog.jsx';
 import './topbar.css';
@@ -26,6 +27,7 @@ export function TopBarButton({ title, onClick, active, enabled, icon, label, dis
       variant={topBarButtonVariant({ active })}
       disabledLook={!enabled}
       onClick={onClick}
+      aria-label={label || undefined}
       title={enabled ? title : (disabledHint || `${title} (${t('common.adminOnly')})`)}
     >
       {icon}
@@ -77,7 +79,7 @@ function PresenceButton({ players, onClick }) {
 }
 
 export function TopBar({
-  mode = BOARD_MODE.PRIVATE, code, title = null, canUndo, canRedo, editingLocked, isAdmin, admin, canClaim, players,
+  mode = BOARD_MODE.PRIVATE, code, boardToken, onNotice, title = null, canUndo, canRedo, editingLocked, isAdmin, admin, canClaim, players,
   userId, userName, themePref, exports = {}, presenter = null, phase = null, mood = null, scrollWheelZoomEnabled,
   onHome, onCopyLink, onUndo, onRedo, onToggleEditingLock, onClaimAdmin,
   onEditName, onToggleTheme, onToggleScrollWheelZoom,
@@ -122,6 +124,7 @@ export function TopBar({
           </button>
         )}
         {title && <span className="rb-topbar-title" title={title}>{title}</span>}
+        {mode === BOARD_MODE.PRIVATE && code && boardToken && <SaveBoardButton code={code} token={boardToken} onNotice={onNotice} />}
         <div className="rb-topbar-spacer" />
         <div className="rb-topbar-controls">
           <TopBarButton

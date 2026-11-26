@@ -75,10 +75,27 @@
     overflow-x: auto;
     overscroll-behavior-x: contain;
     scrollbar-width: thin;
+    scroll-padding-inline-end: var(--rb-mobile-gap-px);
+    padding-inline-end: var(--rb-mobile-gap-px);
+  }
+
+  /* Let the scrolling row peek into the clear edge of the pinned More target. */
+  .rb-topbar .rb-topbar-menu {
+    margin-inline-start: calc(-2 * var(--rb-mobile-gap-px));
   }
 
   .rb-topbar .rb-topbar-brand > span:last-child,
   .rb-topbar .rb-topbar-spacer {
+    display: none;
+  }
+
+  .rb-topbar .rb-topbar-menu > .rb-btn {
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
+  }
+
+  .rb-topbar-controls .rb-btn > span {
     display: none;
   }
 
@@ -223,6 +240,8 @@
   .rb-selection-toolbar.rb-selection-toolbar {
     left: var(--rb-mobile-canvas-left-px);
     right: var(--rb-mobile-right-px);
+    width: max-content;
+    max-width: calc(100% - var(--rb-mobile-canvas-left-px) - var(--rb-mobile-right-px));
     top: auto;
     bottom: var(--rb-mobile-selection-bottom-px);
     translate: none;

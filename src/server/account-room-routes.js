@@ -7,6 +7,7 @@ import { takeTrafficTokens, trafficBucketFor } from './relay-rate-bucket.js';
 import { roomCodeOf, roomLink } from './room-links.js';
 import { orphanAccountRooms } from './room-orphaning.js';
 import { TITLE_WRITE_STATUS } from './room-title-writer.js';
+import { SAVED_BOARD_LIMIT } from './saved-boards.js';
 
 // The signed-in creator's own rooms: list, rename, delete. auth-routes dispatches these paths with the account
 // preflight, Origin policy, cookie check and no-store headers; this module decides what each request may do.
@@ -21,6 +22,9 @@ const ACTION_LIMITS = Object.freeze({
 });
 const ACTION_TOKEN_BYTES = 0;
 const ROOMS_PATH = '/api/account/rooms';
+const SAVED_BOARDS_PATH = '/api/account/saved-boards';
+const BOOKMARK_ACTIONS = new Map(['status', 'save', 'remove'].map(action => [`${SAVED_BOARDS_PATH}/${action}`, action]));
+const INVITE_KEYS = ['code', 'token'];
 const ROOM_ACTION_RE = /^\/api\/account\/rooms\/([^/]+)\/(title|delete)$/;
 const ACTION = Object.freeze({ TITLE: 'title', DELETE: 'delete' });
 const METHOD = Object.freeze({ GET: 'GET', POST: 'POST' });
@@ -71,19 +75,22 @@ export function createAccountRoomRoutes({
     };
   }
 
-  async function list(_req, res, { account, unauthorized }) {
+  const ownedDocs = account => registry.roomsOwnedBy(account.id);
+  const savedDocs = account => (account.savedBoardHandles ?? []).map(handle => registry.registeredRoomsByHandle.get(handle)).filter(Boolean);
+
+  const list = docsOf => async (_req, res, { account, unauthorized }) => {
     if (!takeToken(account.id)) { tooManyRequests(res); return; }
     if (!(await stillSignedIn(account))) { unauthorized(); return; }
     let rooms;
     try {
-      rooms = await Promise.all(registry.roomsOwnedBy(account.id).map(entryOf));
+      rooms = await Promise.all(docsOf(account).map(entryOf));
     } catch (error) {
       // Latched like any storage failure; the dispatcher answers 503.
       if (error.code === STORAGE_FAILURE_CODE) onStorageFailure(error);
       throw error;
     }
     sendJson(res, HTTP.OK, { rooms: rooms.filter(Boolean).sort(newestFirst) });
-  }
+  };
 
   // The parsed request, or null once the refusal has been sent.
   async function readRequest(req, res, parse) {
@@ -129,10 +136,37 @@ export function createAccountRoomRoutes({
     await act(res, docName, request);
   };
 
+  const validInvite = body => hasOnlyKeys(body, INVITE_KEYS)
+    && typeof body.code === 'string' && typeof body.token === 'string' ? body : null;
+  const bookmark = action => async (req, res, { account, unauthorized }) => {
+    if (!takeToken(account.id)) { tooManyRequests(res); return; }
+    const invite = await readRequest(req, res, validInvite);
+    if (!invite) return;
+    if (!(await stillSignedIn(account))) { unauthorized(); return; }
+    const doc = registry.registeredDocForCapability(invite.code, invite.token);
+    if (!doc || registry.ownershipOf(doc)?.kind !== ROOM_KIND.BOARD) { notFound(res); return; }
+    const handle = registry.roomHandleForDoc(doc);
+    const handles = account.savedBoardHandles ?? [];
+    if (action === 'status') { sendJson(res, HTTP.OK, { saved: handles.includes(handle) }); return; }
+    const staleHandles = new Set(handles.filter(item => !registry.registeredRoomsByHandle.has(item)));
+    let saved;
+    try {
+      saved = await store.setBoardSaved(account.id, account.sessionGeneration, { handle, saved: action === 'save', staleHandles });
+    } catch (error) {
+      if (error.code !== SAVED_BOARD_LIMIT) throw error;
+      sendJson(res, HTTP.CONFLICT, { error: SAVED_BOARD_LIMIT });
+      return;
+    }
+    if (saved === null) unauthorized();
+    else sendJson(res, HTTP.OK, { saved });
+  };
+
   return {
     /** The route of an account-rooms path, or null for any other path. */
     routeFor(routePath) {
-      if (routePath === ROOMS_PATH) return { method: METHOD.GET, run: list };
+      if (routePath === ROOMS_PATH) return { method: METHOD.GET, run: list(ownedDocs) };
+      if (routePath === SAVED_BOARDS_PATH) return { method: METHOD.GET, run: list(savedDocs) };
+      if (BOOKMARK_ACTIONS.has(routePath)) return { method: METHOD.POST, run: bookmark(BOOKMARK_ACTIONS.get(routePath)) };
       const match = ROOM_ACTION_RE.exec(routePath);
       if (!match) return null;
       const [, code, action] = match;

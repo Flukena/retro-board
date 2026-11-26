@@ -41,6 +41,12 @@ export const account = {
 
 export const account2 = {
   "workspace.title": "マイボード",
+  "savedBoards.title": "保存したボード",
+  "savedBoards.empty": "共有ボードに星を付けると、どの端末からもここで開けます。",
+  "savedBoards.save": "ボードを保存",
+  "savedBoards.remove": "保存したボードから削除",
+  "savedBoards.removeNamed": "保存したボードから「{name}」を削除",
+  "savedBoards.limit": "保存件数の上限です。別のボードを保存するには、先に1件外してください。",
   "workspace.intro": "ログイン中に作成したボードです。ここから開く、名前を変更、削除ができます。",
   "workspace.search": "名前またはコードで検索",
   "workspace.sort": "並べ替え",

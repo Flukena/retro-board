@@ -9,6 +9,7 @@ import SiteMasthead from '../app/SiteMasthead.jsx';
 import CreateBoardError from '../app/CreateBoardError.jsx';
 import { useCreateBoard } from '../app/use-create-board.js';
 import { signInHref } from '../account/account-api.js';
+import SavedBoards from './SavedBoards.jsx';
 import { MY_BOARDS_ERROR, MY_BOARDS_STATUS, createMyBoardsController } from '../account/my-boards-controller.js';
 import { AGILE_GUIDE_PATH, PLANNING_POKER_PATH } from '../seo/seo-pages.js';
 import { STARTER_FORMAT, starterTemplate } from '../templates/starter-formats.js';
@@ -138,6 +139,7 @@ export function WorkspaceView({
   onAskRename, onAskDelete, menuCode, onToggleMenu,
 }) {
   const hasRooms = state.status === MY_BOARDS_STATUS.READY && state.rooms.length > 0;
+  const saved = canCreate && state.status !== MY_BOARDS_STATUS.LOADING && <SavedBoards now={now} query={query} sort={sort} />;
   return (
     <main className="rb-workspace__main" aria-labelledby={TITLE_ID}>
       <div className="rb-workspace__head">
@@ -149,9 +151,11 @@ export function WorkspaceView({
         </div>
         {hasRooms && <Toolbar query={query} sort={sort} onQuery={onQuery} onSort={onSort} />}
       </div>
+      {!hasRooms && saved}
       <WorkspaceBody state={state} signInUrl={signInUrl} onRetry={onRetry} canCreate={canCreate} creating={creating}
         createError={createError} onCreateFirst={onCreateFirst} query={query} sort={sort} now={now} menuCode={menuCode}
         onToggleMenu={onToggleMenu} onAskRename={onAskRename} onAskDelete={onAskDelete} />
+      {hasRooms && saved}
     </main>
   );
 }

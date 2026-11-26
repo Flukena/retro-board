@@ -41,6 +41,12 @@ export const account = {
 
 export const account2 = {
   "workspace.title": "Papan saya",
+  "savedBoards.title": "Papan tersimpan",
+  "savedBoards.empty": "Beri bintang pada papan yang dibagikan agar bisa dibuka di sini dari perangkat mana pun.",
+  "savedBoards.save": "Simpan papan",
+  "savedBoards.remove": "Hapus dari papan tersimpan",
+  "savedBoards.removeNamed": "Hapus {name} dari papan tersimpan",
+  "savedBoards.limit": "Daftar sudah penuh. Hapus satu papan dari daftar untuk menyimpan papan lain.",
   "workspace.intro": "Papan yang Anda buat saat masuk. Buka, ganti nama, atau hapus di sini.",
   "workspace.search": "Cari berdasarkan nama atau kode",
   "workspace.sort": "Urutkan",

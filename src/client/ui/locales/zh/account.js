@@ -41,6 +41,12 @@ export const account = {
 
 export const account2 = {
   "workspace.title": "我的白板",
+  "savedBoards.title": "已收藏的白板",
+  "savedBoards.empty": "为共享白板加星标，即可在任何设备上从这里打开。",
+  "savedBoards.save": "收藏白板",
+  "savedBoards.remove": "取消收藏",
+  "savedBoards.removeNamed": "取消收藏 {name}",
+  "savedBoards.limit": "收藏列表已满。请移除一个白板后再收藏。",
   "workspace.intro": "你登录时创建的白板，可在这里打开、重命名或删除。",
   "workspace.search": "按名称或代码搜索",
   "workspace.sort": "排序",

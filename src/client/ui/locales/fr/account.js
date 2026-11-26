@@ -41,6 +41,12 @@ export const account = {
 
 export const account2 = {
   "workspace.title": "Mes tableaux",
+  "savedBoards.title": "Tableaux enregistrés",
+  "savedBoards.empty": "Ajoutez une étoile à un tableau partagé pour le retrouver ici sur tous vos appareils.",
+  "savedBoards.save": "Enregistrer le tableau",
+  "savedBoards.remove": "Retirer des tableaux enregistrés",
+  "savedBoards.removeNamed": "Retirer {name} des tableaux enregistrés",
+  "savedBoards.limit": "Votre liste est pleine. Retirez un tableau pour en enregistrer un autre.",
   "workspace.intro": "Les tableaux que vous avez créés en étant connecté. Ouvrez-les, renommez-les ou supprimez-les ici.",
   "workspace.search": "Rechercher par nom ou code",
   "workspace.sort": "Trier",

@@ -3,6 +3,7 @@ import {
 } from '../src/server/account-store.js';
 import { isAccountId, isSessionGeneration } from '../src/domain/account-identity.js';
 import { isKnownPlan } from '../src/domain/plan-entitlements.js';
+import { validSavedBoardHandles } from '../src/server/saved-boards.js';
 
 // Messages are fixed strings: account keys can carry email addresses.
 const INVALID_RECORD = 'account record is invalid';
@@ -35,6 +36,7 @@ function isValidAccount(id, account) {
     && isKnownPlan(account.plan)
     && (account.planGrantedAt === null || isFiniteNumber(account.planGrantedAt))
     && isSessionGeneration(account.sessionGeneration)
+    && (!Object.hasOwn(account, 'savedBoardHandles') || validSavedBoardHandles(account.savedBoardHandles))
     && isFiniteNumber(account.createdAt);
 }
 

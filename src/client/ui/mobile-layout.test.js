@@ -37,6 +37,7 @@ test('mobile chrome reserves a left rail and separate zoom/minimap lanes with sa
 test('mobile header keeps every control reachable and template picker is a bounded bottom sheet', () => {
   const css = readSource('./mobile-layout.css');
   assert.match(css, /\.rb-topbar-scroll\s*\{[^}]*overflow-x:\s*auto/);
+  assert.match(mediaBlocks(css, MOBILE_LAYOUT_QUERY), /\.rb-topbar-menu > \.rb-btn\s*\{[^}]*background:\s*transparent/);
   assert.match(css, /\.rb-template-popover\.rb-template-popover[\s\S]*?position:\s*fixed/);
   assert.match(css, /max-height:\s*65dvh/);
   assert.match(css, /overscroll-behavior:\s*contain/);
@@ -71,6 +72,7 @@ test('mobile selection toolbar stays inside the viewport and keeps all actions s
   assert.match(css, /\.rb-selection-toolbar\.rb-selection-toolbar\s*\{[^}]*right:\s*var\(--rb-mobile-right-px\)/);
   assert.match(css, /\.rb-selection-toolbar\.rb-selection-toolbar\s*\{[^}]*top:\s*auto/);
   assert.match(css, /\.rb-selection-toolbar\.rb-selection-toolbar\s*\{[^}]*overflow-x:\s*auto/);
+  assert.match(mediaBlocks(css, MOBILE_LAYOUT_QUERY), /\.rb-selection-toolbar\.rb-selection-toolbar\s*\{[^}]*width:\s*max-content;[^}]*max-width:\s*calc\(/);
   assert.match(css, /\.rb-selection-toolbar button\s*\{[^}]*min-height:\s*var\(--rb-mobile-touch-target-px\)/);
   assert.match(css, /\.rb-selection-toolbar > \*\s*\{[^}]*flex-shrink:\s*0/);
   assert.match(css, /:root:has\(\.rb-selection-toolbar\)/);

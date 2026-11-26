@@ -76,6 +76,9 @@
   margin-bottom: var(--space-5);
 }
 .rb-workspace__heading { flex: 1 1 var(--workspace-heading-basis); min-width: 0; }
+.rb-workspace__saved { margin-block: var(--space-6); }
+.rb-workspace__saved > h2 { font-family: var(--font-display); margin-block: 0 var(--space-3); }
+.rb-workspace__saved > p { color: var(--text-mid); }
 .rb-workspace__title {
   margin: 0;
   font-family: var(--font-display);

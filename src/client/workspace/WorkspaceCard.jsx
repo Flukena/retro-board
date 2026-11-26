@@ -93,7 +93,7 @@ function CardMenu({ room, name, busy, onAskRename, onAskDelete }) {
 }
 
 /** One room in the workspace grid: the whole card opens the room; the ⋯ menu holds the other actions. */
-export default function WorkspaceCard({ room, now, busy, menuOpen, onToggleMenu, onAskRename, onAskDelete }) {
+export default function WorkspaceCard({ room, now, busy, menuOpen, onToggleMenu, onAskRename, onAskDelete, savedAction }) {
   const actionsRef = useRef(null);
   const triggerRef = useRef(null);
   // Closing the menu unmounts the focused item, so focus moves to the ⋯ trigger first. A dialog opened
@@ -125,11 +125,11 @@ export default function WorkspaceCard({ room, now, busy, menuOpen, onToggleMenu,
         </div>
       </a>
       <div className="rb-workspace-card__actions" ref={actionsRef}>
-        <button type="button" ref={triggerRef} className="rb-workspace-card__more" aria-haspopup="menu"
+        {savedAction ?? <button type="button" ref={triggerRef} className="rb-workspace-card__more" aria-haspopup="menu"
           aria-expanded={menuOpen} aria-label={t('workspace.card.options', { title: name })}
           onClick={() => onToggleMenu(room.code)}>
           <MoreHorizontal size={MORE_ICON_SIZE_PX} aria-hidden="true" />
-        </button>
+        </button>}
         {menuOpen && <CardMenu room={room} name={name} busy={busy} onAskRename={askRename} onAskDelete={askDelete} />}
       </div>
     </li>

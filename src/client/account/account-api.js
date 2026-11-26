@@ -90,10 +90,21 @@ const isRoomEntry = (room) => Boolean(room) && typeof room === 'object' && typeo
 const roomPath = (code, action) => `${ROOMS_PATH}/${encodeURIComponent(code)}/${action}`;
 
 /** The signed-in creator's rooms, newest first, as the relay sent them. */
-export async function listRooms(options) {
-  const { rooms } = await (await accountRequest(ROOMS_PATH, METHOD.GET, undefined, options)).json();
-  if (!Array.isArray(rooms)) throw new AccountRequestError(ROOMS_PATH, HTTP_OK, null);
+async function listRoomEntries(path, options) {
+  const { rooms } = await (await accountRequest(path, METHOD.GET, undefined, options)).json();
+  if (!Array.isArray(rooms)) throw new AccountRequestError(path, HTTP_OK, null);
   return rooms.filter(isRoomEntry);
+}
+
+export const listRooms = options => listRoomEntries(ROOMS_PATH, options);
+const SAVED_BOARDS_PATH = 'saved-boards';
+export const listSavedBoards = options => listRoomEntries(SAVED_BOARDS_PATH, options);
+
+export async function boardBookmark(action, code, token, options) {
+  const path = `${SAVED_BOARDS_PATH}/${action}`;
+  const result = await (await accountRequest(path, METHOD.POST, { code, token }, options)).json();
+  if (typeof result.saved !== 'boolean') throw new AccountRequestError(path, HTTP_OK, null);
+  return result.saved;
 }
 
 /** Resolves to the stored title. */

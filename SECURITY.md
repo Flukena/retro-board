@@ -201,6 +201,11 @@ is non-empty and the relay is not the Public Wall relay.
   Two Google identities may share an email, so `email:` lists every account
   id that holds it and maintainer lookup shows them all.
   A storage failure takes the relay down through the same path as rooms.
+- **Saved boards.** An account may bookmark up to 100 boards. Saving requires the
+  invite code and token. The account record stores only opaque room handles in
+  `savedBoardHandles`. Deleted or expired boards drop out of the list. A
+  bookmark confers ordinary invite access and uses the room's existing retention
+  and password rules. Passwords and decryption keys stay off the account record.
 - **Single-use flows.** `start` sets a signed `rb_oauth_flow` cookie
   (`HttpOnly; SameSite=Lax; Max-Age=600`, `Path` limited to the auth routes,
   host-only) holding `state`, `nonce`, the PKCE verifier and the validated
@@ -226,11 +231,11 @@ is non-empty and the relay is not the Public Wall relay.
 - **Logs.** Callback failures are counted by error code in the periodic
   rejection summary. Tokens, codes, cookies, query strings, emails and names
   are never logged.
-- **Accounts and room access.** Room access is still the link and its session
-  cookie, with one exception: signing in grants access to the rooms the account
-  owns. "My boards" (`GET /api/account/rooms`) hands out working links, so
-  anyone who takes over the Google account or its `rb_account` cookie can open
-  every normal room that account owns. Locked rooms still need their password.
+- **Accounts and room access.** "My boards" (`GET /api/account/rooms`) and
+  "Saved boards" (`GET /api/account/saved-boards`) return working invite links.
+  Anyone who takes over the Google account or its `rb_account` cookie can open
+  every normal room that account owns or has bookmarked. Locked rooms still
+  require the decryption key derived from their password.
   The list also carries a geometry-only zone preview (rectangles and colour
   indexes, no text) for plain boards, and none for locked rooms.
   The plan only gates account features (today: both plans may create locked

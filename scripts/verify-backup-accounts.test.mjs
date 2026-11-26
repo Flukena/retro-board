@@ -47,6 +47,17 @@ test('a pre-accounts backup still verifies', async (t) => {
   assert.deepEqual(await verifyBackupAccounts(ldb), { accounts: 0 });
 });
 
+test('backups allow saved handles and reject full invite links in the account record', async t => {
+  const { ldb, store } = await openFixture(t);
+  const { ada } = await seedAccounts(store);
+  await store.setBoardSaved(ada.id, ada.sessionGeneration, { handle: 'a'.repeat(32), saved: true, staleHandles: new Set() });
+  assert.deepEqual(await verifyBackupAccounts(ldb), { accounts: 2 });
+  await durableMetaBatch(ldb, ACCOUNTS_DOC_NAME, [
+    { type: 'put', key: `acct:${ada.id}`, value: { ...ada, savedBoardHandles: ['/b/shared#invitation'] } },
+  ]);
+  await assert.rejects(verifyBackupAccounts(ldb), /account record is invalid/);
+});
+
 test('a dangling email index fails', async (t) => {
   const { ldb, store } = await openFixture(t);
   const { ada } = await seedAccounts(store);

@@ -41,6 +41,12 @@ export const account = {
 
 export const account2 = {
   "workspace.title": "Bảng của tôi",
+  "savedBoards.title": "Bảng đã lưu",
+  "savedBoards.empty": "Gắn sao cho bảng được chia sẻ để mở lại tại đây trên mọi thiết bị.",
+  "savedBoards.save": "Lưu bảng",
+  "savedBoards.remove": "Bỏ lưu bảng",
+  "savedBoards.removeNamed": "Bỏ lưu bảng {name}",
+  "savedBoards.limit": "Danh sách đã đầy. Hãy bỏ lưu một bảng để lưu bảng khác.",
   "workspace.intro": "Các bảng bạn đã tạo khi đăng nhập. Mở, đổi tên hoặc xóa chúng tại đây.",
   "workspace.search": "Tìm theo tên hoặc mã",
   "workspace.sort": "Sắp xếp",

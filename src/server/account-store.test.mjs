@@ -57,6 +57,18 @@ function failBatches(ldb) {
 
 const accountMetas = async (ldb) => [...(await ldb.getMetas(ACCOUNTS_DOC_NAME)).keys()].sort();
 
+test('saves from two devices survive restart and a revoked session cannot remove either board', async t => {
+  const { store, reopen } = await openStore(t);
+  const { id, sessionGeneration } = await store.upsertFromGoogle(PROFILE);
+  const handles = ['A'.repeat(32), 'B'.repeat(32)];
+  const staleHandles = new Set();
+  await Promise.all(handles.map(handle => store.setBoardSaved(id, sessionGeneration, { handle, saved: true, staleHandles })));
+  const restored = storeFor(await reopen());
+  await restored.bumpSessionGeneration(id);
+  assert.equal(await restored.setBoardSaved(id, sessionGeneration, { handle: handles[0], saved: false, staleHandles }), null);
+  assert.deepEqual((await restored.get(id)).savedBoardHandles, handles);
+});
+
 test('upsert creates one free account per sub and is idempotent', async (t) => {
   const ids = sequentialIds();
   const { store } = await openStore(t, { randomId: ids.randomId });

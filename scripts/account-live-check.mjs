@@ -22,10 +22,12 @@
  * Signed-in A's name dialog starts with the Google name; guest B's starts with a Guest-#### name.
  */
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { FAKE_GOOGLE_PROFILE } from './fake-google-oidc.mjs';
 import {
-  BASE_LABELS, FAKE_GOOGLE_DECISION, REDO_KEY, SYNC_TIMEOUT_MS, addSharedSticky, enter, openLanding, openWorkspace, participant,
-  runLiveCheck, shot, signInLink, step, undoUntilHidden, visitStub, waitForTextOn,
+  BASE_LABELS, FAKE_GOOGLE_DECISION, REDO_KEY, SYNC_TIMEOUT_MS, addSharedSticky, appLabel, createLockedBoard, enter,
+  openLanding, openWorkspace, participant, passwordScreen, runLiveCheck, shot, signInLink, step, undoUntilHidden,
+  unlockScreen, visitStub, waitForTextOn,
 } from './board-live-helpers.mjs';
 
 const BOARD_URL_PATTERN = /\/b\/[A-Za-z0-9_-]+#[A-Za-z0-9_-]+$/;
@@ -231,7 +233,61 @@ async function setupGuests(browser, baseUrl, report) {
   return { a, b };
 }
 
+const boardStar = (page, saved) => page.getByRole('button', {
+  name: appLabel('en', saved ? 'savedBoards.remove' : 'savedBoards.save'), exact: true, pressed: saved,
+});
+const savedSection = page => page.getByRole('region', { name: appLabel('en', 'savedBoards.title'), exact: true });
+function savedCard(page, href) {
+  const { pathname, hash } = new URL(href);
+  return savedSection(page).getByRole('listitem').filter({ has: page.locator(`a[href="${pathname}${hash}"]`) });
+}
+
+async function saveOpenBoard(page) {
+  await boardStar(page, false).click();
+  await boardStar(page, true).waitFor();
+}
+
+async function bookmarkSteps({ a, b, browser, baseUrl, report }) {
+  const sharedLink = b.url();
+  const password = randomUUID();
+  const other = await participant(browser, 'en', report, 'bookmark-device');
+  try {
+    await step(report, 'Save a guest-created board and a locked board', async () => {
+      assert.equal(await b.locator('.rb-board-bookmark').count(), 0);
+      await a.goto(sharedLink);
+      await saveOpenBoard(a);
+      await createLockedBoard(a, baseUrl, password);
+      await unlockScreen(a, 'en', password, NAME_A);
+      await saveOpenBoard(a);
+    });
+    const lockedLink = a.url();
+    await step(report, 'A fresh device on the same account opens a saved shared board and can unstar it', async () => {
+      await openLanding(other, baseUrl);
+      await visitStub(other, baseUrl, APPROVE_SELECTOR);
+      const shared = savedCard(other, sharedLink);
+      await shared.getByRole('link').click();
+      await enter(other, 'en', NAME_A);
+      await boardStar(other, true).waitFor();
+      await openWorkspace(other, baseUrl);
+      await shared.getByRole('button').click();
+      await shared.waitFor({ state: 'detached' });
+      await a.goto(sharedLink);
+      await boardStar(a, false).waitFor();
+    });
+    await step(report, 'Opening a saved locked board on the fresh device still requires its password', async () => {
+      await savedCard(other, lockedLink).getByRole('link').click();
+      await passwordScreen(other, 'en').waitFor();
+      assert.equal(await other.locator('.rb-board-bookmark').count(), 0);
+      await unlockScreen(other, 'en', password, NAME_A);
+      await boardStar(other, true).waitFor();
+    });
+  } finally {
+    await other.context().close();
+  }
+}
+
 await runLiveCheck('account-live-check.mjs', async (context) => {
   await accountSteps(context);
   await collaborationSteps(context);
+  await bookmarkSteps(context);
 }, { setup: setupGuests });

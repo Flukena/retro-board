@@ -2611,7 +2611,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
   };
   const buildTopBarProps = () => topBarProps({
     boardState: { board, undoState },
-    session: { mode, boardCode, isAdmin, canClaim, userId, userName },
+    session: { mode, boardCode, boardToken, isAdmin, canClaim, userId, userName },
     collaboration: { presence, onlineUsers, followedUserId, votesUsedByUser, activeZoneVoteLimit },
     appearance: { themePref, setThemePref, scrollWheelZoomEnabled, toggleScrollWheelZoom },
     workflow: { presenter, retroPhase, mood, boardExports, actionItems },

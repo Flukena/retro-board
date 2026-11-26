@@ -41,6 +41,12 @@ export const account = {
 
 export const account2 = {
   "workspace.title": "Meus quadros",
+  "savedBoards.title": "Quadros salvos",
+  "savedBoards.empty": "Marque um quadro compartilhado com uma estrela para abri-lo aqui em qualquer dispositivo.",
+  "savedBoards.save": "Salvar quadro",
+  "savedBoards.remove": "Remover dos quadros salvos",
+  "savedBoards.removeNamed": "Remover {name} dos quadros salvos",
+  "savedBoards.limit": "Sua lista está cheia. Remova um quadro para salvar outro.",
   "workspace.intro": "Quadros que você criou com login. Abra, renomeie ou exclua por aqui.",
   "workspace.search": "Buscar por nome ou código",
   "workspace.sort": "Ordenar",

@@ -41,6 +41,12 @@ export const account = {
 
 export const account2 = {
   "workspace.title": "내 보드",
+  "savedBoards.title": "저장한 보드",
+  "savedBoards.empty": "공유 보드에 별표를 표시하면 어느 기기에서나 여기서 열 수 있어요.",
+  "savedBoards.save": "보드 저장",
+  "savedBoards.remove": "저장한 보드에서 제거",
+  "savedBoards.removeNamed": "저장한 보드에서 {name} 제거",
+  "savedBoards.limit": "저장 목록이 가득 찼어요. 보드를 하나 제거한 뒤 다시 저장하세요.",
   "workspace.intro": "로그인한 상태에서 만든 보드입니다. 여기에서 열기, 이름 변경, 삭제를 할 수 있습니다.",
   "workspace.search": "이름 또는 코드로 검색",
   "workspace.sort": "정렬",

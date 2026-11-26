@@ -21,6 +21,8 @@ export function topBarProps({ boardState, session, collaboration, appearance, wo
   return {
     mode,
     code: boardCode,
+    boardToken: session.boardToken,
+    onNotice: setToast,
     title: board.title,
     canUndo: undoState.canUndo,
     canRedo: undoState.canRedo,

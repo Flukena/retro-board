@@ -41,6 +41,12 @@ export const account = {
 
 export const account2 = {
   "workspace.title": "Meine Boards",
+  "savedBoards.title": "Gespeicherte Boards",
+  "savedBoards.empty": "Markiere ein geteiltes Board mit einem Stern, um es hier auf jedem Gerät zu öffnen.",
+  "savedBoards.save": "Board speichern",
+  "savedBoards.remove": "Aus gespeicherten Boards entfernen",
+  "savedBoards.removeNamed": "{name} aus gespeicherten Boards entfernen",
+  "savedBoards.limit": "Deine Liste ist voll. Entferne ein Board, um ein weiteres zu speichern.",
   "workspace.intro": "Boards, die du angemeldet erstellt hast. Hier kannst du sie öffnen, umbenennen oder löschen.",
   "workspace.search": "Nach Name oder Code suchen",
   "workspace.sort": "Sortieren",

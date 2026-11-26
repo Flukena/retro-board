@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import { randomBytes } from 'node:crypto';
 import { PLAN, isKnownPlan } from '../domain/plan-entitlements.js';
 import { STORAGE_FAILURE_CODE, durableMetaBatch } from './relay-storage.js';
+import { updateSavedHandles } from './saved-boards.js';
 
 // Leading NUL keeps the accounts document out of every room/handle namespace.
 // Accounts are meta-only (no Yjs updates), so getAllDocNames never lists it.
@@ -118,6 +119,19 @@ export class AccountStore extends EventEmitter {
    * @returns {Promise<boolean>}
    */
   checkGeneration(id, generation) { return this.#enqueue(async () => Boolean(await this.#current(id, generation))); }
+
+  setBoardSaved(id, generation, change) {
+    return this.#enqueue(async () => {
+      const account = await this.#current(id, generation);
+      if (!account) return null;
+      const current = account.savedBoardHandles ?? [];
+      const next = updateSavedHandles(current, change);
+      if (next.length !== current.length || next.some((handle, index) => handle !== current[index])) {
+        await this.#write([put(accountKey(id), { ...account, savedBoardHandles: next })]);
+      }
+      return change.saved;
+    });
+  }
 
   /** @returns {Promise<boolean>} false when missing or, with `expectedGeneration`, stale */
   delete(id, { expectedGeneration } = {}) { return this.#enqueue(() => this.#delete(id, expectedGeneration)); }
