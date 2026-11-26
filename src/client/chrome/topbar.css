@@ -158,6 +158,13 @@
 }
 
 .rb-topbar-popover--more {
+  position: fixed;
+  top: var(--rb-topbar-bottom-px);
+  right: calc(var(--rb-topbar-inset-px) + var(--space-3));
+  bottom: max(var(--rb-topbar-inset-px), env(safe-area-inset-bottom, 0px));
+  max-height: max-content;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   min-width: 220px;
   padding: var(--space-2);
 }

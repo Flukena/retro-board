@@ -120,6 +120,12 @@
     top: calc(var(--rb-mobile-top-px) + var(--rb-mobile-header-clearance-px));
   }
 
+  .rb-topbar-popover--more.rb-topbar-popover {
+    --rb-more-reserved-height: calc(var(--rb-mobile-canvas-top-px) + var(--space-2) + var(--rb-mobile-bottom-px));
+    max-height: min(65vh, calc(100vh - var(--rb-more-reserved-height)));
+    max-height: min(65dvh, calc(100dvh - var(--rb-more-reserved-height)));
+  }
+
   .rb-zone, .rb-zone__tool-popup {
     --zone-tool-target-min: var(--rb-mobile-touch-target-px);
   }

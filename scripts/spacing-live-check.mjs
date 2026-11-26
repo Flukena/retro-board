@@ -21,6 +21,8 @@ const LANDING_MOBILE_CARD_PADDING_PX = 16;
 const TOLERANCE_PX = 1;
 const MAX_FINDINGS_IN_ERROR = 6;
 const TOUCH_TARGET_PX = 44;
+const SHORT_DESKTOP_HEIGHT_PX = 480;
+const SHORT_MOBILE_HEIGHT_PX = 180;
 const CASES = [
   { width: 360, height: 800, lang: 'th', mobile: true },
   { width: 390, height: 844, lang: 'en', mobile: true, publicRoom: true },
@@ -101,6 +103,32 @@ async function dismiss(user) {
 async function more(user, key) {
   await activate(user, user.page.getByTitle(word(user, 'topbar.more'), { exact: true }));
   await activate(user, user.page.locator('.rb-topbar-popover--more').getByRole('button', { name: word(user, key), exact: true }));
+}
+async function checkShortMoreMenu(user, trigger) {
+  const { page, width, height, mobile } = user;
+  const shortHeight = mobile ? SHORT_MOBILE_HEIGHT_PX : SHORT_DESKTOP_HEIGHT_PX;
+  const scene = `${width}x${shortHeight} ${user.lang} More menu`;
+  const menu = page.locator('.rb-topbar-popover--more');
+  await page.setViewportSize({ width, height: shortHeight });
+  try {
+    const triggerBox = await trigger.boundingBox();
+    const geometry = await menu.evaluate(node => {
+      const { top, bottom } = node.getBoundingClientRect();
+      return { top, bottom, viewportHeight: window.visualViewport.height };
+    });
+    finding(geometry.top >= triggerBox.y + triggerBox.height - TOLERANCE_PX, scene, 'menu must open below its trigger');
+    finding(geometry.bottom < geometry.viewportHeight, scene,
+      `menu bottom ${geometry.bottom}px exceeds the ${geometry.viewportHeight}px viewport`);
+    await menu.evaluate(node => { node.scrollTop = node.scrollHeight; });
+    const lastItemReachable = await menu.getByRole('button').last().evaluate(node => {
+      const { x, y, width, height } = node.getBoundingClientRect();
+      return node.contains(document.elementFromPoint(x + width / 2, y + height / 2));
+    });
+    finding(lastItemReachable, scene, 'last item must be reachable by scrolling');
+  } finally {
+    await page.setViewportSize({ width, height });
+    await menu.evaluate(node => { node.scrollTop = 0; });
+  }
 }
 async function checkNavbarScroll(user) {
   if (!user.mobile) return;
@@ -224,7 +252,9 @@ async function runCase(settings) {
     await capture(user, 'name');
     await dismiss(user);
     await checkNavbarScroll(user);
-    await activate(user, user.page.getByTitle(word(user, 'topbar.more'), { exact: true }));
+    const moreTrigger = user.page.getByTitle(word(user, 'topbar.more'), { exact: true });
+    await activate(user, moreTrigger);
+    await checkShortMoreMenu(user, moreTrigger);
     await capture(user, 'more');
     await activate(user, user.page.getByRole('button', { name: word(user, 'help.menuLabel'), exact: true }));
     await capture(user, 'help');

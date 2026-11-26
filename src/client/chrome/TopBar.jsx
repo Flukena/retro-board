@@ -8,7 +8,7 @@ import { Avatar } from '../ui/Avatar.jsx';
 import { MorePopover, PlayersPopover, TransferPopover } from './TopBarPopovers.jsx';
 import { Button, Divider } from '../ui/UiPrimitives.jsx';
 import { BUTTON_VARIANT, DIVIDER_ORIENTATION, topBarButtonVariant } from '../ui/ui-variants.js';
-import { TOPBAR_H_PX, TOPBAR_INSET_PX, TOPBAR_ICON_SIZE_PX, Z } from './chrome-layout.js';
+import { TOPBAR_BOTTOM_PX, TOPBAR_H_PX, TOPBAR_INSET_PX, TOPBAR_ICON_SIZE_PX, Z } from './chrome-layout.js';
 import { t } from '../ui/i18n.js';
 import { LanguagePicker } from '../ui/LanguagePicker.jsx';
 import { boardManagementPermissions } from '../../domain/public-board-permissions.js';
@@ -94,6 +94,7 @@ export function TopBar({
       className="rb-topbar"
       style={{
         '--rb-topbar-inset-px': `${TOPBAR_INSET_PX}px`,
+        '--rb-topbar-bottom-px': `${TOPBAR_BOTTOM_PX}px`,
         height: TOPBAR_H_PX, zIndex: Z.TOPBAR,
       }}
     >
