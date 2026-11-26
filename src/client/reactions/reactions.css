@@ -125,7 +125,7 @@
     width: var(--rb-mobile-rail-width-px);
   }
 
-  /* On a phone the open picker takes the rest of the bottom row, scrolling when narrower than six emoji; the zoom
+  /* On a phone the open picker takes the rest of the bottom row, scrolling when the emoji do not fit. The zoom
      controls and minimap step aside while it is open, as they do for the drawing toolbar. */
   .rb-reaction-picker {
     left: calc(100% + var(--rb-mobile-gap-px));

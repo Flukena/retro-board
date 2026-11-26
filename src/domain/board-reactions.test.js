@@ -6,8 +6,8 @@ import {
 
 const VALID = Object.freeze({ emoji: '👏', seq: 3 });
 
-test('the picker offers exactly the six approved reactions, fireworks first', () => {
-  assert.deepEqual([...BOARD_REACTIONS], ['🎆', '👏', '❤️', '😂', '🔥', '👍']);
+test('the picker offers the approved reactions, with fireworks first and axe last', () => {
+  assert.deepEqual([...BOARD_REACTIONS], ['🎆', '👏', '❤️', '😂', '🔥', '👍', '🪓']);
   assert.equal(FIREWORKS_REACTION, '🎆');
   assert.ok(Object.isFrozen(BOARD_REACTIONS));
   assert.notEqual(BOARD_REACTION_FIELD, 'reaction', 'Planning Poker already owns the `reaction` presence field');

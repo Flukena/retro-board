@@ -58,6 +58,7 @@ const CHROME_SELECTORS = Object.freeze([ZOOM_SELECTOR, '.rb-minimap', '.rb-tool-
 // The narrowest phone, where the open picker shows only part of the row and must be scrolled by touch.
 const TOUCH_SCROLL_VIEWPORT = LAYOUT_VIEWPORTS.find(({ name }) => name === 'phone-320');
 const LAST_REACTION = BOARD_REACTIONS.at(-1);
+const AXE_REACTION = '🪓';
 const stamp = Date.now();
 const STICKY_TEXT = `reaction-undo-${stamp}`;
 const password = `reactions-${randomBytes(9).toString('base64url')}`;
@@ -179,9 +180,9 @@ async function fireworksStep({ a, b, report }) {
 }
 
 async function floatStep({ a, b, report }) {
-  await step(report, `${mode}: B sends 👏 and A sees it float up with B's name`, async () => {
-    await react(b, 'th', '👏');
-    const float = a.locator(FLOAT_SELECTOR).filter({ hasText: NAME_B }).filter({ hasText: '👏' });
+  await step(report, `${mode}: B sends ${AXE_REACTION} and A sees it float up with B's name`, async () => {
+    await react(b, 'th', AXE_REACTION);
+    const float = a.locator(FLOAT_SELECTOR).filter({ hasText: NAME_B }).filter({ hasText: AXE_REACTION });
     await float.waitFor({ timeout: SYNC_TIMEOUT_MS });
     const shownAt = Date.now();
     await sleep(MID_SHOW_DELAY_MS);

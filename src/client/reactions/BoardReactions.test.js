@@ -34,7 +34,7 @@ test('the reaction button is a compact add-reaction icon with a translated label
   });
 });
 
-test('the menu offers the six reactions with translated labels and sends the clicked one', async () => {
+test('the menu offers the board reactions with translated labels and sends the clicked one', async () => {
   await withChromeModule('/src/client/reactions/ReactionPicker.jsx', ({ ReactionMenu, ReactionToggle }, { t, setLang }) => {
     for (const lang of LANGUAGES) {
       setLang(lang);

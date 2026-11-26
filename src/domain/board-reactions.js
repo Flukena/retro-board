@@ -2,7 +2,7 @@
 // board document, so nothing is stored and nothing reaches undo history. Peers' presence is untrusted: decode strictly.
 
 export const FIREWORKS_REACTION = '🎆';
-export const BOARD_REACTIONS = Object.freeze([FIREWORKS_REACTION, '👏', '❤️', '😂', '🔥', '👍']);
+export const BOARD_REACTIONS = Object.freeze([FIREWORKS_REACTION, '👏', '❤️', '😂', '🔥', '👍', '🪓']);
 // Planning Poker rooms use `reaction`; a distinct field keeps the two shapes apart.
 export const BOARD_REACTION_FIELD = 'boardReaction';
 // About one reaction per second per person (owner decision). Senders hold to it, and every page enforces a slightly

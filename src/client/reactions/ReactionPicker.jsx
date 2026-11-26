@@ -11,7 +11,7 @@ import './reactions.css';
 export const reactionLabel = (emoji) => (emoji === FIREWORKS_REACTION
   ? t('reaction.fireworks') : t('reaction.send', { emoji }));
 
-/** The six reactions. While `cooling`, clicks still reach `onSend`; the channel's rate limit drops them. */
+/** While `cooling`, clicks still reach `onSend`; the channel's rate limit drops them. */
 export function ReactionMenu({ cooling, onSend }) {
   return (
     <Surface className="rb-reaction-picker" role="group" aria-label={t('reaction.picker')} data-board-shortcuts="off">
