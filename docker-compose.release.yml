@@ -1,0 +1,16 @@
+# Production image pins. Apply after the host's maintainer override.
+services:
+  volume-init:
+    image: miro-release-volume-init:a2a5a31
+  yjs:
+    image: &relay miro-release-yjs:saved-fc770d9
+  yjs-public:
+    image: *relay
+  web:
+    image: &web miro-release-web:saved-fc770d9
+  maintainer-gateway:
+    image: *web
+  cloudflared:
+    image: &tunnel miro-release-cloudflared:security-37d5ecd
+  cloudflared-retroroom:
+    image: *tunnel

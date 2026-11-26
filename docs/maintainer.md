@@ -96,16 +96,24 @@ The deployed private configuration is
 this override when operating the stack:
 
 ```sh
-docker compose --env-file /dev/null -p miro \
+docker compose -p miro \
   -f docker-compose.prod.yml \
-  -f ~/.config/retro-board/maintainer/compose.yml up -d --no-build --wait
+  -f ~/.config/retro-board/maintainer/compose.yml \
+  -f docker-compose.release.yml up -d --no-build --pull never --wait
 ```
 
 Production deployment/recreation still requires owner approval and the release
-gate in `DEPLOYMENT.md`. The override pins the release images and the existing
-tunnel credential mount paths; omitting those paths can start a tunnel with
-missing default credential files. Never print the merged Compose configuration:
-it contains the owner key.
+gate in `DEPLOYMENT.md`. The host override supplies the maintainer settings and
+tunnel credential mounts. Compose reads Google sign-in settings from the
+project's production environment. Keep the merged configuration private.
+
+`docker-compose.release.yml` pins the local images for the release and pairs
+the maintainer gateway with the same patched image as the website. Before
+deploying on this host, scan those tags from the clean release checkout:
+
+```sh
+COMPOSE_PROJECT_NAME=miro COMPOSE_FILE=docker-compose.release.yml ./scripts/scan-production-images.sh
+```
 
 The private console is at `http://127.0.0.1:1240`; Public Wall's console is at
 `http://127.0.0.1:1241`. Docker does not publish host ports for containers attached
