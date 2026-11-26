@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import {
-  Pencil, LayoutTemplate, Trash2, Lock, Unlock, Type, ArrowUpToLine, ArrowDownToLine, ListTodo,
+  Pencil, LayoutTemplate, Trash2, Lock, Unlock, Type, ArrowUpToLine, ArrowDownToLine,
 } from 'lucide-react';
 import { IconButton, Surface } from '../ui/UiPrimitives.jsx';
 import { ICON_BUTTON_VARIANT, SURFACE_KIND, surfaceClass } from '../ui/ui-variants.js';
@@ -195,7 +195,7 @@ function FontColorPicker({ fontColor, can, onFontColor }) {
 }
 
 export function SelectionToolbar({ anchor, item, can, canDelete,
-  onColor, onFontSize, onFontColor, onTogglePrivate, onToggleAction, onEditDrawing, onBringToFront, onSendToBack, onDelete }) {
+  onColor, onFontSize, onFontColor, onTogglePrivate, onEditDrawing, onBringToFront, onSendToBack, onDelete }) {
   const sections = selectionToolbarSections(item.type);
   return (
     <ToolbarSurface anchor={anchor}>
@@ -209,17 +209,6 @@ export function SelectionToolbar({ anchor, item, can, canDelete,
           title={item.private ? t('sticky.privacyToggle.off') : t('sticky.privacyToggle.on')}
         >
           {item.private ? <Lock size={TOOLBAR_ICON_SIZE_PX} /> : <Unlock size={TOOLBAR_ICON_SIZE_PX} />}
-        </IconButton>
-      )}
-      {sections.actionItem && onToggleAction && (
-        <IconButton
-          onClick={() => can && onToggleAction()}
-          disabled={!can}
-          aria-pressed={item.actionItem === true}
-          title={item.actionItem ? t('action.toggle.off') : t('action.toggle.on')}
-          aria-label={item.actionItem ? t('action.toggle.off') : t('action.toggle.on')}
-        >
-          <ListTodo size={TOOLBAR_ICON_SIZE_PX} />
         </IconButton>
       )}
       {onEditDrawing && <IconButton onClick={() => can && onEditDrawing()} disabled={!can} title={t('draw.editImage')} aria-label={t('draw.editImage')}>

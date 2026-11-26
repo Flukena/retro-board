@@ -79,11 +79,11 @@ test('hook-order guard rejects an added hook after the loading return', () => {
   assert.throws(() => assertHooksBeforeLoadingReturn(source), /hooks must precede/);
 });
 
-test('coordinator preserves production-base hook order with the accepted independent toast move', () => {
+test('coordinator preserves production-base hook order apart from the moved toast effect and retired action items', () => {
   const source = readFileSync(new URL('RetroBoard.jsx', ROOT), 'utf8');
   const baseline = JSON.parse(readFileSync(new URL('src/test-support/p5b-hook-order.json', ROOT), 'utf8'));
   assert.equal(baseline.capturedFrom, '83a7892:RetroBoard.jsx');
-  const expected = baseline.hooks.filter((_hook, index) => index !== baseline.acceptedToastDismissMove);
+  const expected = baseline.hooks.filter((hook, index) => index !== baseline.acceptedToastDismissMove && hook !== 'useActionItems');
   assert.deepEqual(coordinatorHooks(source), expected);
   for (const [name, [file, wrapperExpected]] of WRAPPERS) {
     const module = readFileSync(new URL(`src/client/${file}`, ROOT), 'utf8');

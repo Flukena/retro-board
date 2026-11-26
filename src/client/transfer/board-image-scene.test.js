@@ -8,7 +8,6 @@ import {
 const LOOK = Object.freeze({ background: 'white', text: 'black', uiFont: 'UI', displayFont: 'Display' });
 const LABELS = Object.freeze({
   hidden: 'Hidden card', votes: n => `${n} votes`,
-  actionBadge: ({ done, owner, due }) => [done ? '[x]' : '[ ]', owner, due].filter(Boolean).join(' '),
 });
 const sticky = (id, fields = {}) => ({ id, type: 'sticky', x: 0, y: 0, w: 200, h: 180, text: `text ${id}`,
   authorId: `a-${id}`, authorName: `Author ${id}`, createdAt: 1, ...fields });
@@ -56,13 +55,10 @@ test('sticky text, author and votes appear; hidden private cards are masked', ()
   assert.ok(!content.some(text => text.includes('secret plan') || text === 'Author s'));
 });
 
-test('action items carry their badge, without the owner when the card is hidden', () => {
+test('legacy action fields have no effect on a visible or hidden card in image exports', () => {
   const items = [sticky('a', { actionItem: true, actionOwner: 'Nok', actionDue: '2026-11-30' }),
     sticky('s', { private: true, actionItem: true, actionOwner: 'Secret owner', actionDone: true })];
-  const content = texts(scene(items));
-  assert.ok(content.includes('[ ] Nok 2026-11-30'));
-  assert.ok(content.includes('[x]'));
-  assert.ok(!content.some(text => text.includes('Secret owner')));
+  assert.deepEqual(scene(items), scene([sticky('a'), sticky('s', { private: true })]));
 });
 
 test('scene size and plate geometry follow the scale; images are listed once', () => {

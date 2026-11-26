@@ -22,7 +22,7 @@ const ZONE_DRAG_PX = { from: { x: 300, y: 560 }, to: { x: 900, y: 860 } };
 const PHASE_STEPS = [
   { en: 'Write', th: 'เขียน' }, { en: 'Reveal', th: 'เปิดเผย', shortcut: 'Reveal 1 zones' },
   { en: 'Group', th: 'จัดกลุ่ม' }, { en: 'Vote', th: 'โหวต', shortcut: 'Start a vote' },
-  { en: 'Discuss', th: 'คุย', shortcut: 'Lock editing' }, { en: 'Action items', th: 'Action items', shortcut: 'Open action items' },
+  { en: 'Discuss', th: 'คุย', shortcut: 'Lock editing' }, { en: 'Next steps', th: 'ขั้นตอนถัดไป' },
 ];
 const LABELS = {
   en: { start: 'Start presenting', stop: 'Stop presenting', presenting: 'You are presenting — everyone follows your view',
@@ -32,8 +32,7 @@ const LABELS = {
 const MOOD = {
   en: { start: 'Start mood check', close: 'Close mood check', question: 'How are you feeling right now?', great: 'Great',
     answered: (n) => `${n} answered`, result: 'Team mood', average: 'Average 4.5 / 5',
-    summary: ['## Team mood', '- 🙂 Good: 1', '- 😄 Great: 1', 'Average 4.5 / 5 from 2 people'],
-    copySummary: 'Copy retro summary', exportZip: 'Export', import: 'Import', importOk: 'Overwrite',
+    exportZip: 'Export', import: 'Import', importOk: 'Overwrite',
     editingLocked: 'Editing locked' },
   th: { question: 'ตอนนี้รู้สึกอย่างไรบ้าง?', skip: 'ข้ามไปก่อน', answer: 'ตอบ', good: 'ดี',
     answered: (n) => `ตอบแล้ว ${n} คน`, result: 'ความรู้สึกของทีม', average: 'ค่าเฉลี่ย 4.5 / 5' },
@@ -75,10 +74,6 @@ const SHORTCUT_EFFECT = {
     await a.keyboard.press('Escape');
   },
   Discuss: (a) => button(a, PHASE_STEPS[4].shortcut).waitFor({ state: 'hidden', timeout: SYNC_TIMEOUT_MS }),
-  'Action items': async (a) => {
-    await a.getByRole('dialog').waitFor({ timeout: SYNC_TIMEOUT_MS });
-    await a.keyboard.press('Escape');
-  },
 };
 
 async function dragCanvas(page, by) {
@@ -148,7 +143,7 @@ await runLiveCheck('facilitation-live-check.mjs', async ({ a, b, report }) => {
     });
   }
   await step(report, 'Finish ends the phases on both screens', async () => {
-    await shot(b, 'phase-actions-th.png', report);
+    await shot(b, 'phase-next-steps-th.png', report);
     await button(a, LABELS.en.finish).click();
     await Promise.all([a, b].map(page => page.locator(CURRENT_STEP).waitFor({ state: 'hidden', timeout: SYNC_TIMEOUT_MS })));
   });
@@ -177,13 +172,6 @@ await runLiveCheck('facilitation-live-check.mjs', async ({ a, b, report }) => {
     await Promise.all([visible(a, MOOD.en.result), visible(b, MOOD.th.result), visible(a, MOOD.en.average), visible(b, MOOD.th.average)]);
     await shot(a, 'mood-result-en.png', report);
     await shot(b, 'mood-result-th.png', report);
-  });
-  await step(report, 'The copied summary has the Mood section', async () => {
-    await openMenu(a, 'en', MOOD.en.copySummary);
-    const text = await a.evaluate(() => navigator.clipboard.readText());
-    const missing = MOOD.en.summary.filter((line) => !text.split('\n').includes(line));
-    if (missing.length) throw new Error(`summary missing ${JSON.stringify(missing)}`);
-    return { summaryLines: MOOD.en.summary };
   });
   await step(report, 'ZIP export then import keeps the round and its answers', async () => {
     const zip = await download(a, 'en', MOOD.en.exportZip, report);

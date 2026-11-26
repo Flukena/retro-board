@@ -65,40 +65,6 @@
   color: var(--rb-card-ink);
 }
 
-.rb-action-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-  max-width: 70%;
-  height: var(--sticky-chip-height);
-  margin-right: auto;
-  padding: var(--comment-chip-padding);
-  box-sizing: border-box;
-  background: var(--comment-chip-bg);
-  color: var(--comment-chip-text);
-  border-radius: var(--radius-pill);
-  box-shadow: var(--comment-chip-shadow);
-  font-size: var(--comment-chip-font-size);
-  font-weight: var(--comment-chip-font-weight);
-  white-space: nowrap;
-  overflow: hidden;
-}
-
-.rb-action-badge > svg {
-  flex-shrink: 0;
-}
-
-.rb-action-badge--done {
-  opacity: 0.7;
-}
-
-.rb-action-badge__text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .rb-sticky__comment-chip {
   pointer-events: auto;
   display: inline-flex;

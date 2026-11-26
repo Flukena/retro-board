@@ -5,12 +5,12 @@ import { zoneEffectiveRevealed, zoneGroupIds } from './zone-actions.js';
 
 // Meeting phases guide a retro; they do not lock anything by themselves.
 // `meta.phase` records where the meeting is and, optionally, the top-level
-// zone it runs on (`zoneId`; null means the whole board). Each phase offers
-// one shortcut that runs an existing (undoable) board action.
+// zone it runs on (`zoneId`; null means the whole board). A phase can offer
+// a shortcut that runs an existing (undoable) board action.
 
 export const RETRO_PHASES = Object.freeze(['write', 'reveal', 'group', 'vote', 'discuss', 'actions']);
 export const PHASE_SHORTCUT = Object.freeze({
-  UNLOCK: 'unlock', REVEAL: 'reveal', VOTE: 'vote', LOCK: 'lock', ACTIONS: 'actions',
+  UNLOCK: 'unlock', REVEAL: 'reveal', VOTE: 'vote', LOCK: 'lock',
 });
 const MINUTE_MS = 60_000;
 
@@ -68,8 +68,6 @@ export function phaseShortcut(phaseId, { items, allRevealed, editingLocked }, zo
     }
     case 'discuss':
       return editingLocked ? null : { kind: PHASE_SHORTCUT.LOCK };
-    case 'actions':
-      return { kind: PHASE_SHORTCUT.ACTIONS };
     default:
       return null;
   }

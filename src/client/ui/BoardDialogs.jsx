@@ -5,7 +5,6 @@ import { MODAL_SIZE, BUTTON_VARIANT } from './ui-variants.js';
 import { confirmThenPin } from './confirm-then-pin.js';
 import { importWarningNotes } from './modal-model.js';
 import { MoodCheckDialog } from '../board/MoodCheck.jsx';
-import { ActionItemsDialog } from '../board/ActionItemsDialog.jsx';
 import { PALETTE } from './palette.js';
 import { t } from './i18n.js';
 const EMPTY_COMMENTS = [];
@@ -27,8 +26,7 @@ export function BoardDialogs({
   saveName, dismissName, userName, confirmUnlockAll, setConfirmUnlockAll,
   requireAdminPin, adminUnlockAll, confirmResetVotes, setConfirmResetVotes, adminResetVotes,
   pendingImport, importBusy, setPendingImport, confirmImport, mood,
-  actionItems, canModifyOwnedItem, items, updateItem, setSelectedIds,
-  fitToItems, commentsOpenReadable, commentsOpenItem, commentsByItem, editingAllowed,
+  commentsOpenReadable, commentsOpenItem, commentsByItem, editingAllowed,
   addCommentTo, deleteCommentFrom, setCommentsOpenFor, helpOpen, setHelpOpen,
   pinPromptCfg, confirmClear, setConfirmClear, adminClearBoard,
 }) {
@@ -79,11 +77,6 @@ export function BoardDialogs({
         />
       )}
       {mood.dialogOpen && <MoodCheckDialog onAnswer={mood.answer} onSkip={mood.skip} />}
-      {actionItems.open && (
-        <ActionItemsDialog rows={actionItems.rows} onClose={actionItems.hide}
-          canEdit={(id) => canModifyOwnedItem(items.find((it) => it.id === id))}
-          onPatch={updateItem} onLocate={(id) => { actionItems.hide(); setSelectedIds(new Set([id])); fitToItems([id]); }} />
-      )}
       {commentsOpenReadable && (
         <CommentsDialog
           item={commentsOpenItem}

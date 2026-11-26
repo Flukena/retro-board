@@ -1,5 +1,5 @@
 import React from 'react';
-import { Check, ChevronRight, Eye, ListTodo, Lock, ThumbsUp, Unlock } from 'lucide-react';
+import { Check, ChevronRight, Eye, Lock, ThumbsUp, Unlock } from 'lucide-react';
 import { PHASE_SHORTCUT } from '../../domain/retro-phase.js';
 import { Button } from '../ui/UiPrimitives.jsx';
 import { BUTTON_VARIANT } from '../ui/ui-variants.js';
@@ -13,7 +13,6 @@ const SHORTCUT_VIEW = Object.freeze({
   [PHASE_SHORTCUT.REVEAL]: { Icon: Eye, label: (shortcut) => t('phase.do.reveal', { n: shortcut.zoneIds.length }) },
   [PHASE_SHORTCUT.VOTE]: { Icon: ThumbsUp, label: () => t('phase.do.vote') },
   [PHASE_SHORTCUT.LOCK]: { Icon: Lock, label: () => t('phase.do.lock') },
-  [PHASE_SHORTCUT.ACTIONS]: { Icon: ListTodo, label: () => t('phase.do.actions') },
 });
 
 function PhaseShortcut({ shortcut, onShortcut }) {

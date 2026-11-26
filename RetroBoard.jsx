@@ -29,12 +29,10 @@ import React, {
   useState, useEffect, useRef, useCallback, useMemo, startTransition,
 } from 'react';
 import { useBoardExports } from './src/client/transfer/use-board-exports.js';
-import { useActionItems } from './src/client/board/use-action-items.js';
 import { useRetroPhase } from './src/client/board/use-retro-phase.js';
 import { useMoodCheck } from './src/client/board/use-mood-check.js';
 import { useFollowMotion } from './src/client/board/use-follow-motion.js';
 import { usePresenterFollow } from './src/client/board/use-presenter-follow.js';
-import { actionTogglePatch } from './src/domain/action-item.js';
 import { geometryErrorForItem, geometryErrorForPatch, sizeForPlacement, sizeForResize, sizeForGroupBounds, sizeForStickySignature } from './src/domain/board-geometry.js';
 import { applyOptimisticItemPatch, boundBoardTextPatch } from './src/client/board/board-text-edits.js';
 import { boardEditingAllowed, boardManagementPermissions, runSharedBoardAction } from './src/domain/public-board-permissions.js';
@@ -2307,7 +2305,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
 
   /* ----- Export / Import ----- */
   const boardExports = useBoardExports({ boardRef, boardCode, userId, setToast });
-  const actionItems = useActionItems({ items: board.items, userId, allRevealed: board.allRevealed });
 
   const fileInputRef = useRef(null);
   const [pendingImport, setPendingImport] = useState(null); // normalized manifest awaiting confirmation
@@ -2328,7 +2325,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     updateFocusedText, setTimerSetupZoneId, adminStopTimer, adminStartTimer, updateItem,
     exportZoneCsv: boardExports.exportCsv, openSaveTemplate, bringToFront, sendToBack, deleteItemsIfAllowed });
   const retroPhase = useRetroPhase({ mode, isAdmin, board, now, patchMeta, adminToggle, zoneActions: zoneHeaderActions,
-    fitToItems, showActionItems: actionItems.show });
+    fitToItems });
   const stackPhase = retroPhase.bar && { bar: retroPhase.bar, onShortcut: retroPhase.runShortcut, onAdvance: retroPhase.advance };
   const mood = useMoodCheck({ mode, isAdmin, userId, moodCheck: board.moodCheck, patchMeta, storage: window.storage, newRoundId: uid });
   const stackMood = (mood.banner || mood.result) && { banner: mood.banner, result: mood.result,
@@ -2497,7 +2494,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
         item={{
           type: selectedItem.type, colorIndex: selectedItem.color,
           fontSize: selectedItem.fontSize, fontColor: selectedItem.fontColor,
-          private: selectedItem.private, locked: selectedItem.locked, actionItem: selectedItem.actionItem,
+          private: selectedItem.private, locked: selectedItem.locked,
         }}
         can={can}
         canDelete={canDelete}
@@ -2506,7 +2503,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
         onFontSize={(fontSize) => can && updateItem(selectedItem.id, { fontSize })}
         onFontColor={(fontColor) => updateItem(selectedItem.id, { fontColor })}
         onTogglePrivate={() => can && updateItem(selectedItem.id, { private: !selectedItem.private })}
-        onToggleAction={() => can && updateItem(selectedItem.id, actionTogglePatch(selectedItem))}
         onBringToFront={() => can && bringToFront(new Set([selectedItem.id]))}
         onSendToBack={() => can && sendToBack(new Set([selectedItem.id]))}
         onDelete={() => deleteItemsIfAllowed([selectedItem.id])}
@@ -2614,7 +2610,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
     session: { mode, boardCode, boardToken, isAdmin, canClaim, userId, userName },
     collaboration: { presence, onlineUsers, followedUserId, votesUsedByUser, activeZoneVoteLimit },
     appearance: { themePref, setThemePref, scrollWheelZoomEnabled, toggleScrollWheelZoom },
-    workflow: { presenter, retroPhase, mood, boardExports, actionItems },
+    workflow: { presenter, retroPhase, mood, boardExports },
     actions: { setToast, copyRoomLink, doUndo, doRedo, adminToggle, adminClaim, setNameDraft, setNameModalOpen, onImportPick, setHelpOpen, setConfirmUnlockAll, setConfirmResetVotes, setConfirmClear, requirePrivateAdminPin, adminTransfer, startFollowing, stopFollowing },
   });
 
@@ -2841,12 +2837,6 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
         setPendingImport={setPendingImport}
         confirmImport={confirmImport}
         mood={mood}
-        actionItems={actionItems}
-        canModifyOwnedItem={canModifyOwnedItem}
-        items={board.items}
-        updateItem={updateItem}
-        setSelectedIds={setSelectedIds}
-        fitToItems={fitToItems}
         commentsOpenReadable={commentsOpenReadable}
         commentsOpenItem={commentsOpenItem}
         commentsByItem={commentsByItem}

@@ -7,7 +7,7 @@ export function topBarProps({ boardState, session, collaboration, appearance, wo
   const { mode, boardCode, isAdmin, canClaim, userId, userName } = session;
   const { presence, onlineUsers, followedUserId, votesUsedByUser, activeZoneVoteLimit } = collaboration;
   const { themePref, setThemePref, scrollWheelZoomEnabled, toggleScrollWheelZoom } = appearance;
-  const { presenter, retroPhase, mood, boardExports, actionItems } = workflow;
+  const { presenter, retroPhase, mood, boardExports } = workflow;
   const {
     setToast, copyRoomLink, doUndo, doRedo, adminToggle, adminClaim,
     setNameDraft, setNameModalOpen, onImportPick, setHelpOpen,
@@ -50,7 +50,7 @@ export function topBarProps({ boardState, session, collaboration, appearance, wo
     presenter,
     phase: retroPhase,
     mood,
-    exports: { ...boardExports, onActionItems: actionItems.show, openActionCount: actionItems.openCount },
+    exports: boardExports,
     scrollWheelZoomEnabled,
     onHome: () => { window.location.href = '/'; },
     onCopyLink: copyRoomLink,

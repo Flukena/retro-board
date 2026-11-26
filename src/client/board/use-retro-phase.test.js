@@ -13,7 +13,7 @@ function renderPhase(props) {
     api = useRetroPhase({
       mode: 'private', isAdmin: true, now: 0, board: { items: [], phase: null },
       patchMeta: record('patchMeta'), adminToggle: record('adminToggle'), fitToItems: record('fitToItems'),
-      zoneActions: { toggleReveal: record('reveal'), vote: record('vote') }, showActionItems: record('actions'),
+      zoneActions: { toggleReveal: record('reveal'), vote: record('vote') },
       ...props,
     });
     return null;
@@ -53,10 +53,9 @@ test('shortcuts call the existing board actions', () => {
   api.runShortcut({ kind: PHASE_SHORTCUT.LOCK });
   api.runShortcut({ kind: PHASE_SHORTCUT.REVEAL, zoneIds: ['a', 'b'] });
   api.runShortcut({ kind: PHASE_SHORTCUT.VOTE, zoneId: 'z' });
-  api.runShortcut({ kind: PHASE_SHORTCUT.ACTIONS });
   assert.deepEqual(calls, [
     ['adminToggle', 'editingLocked'], ['adminToggle', 'editingLocked'],
-    ['reveal', 'a'], ['reveal', 'b'], ['fitToItems', ['z']], ['vote', 'z'], ['actions'],
+    ['reveal', 'a'], ['reveal', 'b'], ['fitToItems', ['z']], ['vote', 'z'],
   ]);
 });
 

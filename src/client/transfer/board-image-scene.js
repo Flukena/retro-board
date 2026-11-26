@@ -1,4 +1,3 @@
-import { ACTION_FIELD, isActionItem } from '../../domain/action-item.js';
 import { sizeForPlacement } from '../../domain/board-geometry.js';
 import { isStickyHiddenForUser } from '../../domain/board-visibility.js';
 import { compareZOrder } from '../../domain/z-order.js';
@@ -76,12 +75,6 @@ function zonePlates(zone, frame, look) {
   })];
 }
 
-function actionBadge(sticky, hidden, labels) {
-  if (!isActionItem(sticky)) return '';
-  return labels.actionBadge({ done: sticky[ACTION_FIELD.DONE] === true,
-    owner: hidden ? '' : sticky[ACTION_FIELD.OWNER] || '', due: sticky[ACTION_FIELD.DUE] || '' });
-}
-
 function stickyPlates(sticky, frame, context) {
   const { look, labels } = context;
   const box = frame.box(sticky);
@@ -91,10 +84,7 @@ function stickyPlates(sticky, frame, context) {
   const pad = STICKY_PADDING_PX * s;
   const footerH = STICKY_FOOTER_HEIGHT_PX * s;
   const footerSize = STICKY_FOOTER_FONT_PX * s;
-  const badge = actionBadge(sticky, hidden, labels);
-  const badgeH = badge ? footerSize * TEXT_LINE_HEIGHT_RATIO : 0;
-  const badgeBox = { x: box.x + pad, y: box.y + pad, w: box.w - pad * 2, h: badgeH };
-  const textBox = { x: box.x + pad, y: badgeBox.y + badgeH, w: box.w - pad * 2, h: Math.max(0, box.h - pad - badgeH - footerH) };
+  const textBox = { x: box.x + pad, y: box.y + pad, w: box.w - pad * 2, h: Math.max(0, box.h - pad - footerH) };
   const footerBox = { x: box.x + pad, y: box.y + box.h - footerH, w: box.w - pad * 2, h: footerH };
   const votes = context.votesByItem.get(sticky.id)?.size ?? 0;
   const footer = (align, content) => plate(footerBox, { text: textBlock({ content, box: footerBox, sizePx: footerSize,
@@ -102,8 +92,6 @@ function stickyPlates(sticky, frame, context) {
   return [
     plate(box, { radius: STICKY_RADIUS_PX * s, background: colors.bg,
       border: { width: STICKY_BORDER_PX * s, color: colors.border, style: 'solid' } }),
-    ...(badge ? [plate(badgeBox, { text: textBlock({ content: badge, box: badgeBox, sizePx: footerSize, family: look.uiFont,
-      color: colors.ink, wrap: false }) })] : []),
     plate(textBox, { text: textBlock({ content: hidden ? labels.hidden : String(sticky.text ?? ''), box: textBox,
       sizePx: fontSizeForItem(sticky) * s, family: look.displayFont, color: sticky.fontColor || STICKY_AUTO_TEXT }) }),
     ...(!hidden && sticky.authorName ? [footer('left', sticky.authorName)] : []),

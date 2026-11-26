@@ -1,7 +1,7 @@
 import { BOARD_MODE } from '../../domain/public-wall-contract.js';
 import React, { useRef } from 'react';
 import {
-  Check, ClipboardCopy, Crown, Download, FileDown, FileImage, FileText, HelpCircle, ListTodo, LocateFixed, Milestone, Presentation,
+  Check, Crown, Download, FileDown, FileImage, HelpCircle, LocateFixed, Milestone, Presentation,
   RotateCcw, SmilePlus, Trash2, Unlock, Upload, X, ZoomIn,
 } from 'lucide-react';
 import { Avatar } from '../ui/Avatar.jsx';
@@ -54,7 +54,7 @@ export function MorePopover({
         checkIcon={<Check size={TOPBAR_ICON_SIZE_PX.MENU} />}
         onClick={onToggleScrollWheelZoom}
       />
-      <Divider orientation={DIVIDER_ORIENTATION.HORIZONTAL} />
+      {(presenter?.available || phase?.available || mood?.available) && <Divider orientation={DIVIDER_ORIENTATION.HORIZONTAL} />}
       {presenter?.available && (
       <MenuItem
         icon={<Presentation size={TOPBAR_ICON_SIZE_PX.MENU} />}
@@ -86,21 +86,6 @@ export function MorePopover({
         onClick={closeThen(mood.showResult)}
       />
       )}
-      <MenuItem
-        icon={<ListTodo size={TOPBAR_ICON_SIZE_PX.MENU} />}
-        label={exports.openActionCount ? t('action.menuCount', { n: exports.openActionCount }) : t('action.title')}
-        onClick={closeThen(exports.onActionItems)}
-      />
-      <MenuItem
-        icon={<ClipboardCopy size={TOPBAR_ICON_SIZE_PX.MENU} />}
-        label={t('summary.copy')}
-        onClick={closeThen(exports.copySummary)}
-      />
-      <MenuItem
-        icon={<FileText size={TOPBAR_ICON_SIZE_PX.MENU} />}
-        label={t('summary.download')}
-        onClick={closeThen(exports.downloadSummary)}
-      />
       <Divider orientation={DIVIDER_ORIENTATION.HORIZONTAL} />
       <MenuItem
         icon={<Download size={TOPBAR_ICON_SIZE_PX.MENU} />}

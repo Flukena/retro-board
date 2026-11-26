@@ -7,7 +7,7 @@ import { phaseBarModel } from './phase-bar-model.js';
  * on. Phase changes are silent (Ctrl+Z must not move the meeting back);
  * shortcuts call the board's existing undoable actions.
  */
-export function useRetroPhase({ mode, isAdmin, board, now, patchMeta, adminToggle, zoneActions, fitToItems, showActionItems }) {
+export function useRetroPhase({ mode, isAdmin, board, now, patchMeta, adminToggle, zoneActions, fitToItems }) {
   const available = phasesAvailable(mode);
   const phase = available ? board.phase ?? null : null;
   const [choosing, setChoosing] = useState(false);
@@ -30,7 +30,6 @@ export function useRetroPhase({ mode, isAdmin, board, now, patchMeta, adminToggl
       fitToItems([zoneId]);
       zoneActions.vote(zoneId);
     },
-    [PHASE_SHORTCUT.ACTIONS]: () => showActionItems(),
   };
   const runShortcut = (shortcut) => shortcutHandlers[shortcut.kind](shortcut);
 

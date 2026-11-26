@@ -16,7 +16,7 @@ test('topbar props preserve roles, quota, command identities and guarded admin o
       collaboration: { presence: { owner: { name: 'Live' } }, onlineUsers: [{ userId: 'owner', name: 'Live' }],
         followedUserId: 'owner', votesUsedByUser: new Map([['owner', 3]]), activeZoneVoteLimit: 3 },
       appearance: { themePref: 'auto', setThemePref: value => events.push(['theme', value]), scrollWheelZoomEnabled: true, toggleScrollWheelZoom() {} },
-      workflow: { presenter: {}, retroPhase: {}, mood: {}, boardExports: { marker: 'export' }, actionItems: { show() {}, openCount: 2 } }, actions,
+      workflow: { presenter: {}, retroPhase: {}, mood: {}, boardExports: { marker: 'export' } }, actions,
     };
     const props = topBarProps(input);
     assert.equal(props.title, 'Retro');
@@ -29,8 +29,7 @@ test('topbar props preserve roles, quota, command identities and guarded admin o
     assert.equal(props.players[0].used, 3);
     assert.equal(props.onUndo, actions.doUndo);
     assert.equal(props.onFollow, actions.startFollowing);
-    assert.equal(props.exports.openActionCount, 2);
-    assert.equal(props.exports.onActionItems, input.workflow.actionItems.show);
+    assert.equal(props.exports, input.workflow.boardExports);
     props.onClear();
     assert.equal(events.length, 1);
     assert.equal(events[0][0], 'setToast');

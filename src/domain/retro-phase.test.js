@@ -48,7 +48,7 @@ test('write unlocks and discuss locks editing, only when needed', () => {
   assert.equal(phaseShortcut('write', board([])), null);
   assert.deepEqual(phaseShortcut('discuss', board([])), { kind: PHASE_SHORTCUT.LOCK });
   assert.equal(phaseShortcut('discuss', board([], { editingLocked: true })), null);
-  assert.deepEqual(phaseShortcut('actions', board([])), { kind: PHASE_SHORTCUT.ACTIONS });
+  assert.equal(phaseShortcut('actions', board([])), null);
   assert.equal(phaseShortcut('group', board([zone('z', 0, 0)])), null);
 });
 

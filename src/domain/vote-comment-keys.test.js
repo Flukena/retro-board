@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { voteKey, commentKey, moodKey, parseStoredVoteKey, parseStoredCommentKey, parseCanonicalVoteKey, parseMoodKey } from './vote-comment-keys.js';
-import { buildRetroSummary } from './retro-summary.js';
 import { readCanonicalVotes } from './canonical-votes.js';
 import { moodKey as publicMoodKey, parseMoodKey as publicParseMoodKey } from './mood-check.js';
 
@@ -33,15 +32,4 @@ test('legacy bridge parsers and strict canonical parser retain distinct rejectio
   for (const key of ['other', 's||vote:missing-separator']) assert.equal(parseStoredVoteKey(key), null);
   for (const key of ['other', 's||comment:missing-separator']) assert.equal(parseStoredCommentKey(key), null);
   for (const key of [undefined, 42, 's||mood:r:__proto__', 's||mood:r:u:extra']) assert.equal(parseMoodKey(key), null);
-});
-
-test('retro summary consumes canonical votes addressed by built and legacy keys', () => {
-  const labels = { date: 'Date', participants: 'Participants', topVoted: 'Top', cards: 'Cards',
-    unassigned: 'Unassigned', actionItems: 'Actions', noActionItems: 'None', votes: n => `${n} votes` };
-  for (const key of [voteKey('card', 'alice'), 's||vote:card:alice']) {
-    const text = buildRetroSummary({ title: 'Retro', dateText: 'Today',
-      items: [{ id: 'card', type: 'sticky', text: 'Idea', x: 0, y: 0 }],
-      votesByItem: readCanonicalVotes(new Map([[key, true]])), allRevealed: true, userId: 'viewer', labels });
-    assert.match(text, /1\. Idea \(1 votes\)/);
-  }
 });

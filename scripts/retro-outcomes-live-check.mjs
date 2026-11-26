@@ -1,59 +1,55 @@
 #!/usr/bin/env node
 /**
- * Two-participant live check for action items, the retro summary and PNG/PDF/ZIP export.
+ * Two-participant live check for board exports, retired commands and legacy sticky data.
  * Start isolated servers first (see ui-live-check.mjs for the env; pick free ports), then:
  * node scripts/retro-outcomes-live-check.mjs <base-url> <BaseData output directory>
  * A (English) and B (Thai) share one new board. Writes screenshots, downloads and report.json.
  */
-import { readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import { BASE_LABELS, CANVAS_SELECTOR, SYNC_TIMEOUT_MS, VIEWPORT, addSticky, addZone, download, openMenu, runLiveCheck, shot, step } from './board-live-helpers.mjs';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import {
+  BASE_LABELS, REDO_KEY, SYNC_TIMEOUT_MS, addSharedSticky, addSticky, addZone, appLabel, boardItems, download,
+  openMenu, pollUntil, runLiveCheck, step, undoUntilHidden, waitForTextOn,
+} from './board-live-helpers.mjs';
 
-const BADGE_SELECTOR = '.rb-action-badge';
-const DONE_BADGE_SELECTOR = '.rb-action-badge--done';
 const STICKY_POSITION_PX = { x: 520, y: 380 };
 const PRIVATE_POSITION_PX = { x: 900, y: 380 };
-const ACTION_TEXT = 'Fix flaky CI';
+const SHARED_TEXT = 'Fix flaky CI';
 const SECRET_TEXT = 'Secret salary idea';
-const OWNER = 'Nok';
+const LEGACY_FIELDS = { actionItem: true, actionOwner: 'Nok', actionDue: '2026-11-30', actionDone: true };
 const ZONE_TITLE = 'ไปได้ดี';
 const THAI_TEXT = 'ทีมช่วยกันรีวิวโค้ดเร็วขึ้นมากในสปรินต์นี้ ขอบคุณทุกคน';
 const ZONE_DRAG_PX = { from: { x: 260, y: 600 }, to: { x: 1200, y: 880 } };
 const ZONE_STICKY_PX = { x: 560, y: 720 };
-const PAN_AWAY_WHEEL_PX = 3000;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const PNG_WIDTH_OFFSET = 16;
 const PNG_HEIGHT_OFFSET = 20;
-const LABELS = {
-  en: { markAction: 'Mark as action item', actions: 'Action items', copySummary: 'Copy retro summary',
-    exportPng: 'Export PNG', exportPdf: 'Export PDF', exportZip: 'Export', import: 'Import', importOk: 'Overwrite' },
-  th: { actionsOpen: 'Action items (ค้าง 1)', actions: 'Action items', owner: 'ใครรับผิดชอบ?',
-    markDone: 'ทำเครื่องหมายว่าเสร็จ', locate: 'ไปที่การ์ดบนบอร์ด' },
+const RETIRED_LABELS = {
+  en: ['Action items', 'Copy retro summary', 'Download summary (.md)'],
+  th: ['Action items', 'คัดลอกสรุป retro', 'ดาวน์โหลดสรุป (.md)'],
 };
 
+async function checkMenu(page, lang) {
+  await page.getByTitle(BASE_LABELS[lang].more, { exact: true }).click();
+  const menu = page.locator('.rb-topbar-popover--more');
+  await menu.getByRole('button', { name: appLabel(lang, 'topbar.exportCsv'), exact: true }).waitFor();
+  for (const name of RETIRED_LABELS[lang]) assert.equal(await menu.getByRole('button', { name, exact: true }).count(), 0);
+  await page.keyboard.press('Escape');
+}
+
 await runLiveCheck('retro-outcomes-live-check.mjs', async ({ a, b, report }) => {
-  await step(report, 'A marks a sticky as an action item; B sees the badge', async () => {
-    await addSticky(a, 'en', ACTION_TEXT, STICKY_POSITION_PX);
-    await a.getByTitle(BASE_LABELS.en.reveal, { exact: true }).click();
-    await a.getByTitle(LABELS.en.markAction, { exact: true }).click();
-    await Promise.all([a.locator(BADGE_SELECTOR).waitFor(), b.locator(BADGE_SELECTOR).waitFor({ timeout: SYNC_TIMEOUT_MS })]);
+  await step(report, 'Both languages offer board exports without action items or Markdown summaries', async () => {
+    await Promise.all([checkMenu(a, 'en'), checkMenu(b, 'th')]);
   });
-  await step(report, 'B sets owner and ticks done in the Thai panel; A sees both', async () => {
-    await openMenu(b, 'th', LABELS.th.actionsOpen);
-    await b.getByPlaceholder(LABELS.th.owner, { exact: true }).fill(OWNER);
-    await b.getByPlaceholder(LABELS.th.owner, { exact: true }).press('Enter');
-    await b.getByRole('button', { name: LABELS.th.markDone, exact: true }).click();
-    await shot(b, 'panel-th.png', report);
-    await b.keyboard.press('Escape');
-    await a.locator(DONE_BADGE_SELECTOR).filter({ hasText: OWNER }).waitFor({ timeout: SYNC_TIMEOUT_MS });
-    await shot(a, 'board-en-badge.png', report);
-  });
-  await step(report, 'undo and redo of the done tick sync both ways', async () => {
-    await b.locator(CANVAS_SELECTOR).click({ position: { x: 200, y: 700 } });
-    await b.keyboard.press('Control+z');
-    await a.locator(DONE_BADGE_SELECTOR).waitFor({ state: 'detached', timeout: SYNC_TIMEOUT_MS });
-    await b.keyboard.press('Control+Shift+z');
-    await a.locator(DONE_BADGE_SELECTOR).waitFor({ timeout: SYNC_TIMEOUT_MS });
+  await step(report, 'A shares a sticky and both peers see undo and redo', async () => {
+    await addSharedSticky(a, 'en', SHARED_TEXT, STICKY_POSITION_PX);
+    await waitForTextOn([a, b], SHARED_TEXT);
+    await a.locator('.rb-selection-toolbar').waitFor();
+    assert.equal(await a.getByTitle('Mark as action item', { exact: true }).count(), 0);
+    const presses = await undoUntilHidden(a, SHARED_TEXT);
+    await waitForTextOn([a, b], SHARED_TEXT, 'hidden');
+    for (let count = 0; count < presses; count++) await a.keyboard.press(REDO_KEY);
+    await waitForTextOn([a, b], SHARED_TEXT);
   });
   await step(report, 'B adds a private card that A cannot read', async () => {
     // New cards start private, so B's card stays hidden from A.
@@ -61,27 +57,10 @@ await runLiveCheck('retro-outcomes-live-check.mjs', async ({ a, b, report }) => 
     await b.keyboard.press('Escape');
     await a.getByText(SECRET_TEXT, { exact: true }).waitFor({ state: 'detached', timeout: SYNC_TIMEOUT_MS });
   });
-  await step(report, 'A copies a summary with the checklist and without the private card', async () => {
-    await openMenu(a, 'en', LABELS.en.copySummary);
-    const text = await a.evaluate(() => navigator.clipboard.readText());
-    await writeFile(join(report.out, 'summary.md'), text);
-    if (!text.includes(`- [x] ${ACTION_TEXT} — ${OWNER}`)) throw new Error(`checklist line missing:\n${text}`);
-    if (text.includes(SECRET_TEXT)) throw new Error('private card leaked into the summary');
-    if (!text.includes('1 hidden cards not shown')) throw new Error('hidden card count missing');
-    return { summary: text };
-  });
-  await step(report, 'B pans away, then Locate in the panel brings the card back into view', async () => {
-    await b.locator(CANVAS_SELECTOR).hover({ position: { x: 700, y: 600 } });
-    await b.mouse.wheel(PAN_AWAY_WHEEL_PX, PAN_AWAY_WHEEL_PX);
-    const card = b.getByText(ACTION_TEXT, { exact: true });
-    const away = await card.boundingBox();
-    await openMenu(b, 'th', LABELS.th.actions); // all done, so no open count
-    await b.getByRole('button', { name: LABELS.th.locate, exact: true }).click();
-    await b.locator('.rb-action-list').waitFor({ state: 'detached' });
-    const box = await card.boundingBox();
-    const inView = box && box.x >= 0 && box.y >= 0 && box.x + box.width <= VIEWPORT.width && box.y + box.height <= VIEWPORT.height;
-    if (!inView) throw new Error(`card not in view after Locate: ${JSON.stringify(box)}`);
-    return { before: away, after: box };
+  await step(report, 'B reveals their note and A sees the edit', async () => {
+    await b.getByText(SECRET_TEXT, { exact: true }).click();
+    await b.getByTitle(BASE_LABELS.th.reveal, { exact: true }).click();
+    await waitForTextOn([a, b], SECRET_TEXT);
   });
   await step(report, 'A adds a Thai zone with a Thai sticky for the image export', async () => {
     await addZone(a, ZONE_TITLE, ZONE_DRAG_PX);
@@ -91,21 +70,39 @@ await runLiveCheck('retro-outcomes-live-check.mjs', async ({ a, b, report }) => 
     await b.getByText(THAI_TEXT, { exact: true }).waitFor({ timeout: SYNC_TIMEOUT_MS });
   });
   await step(report, 'A exports PNG and PDF', async () => {
-    const png = await readFile(await download(a, 'en', LABELS.en.exportPng, report));
+    const png = await readFile(await download(a, 'en', appLabel('en', 'topbar.exportPng'), report));
     if (!png.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) throw new Error('not a PNG');
-    const pdf = await readFile(await download(a, 'en', LABELS.en.exportPdf, report));
+    const pdf = await readFile(await download(a, 'en', appLabel('en', 'topbar.exportPdf'), report));
     if (pdf.subarray(0, 5).toString('latin1') !== '%PDF-') throw new Error('not a PDF');
     return { pngWidth: png.readUInt32BE(PNG_WIDTH_OFFSET), pngHeight: png.readUInt32BE(PNG_HEIGHT_OFFSET), pdfBytes: pdf.length };
   });
-  await step(report, 'ZIP export then import keeps the action-item fields', async () => {
-    const zip = await download(a, 'en', LABELS.en.exportZip, report);
+  await step(report, 'B downloads the board CSV from the Thai menu', async () => {
+    const file = await download(b, 'th', appLabel('th', 'topbar.exportCsv'), report);
+    const contents = await readFile(file, 'utf8');
+    for (const text of [SHARED_TEXT, THAI_TEXT]) assert.ok(contents.includes(text));
+  });
+  await step(report, 'A legacy sticky round-trips through ZIP as an ordinary card', async () => {
+    const { id } = (await boardItems(a)).find(item => item.text === SHARED_TEXT);
+    // A peer running an older client can still write these fields to the shared note.
+    const setFields = fields => b.evaluate(({ id, fields }) => window.storage.updateItem(id, fields), { id, fields });
+    await setFields(LEGACY_FIELDS);
+    const readFields = async page => {
+      const item = (await boardItems(page)).find(card => card.id === id);
+      return Object.fromEntries(Object.keys(LEGACY_FIELDS).map(key => [key, item?.[key]]));
+    };
+    const restored = value => Object.entries(LEGACY_FIELDS).every(([key, field]) => value[key] === field);
+    await pollUntil(() => readFields(a), restored, 'Exporting peer receives legacy fields');
+    const zip = await download(a, 'en', appLabel('en', 'topbar.export'), report);
+    await setFields({ actionDone: false });
+    await pollUntil(() => readFields(a), fields => fields.actionDone === false, 'Importing peer sees the change before restore');
     const chooser = a.waitForEvent('filechooser');
-    await openMenu(a, 'en', LABELS.en.import);
+    await openMenu(a, 'en', appLabel('en', 'topbar.import'));
     await (await chooser).setFiles(zip);
-    await a.getByRole('button', { name: LABELS.en.importOk, exact: true }).click();
-    await a.locator(DONE_BADGE_SELECTOR).filter({ hasText: OWNER }).waitFor({ timeout: SYNC_TIMEOUT_MS });
-    await b.locator(DONE_BADGE_SELECTOR).filter({ hasText: OWNER }).waitFor({ timeout: SYNC_TIMEOUT_MS });
-    await openMenu(a, 'en', LABELS.en.actions);
-    await shot(a, 'panel-en.png', report);
+    await a.getByRole('button', { name: appLabel('en', 'import.confirm.ok'), exact: true }).click();
+    for (const page of [a, b]) {
+      await pollUntil(() => readFields(page), restored, 'ZIP restores the historical fields');
+      await page.getByText(SHARED_TEXT, { exact: true }).waitFor();
+      assert.equal(await page.locator('.rb-action-badge').count(), 0);
+    }
   });
 });

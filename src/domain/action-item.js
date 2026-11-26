@@ -1,8 +1,4 @@
-import { isStickyHiddenForUser } from './board-visibility.js';
-import { compareStableText } from './vote-ranking.js';
-
-// A retro action item is a sticky with these extra fields. They stay separate
-// keys so concurrent edits (one peer ticks done, another sets the owner) merge.
+// Historical sticky fields retained for lossless room imports and backups.
 export const ACTION_FIELD = Object.freeze({
   FLAG: 'actionItem',
   OWNER: 'actionOwner',
@@ -61,39 +57,3 @@ export const normalizeActionFields = (item, label) => {
   };
   return Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined));
 };
-
-export const isActionItem = (item) => item?.type === 'sticky' && item[ACTION_FIELD.FLAG] === true;
-
-/** Patch that turns a sticky into an action item, or back into a plain sticky. */
-export const actionTogglePatch = (item) => ({ [ACTION_FIELD.FLAG]: !isActionItem(item) });
-
-// Open before done, then dated before undated (earliest first), then oldest card.
-const compareActionRows = (a, b) => (
-  Number(a.done) - Number(b.done)
-  || Number(!a.due) - Number(!b.due)
-  || compareStableText(a.due, b.due)
-  || a.createdAt - b.createdAt
-  || compareStableText(a.id, b.id)
-);
-
-/**
- * Display rows for every action item on the board. A card hidden from this
- * viewer keeps its status and date but not its text or owner.
- */
-export const actionItemsOf = (items, { userId, allRevealed }) => items
-  .filter(isActionItem)
-  .map((item) => {
-    const hidden = isStickyHiddenForUser(item, items, allRevealed, userId);
-    return {
-      id: item.id,
-      hidden,
-      text: hidden ? '' : String(item.text ?? ''),
-      owner: hidden ? '' : String(item[ACTION_FIELD.OWNER] ?? ''),
-      due: String(item[ACTION_FIELD.DUE] ?? ''),
-      done: item[ACTION_FIELD.DONE] === true,
-      createdAt: Number(item.createdAt) || 0,
-    };
-  })
-  .sort(compareActionRows);
-
-export const openActionCount = (rows) => rows.filter(row => !row.done).length;

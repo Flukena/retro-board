@@ -8,7 +8,7 @@ const SUBJECT = '/src/client/ui/BoardDialogs.jsx';
 test('dialog host preserves conditional dialogs, translated confirmations and import busy state', async () => {
   await withSsrModule(SUBJECT, async ({ BoardDialogs }, { load }) => {
     const { setLang, t } = await load('/src/client/ui/i18n.js');
-    const base = { mood: {}, actionItems: {}, templateDraft: [], commentsByItem: new Map(), items: [] };
+    const base = { mood: {}, templateDraft: [], commentsByItem: new Map() };
     const render = props => renderToStaticMarkup(React.createElement(BoardDialogs, { ...base, ...props }));
     assert.equal(render({}), '');
     for (const lang of ['th', 'en']) {
@@ -30,7 +30,6 @@ test('dialog host preserves conditional dialogs, translated confirmations and im
         { commentsOpenReadable: true, commentsOpenItem: { id: 'note', type: 'sticky', text: 'Note' }, editingAllowed: true },
         { pinPromptCfg: { isSetting: false, error: '' } },
         { mood: { dialogOpen: true } },
-        { actionItems: { open: true, rows: [] } },
       ]) assert.match(render(props), /role="dialog"/);
       assert.match(render({ renameTarget: { id: 'template', name: 'Existing template' } }), /value="Existing template"/);
     }
