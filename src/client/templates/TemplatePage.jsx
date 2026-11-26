@@ -34,15 +34,20 @@ export default function TemplatePage({ slug }) {
         <h1 id="template-title" className="rb-legal__title">{t(format.headingKey)}</h1>
         <p className="rb-template__lede">{t(format.ledeKey)}</p>
         <StartBoard format={format} id="template-start-note" />
-        <section className="rb-legal__section" aria-labelledby="template-when">
-          <h2 id="template-when">{t('tpl.section.when')}</h2>
-          <p>{t(format.whenKey)}</p>
-        </section>
         <section className="rb-legal__section" aria-labelledby="template-board">
           <h2 id="template-board">{t('tpl.section.board')}</h2>
           <ul className="rb-template__list">
-            {format.columns.map((column) => <li key={column.id}>{t(column.descKey)}</li>)}
+            {format.columns.map((column) => (
+              <li key={column.id}>
+                {t(column.descKey)}
+                <q className="rb-template__example">{t(column.exampleKey)}</q>
+              </li>
+            ))}
           </ul>
+        </section>
+        <section className="rb-legal__section" aria-labelledby="template-when">
+          <h2 id="template-when">{t('tpl.section.when')}</h2>
+          <p>{t(format.whenKey)}</p>
         </section>
         <section className="rb-legal__section" aria-labelledby="template-steps">
           <h2 id="template-steps">{t('tpl.section.steps')}</h2>

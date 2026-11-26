@@ -3,10 +3,10 @@ export const seo = {
   "seo.home.description": "Faça uma retrospectiva online grátis com sua equipe. Crie um quadro com um clique, sem cadastro: notas adesivas, zonas, cartões ocultos e votação, tudo em tempo real.",
   "seo.ssc.title": "Modelo de Retrospectiva Start Stop Continue — RetroRoom",
   "seo.ssc.description": "Como conduzir uma retrospectiva Start Stop Continue, com passos de facilitação, exemplos de perguntas e um quadro online grátis que já abre com as três colunas.",
-  "seo.msg.title": "Modelo de Retrospectiva Mad Sad Glad — RetroRoom",
-  "seo.msg.description": "Como conduzir uma retrospectiva Mad Sad Glad, com passos de facilitação, exemplos de perguntas e um quadro online grátis que já abre com Mad, Sad e Glad.",
-  "seo.4ls.title": "Modelo de Retrospectiva 4Ls: Liked, Learned, Lacked, Longed for — RetroRoom",
-  "seo.4ls.description": "Como conduzir uma retrospectiva 4Ls (Liked, Learned, Lacked, Longed for), com passos de facilitação, exemplos de perguntas e um quadro grátis com quatro zonas prontas.",
+  "seo.msg.title": "Mad Sad Glad com modelo de retrospectiva e exemplos — RetroRoom",
+  "seo.msg.description": "Veja o que escrever em Mad, Sad e Glad com cartões sobre uma demonstração de produto. Escolha as perguntas e abra um quadro gratuito para a retrospectiva.",
+  "seo.4ls.title": "Retrospectiva dos 4Ls com modelo e exemplos — RetroRoom",
+  "seo.4ls.description": "Entenda Liked, Learned, Lacked e Longed for com exemplos de um teste de pagamento. Use as perguntas e abra grátis um quadro com os quatro campos.",
   "seo.privacy.title": "Política de Privacidade — RetroRoom",
   "seo.privacy.description": "O que o RetroRoom armazena quando você usa um quadro de retrospectiva, o que fica no seu navegador e quais provedores de serviço tratam os dados.",
   "seo.terms.title": "Termos de Uso — RetroRoom",
@@ -20,8 +20,8 @@ export const seo2 = {
 };
 
 export const seo3 = {
-  "seo.loop.title": "Modelo de Retrospectiva Retro Loop: Bom, Ruim, Tentar e Ações — RetroRoom",
-  "seo.loop.description": "Como conduzir uma retrospectiva Retro Loop que confere as ações da vez anterior, reúne notas de Bom, Ruim e Tentar e termina com próximas ações com responsável, em um quadro online grátis.",
+  "seo.loop.title": "Modelo de retrospectiva Retro Loop com exemplo de sprint — RetroRoom",
+  "seo.loop.description": "Veja como uma equipe retomou uma ação da sprint passada e testou uma ideia para reduzir a espera por revisão. Abra o quadro Retro Loop grátis para a sua equipe.",
 };
 
 export const seo4 = {

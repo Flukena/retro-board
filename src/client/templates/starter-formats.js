@@ -73,6 +73,7 @@ export function starterFormat(slug) {
       id,
       zoneKey: `${zoneKeyBase}.${id}`,
       descKey: `${base}.col.${id}`,
+      exampleKey: `${base}.example.${id}`,
       promptKeys: range(PROMPTS_PER_COLUMN).map((n) => `${base}.prompt.${id}${n}`),
     })),
   };

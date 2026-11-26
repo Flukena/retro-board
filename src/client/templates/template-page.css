@@ -4,6 +4,7 @@
 .rb-template__error { flex-basis: 100%; color: var(--danger); }
 .rb-template__list { padding-inline-start: var(--space-6); margin: 0 0 var(--space-3); }
 .rb-template__list li + li { margin-top: var(--space-2); }
+.rb-template__example { display: block; margin-block-start: var(--space-1); color: var(--text-mid); }
 .rb-template__subhead { font-size: var(--legal-heading-size); margin: var(--space-4) 0 var(--space-2); }
 .rb-template__links { display: flex; flex-wrap: wrap; gap: var(--space-3) var(--space-6); }
 .rb-template__links a { color: var(--accent-text); font-weight: var(--legal-link-weight); }

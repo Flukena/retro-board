@@ -62,6 +62,29 @@ const fileFor = (path) => (path === '/' ? 'index.html' : `${path.slice(1)}/index
 const THAI_TEXT = /[\u0E00-\u0E7F]/;
 const linkTags = (html, rel) => [...html.matchAll(new RegExp(`<link rel="${rel}"[^>]*>`, 'g'))].map((match) => match[0]);
 
+test('template guides ship a localized example note for every column before JavaScript runs', async () => {
+  await renderAll((pages) => {
+    for (const guide of SEO_PAGES.filter(page => page.slug)) {
+      const examplesByLanguage = new Set();
+      for (const lang of SEO_LANGS) {
+        const path = localizedPath(guide.path, lang);
+        const html = pages.get(fileFor(path));
+        const board = html.match(/<section[^>]+aria-labelledby="template-board"[^>]*>([\s\S]*?)<\/section>/)[1];
+        const columns = [...board.matchAll(/<li>([\s\S]*?)<\/li>/g)];
+        assert.ok(columns.length > 0, path);
+        const notes = columns.map(([, column]) => {
+          const note = column.match(/<q\b[^>]*>([^<]+)<\/q>/)?.[1];
+          assert.ok(note && !note.startsWith('tpl.'), path + ' needs a filled-in example for each column');
+          return note;
+        });
+        assert.equal(new Set(notes).size, columns.length, path);
+        examplesByLanguage.add(notes.join('\n'));
+      }
+      assert.equal(examplesByLanguage.size, SEO_LANGS.length, guide.path + ' examples must be translated');
+    }
+  });
+});
+
 test('every public page also ships a Thai version under /th with Thai head and content', async () => {
   await renderAll((pages) => {
     const thaiTitles = new Set();
