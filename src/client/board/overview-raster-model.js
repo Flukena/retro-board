@@ -2,6 +2,7 @@ import { sizeForPlacement } from '../../domain/board-geometry.js';
 import { stickyTextForDom } from '../../domain/security-boundaries.js';
 import { CARD_OVERVIEW_ZOOM_MAX, CARD_OVERVIEW_MAX_EDGE_PX, CARD_OVERVIEW_TEXT_MAX_LENGTH } from '../../domain/viewport-limits.js';
 import { stickyFontSize } from './sticky-font.js';
+import { stickyShowsLock } from './card-look.js';
 
 const CELL_EDGE_PX = 512;
 const MAX_INDEX_CELLS = 64;
@@ -41,17 +42,19 @@ function unoccluded(record, index, zones) {
 function rasterRow(record, options) {
   const item = record.item;
   const revealed = options.contexts.get(item.id)?.revealed ?? options.allRevealed;
-  const hidden = item.private && item.authorId !== options.userId && !revealed;
+  const hidden = stickyShowsLock(item, revealed) && item.authorId !== options.userId;
+  const text = stickyTextForDom(item, hidden);
+  if (text === null) return null;
   return { id: item.id, x: record.x, y: record.y, w: record.w, h: record.h,
     fontSize: stickyFontSize(item), color: item.fontColor,
-    text: hidden ? options.hiddenText : stickyTextForDom(item, false).slice(0, CARD_OVERVIEW_TEXT_MAX_LENGTH) };
+    text: text.slice(0, CARD_OVERVIEW_TEXT_MAX_LENGTH) };
 }
 export function overviewRasterModel(items, options) {
   const records = items.map((item, order) => ({ ...sizeForPlacement(item), x: item.x, y: item.y, id: item.id, item, order }));
   const zones = records.filter(row => row.item.type === 'zone');
   const index = obstacleIndex(records.filter(row => row.item.type !== 'zone'));
   const rows = records.filter(row => row.item.type === 'sticky' && row.w <= CARD_OVERVIEW_MAX_EDGE_PX && row.h <= CARD_OVERVIEW_MAX_EDGE_PX
-    && !options.winners.has(row.id) && unoccluded(row, index, zones)).map(row => rasterRow(row, options));
+    && !options.winners.has(row.id) && unoccluded(row, index, zones)).map(row => rasterRow(row, options)).filter(Boolean);
   if (rows.length < MIN_RASTER_ITEMS) return null;
   const x = Math.min(...rows.map(row => row.x)), y = Math.min(...rows.map(row => row.y));
   const w = Math.max(...rows.map(row => row.x + row.w)) - x, h = Math.max(...rows.map(row => row.y + row.h)) - y;

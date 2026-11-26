@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useContext } from 'rea
 import { Lock, ThumbsUp, MessageSquare } from 'lucide-react';
 import { BOARD_TEXT_MAX_LENGTH, stickyTextForDom } from '../../domain/security-boundaries.js';
 import { PALETTE, STICKY_AUTO_TEXT } from '../ui/palette.js';
-import { stickyClassName, stickyCardVars, medalLook, stickyVoteClassName, COMMENT_CAROUSEL_MS } from './card-look.js';
+import { stickyClassName, stickyCardVars, stickyShowsLock, medalLook, stickyVoteClassName, COMMENT_CAROUSEL_MS } from './card-look.js';
 import { DEFAULT_STICKY_WIDTH_PX as STICKY_W, DEFAULT_STICKY_HEIGHT_PX as STICKY_H } from '../../domain/board-geometry.js';
 import { useBrowserLayoutEffect } from '../ui/use-browser-layout-effect.js';
 import { stickyFontSize } from './sticky-font.js';
@@ -17,6 +17,7 @@ import { isActionItem } from '../../domain/action-item.js';
 // Let notes grow while typing, but keep a pasted essay from turning into a
 // many-thousand-pixel card. At the cap the editor becomes internally scrollable.
 const STICKY_AUTO_GROW_MAX_H = 900;
+const OWNER_LOCK_SIZE_PX = 14;
 
 const autoGrownStickyHeight = (height, overflow) => {
   if (!Number.isFinite(overflow) || overflow <= 1) return height;
@@ -59,7 +60,9 @@ export const StickyCard = React.memo(function StickyCard({
   void lang;
   const it = item;
   const c = PALETTE[it.color] || PALETTE[0];
-  const hideContent = it.private && !allRevealed && !isOwner;
+  const showLock = stickyShowsLock(it, allRevealed);
+  const hideContent = showLock && !isOwner;
+  const ownerLock = showLock && isOwner && <Lock size={OWNER_LOCK_SIZE_PX} className="rb-sticky__lock" />;
   const visibleText = stickyTextForDom(it, hideContent);
   const w = it.w || STICKY_W;
   const h = it.h || STICKY_H;
@@ -70,7 +73,7 @@ export const StickyCard = React.memo(function StickyCard({
   const commentPreview = commentPreviews[commentPreviewIndex] ?? commentPreviews[0] ?? '';
   const showCommentPreview = !hideContent && !!commentPreview;
   const showCommentEntry = !hideContent && (commentCount > 0 || hovered);
-  const overview = compact && w <= CARD_OVERVIEW_MAX_EDGE_PX && h <= CARD_OVERVIEW_MAX_EDGE_PX
+  const overview = compact && !hideContent && w <= CARD_OVERVIEW_MAX_EDGE_PX && h <= CARD_OVERVIEW_MAX_EDGE_PX
     && !selected && !remoteSelected && !isEditing && !hovered && !top3;
   const growToFit = useCallback((overflow, patch = null) => {
     const nextHeight = autoGrownStickyHeight(h, overflow);
@@ -95,14 +98,15 @@ export const StickyCard = React.memo(function StickyCard({
     return () => clearInterval(timer);
   }, [commentPreviews, hideContent, overview]);
   if (overview) {
+    const preview = visibleText.slice(0, CARD_OVERVIEW_TEXT_MAX_LENGTH);
     return (
       <div
         className="rb-card-overview rb-card-overview--shadow-flat"
         data-sticky-id={it.id}
         role={rasterIds?.has(it.id) ? 'group' : undefined}
-        aria-label={rasterIds?.has(it.id) ? (hideContent ? t('sticky.hidden') : visibleText?.slice(0, CARD_OVERVIEW_TEXT_MAX_LENGTH)) : undefined}
+        aria-label={rasterIds?.has(it.id) ? preview : undefined}
         onMouseDown={e => onStartDrag(e, it)}
-        onDoubleClick={e => { e.stopPropagation(); if (!hideContent) onBeginFocus(it, 'text'); }}
+        onDoubleClick={e => { e.stopPropagation(); onBeginFocus(it, 'text'); }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         style={{
@@ -115,13 +119,14 @@ export const StickyCard = React.memo(function StickyCard({
           fontSize: stickyFontSize(it),
         }}
       >
+        {ownerLock && <div className="rb-sticky__badges">{ownerLock}</div>}
         <div
           className={`rb-card-overview__text${rasterIds?.has(it.id) ? ' rb-card-overview__text--rasterized' : ''}`}
           style={{ maxHeight: h - CARD_OVERVIEW_FOOTER_HEIGHT_PX }}
         >
-          {hideContent ? t('sticky.hidden') : visibleText?.slice(0, CARD_OVERVIEW_TEXT_MAX_LENGTH)}
+          {preview}
         </div>
-        {showVoteCount && !hideContent && (voteCount > 0 || votingAllowedNow) && (
+        {showVoteCount && (voteCount > 0 || votingAllowedNow) && (
           <button
             type="button"
             onMouseDown={e => e.stopPropagation()}
@@ -167,9 +172,7 @@ export const StickyCard = React.memo(function StickyCard({
     >
       <div className="rb-sticky__badges">
         <ActionItemBadge item={it} hidden={hideContent} />
-        {it.private && !allRevealed && isOwner && (
-          <Lock size={14} className="rb-sticky__lock" />
-        )}
+        {ownerLock}
         {showCommentEntry && (
           <button
             type="button"

@@ -4,12 +4,14 @@ import { overviewRasterModel, overviewPaintRuns } from './overview-raster-model.
 
 const items = () => Array.from({ length: 64 }, (_, n) => ({ id: `note-${n}`, type: 'sticky', x: (n % 8) * 330,
   y: Math.floor(n / 8) * 280, w: 280, h: 240, text: `Note ${n}`, authorId: 'owner' }));
-const options = () => ({ contexts: new Map(), winners: new Map(), allRevealed: false, userId: 'viewer', hiddenText: 'Hidden', dpr: 3 });
+const options = () => ({ contexts: new Map(), winners: new Map(), allRevealed: false, userId: 'viewer', dpr: 3 });
 
-test('raster rows redact non-owner private text with nested reveal overrides', () => {
+test('the atlas leaves hidden notes to their native lock layout and paints visible notes', () => {
   const board = items(); board[0] = { ...board[0], private: true, text: 'DO NOT RASTER' };
   const model = overviewRasterModel(board, options());
-  assert.equal(model.rows[0].text, 'Hidden');
+  assert.equal(model.ids.has(board[0].id), false);
+  assert.equal(model.ids.has(board[1].id), true);
+  assert.ok(model.rows.every(row => row.id !== board[0].id));
   assert.ok(!JSON.stringify(model.rows).includes('DO NOT RASTER'));
   const revealed = options(); revealed.contexts.set(board[0].id, { revealed: true });
   assert.equal(overviewRasterModel(board, revealed).rows[0].text, 'DO NOT RASTER');

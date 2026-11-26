@@ -12,6 +12,8 @@ export const ZONE_BORDER_W_PX = 2;
 export const ZONE_RADIUS_PX = 24;
 export const ZONE_EDGE_HIT_WIDTH_PX = 16;
 
+export const stickyShowsLock = (sticky, revealed) => sticky.private && !revealed;
+
 export function stickyShadowClass({ remoteSelected, winner, dense }) {
   if (remoteSelected) return '';
   if (winner) return 'rb-sticky--shadow-winner';

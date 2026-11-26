@@ -35,26 +35,29 @@ function byClass(tree, className) {
   return findElement(tree, (node) => node.props.className?.split(' ').includes(className));
 }
 
-test('text and private visibility follow owner/reveal props in th/en', async () => {
+function checkPrivateStickyView(StickyCard, props, t) {
+  const { tree, html } = renderCard(StickyCard, { item: { ...ITEM, private: true }, ...props });
+  const hidden = !props.isOwner && !props.allRevealed;
+  assert.equal(html.includes(ITEM.text), !hidden);
+  assert.equal(Boolean(byClass(tree, 'rb-sticky__hidden')), hidden);
+  assert.equal(Boolean(byClass(tree, 'rb-sticky__lock')), props.isOwner && !props.allRevealed);
+  if (!hidden) return;
+  assert.ok(byClass(tree, 'rb-sticky__hidden-icon'));
+  assert.equal(byClass(tree, 'rb-sticky__hidden-title').props.children, t('sticky.hidden'));
+  assert.ok(!t('sticky.hidden').includes('🔒'));
+  assert.equal(byClass(tree, 'rb-sticky__hidden-author').props.children, t('sticky.hiddenBy', { name: ITEM.authorName }));
+  assert.equal(byClass(tree, 'rb-sticky__vote-pill').props.disabled, true);
+}
+
+test('private notes keep the lock layout, author badge and reveal behavior at both zoom levels in th/en', async () => {
   await withChromeModule('/src/client/board/StickyCard.jsx', ({ StickyCard }, { t, getLang, setLang }) => {
     const previous = getLang();
     try {
       for (const lang of ['th', 'en']) {
         setLang(lang);
         for (const [isOwner, allRevealed] of [[false, false], [true, false], [false, true]]) {
-          const { tree, html } = renderCard(StickyCard, {
-            item: { ...ITEM, private: true }, isOwner, allRevealed, lang,
-          });
-          const hidden = !isOwner && !allRevealed;
-          assert.equal(html.includes(ITEM.text), !hidden);
-          assert.equal(Boolean(byClass(tree, 'rb-sticky__hidden')), hidden);
-          if (hidden) {
-            assert.equal(byClass(tree, 'rb-sticky__hidden-title').props.children, t('sticky.hidden'));
-            assert.ok(!t('sticky.hidden').includes('🔒'));
-            assert.ok(byClass(tree, 'rb-sticky__hidden-icon'));
-            assert.equal(byClass(tree, 'rb-sticky__hidden-author').props.children,
-              t('sticky.hiddenBy', { name: ITEM.authorName }));
-            assert.equal(byClass(tree, 'rb-sticky__vote-pill').props.disabled, true);
+          for (const compact of [false, true]) {
+            checkPrivateStickyView(StickyCard, { compact, isOwner, allRevealed, lang }, t);
           }
         }
       }

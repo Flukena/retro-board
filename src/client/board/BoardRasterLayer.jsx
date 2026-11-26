@@ -4,7 +4,6 @@ import { overviewRasterModel, overviewPaintRuns, OVERVIEW_RASTER_MAX_PIXELS, OVE
 import { OverviewRasterPainter, overviewFontLoadAffectsPaint } from './overview-raster-paint.js';
 import { OverviewRasterImage } from './overview-raster-image.js';
 import { webkitCompositing } from './webkit-compositing.js';
-import { t } from '../ui/i18n.js';
 import { useBrowserLayoutEffect as useLayoutEffect } from '../ui/use-browser-layout-effect.js';
 
 function RasterGroup({ items, compact, dense, selectedIds, remoteSelectors, focusedTextId, detailedIds,
@@ -16,7 +15,7 @@ function RasterGroup({ items, compact, dense, selectedIds, remoteSelectors, focu
   const asImage = webkitCompositing(globalThis);
   const enabled = dense && (compact || detailedIds != null) && !selectedIds.size && !remoteSelectors.size && !focusedTextId;
   const model = useMemo(() => enabled ? overviewRasterModel(items, { contexts, allRevealed, userId, winners,
-    hiddenText: t('sticky.hidden'), maxPixels: pixelBudget, dpr: Math.min(globalThis.devicePixelRatio || 1, OVERVIEW_RASTER_MAX_DPR) }) : null,
+    maxPixels: pixelBudget, dpr: Math.min(globalThis.devicePixelRatio || 1, OVERVIEW_RASTER_MAX_DPR) }) : null,
   [items, enabled, contexts, allRevealed, userId, winners, lang, pixelBudget]);
   useLayoutEffect(() => {
     const atlas = atlasRef.current;
