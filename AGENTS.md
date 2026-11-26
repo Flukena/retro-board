@@ -86,11 +86,13 @@ Goal: minimal bytes and write ops per useful line, so SSD/HDD wear stays low. Ap
 - New machine-read logs are JSON with UTC ISO-8601 timestamps and short keys; otherwise keep the repo's existing format. Human-only logs stay compact text, not JSON (fewer bytes written).
 
 ## Data location (hard rule)
-Logs, long probes/captures and bulk datasets go to one of two data volumes, per-task folder (e.g. `<root>/<project>/<probe>-<YYYYMMDD>/`):
+Only files that are genuinely large or created and deleted often go to a data volume: logs, long probes/captures, bulk datasets, build targets and caches. They go to one of two volumes, per-task folder (e.g. `<root>/<project>/<probe>-<YYYYMMDD>/`):
 - Fast/frequent writes (high write rate, hot captures, data read back often) → `/Volumes/ssd-fluke/BaseData`.
 - Infrequent writes, speed not needed (archives, occasional logs, cold datasets) → `/Volumes/BaseDisk/Base`.
 
-Never internal disk, repo trees, `/tmp` or scratchpad. Chosen volume unmounted → stop/report, no fallback to the other. Claude also symlinks each new task folder at `~/basedata/<project>/<task>` (outside repos). Small throwaway temp files use the session scratchpad (Codex: its sandbox temp).
+Such data never goes on the internal disk, in repo trees, `/tmp` or scratchpad. Chosen volume unmounted → stop/report, no fallback to the other. Claude also symlinks each new task folder at `~/basedata/<project>/<task>` (outside repos). Small throwaway temp files use the session scratchpad (Codex: its sandbox temp).
+
+Plans, documents (PRD, roadmap, design, rulings, review reports and verdicts, reports meant to be read) and small scripts are not data: keep them in the project root (the repo, in its docs/scripts layout, on a branch where the repo requires one), never only on a data volume. A reviewer writes its report into the repo beside the thing reviewed; only its prompt, run log and pid file stay on the data volume. A document may cite evidence that stays on the data volume by path.
 
 ## Long runs (hard rule)
 - Long builds/tests (`cargo`, `pytest`, probes): run them as ONE blocking command with output redirected to a file and the longest yield/timeout the tool allows, then read only `tail`/`rg` of that file. Do not poll with repeated `write_stdin`/`sleep`, because every poll re-sends the whole context. Use quiet flags (`-q`, `--quiet`, `--message-format short`) and filter for failures.
@@ -102,5 +104,5 @@ Never internal disk, repo trees, `/tmp` or scratchpad. Chosen volume unmounted �
 4. Define verifiable success criteria; multi-step work gets a brief plan with checks.
 
 ## Reviews
-Every review (Claude or Codex, whoever wrote the code) checks every rule in Code shape, Tests, Logging and disk writes, Data location and Karpathy guidelines, plus repo style and failure-path tests. Each violation is a finding. End the review with a `RULE CONFORMANCE` section: one line per section (Code shape, Tests, Logging and disk writes, Data location, Karpathy guidelines, repo style, failure-path tests) saying PASS or N/A, plus one line per failed rule (FAIL → finding). A re-review round lists only the rules that failed in the round before or that the new diff touches.
+Every review (Claude or Codex, whoever wrote the code) checks every rule in Code shape, Tests, Logging and disk writes, Data location and Karpathy guidelines, plus repo style and failure-path tests. Each violation is a finding; only P1 and P2 findings block GO (`NO-GO`), while P3-only reviews (wording, minor style, non-runtime notes) return `GO`. On any `NO-GO` verdict (any P1 or P2-mechanism finding), the reviewer (Codex or Claude) MUST provide a concrete, actionable solution for every blocking finding (exact files/symbols, minimal fix design, and verification/test) in the same reply — never return `NO-GO` without the solution. End the review with a `RULE CONFORMANCE` section: one line per section (Code shape, Tests, Logging and disk writes, Data location, Karpathy guidelines, repo style, failure-path tests) saying PASS or N/A, plus one line per failed rule (FAIL → finding). A re-review round lists only the rules that failed in the round before or that the new diff touches.
 <!-- SHARED_RULES_END -->
