@@ -38,6 +38,7 @@ const NAME_A = 'Ada';
 const GUEST_NAME_PATTERN = /^Guest-\d{4}$/;
 const PREFILL_POLL_MS = 100;
 const NAME_B = 'บี';
+const LANDING_COMPACT_WIDTHS_PX = [320, 390, 600];
 const LABELS = {
   en: { menu: 'Account menu', free: 'Free plan', pro: 'Pro plan',
     signOutAll: 'Sign out everywhere', delete: 'Delete account', cancelled: 'Sign-in was cancelled.' },
@@ -96,6 +97,32 @@ async function chooseFromMenu(page, label) {
   await page.getByRole('button', { name: label, exact: true }).click();
 }
 
+async function checkGuestMasthead(page) {
+  const initial = page.viewportSize();
+  try {
+    for (const width of [...LANDING_COMPACT_WIDTHS_PX, initial.width]) {
+      await page.setViewportSize({ width, height: initial.height });
+      const boxes = await page.locator('.rb-landing__masthead').evaluate(async header => {
+        await document.fonts.ready;
+        const parts = ['.rb-landing__brand', '.rb-landing__wordmark', '.rb-account__signin', '.rb-lang-picker', '.rb-landing__corner > button'];
+        return parts.map(selector => {
+          const { left, right, top, bottom } = header.querySelector(selector).getBoundingClientRect();
+          return { selector, left, right, top, bottom };
+        });
+      });
+      for (const [index, box] of boxes.entries()) {
+        assert.ok(box.left >= 0 && box.right <= width && box.right > box.left, `${box.selector} must fit at ${width}px`);
+        for (const other of boxes.slice(index + 1)) {
+          assert.ok(box.right <= other.left || other.right <= box.left || box.bottom <= other.top || other.bottom <= box.top,
+            `${box.selector} overlaps ${other.selector} at ${width}px`);
+        }
+      }
+    }
+  } finally {
+    await page.setViewportSize(initial);
+  }
+}
+
 async function accountSteps({ a, b, report, browser, baseUrl }) {
   await step(report, 'signed-out menu renders in en (A) and th (B)', async () => {
     await openLanding(a, baseUrl);
@@ -104,6 +131,8 @@ async function accountSteps({ a, b, report, browser, baseUrl }) {
     await openLanding(b, baseUrl);
     await signInLink(b, 'th').waitFor();
     await shot(b, 'signed-out-th.png', report);
+    await checkGuestMasthead(a);
+    await checkGuestMasthead(b);
   });
   await step(report, 'cancel at the stub shows the access_denied toast', async () => {
     await visitStub(a, baseUrl, CANCEL_SELECTOR);

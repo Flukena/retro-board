@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { withChromeModule } from '../../test-support/chrome-test-helper.js';
-import { MOBILE_LAYOUT_QUERY, APP_VIEWPORT_CONTENT } from './mobile-layout.js';
+import { MOBILE_LAYOUT_QUERY } from './mobile-layout.js';
 import { TOKENS } from './theme.js';
 
 const readSource = (file) => readFileSync(new URL(file, import.meta.url), 'utf8');
@@ -96,16 +96,23 @@ test('mobile rail reserves room for the full Templates label and keeps tool labe
   assert.match(css, /\.rb-dock-tile__label > svg\[aria-hidden="true"\]\s*\{[^}]*display:\s*none/);
 });
 
-test('landing preserves safe-area viewport coverage and uses usable mobile controls', () => {
-  const viewport = Object.fromEntries(APP_VIEWPORT_CONTENT.split(', ').map((entry) => entry.split('=')));
+test('every mobile route starts with a fixed document scale and allows touch panning', () => {
+  const html = readSource('../../../index.html');
+  const [, content] = html.match(/<meta name="viewport" content="([^"]+)"/);
+  const viewport = Object.fromEntries(content.split(/,\s*/).map(entry => entry.split('=')));
+  assert.equal(viewport.width, 'device-width');
+  assert.equal(viewport['initial-scale'], '1.0');
   assert.equal(viewport['viewport-fit'], 'cover');
   assert.equal(viewport['maximum-scale'], '1.0');
   assert.equal(viewport['minimum-scale'], '1.0');
   assert.equal(viewport['user-scalable'], 'no');
+  assert.match(mediaBlocks(html, '(any-pointer: coarse)'), /html\s*\{[^}]*touch-action:\s*pan-x pan-y\s*;/);
+});
+
+test('landing preserves safe-area viewport coverage and uses usable mobile controls', () => {
   const landing = readSource('../app/Landing.jsx');
   assert.match(landing, /import \{ useBrowserZoomGuard \} from '..\/board\/use-browser-zoom-guard.js'/);
   assert.match(landing, /useBrowserZoomGuard\(\{ blockGestures: true \}\)/);
-  assert.match(readSource('../board/use-browser-zoom-guard.js'), /meta.setAttribute\([\s\S]*?'content',\s*APP_VIEWPORT_CONTENT/);
   const css = readSource('../app/landing.css');
   assert.ok(css.includes(`@media ${MOBILE_LAYOUT_QUERY}`));
   assert.match(css, /--landing-control-font-size:\s*16px/);

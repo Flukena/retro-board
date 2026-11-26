@@ -59,6 +59,8 @@
 }
 .rb-landing__identity:focus-visible,
 .rb-landing__nav a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.rb-landing__page .rb-landing__masthead { flex-wrap: wrap; }
+.rb-landing__page .rb-landing__identity { flex-shrink: 0; }
 .rb-landing__wordmark { font-family: var(--font-display); font-size: var(--landing-wordmark-size); font-weight: var(--landing-title-font-weight); white-space: nowrap; }
 .rb-landing__nav { display: flex; gap: var(--space-1); margin-left: auto; }
 .rb-landing__nav a {
@@ -543,6 +545,10 @@
   }
   .rb-landing__masthead { padding-top: calc(var(--space-4) + env(safe-area-inset-top, 0px)); gap: var(--space-2); }
   .rb-landing__identity { gap: var(--space-2); }
+  .rb-landing__page .rb-landing__corner { display: contents; }
+  .rb-landing__page .rb-landing__corner > .rb-account,
+  .rb-landing__page .rb-landing__corner > .rb-lang-picker { margin-inline-start: auto; max-width: 100%; }
+  .rb-landing__page .rb-landing__corner .rb-btn { min-height: var(--landing-control-height); box-sizing: border-box; }
   .rb-landing__hero-layout { padding-top: var(--space-6); }
   .rb-landing__eyebrow { display: none; }
   .rb-landing__tagline { font-size: var(--landing-body-font-size); margin-top: var(--space-3); }
@@ -554,6 +560,9 @@
 }
 @media (max-width: 359px) {
   .rb-landing__page { --landing-wordmark-size: var(--landing-compact-wordmark-size); --landing-logo-size: var(--landing-compact-logo-size); }
+  .rb-landing__page .rb-landing__identity,
+  .rb-landing__page .rb-account__signin { gap: var(--space-1); }
+  .rb-landing__page .rb-account__signin { padding-inline: var(--space-2); }
   .rb-landing__public-copy p { display: none; }
 }
 @media (max-height: 560px) and (min-width: 600px) {

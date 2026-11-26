@@ -1,5 +1,4 @@
 import { useEffect } from 'react';
-import { APP_VIEWPORT_CONTENT } from '../ui/mobile-layout.js';
 
 const DPR_ZOOM_TOLERANCE = 0.01;
 const GESTURE_EVENTS = ['gesturestart', 'gesturechange', 'gestureend'];
@@ -8,15 +7,6 @@ const ZOOM_KEYS = ['+', '-', '=', '0'];
 export function attachBrowserZoomGuard({
   view = globalThis.window, ownerDocument = globalThis.document, blockGestures = false,
 } = {}) {
-  const meta = ownerDocument.querySelector('meta[name="viewport"]');
-  const prevContent = meta?.getAttribute('content') || '';
-  if (meta) {
-    meta.setAttribute(
-      'content',
-      APP_VIEWPORT_CONTENT,
-    );
-  }
-
   const onWheel = (e) => {
     // Canvas already preventDefaults its own wheel; this stops zoom
     // when pinch/ctrl-wheel happens over toolbars or modals.
@@ -43,7 +33,6 @@ export function attachBrowserZoomGuard({
   view.visualViewport?.addEventListener('resize', counterZoom);
 
   const dispose = () => {
-    if (meta) meta.setAttribute('content', prevContent);
     if (blockGestures) GESTURE_EVENTS.forEach(type => view.removeEventListener(type, onGesture));
     view.removeEventListener('wheel', onWheel);
     view.removeEventListener('keydown', onKeyDown);

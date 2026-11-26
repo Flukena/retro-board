@@ -28,6 +28,9 @@ const NATIVE_ANCHOR_TOLERANCE_WORLD_PX = 0.05;
 const LAYOUT_SETTLE_MS = 350;
 const RETRY_INTERVAL_MS = 250;
 const GESTURE_STEPS = 8;
+const PINCH_START_RADIUS_PX = 50;
+const PINCH_SPREAD_PX = 40;
+const BOARD_PINCH_CENTER = { x: 190, y: 200 };
 const EDGE_TOLERANCE_PX = 2;
 const SELECTION_FOLLOW_FRAME_COUNT = 32;
 const SELECTION_FOLLOW_TOLERANCE_PX = 1;
@@ -285,6 +288,12 @@ async function checkLanding(mobile) {
   await mobile.page.setViewportSize(MOBILE_VIEWPORT);
   await checkNativePageSelection(mobile);
   await mobile.page.screenshot({ path: join(output, 'mobile-landing.png') });
+  await spreadFingers(mobile, BOARD_PINCH_CENTER);
+  await assertPageScale(mobile, 'Landing');
+  await mobile.page.goto(new URL('/privacy', baseUrl).href);
+  await mobile.page.locator('#legal-title').waitFor();
+  await spreadFingers(mobile, BOARD_PINCH_CENTER);
+  await assertPageScale(mobile, 'Privacy page');
 }
 async function createPrivateRoom(user) {
   await user.page.goto(baseUrl);
@@ -692,21 +701,34 @@ async function restoreViewport(mobile) {
     window.visualViewport.dispatchEvent(new Event('resize'));
   });
 }
-async function checkPinch(mobile) {
+async function spreadFingers(mobile, { x, y }) {
   const send = await touches(mobile);
-  const initial = await viewport(mobile);
-  const initialPoints = [{ id: 1, x: 140, y: 200 }, { id: 2, x: 240, y: 200 }];
-  await send('touchStart', initialPoints.slice(0, 1));
-  await send('touchStart', initialPoints);
-  await send('touchMove', [{ id: 1, x: 100, y: 200 }, { id: 2, x: 280, y: 200 }]);
+  const points = radius => [{ id: 1, x: x - radius, y }, { id: 2, x: x + radius, y }];
+  const start = points(PINCH_START_RADIUS_PX);
+  await send('touchStart', start.slice(0, 1));
+  await send('touchStart', start);
+  for (let index = 1; index <= GESTURE_STEPS; index++) {
+    await send('touchMove', points(PINCH_START_RADIUS_PX + PINCH_SPREAD_PX * index / GESTURE_STEPS));
+    await mobile.page.waitForTimeout(FRAME_INTERVAL_MS);
+  }
   await send('touchEnd', []);
   await mobile.page.waitForTimeout(LAYOUT_SETTLE_MS);
+}
+async function assertPageScale(mobile, location) {
+  const scale = await mobile.page.evaluate(() => window.visualViewport.scale);
+  assert.equal(scale, 1, `${location} must stay at its original page scale`);
+}
+async function checkPinch(mobile) {
+  const initial = await viewport(mobile);
+  await spreadFingers(mobile, BOARD_PINCH_CENTER);
   const next = await viewport(mobile);
   assert.ok(next.zoom > initial.zoom);
-  const browserScale = await mobile.page.evaluate(() => window.visualViewport.scale);
-  assert.equal(browserScale, 1, 'Pinch must zoom board, not document');
+  await assertPageScale(mobile, 'Board');
   await mobile.page.locator('[data-tool="templates"]').tap();
-  await mobile.page.locator('.rb-template-popover').waitFor();
+  const sheet = await mobile.page.locator('.rb-template-popover').boundingBox();
+  await spreadFingers(mobile, { x: sheet.x + sheet.width / 2, y: sheet.y + sheet.height / 2 });
+  await assertPageScale(mobile, 'Template menu');
+  assert.equal((await viewport(mobile)).zoom, next.zoom, 'Pinching the menu must leave the board zoom unchanged');
   await closeTemplates(mobile);
 }
 async function checkInlineScroll(mobile, desktop, text) {
