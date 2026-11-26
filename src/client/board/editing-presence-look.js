@@ -1,5 +1,6 @@
 import { sizeForPlacement } from '../../domain/board-geometry.js';
 import { Z } from '../chrome/chrome-layout.js';
+import { PRESENCE_INVERSE_ZOOM } from './presence-zoom.js';
 
 const EDITOR_BORDER_SCREEN_PX = 2;
 const EDITOR_GLOW_SCREEN_PX = 3;
@@ -8,15 +9,15 @@ const CARD_RADIUS = Object.freeze({
   zone: 'var(--radius-zone)', image: 'var(--radius-image-card)',
 });
 
-export function remoteEditingFrameStyle(item, { zoom, color, glow }) {
+export function remoteEditingFrameStyle(item, { color, glow }) {
   const { w: width, h: height } = sizeForPlacement(item);
   return {
     position: 'absolute', left: item.x, top: item.y,
     width, height, boxSizing: 'border-box',
-    border: `${EDITOR_BORDER_SCREEN_PX / zoom}px solid ${color}`,
+    border: `calc(${EDITOR_BORDER_SCREEN_PX}px * ${PRESENCE_INVERSE_ZOOM}) solid ${color}`,
     // Card geometry scales with the world; only stroke and glow counter-scale.
     borderRadius: CARD_RADIUS[item.type] || CARD_RADIUS.image,
-    boxShadow: `0 0 0 ${EDITOR_GLOW_SCREEN_PX / zoom}px ${glow}`,
+    boxShadow: `0 0 0 calc(${EDITOR_GLOW_SCREEN_PX}px * ${PRESENCE_INVERSE_ZOOM}) ${glow}`,
     pointerEvents: 'none', zIndex: Z.REMOTE_EDITOR_BOX,
   };
 }

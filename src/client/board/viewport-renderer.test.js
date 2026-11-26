@@ -6,17 +6,32 @@ import { GRID_PITCH_PX } from '../chrome/chrome-layout.js';
 
 test('viewport painting preserves world, grid, cursor and minimap coordinate alignment', () => {
   const world = { style: {} }, grid = { style: {} }, mini = { style: {} };
-  const cursor = { dataset: { cursorX: '100', cursorY: '200' }, style: {} };
-  paintViewport({ x: 20, y: -30, zoom: 0.5 }, { world, grid, cursorLayer: { children: [cursor] }, minimapViewport: mini,
+  const cursorLayer = { style: { setProperty() {} }, children: [] };
+  paintViewport({ x: 20, y: -30, zoom: 0.5 }, { world, grid, cursorLayer, minimapViewport: mini,
     minimapModel: { viewportSize: { w: 100, h: 80 }, bounds: { x: 0, y: 0 }, scale: 0.1, offsetX: 0, offsetY: 0 } });
   assert.equal(world.style.transform, 'translate3d(20px, -30px, 0) scale(0.5)');
-  assert.equal(cursor.style.transform, 'translate3d(70px, 70px, 0)');
+  assert.equal(cursorLayer.style.transform, world.style.transform);
   assert.equal(mini.style.transform, 'translate3d(-4px, 6px, 0)');
   assert.equal(mini.style.width, '20px'); assert.equal(mini.style.height, '16px');
   assert.notEqual(grid.style.backgroundImage, 'none');
   assert.doesNotThrow(() => paintViewport({ x: 0, y: 0, zoom: 1 }, {}));
 });
 
+test('live zoom and its trailing commit paint the same smaller cursor and status labels', () => {
+  const layer = () => ({
+    children: [], style: { setProperty(name, value) { this[name] = value; } },
+  });
+  const cursorLayer = layer(), labelLayer = layer();
+  const viewport = { x: -41, y: 23, zoom: 0.05 };
+  for (const live of [true, false]) {
+    paintViewport(viewport, { cursorLayer, labelLayer }, { live });
+    assert.equal(cursorLayer.style.transform, 'translate3d(-41px, 23px, 0) scale(0.05)');
+    for (const { style } of [cursorLayer, labelLayer]) {
+      assert.ok(Math.abs(Number(style['--rb-presence-world-scale']) * viewport.zoom - 0.6) < 1e-9);
+    }
+    assert.equal(Number(labelLayer.style['--rb-presence-inverse-zoom']) * viewport.zoom, 1);
+  }
+});
 
 test('live viewport painting moves selected handles with the same fractional world transform', () => {
   const se = { dataset: { selectionCorner: 'se' }, style: {} };

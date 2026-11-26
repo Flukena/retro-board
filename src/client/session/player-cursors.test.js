@@ -4,7 +4,6 @@ import * as Y from 'yjs';
 import { Awareness, outdatedTimeout, applyAwarenessUpdate, encodeAwarenessUpdate, removeAwarenessStates } from 'y-protocols/awareness';
 
 import {
-  cursorScreenPosition,
   mergePlayerPresence,
   normalizePlayerCursor,
   normalizePlayerView,
@@ -42,13 +41,6 @@ test('shows only fresh online cursors belonging to other players', () => {
     name: 'Alice',
     cursor: { x: 30, y: 40, updatedAt: 9800 },
   }]);
-});
-
-test('maps a shared world cursor into the local player viewport', () => {
-  assert.deepEqual(
-    cursorScreenPosition({ x: 400, y: 250 }, { x: -100, y: 50, zoom: 0.5 }),
-    { x: 100, y: 175 },
-  );
 });
 
 test('a live player with a delayed heartbeat keeps their fresh cursor', () => {

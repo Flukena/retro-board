@@ -108,8 +108,3 @@ export const visiblePlayerCursors = ({
     }];
   });
 };
-
-export const cursorScreenPosition = (cursor, viewport) => ({
-  x: Number(cursor.x) * Number(viewport.zoom) + Number(viewport.x),
-  y: Number(cursor.y) * Number(viewport.zoom) + Number(viewport.y),
-});

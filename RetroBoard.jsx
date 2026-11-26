@@ -261,7 +261,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
   const selectionLayerRef = useRef(null);
   const worldMeasureRef = useRef(null);
   const gridRef = useRef(null);
-  const cursorLayerRef = useRef(null);
+  const { cursorLayerRef, labelLayerRef } = useRef({ cursorLayerRef: { current: null }, labelLayerRef: { current: null } }).current;
   const presenceBroadcastRef = usePresenceBroadcastState();
   const followedUserIdRef = useRef(null);
   const followViewportCommitRef = useRef(null);
@@ -1088,7 +1088,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
   // mousemove — pan becomes a single GPU-composited transform.
   const applyViewportToDom = useCallback((v, live = false) => {
     revealMinimap();
-    paintViewport(v, { world: worldRef.current, grid: gridRef.current, cursorLayer: cursorLayerRef.current,
+    paintViewport(v, { world: worldRef.current, grid: gridRef.current, cursorLayer: cursorLayerRef.current, labelLayer: labelLayerRef.current,
       minimapViewport: minimapViewportRef.current, minimapModel: minimapModelRef.current, selectionLayer: selectionLayerRef.current }, { live });
   }, [revealMinimap]);
 
@@ -2762,7 +2762,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
           {renderedItems}
           <LiveDrawingPreviews />
 
-          <RemoteCollaborationLabels selectionLabels={selectionLabels} editingIndicators={editingIndicators} viewport={viewport} />
+          <RemoteCollaborationLabels selectionLabels={selectionLabels} editingIndicators={editingIndicators} labelLayerRef={labelLayerRef} />
 
           {/* Zone-creation preview */}
           <ZonePreview zonePreview={zonePreview} />
@@ -2772,7 +2772,7 @@ export default function RetroBoard({ boardCode = null, boardToken = null, mode =
         <EmptyCanvasHint itemCount={board.items.length} creationMode={creationMode} />
       </div>
 
-      <RemoteCursorLayer cursorLayerRef={cursorLayerRef} viewportRef={viewportRef} playerCursors={playerCursors} />
+      <RemoteCursorLayer cursorLayerRef={cursorLayerRef} playerCursors={playerCursors} />
 
       {/* Floating UI */}
       <input ref={fileInputRef} type="file" accept="application/zip,.zip,application/json,.json,text/csv,.csv"

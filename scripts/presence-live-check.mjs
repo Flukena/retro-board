@@ -2,7 +2,8 @@
 /**
  * Two-participant live check of remote presence (INV-10, and the visible half of INV-11; refactor design §7.3).
  * Each participant sees the other's named cursor follow the mouse. A shared sticky `pres` shows B's selection label and
- * B's editing label on A, and both clear again. While B holds a drag of `pres`, A's own drag is refused with the "in use"
+ * B's editing label on A, and both clear again. The cursor name and selection badge shrink during zoom without a
+ * size jump on settle. While B holds a drag of `pres`, A's own drag is refused with the "in use"
  * toast and moves nothing. When B leaves mid-drag the busy claim, B's cursor, selection and editing labels all clear on A
  * within PLAYER_PRESENCE_STALE_MS + SYNC_TIMEOUT_MS, and A's drag then succeeds with no busy toast. The measured clear
  * times are recorded in report.json.
@@ -12,8 +13,9 @@
  */
 import assert from 'node:assert/strict';
 import { PLAYER_PRESENCE_STALE_MS } from '../src/domain/awareness-liveness.js';
+import { wheelDeltaForZoomFactor } from '../src/domain/viewport-zoom.js';
 import {
-  LIVE_MODE, NAME_A, NAME_B, SYNC_TIMEOUT_MS, addSharedSticky, appLabel, boardItems, boxCenter, dragBy, errorsStep,
+  CANVAS_SELECTOR, LIVE_MODE, NAME_A, NAME_B, SYNC_TIMEOUT_MS, addSharedSticky, appLabel, boardItems, boxCenter, dragBy, errorsStep,
   itemById, pollUntil, runLiveCheck, sleep, step, stickyBox, waitForTextOn, withinPx,
 } from './board-live-helpers.mjs';
 
@@ -26,6 +28,13 @@ const CURSOR_MOVE_STEPS = 10;
 // The cursor is drawn in world units; 300 screen px at the default zoom is about 300 world px, so half is a safe floor.
 const CURSOR_MIN_DELTA_WORLD_PX = 150;
 const CURSOR_SETTLE_MS = 400;
+const NORMAL_ZOOM = 1;
+const MID_ZOOM = 0.55;
+const OVERVIEW_ZOOM = 0.15;
+const MIN_OVERVIEW_LABEL_RATIO = 0.5;
+const MAX_OVERVIEW_LABEL_RATIO = 0.85;
+const LIVE_ZOOM_TOLERANCE = 0.001;
+const LABEL_SIZE_TOLERANCE_PX = 1;
 // Empty canvas, away from every sticky and control.
 const EMPTY_CANVAS_PX = Object.freeze({ x: 1000, y: 200 });
 const FOCUSED_EDITOR_SELECTOR = 'textarea:focus';
@@ -101,6 +110,74 @@ async function cursorFollows(mover, watcher, name) {
 
 // ---------------------------------------------------------------- steps 3-4
 
+async function sampleLiveZoom(page, cursor, label, zoomControl) {
+  const handles = [];
+  try {
+    for (const locator of [cursor, label, zoomControl]) handles.push(await locator.elementHandle());
+    return await page.locator(CANVAS_SELECTOR).evaluate(async (canvas, { handles: [cursor, label, zoomControl], deltas }) => {
+      const size = node => {
+        const { width, height } = node.getBoundingClientRect();
+        return { width, height };
+      };
+      const sample = () => ({
+        cursor: size(cursor), badge: size(label), percentage: zoomControl.textContent,
+        zoom: new DOMMatrix(getComputedStyle(canvas.firstElementChild).transform).a,
+      });
+      const nextFrame = () => new Promise(resolve => requestAnimationFrame(resolve));
+      const samples = [sample()];
+      const { left, top, width, height } = canvas.getBoundingClientRect();
+      for (const deltaY of deltas) {
+        canvas.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, ctrlKey: true,
+          deltaY, clientX: left + width / 2, clientY: top + height / 2 }));
+        // The wheel handler paints on the next frame, before its trailing React commit.
+        await nextFrame();
+        await nextFrame();
+        samples.push(sample());
+      }
+      return samples;
+    }, { handles, deltas: [
+      wheelDeltaForZoomFactor(MID_ZOOM / NORMAL_ZOOM, true),
+      wheelDeltaForZoomFactor(OVERVIEW_ZOOM / MID_ZOOM, true),
+    ] });
+  } finally {
+    await Promise.all(handles.map(handle => handle.dispose()));
+  }
+}
+
+function assertLabelZoom(name, start, middle, overview, settled) {
+  for (const dimension of ['width', 'height']) {
+    assert.ok(start[dimension] > middle[dimension] && middle[dimension] > overview[dimension],
+      `${name} ${dimension} did not shrink on both live zoom frames`);
+    const ratio = overview[dimension] / start[dimension];
+    assert.ok(ratio >= MIN_OVERVIEW_LABEL_RATIO && ratio <= MAX_OVERVIEW_LABEL_RATIO,
+      `${name} overview ${dimension} is ${ratio} of its normal size`);
+    assert.ok(withinPx(overview[dimension], settled[dimension], LABEL_SIZE_TOLERANCE_PX),
+      `${name} ${dimension} jumped when zoom settled`);
+  }
+}
+
+async function presenceTracksLiveZoom(page, label) {
+  const cursor = cursorOf(page, NAME_B).first().locator('span');
+  await visibleWithin(cursor);
+  const zoomControl = page.getByTitle(appLabel('en', 'zoom.reset'), { exact: true });
+  try {
+    const [start, middle, overview] = await sampleLiveZoom(page, cursor, label, zoomControl);
+    assert.ok(withinPx(start.zoom, NORMAL_ZOOM, LIVE_ZOOM_TOLERANCE), 'label check starts at normal zoom');
+    assert.ok(withinPx(middle.zoom, MID_ZOOM, LIVE_ZOOM_TOLERANCE), 'the middle wheel frame painted');
+    assert.ok(withinPx(overview.zoom, OVERVIEW_ZOOM, LIVE_ZOOM_TOLERANCE), 'the overview wheel frame painted');
+    assert.equal(middle.percentage, start.percentage, 'the middle frame preceded the React commit');
+    assert.equal(overview.percentage, start.percentage, 'the overview frame preceded the React commit');
+    await pollUntil(() => zoomControl.textContent(), percentage => percentage !== start.percentage, 'overview zoom did not settle');
+    const [settledCursor, settledBadge] = await Promise.all([cursor.boundingBox(), label.boundingBox()]);
+    assert.ok(settledCursor && settledBadge, 'both labels stay visible when zoom settles');
+    assertLabelZoom('Cursor name', start.cursor, middle.cursor, overview.cursor, settledCursor);
+    assertLabelZoom('Selection badge', start.badge, middle.badge, overview.badge, settledBadge);
+    return { start, middle, overview, settled: { cursor: settledCursor, badge: settledBadge } };
+  } finally {
+    await zoomControl.click();
+  }
+}
+
 async function selectionAppearsAndClears({ a, b }, run) {
   await addSharedSticky(a, 'en', SHARED_TEXT, SHARED_ADD_PX);
   await waitForTextOn([a, b], SHARED_TEXT);
@@ -110,9 +187,10 @@ async function selectionAppearsAndClears({ a, b }, run) {
   const centre = await stickyCentre(b);
   await b.mouse.click(centre.x, centre.y);
   await visibleWithin(label);
+  const zoom = await presenceTracksLiveZoom(a, label);
   await b.mouse.click(EMPTY_CANVAS_PX.x, EMPTY_CANVAS_PX.y);
   await hiddenWithin(label, 'the selection label');
-  return { label: appLabel('en', 'selection.by', { name: NAME_B }) };
+  return { label: appLabel('en', 'selection.by', { name: NAME_B }), zoom };
 }
 
 async function editingAppearsAndClears({ a, b }) {
